@@ -25,7 +25,7 @@ A Container Storage Interface (CSI) driver for TrueNAS that enables dynamic prov
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
@@ -87,7 +87,7 @@ storageClasses:
 Install with:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
   --values my-values.yaml
@@ -107,7 +107,7 @@ helm install tns-csi ./charts/tns-csi-driver \
 From OCI registry:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
@@ -132,7 +132,7 @@ helm install tns-csi ./charts/tns-csi-driver \
 From OCI registry:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
@@ -292,7 +292,7 @@ To upgrade the chart from OCI registry:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --reuse-values
 ```
@@ -301,7 +301,7 @@ Or with new values:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --values my-values.yaml
 ```
@@ -430,12 +430,12 @@ helm package charts/tns-csi-driver
 
 Push to OCI registry (Docker Hub):
 ```bash
-helm push tns-csi-driver-0.1.0.tgz oci://registry-1.docker.io/bfenski
+helm push tns-csi-driver-0.0.1.tgz oci://registry-1.docker.io/bfenski
 ```
 
 Pull chart from OCI registry:
 ```bash
-helm pull oci://registry-1.docker.io/bfenski/tns-csi-driver --version 0.1.0
+helm pull oci://registry-1.docker.io/bfenski/tns-csi-driver --version 0.0.1
 ```
 
 ## Support

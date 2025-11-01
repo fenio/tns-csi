@@ -80,7 +80,7 @@ The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.1.0 \
+  --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \

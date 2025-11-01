@@ -13,7 +13,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Config contains the configuration for the driver
+// Config contains the configuration for the driver.
 type Config struct {
 	DriverName string
 	Version    string
@@ -23,7 +23,7 @@ type Config struct {
 	APIKey     string
 }
 
-// Driver is the TNS CSI driver
+// Driver is the TNS CSI driver.
 type Driver struct {
 	config     Config
 	srv        *grpc.Server
@@ -33,7 +33,7 @@ type Driver struct {
 	identity   *IdentityService
 }
 
-// NewDriver creates a new driver instance
+// NewDriver creates a new driver instance.
 func NewDriver(cfg Config) (*Driver, error) {
 	klog.V(4).Infof("Creating new driver with config: %+v", cfg)
 
@@ -56,7 +56,7 @@ func NewDriver(cfg Config) (*Driver, error) {
 	return d, nil
 }
 
-// Run starts the CSI driver
+// Run starts the CSI driver.
 func (d *Driver) Run() error {
 	u, err := url.Parse(d.config.Endpoint)
 	if err != nil {
@@ -94,7 +94,7 @@ func (d *Driver) Run() error {
 	return d.srv.Serve(listener)
 }
 
-// Stop stops the driver
+// Stop stops the driver.
 func (d *Driver) Stop() {
 	klog.Info("Stopping TNS CSI Driver")
 	if d.srv != nil {
@@ -105,7 +105,7 @@ func (d *Driver) Stop() {
 	}
 }
 
-// logGRPC logs gRPC requests
+// logGRPC logs gRPC requests.
 func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	methodParts := strings.Split(info.FullMethod, "/")
 	method := methodParts[len(methodParts)-1]

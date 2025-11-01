@@ -1,4 +1,4 @@
-.PHONY: all build clean test docker-build docker-push
+.PHONY: all build clean test docker-build docker-push lint lint-fix
 
 DRIVER_NAME=tns-csi-driver
 IMAGE_NAME=truenas/csi-driver
@@ -12,6 +12,7 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
+GOLANGCI_LINT=golangci-lint
 
 # Build parameters
 LDFLAGS=-ldflags "-s -w"
@@ -32,6 +33,18 @@ clean:
 test:
 	@echo "Running tests..."
 	$(GOTEST) -v ./...
+
+lint:
+	@echo "Running golangci-lint..."
+	$(GOLANGCI_LINT) run --config .golangci.yml ./...
+
+lint-fix:
+	@echo "Running golangci-lint with auto-fix..."
+	$(GOLANGCI_LINT) run --config .golangci.yml --fix ./...
+
+lint-verbose:
+	@echo "Running golangci-lint (verbose)..."
+	$(GOLANGCI_LINT) run --config .golangci.yml -v ./...
 
 deps:
 	@echo "Downloading dependencies..."

@@ -10,14 +10,14 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// IdentityService implements the CSI Identity service
+// IdentityService implements the CSI Identity service.
 type IdentityService struct {
 	csi.UnimplementedIdentityServer
 	driverName string
 	version    string
 }
 
-// NewIdentityService creates a new identity service
+// NewIdentityService creates a new identity service.
 func NewIdentityService(driverName, version string) *IdentityService {
 	return &IdentityService{
 		driverName: driverName,
@@ -25,7 +25,7 @@ func NewIdentityService(driverName, version string) *IdentityService {
 	}
 }
 
-// GetPluginInfo returns plugin information
+// GetPluginInfo returns plugin information.
 func (s *IdentityService) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	klog.V(4).Info("GetPluginInfo called")
 
@@ -43,7 +43,7 @@ func (s *IdentityService) GetPluginInfo(ctx context.Context, req *csi.GetPluginI
 	}, nil
 }
 
-// GetPluginCapabilities returns plugin capabilities
+// GetPluginCapabilities returns plugin capabilities.
 func (s *IdentityService) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
 	klog.V(4).Info("GetPluginCapabilities called")
 
@@ -67,7 +67,7 @@ func (s *IdentityService) GetPluginCapabilities(ctx context.Context, req *csi.Ge
 	}, nil
 }
 
-// Probe returns the health and readiness of the plugin
+// Probe returns the health and readiness of the plugin.
 func (s *IdentityService) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	klog.V(4).Info("Probe called")
 	return &csi.ProbeResponse{

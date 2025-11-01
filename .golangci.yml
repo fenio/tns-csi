@@ -1,0 +1,180 @@
+# golangci-lint configuration
+# Documentation: https://golangci-lint.run/usage/configuration/
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  skip-dirs:
+    - vendor
+  skip-files:
+    - ".*\\.pb\\.go$"
+
+output:
+  formats:
+    out: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters:
+  disable-all: true
+  enable:
+    # Enabled by default linters
+    - errcheck        # Checks for unchecked errors
+    - govet           # Reports suspicious constructs
+    - ineffassign     # Detects ineffectual assignments
+    - staticcheck     # Go static analysis
+    - unused          # Checks for unused constants, variables, functions and types
+    
+    # Code quality
+    - revive          # Fast, configurable, extensible, flexible, and beautiful linter
+    - misspell        # Finds commonly misspelled English words
+    - unconvert       # Remove unnecessary type conversions
+    - unparam         # Reports unused function parameters
+    - gosec           # Security problems
+    - bodyclose       # Checks whether HTTP response body is closed
+    - noctx           # Finds sending http request without context.Context
+    - gocyclo         # Computes cyclomatic complexity
+    - dupl            # Code clone detection
+    - goconst         # Finds repeated strings that could be constants
+    - gocognit        # Computes cognitive complexity
+    - gocritic        # Provides diagnostics that check for bugs, performance and style issues
+    - godot           # Checks if comments end in a period
+    - prealloc        # Finds slice declarations that could be preallocated
+    - predeclared     # Finds code that shadows predeclared identifiers
+    - whitespace      # Checks for unnecessary whitespace
+    - errorlint       # Find misuses of errors
+    - forcetypeassert # Finds forced type assertions
+    - gomoddirectives # Manage use of replace, retract directives in go.mod
+    - nilnil          # Checks returning nil even if nil is a valid value
+    - nolintlint      # Ill-formed or insufficient nolint directives
+    - usestdlibvars   # Suggests using constants from stdlib
+
+formatters:
+  enable:
+    - goimports       # Checks import statements are formatted
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (*github.com/gorilla/websocket.Conn).Close
+      - (io.Closer).Close
+    
+  govet:
+    enable-all: true
+    
+  gocyclo:
+    min-complexity: 15
+    
+  gocognit:
+    min-complexity: 20
+    
+  dupl:
+    threshold: 100
+    
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    ignore-tests: true
+    
+  misspell:
+    locale: US
+    
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: var-naming
+        severity: warning
+        disabled: false
+      - name: package-comments
+        severity: warning
+        disabled: false
+      - name: error-return
+        severity: warning
+        disabled: false
+      - name: error-strings
+        severity: warning
+        disabled: false
+      - name: error-naming
+        severity: warning
+        disabled: false
+      - name: increment-decrement
+        severity: warning
+        disabled: false
+      - name: var-declaration
+        severity: warning
+        disabled: false
+      - name: range
+        severity: warning
+        disabled: false
+      - name: receiver-naming
+        severity: warning
+        disabled: false
+      - name: indent-error-flow
+        severity: warning
+        disabled: false
+      - name: superfluous-else
+        severity: warning
+        disabled: false
+      - name: unused-parameter
+        severity: warning
+        disabled: true  # Can be noisy
+        
+  gosec:
+    excludes:
+      - G404  # Use of weak random number generator (we don't use for crypto)
+    
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - whyNoLint
+      - hugeParam
+      
+  whitespace:
+    multi-if: true
+    multi-func: true
+
+issues:
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+  
+  # Excluding configuration per-path, per-linter, per-text and per-source
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+        
+    # Ignore long lines in generated files
+    - path: \.pb\.go$
+      linters:
+        - revive
+        
+    # Allow fmt.Sprintf in certain cases
+    - text: "printf-like formatting function"
+      linters:
+        - revive
+        
+  # Show all issues from a linter
+  exclude-use-default: false
+  
+  # Fix found issues (if possible)
+  fix: false

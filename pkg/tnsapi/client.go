@@ -1,3 +1,4 @@
+// Package tnsapi provides a WebSocket client for TrueNAS Scale API.
 package tnsapi
 
 import (
@@ -14,7 +15,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Client is a storage API client using JSON-RPC 2.0 over WebSocket
+// Client is a storage API client using JSON-RPC 2.0 over WebSocket.
 type Client struct {
 	url           string
 	apiKey        string
@@ -29,7 +30,7 @@ type Client struct {
 	retryInterval time.Duration
 }
 
-// Request represents a storage API WebSocket request (JSON-RPC 2.0 format)
+// Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
 type Request struct {
 	ID      string        `json:"id"`
 	JSONRPC string        `json:"jsonrpc"`
@@ -37,7 +38,7 @@ type Request struct {
 	Params  []interface{} `json:"params,omitempty"`
 }
 
-// Response represents a storage API WebSocket response
+// Response represents a storage API WebSocket response.
 type Response struct {
 	ID     string          `json:"id"`
 	Msg    string          `json:"msg,omitempty"`
@@ -45,7 +46,7 @@ type Response struct {
 	Error  *Error          `json:"error,omitempty"`
 }
 
-// Error represents a storage API error
+// Error represents a storage API error.
 type Error struct {
 	// Storage API error format
 	ErrorCode int    `json:"error"`
@@ -75,7 +76,7 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("Storage API error %d: %s", e.Code, e.Message)
 }
 
-// NewClient creates a new storage API client
+// NewClient creates a new storage API client.
 func NewClient(url, apiKey string) (*Client, error) {
 	klog.V(4).Infof("Creating new storage API client for %s", url)
 
@@ -112,7 +113,7 @@ func NewClient(url, apiKey string) (*Client, error) {
 	return c, nil
 }
 
-// connect establishes WebSocket connection
+// connect establishes WebSocket connection.
 func (c *Client) connect() error {
 	klog.V(4).Infof("Connecting to storage WebSocket at %s", c.url)
 
@@ -143,7 +144,7 @@ func (c *Client) connect() error {
 	return nil
 }
 
-// authenticate performs API key authentication using JSON-RPC 2.0
+// authenticate performs API key authentication using JSON-RPC 2.0.
 func (c *Client) authenticate() error {
 	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key")
 
@@ -167,7 +168,7 @@ func (c *Client) authenticate() error {
 }
 
 // authenticateDirect performs API key authentication by directly reading from WebSocket
-// This is used during reconnection when readLoop is blocked and can't handle responses
+// This is used during reconnection when readLoop is blocked and can't handle responses.
 func (c *Client) authenticateDirect() error {
 	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key (direct mode)")
 
@@ -192,7 +193,10 @@ func (c *Client) authenticateDirect() error {
 	}
 
 	// Set read deadline for authentication response
-	c.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if err := c.conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("failed to set read deadline: %w", err)
+	}
 	c.mu.Unlock()
 
 	// Read response directly (don't use readLoop)
@@ -213,7 +217,7 @@ func (c *Client) authenticateDirect() error {
 
 	// Check for errors
 	if resp.Error != nil {
-		return fmt.Errorf("authentication error: %v", resp.Error)
+		return fmt.Errorf("authentication error: %w", resp.Error)
 	}
 
 	// Verify response ID matches
@@ -238,7 +242,7 @@ func (c *Client) authenticateDirect() error {
 	return nil
 }
 
-// Call makes a JSON-RPC 2.0 call
+// Call makes a JSON-RPC 2.0 call.
 func (c *Client) Call(ctx context.Context, method string, params []interface{}, result interface{}) error {
 	c.mu.Lock()
 	if c.closed {
@@ -296,7 +300,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	}
 }
 
-// readLoop reads responses from WebSocket
+// readLoop reads responses from WebSocket.
 func (c *Client) readLoop() {
 	defer func() {
 		c.mu.Lock()
@@ -315,7 +319,9 @@ func (c *Client) readLoop() {
 		// This gets reset every time we receive a message (response to our requests)
 		c.mu.Lock()
 		if c.conn != nil {
-			c.conn.SetReadDeadline(time.Now().Add(40 * time.Second))
+			if err := c.conn.SetReadDeadline(time.Now().Add(40 * time.Second)); err != nil {
+				klog.Warningf("Failed to set read deadline: %v", err)
+			}
 		}
 		c.mu.Unlock()
 
@@ -381,7 +387,7 @@ func (c *Client) readLoop() {
 	}
 }
 
-// reconnect attempts to reconnect to the WebSocket and re-authenticate
+// reconnect attempts to reconnect to the WebSocket and re-authenticate.
 func (c *Client) reconnect() bool {
 	c.mu.Lock()
 	if c.reconnecting {
@@ -412,7 +418,9 @@ func (c *Client) reconnect() bool {
 		// Close old connection
 		c.mu.Lock()
 		if c.conn != nil {
-			c.conn.Close()
+			if err := c.conn.Close(); err != nil {
+				klog.V(5).Infof("Error closing old connection: %v", err)
+			}
 		}
 		// Reset pending requests for new connection
 		for _, ch := range c.pending {
@@ -440,7 +448,7 @@ func (c *Client) reconnect() bool {
 	return false
 }
 
-// pingLoop sends periodic pings to keep the connection alive and detect failures
+// pingLoop sends periodic pings to keep the connection alive and detect failures.
 func (c *Client) pingLoop() {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
@@ -469,7 +477,9 @@ func (c *Client) pingLoop() {
 			}
 
 			// Reset write deadline
-			c.conn.SetWriteDeadline(time.Time{})
+			if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
+				klog.Warningf("Failed to reset write deadline: %v", err)
+			}
 			c.mu.Unlock()
 
 			klog.V(6).Info("Sent WebSocket ping")
@@ -480,7 +490,7 @@ func (c *Client) pingLoop() {
 	}
 }
 
-// Close closes the client connection
+// Close closes the client connection.
 func (c *Client) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -493,20 +503,24 @@ func (c *Client) Close() {
 	c.closed = true
 
 	if c.conn != nil {
-		c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-		c.conn.Close()
+		if err := c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+			klog.V(5).Infof("Error sending close message: %v", err)
+		}
+		if err := c.conn.Close(); err != nil {
+			klog.V(5).Infof("Error closing connection: %v", err)
+		}
 	}
 }
 
 // Dataset API methods
 
-// DatasetCreateParams represents parameters for dataset creation
+// DatasetCreateParams represents parameters for dataset creation.
 type DatasetCreateParams struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // FILESYSTEM, VOLUME
 }
 
-// Dataset represents a ZFS dataset
+// Dataset represents a ZFS dataset.
 type Dataset struct {
 	ID         string                 `json:"id"`
 	Name       string                 `json:"name"`
@@ -516,7 +530,7 @@ type Dataset struct {
 	Mountpoint string                 `json:"mountpoint,omitempty"`
 }
 
-// CreateDataset creates a new ZFS dataset
+// CreateDataset creates a new ZFS dataset.
 func (c *Client) CreateDataset(ctx context.Context, params DatasetCreateParams) (*Dataset, error) {
 	klog.V(4).Infof("Creating dataset: %s", params.Name)
 
@@ -530,7 +544,7 @@ func (c *Client) CreateDataset(ctx context.Context, params DatasetCreateParams) 
 	return &result, nil
 }
 
-// DeleteDataset deletes a ZFS dataset
+// DeleteDataset deletes a ZFS dataset.
 func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 	klog.V(4).Infof("Deleting dataset: %s", datasetID)
 
@@ -544,7 +558,7 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 	return nil
 }
 
-// GetDataset retrieves dataset information
+// GetDataset retrieves dataset information.
 func (c *Client) GetDataset(ctx context.Context, datasetID string) (*Dataset, error) {
 	klog.V(4).Infof("Getting dataset: %s", datasetID)
 
@@ -563,7 +577,7 @@ func (c *Client) GetDataset(ctx context.Context, datasetID string) (*Dataset, er
 
 // NFS Share API methods
 
-// NFSShareCreateParams represents parameters for NFS share creation
+// NFSShareCreateParams represents parameters for NFS share creation.
 type NFSShareCreateParams struct {
 	Path          string   `json:"path"`
 	Comment       string   `json:"comment,omitempty"`
@@ -574,7 +588,7 @@ type NFSShareCreateParams struct {
 	Enabled       bool     `json:"enabled"`
 }
 
-// NFSShare represents an NFS share
+// NFSShare represents an NFS share.
 type NFSShare struct {
 	ID      int      `json:"id"`
 	Path    string   `json:"path"`
@@ -583,7 +597,7 @@ type NFSShare struct {
 	Enabled bool     `json:"enabled"`
 }
 
-// CreateNFSShare creates a new NFS share
+// CreateNFSShare creates a new NFS share.
 func (c *Client) CreateNFSShare(ctx context.Context, params NFSShareCreateParams) (*NFSShare, error) {
 	klog.V(4).Infof("Creating NFS share for path: %s", params.Path)
 
@@ -597,7 +611,7 @@ func (c *Client) CreateNFSShare(ctx context.Context, params NFSShareCreateParams
 	return &result, nil
 }
 
-// DeleteNFSShare deletes an NFS share
+// DeleteNFSShare deletes an NFS share.
 func (c *Client) DeleteNFSShare(ctx context.Context, shareID int) error {
 	klog.V(4).Infof("Deleting NFS share: %d", shareID)
 
@@ -611,7 +625,7 @@ func (c *Client) DeleteNFSShare(ctx context.Context, shareID int) error {
 	return nil
 }
 
-// QueryNFSShare queries NFS shares by path
+// QueryNFSShare queries NFS shares by path.
 func (c *Client) QueryNFSShare(ctx context.Context, path string) ([]NFSShare, error) {
 	klog.V(4).Infof("Querying NFS shares for path: %s", path)
 
@@ -630,7 +644,7 @@ func (c *Client) QueryNFSShare(ctx context.Context, path string) ([]NFSShare, er
 
 // NVMe-oF API methods
 
-// ZvolCreateParams represents parameters for ZVOL creation
+// ZvolCreateParams represents parameters for ZVOL creation.
 type ZvolCreateParams struct {
 	Name         string `json:"name"`
 	Type         string `json:"type"` // VOLUME
@@ -638,7 +652,7 @@ type ZvolCreateParams struct {
 	Volblocksize string `json:"volblocksize,omitempty"` // e.g., "16K"
 }
 
-// CreateZvol creates a new ZVOL (block device)
+// CreateZvol creates a new ZVOL (block device).
 func (c *Client) CreateZvol(ctx context.Context, params ZvolCreateParams) (*Dataset, error) {
 	klog.V(4).Infof("Creating ZVOL: %s (size: %d)", params.Name, params.Volsize)
 
@@ -652,12 +666,12 @@ func (c *Client) CreateZvol(ctx context.Context, params ZvolCreateParams) (*Data
 	return &result, nil
 }
 
-// NVMeOFSubsystemCreateParams represents parameters for NVMe-oF subsystem creation
+// NVMeOFSubsystemCreateParams represents parameters for NVMe-oF subsystem creation.
 type NVMeOFSubsystemCreateParams struct {
 	Name string `json:"name"`
 }
 
-// NVMeOFSubsystem represents an NVMe-oF subsystem
+// NVMeOFSubsystem represents an NVMe-oF subsystem.
 type NVMeOFSubsystem struct {
 	ID      int    `json:"id"`
 	NQN     string `json:"subnqn"` // Storage system uses "subnqn" field name
@@ -665,7 +679,7 @@ type NVMeOFSubsystem struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// CreateNVMeOFSubsystem creates a new NVMe-oF subsystem
+// CreateNVMeOFSubsystem creates a new NVMe-oF subsystem.
 func (c *Client) CreateNVMeOFSubsystem(ctx context.Context, params NVMeOFSubsystemCreateParams) (*NVMeOFSubsystem, error) {
 	klog.V(4).Infof("Creating NVMe-oF subsystem: %s", params.Name)
 
@@ -679,7 +693,7 @@ func (c *Client) CreateNVMeOFSubsystem(ctx context.Context, params NVMeOFSubsyst
 	return &result, nil
 }
 
-// DeleteNVMeOFSubsystem deletes an NVMe-oF subsystem
+// DeleteNVMeOFSubsystem deletes an NVMe-oF subsystem.
 func (c *Client) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error {
 	klog.V(4).Infof("Deleting NVMe-oF subsystem: %d", subsystemID)
 
@@ -693,7 +707,7 @@ func (c *Client) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) err
 	return nil
 }
 
-// NVMeOFNamespaceCreateParams represents parameters for NVMe-oF namespace creation
+// NVMeOFNamespaceCreateParams represents parameters for NVMe-oF namespace creation.
 type NVMeOFNamespaceCreateParams struct {
 	SubsysID   int    `json:"subsys_id"`
 	DevicePath string `json:"device_path"`    // Path to ZVOL, e.g., "/dev/zvol/pool/dataset"
@@ -701,7 +715,7 @@ type NVMeOFNamespaceCreateParams struct {
 	NSID       int    `json:"nsid,omitempty"` // Namespace ID (optional, auto-assigned if 0)
 }
 
-// NVMeOFNamespace represents an NVMe-oF namespace
+// NVMeOFNamespace represents an NVMe-oF namespace.
 type NVMeOFNamespace struct {
 	ID        int    `json:"id"`
 	Subsystem int    `json:"subsystem"`
@@ -709,7 +723,7 @@ type NVMeOFNamespace struct {
 	NSID      int    `json:"nsid"`
 }
 
-// CreateNVMeOFNamespace creates a new NVMe-oF namespace
+// CreateNVMeOFNamespace creates a new NVMe-oF namespace.
 func (c *Client) CreateNVMeOFNamespace(ctx context.Context, params NVMeOFNamespaceCreateParams) (*NVMeOFNamespace, error) {
 	klog.V(4).Infof("Creating NVMe-oF namespace for device: %s", params.DevicePath)
 
@@ -723,7 +737,7 @@ func (c *Client) CreateNVMeOFNamespace(ctx context.Context, params NVMeOFNamespa
 	return &result, nil
 }
 
-// DeleteNVMeOFNamespace deletes an NVMe-oF namespace
+// DeleteNVMeOFNamespace deletes an NVMe-oF namespace.
 func (c *Client) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error {
 	klog.V(4).Infof("Deleting NVMe-oF namespace: %d", namespaceID)
 
@@ -737,7 +751,7 @@ func (c *Client) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) err
 	return nil
 }
 
-// QueryNVMeOFSubsystem queries NVMe-oF subsystems by NQN
+// QueryNVMeOFSubsystem queries NVMe-oF subsystems by NQN.
 func (c *Client) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOFSubsystem, error) {
 	klog.V(4).Infof("Querying NVMe-oF subsystems for NQN: %s", nqn)
 

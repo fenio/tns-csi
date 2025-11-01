@@ -1,3 +1,4 @@
+// Package main implements the TrueNAS CSI driver entry point.
 package main
 
 import (

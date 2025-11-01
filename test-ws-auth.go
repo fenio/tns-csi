@@ -1,10 +1,11 @@
+// Package main provides a test utility for TrueNAS WebSocket authentication.
 package main
 
 import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ type Response struct {
 
 func main() {
 	// Read credentials
-	creds, err := ioutil.ReadFile(".tns-credentials")
+	creds, err := os.ReadFile(".tns-credentials")
 	if err != nil {
 		fmt.Printf("ERROR: Failed to read .tns-credentials: %v\n", err)
 		return
@@ -66,7 +67,11 @@ func main() {
 		}
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Error closing connection: %v\n", err)
+		}
+	}()
 
 	fmt.Printf("✓ WebSocket connected (HTTP %s)\n\n", resp.Status)
 

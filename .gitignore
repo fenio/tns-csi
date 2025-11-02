@@ -1,10 +1,9 @@
-# Credentials - NEVER commit these files
 .tns-credentials
 *.local.yaml
 *.local.yml
 secret.local.*
+AGENTS.md
 
-# Test binary, built with `go test -c`
 *.test
 bin/
 *.out

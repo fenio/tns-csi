@@ -2,6 +2,90 @@
 
 This guide walks you through deploying and testing the CSI driver in a real environment.
 
+## Quick Start: Testing with Helm (Recommended)
+
+The fastest way to test the CSI driver is using the Helm chart:
+
+```bash
+# Install from OCI registry
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.0.1 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nfs.enabled=true \
+  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+
+# Verify deployment
+kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+
+# Check logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin
+
+# Create a test PVC
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: truenas-nfs
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+
+# Verify PVC is bound
+kubectl get pvc test-pvc
+
+# Create a test pod
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: test
+    image: busybox
+    command: ["sh", "-c", "echo 'Hello from TrueNAS!' > /data/test.txt && sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-pvc
+EOF
+
+# Verify pod is running and data is written
+kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+kubectl exec test-pod -- cat /data/test.txt
+
+# Cleanup
+kubectl delete pod test-pod
+kubectl delete pvc test-pvc
+helm uninstall tns-csi -n kube-system
+```
+
+**Skip to "Test Volume Provisioning" section if using Helm for testing.**
+
+---
+
+## Advanced: Manual Testing and Development
+
+The following sections are for advanced users who want to:
+- Build custom images
+- Test development changes
+- Deploy manually without Helm
+
+<details>
+<summary>Manual Testing Prerequisites and Steps - Click to expand</summary>
+
 ## Prerequisites
 
 ### 1. TrueNAS Scale Setup
@@ -440,7 +524,10 @@ kubectl delete pvc multi-pvc-1 multi-pvc-2 multi-pvc-3
 # Check events
 kubectl describe pvc <pvc-name>
 
-# Check controller logs
+# Check controller logs (Helm)
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin --tail=100
+
+# Check controller logs (Manual)
 kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin --tail=100
 
 # Common issues:
@@ -456,7 +543,10 @@ kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin --tail=1
 # Check events
 kubectl describe pod <pod-name>
 
-# Check node logs
+# Check node logs (Helm)
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node -c tns-csi-plugin --tail=100
+
+# Check node logs (Manual)
 kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin --tail=100
 
 # Common issues:
@@ -472,7 +562,10 @@ kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin --tail=100
 # Check finalizers
 kubectl get pvc <pvc-name> -o yaml | grep finalizers -A 5
 
-# Check controller logs
+# Check controller logs (Helm)
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin --tail=100
+
+# Check controller logs (Manual)
 kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin --tail=100
 
 # If stuck, you may need to manually remove finalizers:
@@ -569,6 +662,22 @@ Once basic testing is successful:
 
 To remove the CSI driver completely:
 
+### Helm Installation
+
+```bash
+# Delete all PVCs using the storage class first
+kubectl delete pvc --all
+
+# Uninstall Helm release
+helm uninstall tns-csi -n kube-system
+
+# Verify everything is gone
+kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pv
+```
+
+### Manual Installation
+
 ```bash
 # Delete all PVCs using the storage class first
 kubectl delete pvc --all
@@ -587,3 +696,5 @@ kubectl get pv
 ```
 
 Manually clean up any remaining datasets/shares in TrueNAS UI if needed.
+
+</details>

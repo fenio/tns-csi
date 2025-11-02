@@ -98,11 +98,14 @@ This single command will:
 
 See the [Helm chart README](charts/tns-csi-driver/README.md) for advanced configuration options.
 
-**Skip to Step 5 if using Helm installation.**
+**Skip to Step 5 (Verify Installation) if using Helm installation.**
 
 ---
 
-## Alternative: Manual Deployment with kubectl
+<details>
+<summary>Alternative: Manual Deployment with kubectl - Click to expand</summary>
+
+For advanced users who prefer manual deployment without Helm:
 
 ### Step 2a: Build and Push Docker Image (Optional)
 
@@ -227,6 +230,10 @@ tns-csi-node-xxxxx            2/2     Running   0          1m
 tns-csi-node-yyyyy            2/2     Running   0          1m
 ```
 
+</details>
+
+---
+
 ## Step 5: Verify Installation
 
 Whether you used Helm or manual deployment, verify everything is working:
@@ -317,12 +324,29 @@ Verify the dataset and NFS share are removed from TrueNAS (if reclaimPolicy is D
 
 ### Check Controller Logs
 
+For Helm deployments:
+```bash
+# Get controller pod logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin
+```
+
+For manual (kubectl) deployments:
 ```bash
 kubectl logs -n kube-system tns-csi-controller-0 -c tns-csi-plugin
 ```
 
 ### Check Node Plugin Logs
 
+For Helm deployments:
+```bash
+# Get node plugin pod name
+kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+
+# View logs (replace xxxxx with actual pod name)
+kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
+```
+
+For manual (kubectl) deployments:
 ```bash
 # Get node plugin pod name
 kubectl get pods -n kube-system -l app=tns-csi-node
@@ -377,6 +401,17 @@ args:
 ```
 
 Then restart the pods:
+
+For Helm deployments:
+```bash
+# Restart controller
+kubectl rollout restart statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+
+# Restart node plugin
+kubectl rollout restart daemonset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+```
+
+For manual (kubectl) deployments:
 ```bash
 kubectl rollout restart statefulset -n kube-system tns-csi-controller
 kubectl rollout restart daemonset -n kube-system tns-csi-node
@@ -384,7 +419,21 @@ kubectl rollout restart daemonset -n kube-system tns-csi-node
 
 ## Uninstall
 
-To remove the CSI driver:
+### Helm Installation
+
+To uninstall a Helm deployment:
+
+```bash
+# Delete test resources first (if any)
+kubectl delete pvc test-pvc
+
+# Uninstall the Helm release
+helm uninstall tns-csi -n kube-system
+```
+
+### Manual Installation
+
+To remove a manual kubectl deployment:
 
 ```bash
 # Delete test resources
@@ -431,9 +480,12 @@ This CSI driver supports multiple storage protocols:
 
 ## Next Steps
 
+Future enhancements planned:
+
 - **iSCSI Support**: Add block storage support via iSCSI protocol
 - **Snapshots**: Implement CSI snapshot support using TrueNAS snapshots
-- **Volume Expansion**: Test and validate volume expansion
 - **Volume Cloning**: Implement CSI volume cloning using TrueNAS clone features
 - **Metrics**: Add Prometheus metrics endpoint
 - **Topology**: Add topology awareness for multi-zone deployments
+
+Note: Volume expansion is already supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (enabled by default in the Helm chart for NFS).

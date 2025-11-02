@@ -9,7 +9,88 @@ This guide shows how to test the TrueNAS CSI driver in a local Kind cluster with
 3. **kubectl**: Kubernetes CLI tool
 4. **TrueNAS**: Accessible TrueNAS server with API access
 
-## Quick Start
+## Quick Start with Helm (Recommended)
+
+### 1. Create Kind Cluster
+
+```bash
+kind create cluster --config kind-config.yaml --name truenas-csi-test
+```
+
+### 2. Install NFS Support
+
+```bash
+./scripts/setup-kind-nfs.sh truenas-csi-test
+```
+
+This installs `nfs-common` package on all Kind nodes, which is required for NFS mounts.
+
+### 3. Install CSI Driver via Helm
+
+```bash
+# Install from OCI registry
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.0.1 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nfs.enabled=true \
+  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+
+# Verify deployment
+kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+```
+
+### 4. Test the Driver
+
+Create a test PVC and pod:
+
+```bash
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: truenas-nfs
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod
+spec:
+  containers:
+  - name: test
+    image: busybox
+    command: ["sh", "-c", "echo 'Hello from Kind!' > /data/test.txt && sleep 3600"]
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-pvc
+EOF
+
+# Check status
+kubectl get pvc test-pvc
+kubectl get pod test-pod
+kubectl exec test-pod -- cat /data/test.txt
+```
+
+---
+
+## Alternative: Script-based Deployment
+
+<details>
+<summary>Using deploy-to-kind.sh script - Click to expand</summary>
 
 ### 1. Configure TrueNAS Credentials
 
@@ -61,7 +142,14 @@ kubectl get pod test-nfs-pod
 kubectl logs test-nfs-pod
 ```
 
+</details>
+
+---
+
 ## Manual Setup (Step-by-Step)
+
+<details>
+<summary>Manual deployment for development/testing - Click to expand</summary>
 
 If you prefer to set up manually or understand each step:
 
@@ -123,6 +211,10 @@ kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin
 kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin
 ```
 
+</details>
+
+---
+
 ## Troubleshooting
 
 ### NFS Mount Issues
@@ -152,6 +244,12 @@ If pods fail to mount NFS volumes:
 
 Check node plugin logs:
 
+For Helm deployments:
+```bash
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node -c tns-csi-plugin --tail=100
+```
+
+For manual/script deployments:
 ```bash
 kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin --tail=100
 ```
@@ -165,6 +263,12 @@ Common issues:
 
 Check controller logs:
 
+For Helm deployments:
+```bash
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin --tail=100
+```
+
+For manual/script deployments:
 ```bash
 kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin --tail=100
 ```
@@ -186,6 +290,13 @@ args:
 
 Then restart:
 
+For Helm deployments:
+```bash
+kubectl rollout restart statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+kubectl rollout restart daemonset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+```
+
+For manual/script deployments:
 ```bash
 kubectl rollout restart statefulset -n kube-system tns-csi-controller
 kubectl rollout restart daemonset -n kube-system tns-csi-node
@@ -243,11 +354,18 @@ kubectl get pvc
 ### Delete test resources:
 
 ```bash
-kubectl delete -f test-pvc.yaml
+kubectl delete pvc test-pvc
+kubectl delete pod test-pod
 ```
 
-### Delete CSI driver:
+### Uninstall CSI driver:
 
+For Helm installations:
+```bash
+helm uninstall tns-csi -n kube-system
+```
+
+For manual/script deployments:
 ```bash
 kubectl delete -f deploy/storageclass.yaml
 kubectl delete -f deploy/node.yaml

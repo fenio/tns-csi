@@ -86,7 +86,10 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 See the [Helm chart README](charts/tns-csi-driver/README.md) for detailed configuration options.
 
-### Manual Installation (kubectl)
+<details>
+<summary>Manual Installation (kubectl) - Click to expand</summary>
+
+For advanced users who prefer manual deployment without Helm:
 
 1. Create namespace and RBAC:
 ```bash
@@ -114,6 +117,8 @@ kubectl apply -f deploy/node.yaml
 ```bash
 kubectl apply -f deploy/storageclass.yaml
 ```
+
+</details>
 
 ## Configuration
 
@@ -152,7 +157,7 @@ parameters:
 
 - **Volume Deletion**: Implemented for NFS and NVMe-oF. Datasets, shares, subsystems, and namespaces are cleaned up on PVC deletion. (iSCSI deletion not yet implemented).
 - **Protocol Support**: NFS and NVMe-oF are implemented. iSCSI is planned for future releases.
-- **Volume Expansion**: Not yet implemented
+- **Volume Expansion**: Supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default for NFS)
 - **Snapshots**: Not yet implemented
 - **Testing**: Limited testing on production environments - use with caution
 
@@ -171,6 +176,17 @@ See [DEPLOYMENT.md](DEPLOYMENT.md#troubleshooting) for detailed troubleshooting 
    - For NVMe-oF: Ensure NVMe-oF service is enabled and firewall allows port 4420
 
 **View Logs:**
+
+For Helm deployments:
+```bash
+# Controller logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+
+# Node logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+```
+
+For manual (kubectl) deployments:
 ```bash
 # Controller logs
 kubectl logs -n kube-system -l app=tns-csi,component=controller

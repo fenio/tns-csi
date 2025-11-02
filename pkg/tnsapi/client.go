@@ -670,7 +670,8 @@ func (c *Client) CreateZvol(ctx context.Context, params ZvolCreateParams) (*Data
 
 // NVMeOFSubsystemCreateParams represents parameters for NVMe-oF subsystem creation.
 type NVMeOFSubsystemCreateParams struct {
-	Name string `json:"name"`
+	Name         string `json:"name"`
+	AllowAnyHost bool   `json:"allow_any_host"` // Allow any host to connect
 }
 
 // NVMeOFSubsystem represents an NVMe-oF subsystem.
@@ -768,4 +769,45 @@ func (c *Client) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOF
 	}
 
 	return result, nil
+}
+
+// AddSubsystemToPort associates an NVMe-oF subsystem with a port.
+func (c *Client) AddSubsystemToPort(ctx context.Context, subsystemID, portID int) error {
+	klog.V(4).Infof("Adding subsystem %d to port %d", subsystemID, portID)
+
+	// Use nvmet.port_subsys.create to create port-subsystem association
+	var result map[string]interface{}
+	err := c.Call(ctx, "nvmet.port_subsys.create", []interface{}{
+		map[string]interface{}{
+			"port_id":   portID,
+			"subsys_id": subsystemID,
+		},
+	}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to add subsystem %d to port %d: %w", subsystemID, portID, err)
+	}
+
+	klog.V(4).Infof("Successfully added subsystem %d to port %d", subsystemID, portID)
+	return nil
+}
+
+// QueryNVMeOFPorts queries available NVMe-oF ports.
+func (c *Client) QueryNVMeOFPorts(ctx context.Context) ([]NVMeOFPort, error) {
+	klog.V(4).Info("Querying NVMe-oF ports")
+
+	var result []NVMeOFPort
+	err := c.Call(ctx, "nvmet.port.query", []interface{}{}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NVMe-oF ports: %w", err)
+	}
+
+	return result, nil
+}
+
+// NVMeOFPort represents an NVMe-oF port/listener.
+type NVMeOFPort struct {
+	ID        int    `json:"id"`
+	Transport string `json:"addr_trtype"`
+	Address   string `json:"addr_traddr"`
+	Port      int    `json:"addr_trsvcid"`
 }

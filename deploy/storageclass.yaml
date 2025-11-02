@@ -59,13 +59,15 @@ parameters:
   pool: "storage"
   # NVMe-oF server IP/hostname (should match your storage server)
   # Replace with your TrueNAS server IP or hostname
-  server: "YOUR-TRUENAS-IP"
+  server: "10.10.20.100"
   # Optional: Parent dataset (defaults to pool name if not specified)
   # parentDataset: "nvmeof/k8s"
   # NVMe-oF transport (tcp or rdma)
   transport: "tcp"
   # NVMe-oF port
   port: "4420"
+  # Filesystem type for block devices (ext4, ext3, or xfs)
+  fsType: "ext4"
 allowVolumeExpansion: false
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer

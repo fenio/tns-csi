@@ -1,229 +1,430 @@
-# Local NVMe-oF Testing Guide
+# Testing Guide: NVMe-oF and NFS
 
-This guide shows how to test NVMe-oF functionality locally on macOS using Multipass VMs.
+This guide explains how to test both NVMe-oF and NFS functionality of the TrueNAS CSI driver on macOS.
 
-## Why This Approach?
+## Testing Strategy
 
-**Problem:** macOS (especially Apple Silicon) doesn't support NVMe-oF initiators, iSCSI, or direct block device operations needed for testing storage protocols.
+The CSI driver supports two protocols, each requiring different test environments:
 
-**Solution:** Use Multipass to create an Ubuntu VM with full NVMe-oF support, k3s Kubernetes, and network access to your TrueNAS server.
+### NVMe-oF Testing → UTM Virtual Machine
 
-## Prerequisites
+**Why separate VM?**
+- macOS (especially Apple Silicon) lacks NVMe-oF initiator support
+- Requires real kernel modules (`nvme-tcp`, `nvme-fabrics`) 
+- Needs actual block device operations
+- Container environments can't provide this
+
+**Solution:** UTM VM with Ubuntu + k3s + NVMe-oF tools
+
+### NFS Testing → Kind Cluster
+
+**Why containers work:**
+- NFS works perfectly in container environments
+- No special kernel modules needed
+- Fast iteration and testing
+
+**Solution:** Kind (Kubernetes in Docker) cluster
+
+## UTM VM Setup for NVMe-oF Testing
+
+### Prerequisites
 
 1. **macOS** (Intel or Apple Silicon)
-2. **Homebrew** - [Install here](https://brew.sh)
-3. **Multipass** - Will be installed in setup
-4. **TrueNAS Scale** server accessible on your network
-5. **Docker Desktop** - For building images
+2. **UTM** - [Download from UTM website](https://mac.getutm.app/)
+3. **Ubuntu 22.04 Server ISO** - [Download](https://ubuntu.com/download/server)
+4. **Docker Desktop** - For building CSI driver images
+5. **TrueNAS Scale** server on your network with:
+   - API key generated
+   - NVMe-oF service enabled
+   - ZFS pool available
 
-## Quick Start
+### Step 1: Create Ubuntu VM in UTM
 
-### 1. Install Multipass
+1. **Launch UTM** and click "Create a New Virtual Machine"
 
-```bash
-brew install multipass
-```
+2. **Select Virtualize** (not Emulate)
 
-### 2. Create and Configure Test VM
+3. **Configure VM:**
+   - **Operating System:** Linux
+   - **Boot ISO:** Select Ubuntu 22.04 Server ISO
+   - **CPU:** 4 cores
+   - **Memory:** 4096 MB (4 GB)
+   - **Disk:** 50 GB
 
-```bash
-./scripts/setup-nvmeof-test-vm.sh
-```
+4. **Network Settings:**
+   - **Mode:** Bridged (important for TrueNAS access)
+   - **Network Interface:** Select your active adapter
 
-This script will:
-- Create Ubuntu 22.04 VM (4 CPU, 4GB RAM, 50GB disk)
-- Install NVMe-oF tools (`nvme-cli`)
-- Load kernel modules (`nvme-tcp`, `nvme-fabrics`)
-- Install k3s (lightweight Kubernetes)
-- Configure kubectl access from macOS
+5. **Create and start the VM**
 
-**Time:** ~5 minutes
+6. **Install Ubuntu:**
+   - Follow Ubuntu installer
+   - Create user account (remember credentials)
+   - Install OpenSSH server (select during installation)
+   - Complete installation and reboot
 
-### 3. Deploy CSI Driver
+### Step 2: Configure VM for NVMe-oF
 
-```bash
-./scripts/deploy-nvmeof-test.sh
-```
-
-This script will:
-- Build the CSI driver Docker image
-- Transfer image to VM
-- Load image into k3s
-- Create TrueNAS credentials secret
-- Deploy CSI driver with Helm
-- Enable both NFS and NVMe-oF storage classes
-
-**Time:** ~3 minutes
-
-### 4. Run Tests
+SSH into your VM from macOS:
 
 ```bash
-./scripts/test-nvmeof.sh
+# Find VM IP (from UTM console)
+ip addr show
+
+# SSH from macOS
+ssh <username>@<vm-ip>
 ```
 
-This script will:
-1. Test NFS volume (baseline)
-2. Create NVMe-oF PVC
-3. Mount NVMe-oF volume in pod
-4. Verify NVMe device connection
-5. Test I/O operations
+Install required packages:
 
-**Time:** ~2 minutes
+```bash
+# Update system
+sudo apt-get update
+sudo apt-get upgrade -y
+
+# Install NVMe tools
+sudo apt-get install -y nvme-cli curl wget
+
+# Load NVMe-oF kernel modules
+sudo modprobe nvme-tcp
+sudo modprobe nvme-fabrics
+
+# Verify modules loaded
+lsmod | grep nvme
+
+# Make modules load on boot
+echo "nvme-tcp" | sudo tee -a /etc/modules
+echo "nvme-fabrics" | sudo tee -a /etc/modules
+```
+
+Verify NVMe-oF functionality:
+
+```bash
+# Test discovery (use your TrueNAS IP)
+sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+
+# Should show available NVMe-oF subsystems
+```
+
+### Step 3: Install k3s
+
+```bash
+# Install k3s (lightweight Kubernetes)
+curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+
+# Enable and start k3s
+sudo systemctl enable k3s
+sudo systemctl start k3s
+
+# Wait for k3s to be ready
+sudo kubectl get nodes
+
+# Should show: STATUS=Ready
+```
+
+### Step 4: Configure kubectl from macOS
+
+```bash
+# Get VM IP
+VM_IP=<your-vm-ip>
+
+# Copy kubeconfig from VM
+scp <username>@${VM_IP}:/etc/rancher/k3s/k3s.yaml ~/.kube/utm-nvmeof-test
+
+# Update server address to VM IP
+sed -i.bak "s|https://127.0.0.1:6443|https://${VM_IP}:6443|g" ~/.kube/utm-nvmeof-test
+rm ~/.kube/utm-nvmeof-test.bak
+
+# Test connection from macOS
+kubectl --kubeconfig ~/.kube/utm-nvmeof-test get nodes
+
+# Optional: Set as default
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+kubectl get nodes
+```
+
+### Step 5: Deploy CSI Driver
+
+From your macOS development machine:
+
+```bash
+# Build CSI driver image
+cd /path/to/tns-csi
+make build-image
+
+# Save image as tarball
+docker save tns-csi-driver:latest | gzip > tns-csi-driver.tar.gz
+
+# Transfer to VM
+scp tns-csi-driver.tar.gz <username>@${VM_IP}:~
+
+# Load image into k3s on VM
+ssh <username>@${VM_IP} 'sudo k3s ctr images import ~/tns-csi-driver.tar.gz'
+
+# Create TrueNAS credentials secret
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+kubectl create secret generic tns-csi-secret \
+  --namespace kube-system \
+  --from-literal=apiKey=<your-truenas-api-key>
+
+# Deploy with Helm
+helm install tns-csi ./charts/tns-csi-driver \
+  --namespace kube-system \
+  --set truenas.host=10.10.20.100 \
+  --set image.tag=latest \
+  --set image.pullPolicy=Never
+
+# Verify deployment
+kubectl get pods -n kube-system | grep tns-csi
+```
+
+Expected output:
+```
+tns-csi-controller-0   3/3     Running   0          1m
+tns-csi-node-xxxxx     2/2     Running   0          1m
+```
+
+### Step 6: Test NVMe-oF Volume
+
+```bash
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+
+# Create NVMe-oF PVC
+kubectl apply -f deploy/example-nvmeof-pvc.yaml
+
+# Check PVC status
+kubectl get pvc test-nvmeof-pvc
+
+# Should show: STATUS=Bound
+
+# Create test pod
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-nvmeof-pod
+  namespace: default
+spec:
+  containers:
+  - name: app
+    image: nginx:latest
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-nvmeof-pvc
+EOF
+
+# Wait for pod to start
+kubectl get pod test-nvmeof-pod -w
+
+# Should show: STATUS=Running
+
+# Verify NVMe device is connected
+ssh <username>@${VM_IP} 'sudo nvme list'
+
+# Should show connected NVMe device
+
+# Test I/O operations
+kubectl exec test-nvmeof-pod -- dd if=/dev/zero of=/data/test.img bs=1M count=100
+kubectl exec test-nvmeof-pod -- ls -lh /data/test.img
+
+# Cleanup
+kubectl delete pod test-nvmeof-pod
+kubectl delete pvc test-nvmeof-pvc
+```
+
+## Kind Cluster Setup for NFS Testing
+
+### Prerequisites
+
+1. **Docker Desktop** running
+2. **Kind** installed: `brew install kind`
+3. **TrueNAS Scale** server accessible
+
+### Setup and Test
+
+```bash
+# Create Kind cluster
+kind create cluster --name tns-csi-test
+
+# Build CSI driver
+cd /path/to/tns-csi
+make build-image
+
+# Load image into Kind
+kind load docker-image tns-csi-driver:latest --name tns-csi-test
+
+# Deploy CSI driver
+kubectl create secret generic tns-csi-secret \
+  --namespace kube-system \
+  --from-literal=apiKey=<your-truenas-api-key>
+
+helm install tns-csi ./charts/tns-csi-driver \
+  --namespace kube-system \
+  --set truenas.host=10.10.20.100 \
+  --set image.tag=latest \
+  --set image.pullPolicy=Never
+
+# Test NFS volume
+kubectl apply -f deploy/example-pvc.yaml
+kubectl apply -f deploy/test-pod.yaml
+
+# Verify
+kubectl get pvc
+kubectl get pod test-nfs-pod
+
+# Cleanup
+kubectl delete -f deploy/test-pod.yaml
+kubectl delete -f deploy/example-pvc.yaml
+```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      macOS Host                         │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │ You work here:                                  │   │
-│  │ - Edit code                                     │   │
-│  │ - Run scripts                                   │   │
-│  │ - Use kubectl                                   │   │
-│  └─────────────────────────────────────────────────┘   │
-│                          │                              │
-│                          │ kubectl                      │
-│                          ▼                              │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │    Multipass VM (Ubuntu 22.04)                  │   │
-│  │  ┌───────────────────────────────────────────┐  │   │
-│  │  │ k3s Kubernetes Cluster                    │  │   │
-│  │  │  - CSI Controller                         │  │   │
-│  │  │  - CSI Node Plugin                        │  │   │
-│  │  │  - Test Pods                              │  │   │
-│  │  └───────────────────────────────────────────┘  │   │
-│  │  ┌───────────────────────────────────────────┐  │   │
-│  │  │ NVMe-oF Initiator                         │  │   │
-│  │  │  - nvme-cli                               │  │   │
-│  │  │  - nvme-tcp kernel module                 │  │   │
-│  │  └───────────────────────────────────────────┘  │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-                          │
-                          │ Network
-                          ▼
-            ┌─────────────────────────────┐
-            │   TrueNAS Scale Server      │
-            │  - ZFS Pools                │
-            │  - NVMe-oF Target           │
-            │  - NFS Server               │
-            │  - WebSocket API            │
-            └─────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        macOS Host                              │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Development Environment:                                 │  │
+│  │ - Code editing                                           │  │
+│  │ - Docker builds                                          │  │
+│  │ - kubectl to both clusters                              │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                          │         │                            │
+│                kubectl   │         │   kubectl                  │
+│                          ▼         ▼                            │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │ UTM VM (Ubuntu 22.04)  │  Kind Cluster (Containers)    │    │
+│  │ ┌──────────────────────┤  ┌────────────────────────┐   │    │
+│  │ │ k3s Kubernetes       │  │ Kubernetes             │   │    │
+│  │ │ - CSI Controller     │  │ - CSI Controller       │   │    │
+│  │ │ - CSI Node Plugin    │  │ - CSI Node Plugin      │   │    │
+│  │ │ - Test Pods          │  │ - Test Pods            │   │    │
+│  │ └──────────────────────┤  └────────────────────────┘   │    │
+│  │ ┌──────────────────────┤                                │    │
+│  │ │ NVMe-oF Initiator    │  NFS Client in containers     │    │
+│  │ │ - nvme-cli           │                                │    │
+│  │ │ - nvme-tcp module    │                                │    │
+│  │ └──────────────────────┘                                │    │
+│  └────────────────────────────────────────────────────────┘    │
+└────────────────────────────────────────────────────────────────┘
+                          │              │
+                 NVMe-oF  │              │  NFS
+                          ▼              ▼
+               ┌──────────────────────────────────┐
+               │     TrueNAS Scale Server         │
+               │  ┌────────────┬────────────────┐ │
+               │  │ NVMe-oF    │  NFS Server    │ │
+               │  │ Target     │                │ │
+               │  │ (port 4420)│  (port 2049)   │ │
+               │  └────────────┴────────────────┘ │
+               │  ┌──────────────────────────────┐│
+               │  │ ZFS Pools                    ││
+               │  │ - Block devices (zvols)      ││
+               │  │ - Datasets (NFS shares)      ││
+               │  └──────────────────────────────┘│
+               └──────────────────────────────────┘
 ```
 
-## Manual Operations
+## Development Workflow
 
-### Access VM Shell
-
-```bash
-multipass shell truenas-nvme-test
-```
-
-### View NVMe Devices
+### Working on NVMe-oF features:
 
 ```bash
-# From macOS
-multipass exec truenas-nvme-test -- sudo nvme list
+# 1. Edit code on macOS
+vim pkg/driver/node.go
 
-# Or from inside VM
-multipass shell truenas-nvme-test
-sudo nvme list
-sudo nvme list-subsys
-```
+# 2. Build and transfer
+make build-image
+docker save tns-csi-driver:latest | gzip > tns-csi-driver.tar.gz
+scp tns-csi-driver.tar.gz <username>@${VM_IP}:~
+ssh <username>@${VM_IP} 'sudo k3s ctr images import ~/tns-csi-driver.tar.gz'
 
-### Use kubectl from macOS
+# 3. Restart pods to pick up new image
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+kubectl rollout restart -n kube-system daemonset/tns-csi-node
+kubectl rollout restart -n kube-system statefulset/tns-csi-controller
 
-```bash
-# Option 1: Specify kubeconfig each time
-kubectl --kubeconfig ~/.kube/k3s-nvmeof-test get pods -A
-
-# Option 2: Set as default
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
-kubectl get pods -A
-```
-
-### View CSI Driver Logs
-
-```bash
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
-
-# Controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin -f
-
-# Node logs
+# 4. Monitor logs
 kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin -f
 ```
 
-### Test NVMe-oF Connection Manually
+### Working on NFS features:
 
 ```bash
-# Shell into VM
-multipass shell truenas-nvme-test
+# 1. Edit code on macOS
+vim pkg/driver/controller.go
 
-# Discover NVMe-oF targets
-sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+# 2. Build and load to Kind
+make build-image
+kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
-# Connect to a specific NQN (get from TrueNAS)
-sudo nvme connect -t tcp -n nqn.2005-03.org.freenas.ctl:test-subsystem -a 10.10.20.100 -s 4420
+# 3. Restart pods
+kubectl rollout restart -n kube-system deployment/tns-csi-controller
 
-# List connected devices
-sudo nvme list
-
-# Disconnect
-sudo nvme disconnect -n nqn.2005-03.org.freenas.ctl:test-subsystem
+# 4. Test immediately
+kubectl apply -f deploy/example-pvc.yaml
 ```
 
 ## Troubleshooting
 
-### VM Won't Start
+### UTM VM Issues
 
+**Can't SSH into VM:**
 ```bash
-# Check Multipass status
-multipass list
+# From UTM console, check IP
+ip addr show
 
-# View VM logs
-multipass info truenas-nvme-test
-
-# Restart VM
-multipass restart truenas-nvme-test
+# Verify bridged networking in UTM settings
+# Ensure macOS firewall allows incoming connections
 ```
 
-### Can't Connect with kubectl
-
+**NVMe modules not loading:**
 ```bash
-# Verify VM is running
-multipass list
+ssh <username>@${VM_IP}
 
-# Check VM IP
-multipass info truenas-nvme-test | grep IPv4
-
-# Regenerate kubeconfig
-VM_IP=$(multipass info truenas-nvme-test | grep IPv4 | awk '{print $2}')
-multipass exec truenas-nvme-test -- sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/k3s-nvmeof-test
-sed -i.bak "s|127.0.0.1|${VM_IP}|g" ~/.kube/k3s-nvmeof-test
-```
-
-### NVMe-oF Connection Fails
-
-```bash
-# Check if kernel modules are loaded
-multipass exec truenas-nvme-test -- lsmod | grep nvme
+# Check module status
+lsmod | grep nvme
 
 # Reload modules
-multipass exec truenas-nvme-test -- sudo modprobe nvme-tcp
-multipass exec truenas-nvme-test -- sudo modprobe nvme-fabrics
+sudo modprobe nvme-tcp
+sudo modprobe nvme-fabrics
 
-# Check TrueNAS connectivity
-multipass exec truenas-nvme-test -- ping -c 3 10.10.20.100
-
-# Test NVMe-oF discovery
-multipass exec truenas-nvme-test -- sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+# Check for errors
+dmesg | grep -i nvme
 ```
 
-### PVC Stuck in Pending
-
+**Can't connect to TrueNAS:**
 ```bash
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
+# Test network connectivity
+ssh <username>@${VM_IP} 'ping -c 3 10.10.20.100'
+
+# Test NVMe-oF discovery
+ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a 10.10.20.100 -s 4420'
+
+# Verify TrueNAS NVMe-oF service is running
+# Check TrueNAS: System Settings → Services → NVMe-oF
+```
+
+**kubectl connection fails:**
+```bash
+# Verify k3s is running on VM
+ssh <username>@${VM_IP} 'sudo systemctl status k3s'
+
+# Check VM IP hasn't changed
+ssh <username>@${VM_IP} 'ip addr show'
+
+# Regenerate kubeconfig
+VM_IP=<new-ip>
+scp <username>@${VM_IP}:/etc/rancher/k3s/k3s.yaml ~/.kube/utm-nvmeof-test
+sed -i.bak "s|127.0.0.1|${VM_IP}|g" ~/.kube/utm-nvmeof-test
+```
+
+**PVC stuck in Pending:**
+```bash
+export KUBECONFIG=~/.kube/utm-nvmeof-test
 
 # Check PVC events
 kubectl describe pvc test-nvmeof-pvc
@@ -235,94 +436,121 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi
 kubectl get secret tns-csi-secret -n kube-system -o yaml
 ```
 
-### Pod Stuck in ContainerCreating
-
+**Pod stuck in ContainerCreating:**
 ```bash
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
+export KUBECONFIG=~/.kube/utm-nvmeof-test
 
 # Check pod events
 kubectl describe pod test-nvmeof-pod
 
-# Check node logs
+# Check node driver logs
 kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=100
 
-# Check NVMe devices in VM
-multipass exec truenas-nvme-test -- sudo nvme list
+# Check NVMe devices on VM
+ssh <username>@${VM_IP} 'sudo nvme list'
+
+# Manually test NVMe connection
+ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a 10.10.20.100 -s 4420'
 ```
 
-## Development Workflow
+### Kind Cluster Issues
 
-1. **Edit code on macOS** in your favorite editor
-2. **Test changes:**
-   ```bash
-   ./scripts/deploy-nvmeof-test.sh  # Rebuilds and redeploys
-   ./scripts/test-nvmeof.sh         # Runs test suite
-   ```
-3. **Debug if needed:**
-   ```bash
-   export KUBECONFIG=~/.kube/k3s-nvmeof-test
-   kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin -f
-   ```
-4. **Iterate** - repeat as needed
+**Cluster won't start:**
+```bash
+# Delete and recreate
+kind delete cluster --name tns-csi-test
+kind create cluster --name tns-csi-test
+```
 
-## Cleanup
+**Image not found:**
+```bash
+# Reload image
+make build-image
+kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
-### Delete Test Resources
+# Verify image is loaded
+docker exec tns-csi-test-control-plane crictl images | grep tns-csi
+```
+
+**NFS mount fails:**
+```bash
+# Check TrueNAS NFS service is running
+# Verify NFS share was created on TrueNAS
+# Check controller logs
+kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin
+```
+
+## Manual Testing Commands
+
+### NVMe-oF Operations on VM
 
 ```bash
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
+# Connect to VM
+ssh <username>@<vm-ip>
 
-kubectl delete pod test-nvmeof-pod
-kubectl delete pvc test-nvmeof-pvc
+# Discover targets
+sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+
+# Connect to subsystem (get NQN from discovery)
+sudo nvme connect -t tcp \
+  -n nqn.2005-03.org.freenas.ctl:<subsystem-name> \
+  -a 10.10.20.100 \
+  -s 4420
+
+# List connected devices
+sudo nvme list
+sudo nvme list-subsys
+
+# Show device details
+lsblk
+ls -la /dev/nvme*
+
+# Disconnect
+sudo nvme disconnect -n nqn.2005-03.org.freenas.ctl:<subsystem-name>
 ```
 
-### Uninstall CSI Driver
+### View CSI Driver Logs
 
 ```bash
-helm --kubeconfig ~/.kube/k3s-nvmeof-test uninstall tns-csi -n kube-system
+# UTM VM (NVMe-oF testing)
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+
+# Controller logs
+kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin -f
+
+# Node logs
+kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin -f
+
+# Kind cluster (NFS testing)
+kubectl config use-context kind-tns-csi-test
+
+kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin -f
 ```
-
-### Stop VM (Preserves State)
-
-```bash
-multipass stop truenas-nvme-test
-```
-
-### Delete VM Completely
-
-```bash
-multipass delete truenas-nvme-test
-multipass purge
-```
-
-## Cost Comparison
-
-| Method | Setup Time | Test Time | Monthly Cost | Pros |
-|--------|------------|-----------|--------------|------|
-| **Multipass VM** | 5 min | < 1 min | $0 | Fast, local, free |
-| Cloud VM (always on) | 10 min | < 1 min | $5-20 | Remote access, CI/CD ready |
-| Cloud VM (on-demand) | 15 min | 2 min | $1-5 | Only pay when testing |
-| Bare Metal Linux | 30 min | < 1 min | $0 | Best performance, permanent |
 
 ## What Gets Tested
 
 ### ✅ Fully Tested in This Setup
 
-- NVMe-oF volume provisioning (ZVOL creation, subsystem, namespace)
-- NVMe-oF target connection
+**NVMe-oF (UTM VM):**
+- Volume provisioning (ZVOL creation, subsystem, namespace)
+- NVMe-oF target discovery and connection
 - Block device mounting in pods
 - I/O operations on NVMe devices
-- NFS volumes (baseline comparison)
-- Multi-protocol support
 - Volume lifecycle (create, mount, unmount, delete)
 
-### ⚠️ Not Tested (Requires Multiple Nodes)
+**NFS (Kind Cluster):**
+- NFS share provisioning
+- Filesystem mounting in pods
+- Standard file operations
+- Volume lifecycle
+
+### ⚠️ Requires Multi-Node Setup
 
 - Pod migration between nodes
-- Multi-attach (ReadWriteMany for block storage - not supported by protocol)
 - Node failure scenarios
+- High availability testing
 
-### 📝 Requires Manual Testing
+### 📝 Future Work
 
 - Volume snapshots (when implemented)
 - Volume cloning (when implemented)
@@ -330,41 +558,71 @@ multipass purge
 
 ## Performance Notes
 
-The Multipass VM is suitable for:
-- ✅ Functional testing
+**UTM VM:**
+- ✅ Suitable for functional testing
 - ✅ Development and debugging
-- ✅ CI/CD integration
 - ✅ Feature validation
+- ❌ Not for performance benchmarking
+- ❌ Not for load testing
 
-The VM is **NOT** suitable for:
-- ❌ Performance benchmarking
-- ❌ Load testing
-- ❌ Production workloads
+**Kind Cluster:**
+- ✅ Fast iteration
+- ✅ Quick functional tests
+- ✅ Perfect for NFS testing
+- ❌ Not for performance testing
 
-For performance testing, use real hardware or dedicated cloud instances.
+For performance testing, use bare metal or dedicated cloud instances.
+
+## Cleanup
+
+### Temporary (Keep Environment)
+
+```bash
+# UTM VM
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+kubectl delete pod test-nvmeof-pod
+kubectl delete pvc test-nvmeof-pvc
+
+# Kind
+kubectl delete -f deploy/test-pod.yaml
+kubectl delete -f deploy/example-pvc.yaml
+```
+
+### Full Cleanup
+
+```bash
+# Uninstall CSI driver from UTM VM
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+helm uninstall tns-csi -n kube-system
+
+# Delete Kind cluster
+kind delete cluster --name tns-csi-test
+
+# Stop/Delete UTM VM (through UTM GUI)
+# Right-click VM → Stop or Delete
+```
 
 ## Next Steps
 
-After successful local testing:
-
-1. **Extend tests** - Add more test scenarios to `test-nvmeof.sh`
-2. **CI/CD integration** - Adapt scripts for GitHub Actions with self-hosted runner
+1. **Customize for your environment** - Update IPs, credentials, VM settings
+2. **Add automated tests** - Create test scripts for CI/CD
 3. **Multi-node testing** - Create multiple VMs to test node migration
-4. **Automation** - Add to your development workflow
+4. **Performance testing** - Use bare metal for benchmarks
 
 ## Resources
 
-- [Multipass Documentation](https://multipass.run/docs)
+- [UTM Documentation](https://docs.getutm.app/)
 - [k3s Documentation](https://docs.k3s.io/)
+- [Kind Documentation](https://kind.sigs.k8s.io/)
 - [NVMe-CLI Documentation](https://github.com/linux-nvme/nvme-cli)
 - [TrueNAS Scale API](https://www.truenas.com/docs/scale/api/)
 
 ## Support
 
-Issues with this testing setup? Check:
-1. VM has network connectivity to TrueNAS
-2. NVMe kernel modules are loaded
-3. TrueNAS NVMe-oF target is configured and running
-4. CSI driver pods are running in k3s
+For issues with this testing setup:
+1. Verify network connectivity between VM/cluster and TrueNAS
+2. Check NVMe kernel modules (UTM VM only)
+3. Verify TrueNAS services are running
+4. Review CSI driver logs
 
-For CSI driver bugs, see main project documentation.
+For CSI driver bugs, see main project documentation and GitHub issues.

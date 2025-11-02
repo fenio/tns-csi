@@ -1,164 +1,291 @@
-# Quick Start: NVMe-oF Testing on macOS
+# Quick Start: Testing NVMe-oF and NFS
 
 **Branch:** `local-nvmeof-testing`
 
-This branch adds complete local NVMe-oF testing capability for macOS using Multipass VMs.
+This guide explains the testing setup for the TrueNAS CSI driver with both NVMe-oF and NFS protocols.
 
-## Problem Solved
+## Testing Environments
 
-You can't test NVMe-oF or iSCSI from macOS because:
-- ❌ No NVMe-oF initiator support
-- ❌ No iSCSI initiator (removed in recent macOS)
-- ❌ Docker Desktop runs in isolated VM
-- ❌ Kind on macOS can't access block devices
+### NVMe-oF Testing → UTM VM
 
-## Solution
+NVMe-oF requires real kernel modules and block device support that isn't available in containers.
 
-✅ Multipass VM with Ubuntu 22.04 + k3s + NVMe-oF tools  
-✅ Full kernel module support (nvme-tcp, nvme-fabrics)  
-✅ Network access to your TrueNAS  
-✅ Control everything from macOS terminal  
-✅ Free and runs locally  
+**Why UTM VM?**
+- ✅ Full NVMe-oF kernel module support (`nvme-tcp`, `nvme-fabrics`)
+- ✅ Real block device operations
+- ✅ Network access to TrueNAS
+- ✅ Runs Kubernetes (k3s)
+- ✅ Native performance on Apple Silicon
 
-## 3-Step Setup
+**What's tested:**
+- Volume provisioning (ZVOL → Subsystem → Namespace)
+- NVMe-oF target discovery and connection
+- Block device mounting in pods
+- I/O operations
 
-### 1. Install Multipass (one-time)
+### NFS Testing → Kind Cluster
+
+NFS works perfectly in containers and doesn't require special kernel modules.
+
+**Why Kind?**
+- ✅ Fast startup (seconds vs minutes)
+- ✅ No separate VM needed
+- ✅ Perfect for NFS protocol testing
+- ✅ Integrated with local Docker
+
+**What's tested:**
+- NFS share provisioning
+- Volume mounting in pods
+- Standard filesystem operations
+
+## NVMe-oF Testing Setup (UTM VM)
+
+### Prerequisites
+
+1. **UTM** installed on macOS - [Download from UTM website](https://mac.getutm.app/)
+2. **Ubuntu 22.04 LTS** VM created in UTM with:
+   - **CPU:** 4 cores
+   - **RAM:** 4 GB
+   - **Disk:** 50 GB
+   - **Network:** Bridged (to access TrueNAS)
+3. **TrueNAS Scale** server with NVMe-oF service enabled
+4. **Docker Desktop** for building images
+
+### VM Setup
+
+1. **Create Ubuntu VM in UTM:**
+   - Download Ubuntu 22.04 Server ISO
+   - Create new VM with Virtualization mode
+   - Configure bridged networking
+
+2. **Install required packages in VM:**
+   ```bash
+   # SSH into your UTM VM
+   ssh <user>@<vm-ip>
+   
+   # Install NVMe tools
+   sudo apt-get update
+   sudo apt-get install -y nvme-cli curl
+   
+   # Load NVMe-oF kernel modules
+   sudo modprobe nvme-tcp
+   sudo modprobe nvme-fabrics
+   
+   # Make modules load on boot
+   echo "nvme-tcp" | sudo tee -a /etc/modules
+   echo "nvme-fabrics" | sudo tee -a /etc/modules
+   ```
+
+3. **Install k3s:**
+   ```bash
+   curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+   
+   # Wait for k3s to be ready
+   sudo kubectl get nodes
+   ```
+
+4. **Configure kubectl from macOS:**
+   ```bash
+   # Copy kubeconfig from VM
+   ssh <user>@<vm-ip> sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/utm-nvmeof-test
+   
+   # Update server address
+   VM_IP=<your-vm-ip>
+   sed -i.bak "s|127.0.0.1|${VM_IP}|g" ~/.kube/utm-nvmeof-test
+   
+   # Test connection
+   kubectl --kubeconfig ~/.kube/utm-nvmeof-test get nodes
+   ```
+
+### Deploy CSI Driver to UTM VM
 
 ```bash
-brew install multipass
+# Build the CSI driver
+make build-image
+
+# Save and transfer to VM
+docker save tns-csi-driver:latest | gzip > tns-csi-driver.tar.gz
+scp tns-csi-driver.tar.gz <user>@<vm-ip>:~
+
+# Load into k3s on VM
+ssh <user>@<vm-ip> 'sudo k3s ctr images import tns-csi-driver.tar.gz'
+
+# Deploy with Helm
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+helm install tns-csi ./charts/tns-csi-driver \
+  --namespace kube-system \
+  --set truenas.host=10.10.20.100 \
+  --set truenas.apiKey=<your-api-key>
 ```
 
-### 2. Create Test Environment
+### Test NVMe-oF Volume
 
 ```bash
-./scripts/setup-nvmeof-test-vm.sh
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+
+# Create PVC
+kubectl apply -f deploy/example-nvmeof-pvc.yaml
+
+# Create pod
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-nvmeof-pod
+spec:
+  containers:
+  - name: app
+    image: nginx:latest
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-nvmeof-pvc
+EOF
+
+# Verify pod is running
+kubectl get pod test-nvmeof-pod
+
+# Check NVMe devices
+ssh <user>@<vm-ip> 'sudo nvme list'
+
+# Test I/O
+kubectl exec test-nvmeof-pod -- dd if=/dev/zero of=/data/test bs=1M count=100
 ```
 
-Creates Ubuntu VM with k3s and NVMe-oF support (~5 minutes)
+## NFS Testing Setup (Kind Cluster)
 
-### 3. Deploy & Test
+NFS testing is much simpler since it works in containers:
+
+### Prerequisites
+
+1. **Kind** installed: `brew install kind`
+2. **Docker Desktop** running
+3. **TrueNAS Scale** server accessible
+
+### Setup and Test
 
 ```bash
-# Deploy CSI driver to VM
-./scripts/deploy-nvmeof-test.sh
+# Create Kind cluster
+kind create cluster --name tns-csi-test
 
-# Run test suite
-./scripts/test-nvmeof.sh
-```
+# Build and load image
+make build-image
+kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
-## What You Get
+# Deploy CSI driver
+helm install tns-csi ./charts/tns-csi-driver \
+  --namespace kube-system \
+  --set truenas.host=10.10.20.100 \
+  --set truenas.apiKey=<your-api-key>
 
-```
-Your macOS
-    │
-    ├── Edit code normally
-    ├── Use kubectl from terminal
-    └── Run automated tests
-         │
-         ▼
-    Ubuntu VM (Multipass)
-    ├── k3s Kubernetes
-    ├── NVMe-oF initiator (nvme-cli)
-    ├── CSI driver deployed
-    └── Test pods with NVMe devices
-         │
-         ▼
-    TrueNAS (your network)
-    ├── NVMe-oF target
-    ├── ZFS pools
-    └── Block storage
+# Test NFS volume
+kubectl apply -f deploy/example-pvc.yaml
+kubectl apply -f deploy/test-pod.yaml
+
+# Verify
+kubectl get pvc
+kubectl get pod test-nfs-pod
 ```
 
 ## Daily Workflow
 
+### Working on NVMe-oF features:
+
 ```bash
-# 1. Edit code on macOS (as usual)
+# 1. Edit code on macOS
 vim pkg/driver/node.go
 
-# 2. Deploy changes
-./scripts/deploy-nvmeof-test.sh
+# 2. Build and deploy to UTM VM
+make build-image
+docker save tns-csi-driver:latest | gzip > tns-csi-driver.tar.gz
+scp tns-csi-driver.tar.gz <user>@<vm-ip>:~
+ssh <user>@<vm-ip> 'sudo k3s ctr images import tns-csi-driver.tar.gz'
 
-# 3. Test
-./scripts/test-nvmeof.sh
+# 3. Restart CSI driver pods
+export KUBECONFIG=~/.kube/utm-nvmeof-test
+kubectl rollout restart -n kube-system daemonset/tns-csi-node
 
-# 4. Debug if needed
-export KUBECONFIG=~/.kube/k3s-nvmeof-test
+# 4. View logs
 kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin -f
-
-# 5. When done for the day
-./scripts/cleanup-nvmeof-test.sh  # Choose option 3 to stop VM
 ```
 
-## Files Added
+### Working on NFS features:
 
-| File | Purpose |
-|------|---------|
-| `NVMEOF_TESTING.md` | Complete documentation |
-| `scripts/setup-nvmeof-test-vm.sh` | Create VM with k3s |
-| `scripts/deploy-nvmeof-test.sh` | Deploy CSI driver |
-| `scripts/test-nvmeof.sh` | Run test suite |
-| `scripts/cleanup-nvmeof-test.sh` | Cleanup environment |
-| `scripts/README-NVMEOF.md` | Quick reference |
-| `QUICKSTART-NVMEOF.md` | This file |
+```bash
+# 1. Edit code on macOS
+vim pkg/driver/controller.go
 
-## Tests Run
+# 2. Build and load to Kind
+make build-image
+kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
-✅ NFS baseline (verify environment works)  
-✅ NVMe-oF PVC creation (ZVOL, subsystem, namespace on TrueNAS)  
-✅ NVMe-oF device mounting in pod  
-✅ NVMe device visibility in VM  
-✅ I/O operations (write 100MB test)  
+# 3. Restart pods
+kubectl rollout restart -n kube-system deployment/tns-csi-controller
 
-## Advantages
+# 4. Test
+kubectl apply -f deploy/example-pvc.yaml
+```
 
-| vs Docker Desktop/Kind | vs Cloud VM | vs Bare Metal |
-|------------------------|-------------|---------------|
-| ✅ Real block devices | ✅ No costs | ✅ Fastest |
-| ✅ NVMe-oF support | ✅ No networking setup | ✅ Always available |
-| ✅ Full kernel access | ✅ Local/fast | ✅ Most realistic |
-| | ❌ Need VPN | ❌ Need hardware |
+## Architecture Overview
 
-## VM Resource Usage
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       macOS Host                            │
+│  - Code editing                                             │
+│  - Docker builds                                            │
+│  - kubectl access to both clusters                          │
+└──────────────┬───────────────────────────┬──────────────────┘
+               │                           │
+     ┌─────────▼────────┐        ┌────────▼─────────┐
+     │   UTM VM         │        │  Kind Cluster    │
+     │   (Ubuntu)       │        │  (Containers)    │
+     │                  │        │                  │
+     │  - k3s           │        │  - Kubernetes    │
+     │  - NVMe modules  │        │  - NFS only      │
+     │  - CSI driver    │        │  - CSI driver    │
+     └────────┬─────────┘        └────────┬─────────┘
+              │                           │
+              └────────────┬──────────────┘
+                           │
+                  ┌────────▼─────────┐
+                  │   TrueNAS Scale  │
+                  │  - NVMe-oF Target│
+                  │  - NFS Server    │
+                  │  - ZFS Pools     │
+                  └──────────────────┘
+```
 
-- **CPU:** 4 cores
-- **RAM:** 4 GB  
-- **Disk:** 50 GB
-- **Network:** Bridged (accesses your TrueNAS)
+## Summary
 
-Can be stopped when not in use: `multipass stop truenas-nvme-test`
+| Protocol | Environment | Setup Time | Best For |
+|----------|-------------|------------|----------|
+| **NVMe-oF** | UTM VM | 15 min (one-time) | Block storage, performance testing |
+| **NFS** | Kind Cluster | 2 min | Fast iteration, file storage |
 
 ## Next Steps
 
-1. Try it: `./scripts/setup-nvmeof-test-vm.sh`
-2. Read full docs: [NVMEOF_TESTING.md](NVMEOF_TESTING.md)
-3. Customize for your needs
-4. Add more tests to `test-nvmeof.sh`
+1. **For NVMe-oF development:** Set up UTM VM following steps above
+2. **For NFS development:** Use existing Kind cluster setup
+3. **Read full docs:** See `NVMEOF_TESTING.md` for detailed UTM setup
+4. **Add tests:** Create test scenarios for your use cases
 
-## Merge Back to Main?
+## Troubleshooting
 
-Once you verify this works, you can:
+### UTM VM Issues
+- Ensure bridged networking is configured
+- Verify VM can reach TrueNAS: `ping 10.10.20.100`
+- Check NVMe modules: `lsmod | grep nvme`
 
-```bash
-# Test everything first
-./scripts/setup-nvmeof-test-vm.sh
-./scripts/deploy-nvmeof-test.sh
-./scripts/test-nvmeof.sh
-
-# If all works, merge to main
-git checkout main
-git merge local-nvmeof-testing
-git push
-```
-
-## Support
-
-Issues? Check:
-1. VM has network to TrueNAS: `multipass exec truenas-nvme-test -- ping 10.10.20.100`
-2. Modules loaded: `multipass exec truenas-nvme-test -- lsmod | grep nvme`
-3. k3s healthy: `kubectl --kubeconfig ~/.kube/k3s-nvmeof-test get nodes`
-
-See [NVMEOF_TESTING.md](NVMEOF_TESTING.md) troubleshooting section for more.
+### Kind Cluster Issues
+- Restart Docker Desktop if cluster won't start
+- Reload image if changes aren't reflected
+- Check logs: `kubectl logs -n kube-system <pod-name>`
 
 ---
 
-**Ready to test NVMe-oF locally? Start here:** `./scripts/setup-nvmeof-test-vm.sh`
+**Ready to test?**
+- **NVMe-oF:** Set up UTM VM and test block storage
+- **NFS:** Use Kind cluster for quick testing

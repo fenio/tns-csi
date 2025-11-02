@@ -605,23 +605,41 @@ func (s *NodeService) findNVMeDeviceByNQN(nqn string) (string, error) {
 		return s.findNVMeDeviceByNQNFromSys(nqn)
 	}
 
-	// Simple string search for NQN in output (more robust JSON parsing could be added)
+	// Parse output to find NQN and extract controller name
+	// The JSON format from nvme list-subsys has: "Name" : "nvmeX" under Paths
+	// We need to construct the device path as /dev/nvmeXn1
 	lines := strings.Split(string(subsysOutput), "\n")
-	var currentDevice string
-	for _, line := range lines {
-		if strings.Contains(line, "\"DevicePath\"") {
-			// Extract device path - format: "DevicePath" : "/dev/nvme0n1"
-			parts := strings.Split(line, "\"")
-			if len(parts) >= 4 {
-				currentDevice = parts[3]
+	foundNQN := false
+	for i, line := range lines {
+		// Look for the NQN line
+		if strings.Contains(line, nqn) {
+			foundNQN = true
+			klog.V(4).Infof("Found NQN at line %d", i)
+			// Now look ahead for the "Name" field in the Paths section
+			for j := i; j < len(lines) && j < i+20; j++ {
+				if strings.Contains(lines[j], "\"Name\"") && strings.Contains(lines[j], "nvme") {
+					// Extract controller name - format: "Name" : "nvme0"
+					parts := strings.Split(lines[j], "\"")
+					for k := 0; k < len(parts)-1; k++ {
+						if parts[k] == "Name" && k+2 < len(parts) {
+							controllerName := strings.TrimSpace(parts[k+2])
+							// Construct device path - typically nvme0 -> /dev/nvme0n1
+							devicePath := fmt.Sprintf("/dev/%sn1", controllerName)
+							klog.V(4).Infof("Found controller %s, device path: %s", controllerName, devicePath)
+							return devicePath, nil
+						}
+					}
+				}
 			}
-		}
-		if strings.Contains(line, nqn) && currentDevice != "" {
-			return currentDevice, nil
 		}
 	}
 
-	return "", fmt.Errorf("NVMe device not found for NQN: %s", nqn)
+	if foundNQN {
+		klog.Warningf("Found NQN but could not extract device name, falling back to sysfs")
+	}
+
+	// Fall back to checking /sys/class/nvme if JSON parsing failed
+	return s.findNVMeDeviceByNQNFromSys(nqn)
 }
 
 // findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
@@ -661,21 +679,27 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(nqn string) (string, error) {
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
 func (s *NodeService) waitForNVMeDevice(nqn string, timeout time.Duration) (string, error) {
-	klog.V(4).Infof("Waiting for NVMe device with NQN %s to appear", nqn)
+	klog.Infof("Waiting for NVMe device with NQN %s to appear (timeout: %v)", nqn, timeout)
 
 	deadline := time.Now().Add(timeout)
+	attempt := 0
 	for time.Now().Before(deadline) {
+		attempt++
 		devicePath, err := s.findNVMeDeviceByNQN(nqn)
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, err := os.Stat(devicePath); err == nil {
+				klog.Infof("NVMe device found at %s after %d attempts", devicePath, attempt)
 				return devicePath, nil
 			}
+			klog.V(4).Infof("Device path %s found but not accessible: %v", devicePath, err)
+		} else {
+			klog.V(4).Infof("Attempt %d: device not found yet: %v", attempt, err)
 		}
 		time.Sleep(1 * time.Second)
 	}
 
-	return "", fmt.Errorf("timeout waiting for NVMe device to appear")
+	return "", fmt.Errorf("timeout waiting for NVMe device to appear after %d attempts", attempt)
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target.

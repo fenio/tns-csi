@@ -11,7 +11,9 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// mockAPIClient is a mock implementation of the TrueNAS API client
+// mockAPIClient is a mock implementation of the TrueNAS API client.
+//
+//nolint:dupl // Interface and mock struct have similar structure by design
 type mockAPIClient struct {
 	createDatasetFunc         func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	deleteDatasetFunc         func(ctx context.Context, datasetID string) error
@@ -24,9 +26,9 @@ type mockAPIClient struct {
 	deleteNVMeOFNamespaceFunc func(ctx context.Context, namespaceID int) error
 }
 
-func (m *mockAPIClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
+func (m *mockAPIClient) CreateDataset(_ context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
 	if m.createDatasetFunc != nil {
-		return m.createDatasetFunc(ctx, params)
+		return m.createDatasetFunc(context.Background(), params)
 	}
 	return &tnsapi.Dataset{
 		ID:         "test-dataset-id",
@@ -35,16 +37,16 @@ func (m *mockAPIClient) CreateDataset(ctx context.Context, params tnsapi.Dataset
 	}, nil
 }
 
-func (m *mockAPIClient) DeleteDataset(ctx context.Context, datasetID string) error {
+func (m *mockAPIClient) DeleteDataset(_ context.Context, datasetID string) error {
 	if m.deleteDatasetFunc != nil {
-		return m.deleteDatasetFunc(ctx, datasetID)
+		return m.deleteDatasetFunc(context.Background(), datasetID)
 	}
 	return nil
 }
 
-func (m *mockAPIClient) CreateNFSShare(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
+func (m *mockAPIClient) CreateNFSShare(_ context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
 	if m.createNFSShareFunc != nil {
-		return m.createNFSShareFunc(ctx, params)
+		return m.createNFSShareFunc(context.Background(), params)
 	}
 	return &tnsapi.NFSShare{
 		ID:      123,
@@ -53,16 +55,16 @@ func (m *mockAPIClient) CreateNFSShare(ctx context.Context, params tnsapi.NFSSha
 	}, nil
 }
 
-func (m *mockAPIClient) DeleteNFSShare(ctx context.Context, shareID int) error {
+func (m *mockAPIClient) DeleteNFSShare(_ context.Context, shareID int) error {
 	if m.deleteNFSShareFunc != nil {
-		return m.deleteNFSShareFunc(ctx, shareID)
+		return m.deleteNFSShareFunc(context.Background(), shareID)
 	}
 	return nil
 }
 
-func (m *mockAPIClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+func (m *mockAPIClient) CreateZvol(_ context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 	if m.createZvolFunc != nil {
-		return m.createZvolFunc(ctx, params)
+		return m.createZvolFunc(context.Background(), params)
 	}
 	return &tnsapi.Dataset{
 		ID:   "test-zvol-id",
@@ -71,9 +73,9 @@ func (m *mockAPIClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreate
 	}, nil
 }
 
-func (m *mockAPIClient) CreateNVMeOFSubsystem(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+func (m *mockAPIClient) CreateNVMeOFSubsystem(_ context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
 	if m.createNVMeOFSubsystemFunc != nil {
-		return m.createNVMeOFSubsystemFunc(ctx, params)
+		return m.createNVMeOFSubsystemFunc(context.Background(), params)
 	}
 	return &tnsapi.NVMeOFSubsystem{
 		ID:  1,
@@ -81,16 +83,16 @@ func (m *mockAPIClient) CreateNVMeOFSubsystem(ctx context.Context, params tnsapi
 	}, nil
 }
 
-func (m *mockAPIClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error {
+func (m *mockAPIClient) DeleteNVMeOFSubsystem(_ context.Context, subsystemID int) error {
 	if m.deleteNVMeOFSubsystemFunc != nil {
-		return m.deleteNVMeOFSubsystemFunc(ctx, subsystemID)
+		return m.deleteNVMeOFSubsystemFunc(context.Background(), subsystemID)
 	}
 	return nil
 }
 
-func (m *mockAPIClient) CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
+func (m *mockAPIClient) CreateNVMeOFNamespace(_ context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
 	if m.createNVMeOFNamespaceFunc != nil {
-		return m.createNVMeOFNamespaceFunc(ctx, params)
+		return m.createNVMeOFNamespaceFunc(context.Background(), params)
 	}
 	return &tnsapi.NVMeOFNamespace{
 		ID:     1,
@@ -99,9 +101,9 @@ func (m *mockAPIClient) CreateNVMeOFNamespace(ctx context.Context, params tnsapi
 	}, nil
 }
 
-func (m *mockAPIClient) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error {
+func (m *mockAPIClient) DeleteNVMeOFNamespace(_ context.Context, namespaceID int) error {
 	if m.deleteNVMeOFNamespaceFunc != nil {
-		return m.deleteNVMeOFNamespaceFunc(ctx, namespaceID)
+		return m.deleteNVMeOFNamespaceFunc(context.Background(), namespaceID)
 	}
 	return nil
 }
@@ -213,11 +215,11 @@ func TestDeleteVolume_InvalidVolumeID(t *testing.T) {
 
 func TestDeleteVolume_NFSVolume(t *testing.T) {
 	mockClient := &mockAPIClient{
-		deleteNFSShareFunc: func(ctx context.Context, shareID int) error {
+		deleteNFSShareFunc: func(_ context.Context, shareID int) error {
 			assert.Equal(t, 42, shareID)
 			return nil
 		},
-		deleteDatasetFunc: func(ctx context.Context, datasetID string) error {
+		deleteDatasetFunc: func(_ context.Context, datasetID string) error {
 			assert.Equal(t, "test-dataset-id", datasetID)
 			return nil
 		},
@@ -246,15 +248,15 @@ func TestDeleteVolume_NFSVolume(t *testing.T) {
 
 func TestDeleteVolume_NVMeOFVolume(t *testing.T) {
 	mockClient := &mockAPIClient{
-		deleteNVMeOFNamespaceFunc: func(ctx context.Context, namespaceID int) error {
+		deleteNVMeOFNamespaceFunc: func(_ context.Context, namespaceID int) error {
 			assert.Equal(t, 20, namespaceID)
 			return nil
 		},
-		deleteNVMeOFSubsystemFunc: func(ctx context.Context, subsystemID int) error {
+		deleteNVMeOFSubsystemFunc: func(_ context.Context, subsystemID int) error {
 			assert.Equal(t, 10, subsystemID)
 			return nil
 		},
-		deleteDatasetFunc: func(ctx context.Context, datasetID string) error {
+		deleteDatasetFunc: func(_ context.Context, datasetID string) error {
 			assert.Equal(t, "test-zvol-id", datasetID)
 			return nil
 		},

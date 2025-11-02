@@ -123,6 +123,7 @@ func (c *Client) connect() error {
 	// For wss:// connections, skip TLS verification (common for self-signed certs)
 	// TODO: Add option to provide custom CA certificate
 	if strings.HasPrefix(c.url, "wss://") {
+		//nolint:gosec // TLS skip verify is intentional for self-signed TrueNAS certificates
 		dialer.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: true,
 		}
@@ -135,7 +136,7 @@ func (c *Client) connect() error {
 
 	// Set up pong handler to respond to server pings
 	// Note: TrueNAS does not send pings, so this is just for completeness
-	conn.SetPongHandler(func(appData string) error {
+	conn.SetPongHandler(func(_ string) error {
 		klog.V(6).Info("Received WebSocket pong")
 		return nil
 	})
@@ -407,6 +408,7 @@ func (c *Client) reconnect() bool {
 
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
 		// Exponential backoff: 2^(attempt-1) * retryInterval, max 60s
+		//nolint:gosec // Integer conversion is safe here - attempt is small positive int
 		backoff := time.Duration(1<<uint(attempt-1)) * c.retryInterval
 		if backoff > 60*time.Second {
 			backoff = 60 * time.Second
@@ -579,13 +581,13 @@ func (c *Client) GetDataset(ctx context.Context, datasetID string) (*Dataset, er
 
 // NFSShareCreateParams represents parameters for NFS share creation.
 type NFSShareCreateParams struct {
-	Path          string   `json:"path"`
-	Comment       string   `json:"comment,omitempty"`
-	Hosts         []string `json:"hosts,omitempty"`
-	Networks      []string `json:"networks,omitempty"`
-	Maproot_User  string   `json:"maproot_user,omitempty"`
-	Maproot_Group string   `json:"maproot_group,omitempty"`
-	Enabled       bool     `json:"enabled"`
+	Path         string   `json:"path"`
+	Comment      string   `json:"comment,omitempty"`
+	Hosts        []string `json:"hosts,omitempty"`
+	Networks     []string `json:"networks,omitempty"`
+	MaprootUser  string   `json:"maproot_user,omitempty"`
+	MaprootGroup string   `json:"maproot_group,omitempty"`
+	Enabled      bool     `json:"enabled"`
 }
 
 // NFSShare represents an NFS share.

@@ -26,7 +26,7 @@ func NewIdentityService(driverName, version string) *IdentityService {
 }
 
 // GetPluginInfo returns plugin information.
-func (s *IdentityService) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
+func (s *IdentityService) GetPluginInfo(_ context.Context, _ *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
 	klog.V(4).Info("GetPluginInfo called")
 
 	if s.driverName == "" {
@@ -44,7 +44,7 @@ func (s *IdentityService) GetPluginInfo(ctx context.Context, req *csi.GetPluginI
 }
 
 // GetPluginCapabilities returns plugin capabilities.
-func (s *IdentityService) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
+func (s *IdentityService) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
 	klog.V(4).Info("GetPluginCapabilities called")
 
 	return &csi.GetPluginCapabilitiesResponse{
@@ -68,7 +68,7 @@ func (s *IdentityService) GetPluginCapabilities(ctx context.Context, req *csi.Ge
 }
 
 // Probe returns the health and readiness of the plugin.
-func (s *IdentityService) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
+func (s *IdentityService) Probe(_ context.Context, _ *csi.ProbeRequest) (*csi.ProbeResponse, error) {
 	klog.V(4).Info("Probe called")
 	return &csi.ProbeResponse{
 		Ready: wrapperspb.Bool(true),

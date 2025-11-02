@@ -1,9 +1,11 @@
 package driver
 
 import (
+	"context"
 	"testing"
 )
 
+//nolint:gocognit // Test function with many cases - complexity is acceptable
 func TestEncodeDecodeVolumeID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -192,7 +194,7 @@ func TestIsEncodedVolumeID(t *testing.T) {
 func TestControllerGetCapabilities(t *testing.T) {
 	service := NewControllerService(nil)
 
-	resp, err := service.ControllerGetCapabilities(nil, nil)
+	resp, err := service.ControllerGetCapabilities(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ControllerGetCapabilities() error = %v", err)
 	}

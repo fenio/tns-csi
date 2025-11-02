@@ -74,6 +74,7 @@ func (d *Driver) Run() error {
 	}
 
 	klog.Infof("Listening on %s://%s", u.Scheme, addr)
+	//nolint:noctx // net.Listen is acceptable here - CSI driver lifecycle is managed by gRPC server
 	listener, err := net.Listen(u.Scheme, addr)
 	if err != nil {
 		return err

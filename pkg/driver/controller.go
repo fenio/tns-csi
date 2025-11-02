@@ -15,6 +15,8 @@ import (
 )
 
 // APIClient defines the interface for TrueNAS API operations.
+//
+//nolint:dupl // Interface and mock struct have similar structure by design
 type APIClient interface {
 	CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	DeleteDataset(ctx context.Context, datasetID string) error
@@ -76,8 +78,8 @@ func isEncodedVolumeID(volumeID string) bool {
 	// Base64 URL-safe encoding uses A-Z, a-z, 0-9, -, and _
 	// If it contains characters outside this set, it's not our encoding
 	for _, c := range volumeID {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-			(c >= '0' && c <= '9') || c == '-' || c == '_') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') &&
+			(c < '0' || c > '9') && c != '-' && c != '_' {
 			return false
 		}
 	}
@@ -176,7 +178,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 }
 
 // ControllerPublishVolume attaches a volume to a node.
-func (s *ControllerService) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume called with request: %+v", req)
 
 	// For NFS, this is typically a no-op
@@ -185,7 +187,7 @@ func (s *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 }
 
 // ControllerUnpublishVolume detaches a volume from a node.
-func (s *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume called with request: %+v", req)
 
 	// For NFS, this is typically a no-op
@@ -194,7 +196,7 @@ func (s *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 }
 
 // ValidateVolumeCapabilities validates volume capabilities.
-func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	klog.V(4).Infof("ValidateVolumeCapabilities called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -214,7 +216,7 @@ func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 }
 
 // ListVolumes lists all volumes.
-func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
+func (s *ControllerService) ListVolumes(_ context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	klog.V(4).Infof("ListVolumes called with request: %+v", req)
 
 	// TODO: Implement volume listing
@@ -222,7 +224,7 @@ func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 }
 
 // GetCapacity returns the capacity of the storage pool.
-func (s *ControllerService) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
+func (s *ControllerService) GetCapacity(_ context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	klog.V(4).Infof("GetCapacity called with request: %+v", req)
 
 	// TODO: Implement capacity reporting
@@ -230,7 +232,7 @@ func (s *ControllerService) GetCapacity(ctx context.Context, req *csi.GetCapacit
 }
 
 // ControllerGetCapabilities returns controller capabilities.
-func (s *ControllerService) ControllerGetCapabilities(ctx context.Context, req *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
+func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	klog.V(4).Info("ControllerGetCapabilities called")
 
 	return &csi.ControllerGetCapabilitiesResponse{
@@ -268,37 +270,37 @@ func (s *ControllerService) ControllerGetCapabilities(ctx context.Context, req *
 }
 
 // CreateSnapshot creates a volume snapshot.
-func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+func (s *ControllerService) CreateSnapshot(_ context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
 	klog.V(4).Infof("CreateSnapshot called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "CreateSnapshot not implemented")
 }
 
 // DeleteSnapshot deletes a snapshot.
-func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+func (s *ControllerService) DeleteSnapshot(_ context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
 	klog.V(4).Infof("DeleteSnapshot called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "DeleteSnapshot not implemented")
 }
 
 // ListSnapshots lists snapshots.
-func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+func (s *ControllerService) ListSnapshots(_ context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	klog.V(4).Infof("ListSnapshots called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "ListSnapshots not implemented")
 }
 
 // ControllerExpandVolume expands a volume.
-func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
+func (s *ControllerService) ControllerExpandVolume(_ context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	klog.V(4).Infof("ControllerExpandVolume called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume not implemented")
 }
 
 // ControllerGetVolume gets volume information.
-func (s *ControllerService) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
+func (s *ControllerService) ControllerGetVolume(_ context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	klog.V(4).Infof("ControllerGetVolume called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "ControllerGetVolume not implemented")
 }
 
 // ControllerModifyVolume modifies a volume.
-func (s *ControllerService) ControllerModifyVolume(ctx context.Context, req *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
+func (s *ControllerService) ControllerModifyVolume(_ context.Context, req *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	klog.V(4).Infof("ControllerModifyVolume called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "ControllerModifyVolume not implemented")
 }
@@ -347,11 +349,11 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 	// Step 2: Create NFS share for the dataset
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
-		Path:          dataset.Mountpoint,
-		Comment:       fmt.Sprintf("CSI Volume: %s", volumeID),
-		Maproot_User:  "root",
-		Maproot_Group: "wheel",
-		Enabled:       true,
+		Path:         dataset.Mountpoint,
+		Comment:      fmt.Sprintf("CSI Volume: %s", volumeID),
+		MaprootUser:  "root",
+		MaprootGroup: "wheel",
+		Enabled:      true,
 	})
 	if err != nil {
 		// Cleanup: delete the dataset if NFS share creation fails
@@ -413,7 +415,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	}, nil
 }
 
-func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+func (s *ControllerService) createISCSIVolume(_ context.Context, _ *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Info("Creating iSCSI volume")
 
 	// TODO: Implement iSCSI volume creation
@@ -566,14 +568,6 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}, nil
 }
 
-// min returns the minimum of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // deleteNFSVolume deletes an NFS volume.
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
@@ -605,7 +599,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 }
 
 // deleteISCSIVolume deletes an iSCSI volume.
-func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
+func (s *ControllerService) deleteISCSIVolume(_ context.Context, _ *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	klog.V(4).Info("Deleting iSCSI volume")
 
 	// TODO: Implement iSCSI volume deletion

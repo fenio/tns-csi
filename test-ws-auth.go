@@ -25,6 +25,7 @@ type Response struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
+//nolint:gocognit // Test utility with multiple operations - complexity is acceptable
 func main() {
 	// Read credentials
 	creds, err := os.ReadFile(".tns-credentials")
@@ -55,6 +56,7 @@ func main() {
 	// Connect with TLS skip verify
 	dialer := websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
+	//nolint:gosec // TLS skip verify is intentional for testing with self-signed certificates
 	dialer.TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
 	}
@@ -149,7 +151,7 @@ func main() {
 			select {
 			case msg := <-responseCh:
 				fmt.Printf("✓ RECEIVED QUERY RESPONSE!\n")
-				fmt.Printf("Raw response (first 500 chars):\n%s\n\n", string(msg[:min(500, len(msg))]))
+				fmt.Printf("Raw response (first 500 chars):\n%s\n\n", string(msg[:minInt(500, len(msg))]))
 				fmt.Printf("\n✓ WebSocket API is fully functional!\n")
 
 			case err := <-errorCh:
@@ -172,7 +174,7 @@ func main() {
 	}
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

@@ -120,6 +120,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		if mounted {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
+			//nolint:gosec // umount command with path variable is expected for CSI driver
 			cmd := exec.CommandContext(ctx, "umount", stagingTargetPath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				klog.Warningf("Failed to unmount staging path: %v, output: %s", err, string(output))
@@ -154,7 +155,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 }
 
 // NodePublishVolume mounts the volume to the target path.
-func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	klog.V(4).Infof("NodePublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -258,6 +259,7 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 	klog.V(4).Infof("Executing mount command: mount %v", args)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	//nolint:gosec // mount command with dynamic args is expected for CSI driver
 	cmd := exec.CommandContext(ctx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -302,6 +304,7 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 	klog.V(4).Infof("Executing bind mount command: mount %v", args)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	//nolint:gosec // mount command with dynamic args is expected for CSI driver
 	cmd := exec.CommandContext(ctx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -313,7 +316,7 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 }
 
 // NodeUnpublishVolume unmounts the volume from the target path.
-func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+func (s *NodeService) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("NodeUnpublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -344,6 +347,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	klog.V(4).Infof("Executing umount command for: %s", targetPath)
 	umountCtx, umountCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer umountCancel()
+	//nolint:gosec // umount command with path variable is expected for CSI driver
 	cmd := exec.CommandContext(umountCtx, "umount", targetPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -355,7 +359,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 }
 
 // NodeGetVolumeStats returns volume capacity statistics.
-func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	klog.V(4).Infof("NodeGetVolumeStats called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -372,13 +376,13 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 }
 
 // NodeExpandVolume expands a volume.
-func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
+func (s *NodeService) NodeExpandVolume(_ context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
 	klog.V(4).Infof("NodeExpandVolume called with request: %+v", req)
 	return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not implemented")
 }
 
 // NodeGetCapabilities returns node capabilities.
-func (s *NodeService) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
+func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
 	klog.V(4).Info("NodeGetCapabilities called")
 
 	return &csi.NodeGetCapabilitiesResponse{
@@ -402,7 +406,7 @@ func (s *NodeService) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetC
 }
 
 // NodeGetInfo returns node information.
-func (s *NodeService) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+func (s *NodeService) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	klog.V(4).Info("NodeGetInfo called")
 
 	return &csi.NodeGetInfoResponse{
@@ -448,7 +452,7 @@ func joinMountOptions(options []string) string {
 // Protocol-specific staging functions
 
 // stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.
-func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
@@ -489,6 +493,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", server, port)
 	discoverCtx, discoverCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer discoverCancel()
+	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
 	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", transport, "-a", server, "-s", port)
 	if output, err := discoverCmd.CombinedOutput(); err != nil {
 		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", err, string(output))
@@ -498,6 +503,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	klog.Infof("Connecting to NVMe-oF target: %s", nqn)
 	connectCtx, connectCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer connectCancel()
+	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
 	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", transport, "-n", nqn, "-a", server, "-s", port)
 	output, err := connectCmd.CombinedOutput()
 	if err != nil {
@@ -526,7 +532,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
-func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest, volumeContext map[string]string) (*csi.NodeUnstageVolumeResponse, error) {
+func (s *NodeService) unstageNVMeOFVolume(_ context.Context, req *csi.NodeUnstageVolumeRequest, volumeContext map[string]string) (*csi.NodeUnstageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
@@ -554,6 +560,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 		klog.Infof("Unmounting staging path: %s", stagingTargetPath)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		//nolint:gosec // umount command with path variable is expected for CSI driver
 		cmd := exec.CommandContext(ctx, "umount", stagingTargetPath)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmount staging path: %v, output: %s", err, string(output))
@@ -633,6 +640,7 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(nqn string) (string, error) {
 		deviceName := entry.Name()
 		nqnPath := filepath.Join(nvmeDir, deviceName, "subsysnqn")
 
+		//nolint:gosec // Reading NVMe subsystem info from standard sysfs path
 		data, err := os.ReadFile(nqnPath)
 		if err != nil {
 			continue
@@ -748,6 +756,7 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	//nolint:gosec // mount command with dynamic args is expected for CSI driver
 	cmd := exec.CommandContext(ctx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

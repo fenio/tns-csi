@@ -415,9 +415,8 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 
 	// Calculate capacity, used, and available bytes
 	// Note: statfs returns values in blocks, need to multiply by block size
-	// Bsize type varies by platform (uint32 on Darwin, int64 on Linux)
-	// Block sizes are always positive for mounted filesystems, conversion is safe
-	blockSize := uint64(statfs.Bsize)
+	// Use platform-specific helper to safely convert Bsize to uint64
+	blockSize := getBlockSize(&statfs)
 	totalBytes := statfs.Blocks * blockSize
 	availableBytes := statfs.Bavail * blockSize
 	usedBytes := totalBytes - (statfs.Bfree * blockSize)

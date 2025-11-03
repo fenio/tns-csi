@@ -1,5 +1,9 @@
 # TNS CSI Driver
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/yourusername/tns-csi)](https://go.dev/)
+[![Docker Image](https://img.shields.io/docker/v/bfenski/tns-csi-driver?label=docker)](https://hub.docker.com/r/bfenski/tns-csi-driver)
+
 A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems with TNS-compatible APIs.
 
 ## Important Disclaimer
@@ -195,7 +199,21 @@ kubectl logs -n kube-system -l app=tns-csi,component=controller
 kubectl logs -n kube-system -l app=tns-csi,component=node
 ```
 
+## Documentation
+
+- [Deployment Guide](docs/DEPLOYMENT.md) - Detailed installation and configuration
+- [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
+- [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
+- [Kind Setup](docs/KIND.md) - Local development with Kind
+- [Security](docs/SECURITY-SANITIZATION.md) - Security considerations
+
 ## Development
+
+### Prerequisites
+
+- Go 1.21+
+- Docker (for building images)
+- Kubernetes cluster for testing
 
 ### Building
 
@@ -207,6 +225,15 @@ make build
 
 Tests are automated via GitHub Actions CI/CD. See `.github/workflows/` for workflow configuration.
 
+For local testing:
+```bash
+# Run unit tests
+make test
+
+# Run specific test
+go test -v ./pkg/driver/...
+```
+
 ### Building Container Image
 
 ```bash
@@ -215,7 +242,7 @@ make docker-build
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 

@@ -261,8 +261,8 @@ jobs:
           
           # Restart CSI controller to ensure it picks up new StorageClass
           echo "=== Restarting CSI controller ==="
-          kubectl rollout restart deployment/tns-csi-controller -n kube-system
-          kubectl rollout status deployment/tns-csi-controller -n kube-system --timeout=120s
+          kubectl rollout restart statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+          kubectl rollout status statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --timeout=120s
           
           # Give it a moment to settle
           sleep 5

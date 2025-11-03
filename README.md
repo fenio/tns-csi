@@ -38,11 +38,17 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 
 - Kubernetes 1.20+
 - TrueNAS or compatible system with TNS-compatible API (v2.0 WebSocket API)
+  - **For NVMe-oF support: TrueNAS Scale 25.10 or later required** (NVMe-oF feature introduced in 25.10)
 - For NFS: NFS client utilities on all nodes (`nfs-common` on Debian/Ubuntu, `nfs-utils` on RHEL/CentOS)
 - For NVMe-oF: 
-  - `nvme-cli` package installed on all nodes
+  - TrueNAS Scale 25.10+
+  - **TrueNAS must have a static IP configured** (DHCP not supported for NVMe-oF)
+  - At least one NVMe-oF subsystem with:
+    - Initial ZVOL namespace configured
+    - TCP port configured (default: 4420)
+  - `nvme-cli` package installed on all Kubernetes nodes
   - Kernel modules: `nvme-tcp`, `nvme-fabrics`
-  - Network connectivity to TrueNAS on port 4420
+  - Network connectivity from Kubernetes nodes to TrueNAS on port 4420
 
 ## Quick Start
 

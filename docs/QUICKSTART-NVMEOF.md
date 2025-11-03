@@ -10,6 +10,9 @@ This guide explains the testing setup for the TrueNAS CSI driver with both NVMe-
 
 NVMe-oF requires real kernel modules and block device support that isn't available in containers.
 
+**Prerequisites:**
+- **TrueNAS Scale 25.10 or later** (NVMe-oF feature introduced in 25.10)
+
 **Why UTM VM?**
 - ✅ Full NVMe-oF kernel module support (`nvme-tcp`, `nvme-fabrics`)
 - ✅ Real block device operations
@@ -18,7 +21,7 @@ NVMe-oF requires real kernel modules and block device support that isn't availab
 - ✅ Native performance on Apple Silicon
 
 **What's tested:**
-- Volume provisioning (ZVOL → Subsystem → Namespace)
+- Volume provisioning (ZVOL → Namespace)
 - NVMe-oF target discovery and connection
 - Block device mounting in pods
 - I/O operations
@@ -48,40 +51,79 @@ NFS works perfectly in containers and doesn't require special kernel modules.
    - **RAM:** 4 GB
    - **Disk:** 50 GB
    - **Network:** Bridged (to access TrueNAS)
-3. **TrueNAS Scale** server with:
+3. **TrueNAS Scale 25.10 or later** server with:
    - NVMe-oF service enabled
-   - **⚠️ IMPORTANT: NVMe-oF TCP Portal configured** (see below)
+   - **⚠️ IMPORTANT: At least one NVMe-oF subsystem with TCP port configured** (see below)
 4. **Docker Desktop** for building images
 
-#### ⚠️ Required: Configure NVMe-oF Portal on TrueNAS
+#### ⚠️ Required: Configure NVMe-oF on TrueNAS
 
-**Before provisioning NVMe-oF volumes**, you must configure an NVMe-oF TCP portal on your TrueNAS server:
+**Before provisioning NVMe-oF volumes**, you must complete these configuration steps on TrueNAS 25.10+:
 
-1. **Log in to TrueNAS Scale web UI**
+##### Step 1: Configure Static IP Address (REQUIRED)
 
-2. **Navigate to:** Sharing → Block Shares (NVMe-oF)
+TrueNAS requires a static IP - DHCP interfaces won't appear in NVMe-oF configuration:
 
-3. **Click "Portals" tab** and **"Add"**
+1. **Navigate to:** Network → Interfaces
+2. **Edit** your active network interface
+3. **Configure:**
+   - **DHCP:** Disable
+   - **IP Address:** Your static IP (e.g., `10.10.20.100/24`)
+   - **Gateway:** Your network gateway
+   - **DNS:** DNS servers (e.g., `8.8.8.8`)
+4. **Test Changes** and **Save Changes**
 
-4. **Configure portal:**
-   - **Listen Address:** Choose your TrueNAS network interface (e.g., `0.0.0.0` for all interfaces)
+##### Step 2: Create Initial ZVOL (REQUIRED)
+
+Subsystems require at least one namespace with a ZVOL:
+
+1. **Navigate to:** Datasets
+2. **Click:** Add Dataset → Create Zvol
+3. **Configure:**
+   - **Name:** `nvmeof-init`
+   - **Size:** `1 GiB`
+   - **Block size:** `16K`
+4. **Save**
+
+##### Step 3: Create Subsystem with Namespace and Port (REQUIRED)
+
+1. **Navigate to:** Shares → NVMe-oF Subsystems
+
+2. **Click "Add"** to create a new subsystem
+
+3. **Configure subsystem:**
+   - **Subsystem Name:** `nqn.2025-01.com.truenas:csi`
+   - **Namespace:** Select the ZVOL you created (e.g., `pool1/nvmeof-init`)
+
+4. **Save** the subsystem
+
+5. **Click "Add Port"** on your new subsystem
+
+6. **Configure port:**
+   - **Address:** Select your interface with static IP (should now appear in dropdown)
    - **Port:** `4420` (default NVMe-oF TCP port)
    - **Transport:** `TCP`
 
-5. **Save** the portal configuration
+7. **Save** the port configuration
 
-6. **Verify:** The portal should appear in the Portals list with status "Active"
+8. **Verify:** The subsystem shows:
+   - At least one namespace (your ZVOL)
+   - At least one TCP port
 
 **Why is this required?**
 
-The CSI driver cannot automatically create NVMe-oF portals - they must be pre-configured on the TrueNAS server. The driver will create subsystems and namespaces automatically, but needs an existing portal to attach them to.
+- **Static IP:** TrueNAS only allows NVMe-oF on interfaces with static IPs (prevents storage outages from IP changes)
+- **Initial Namespace:** Empty subsystems are invalid - must have at least one ZVOL namespace
+- **Port:** CSI driver cannot create ports - must be pre-configured
+
+The CSI driver will create additional namespaces automatically for each PVC.
 
 **What happens if not configured?**
 
-If no NVMe-oF TCP portal is configured, volume provisioning will fail with:
+Volume provisioning will fail with:
 ```
 No TCP NVMe-oF port configured on TrueNAS server. 
-Please configure an NVMe-oF TCP portal in TrueNAS before provisioning NVMe-oF volumes.
+Please configure an NVMe-oF TCP port in TrueNAS before provisioning NVMe-oF volumes.
 ```
 
 ### VM Setup

@@ -155,46 +155,48 @@ if ! $SKIP_TRUENAS; then
             exit 1
         fi
         
-        # Check NVMe-oF portals/ports
+        # Check NVMe-oF ports (TrueNAS 25.10+)
         echo ""
-        echo "Checking NVMe-oF portals..."
+        echo "Checking NVMe-oF ports..."
         
-        # Query for NVMe-oF portals - this endpoint may vary by TrueNAS version
-        PORTALS=$(curl -k -s -X POST \
+        # Query for NVMe-oF ports - TrueNAS 25.10+ uses nvmeof.port.query
+        PORTS=$(curl -k -s -X POST \
             -H "Authorization: Bearer ${API_KEY}" \
             -H "Content-Type: application/json" \
             -d '{"method": "nvmeof.port.query", "params": []}' \
             "${API_ENDPOINT}/core/ping" 2>/dev/null || echo "[]")
         
-        PORTAL_COUNT=$(echo "$PORTALS" | jq '. | length' 2>/dev/null || echo "0")
+        PORT_COUNT=$(echo "$PORTS" | jq '. | length' 2>/dev/null || echo "0")
         
-        if [[ "$PORTAL_COUNT" -gt 0 ]]; then
-            info "Found $PORTAL_COUNT NVMe-oF portal(s)"
-            echo "$PORTALS" | jq -r '.[] | "   - \(.addr_trtype) on \(.addr_traddr):\(.addr_trsvcid)"'
+        if [[ "$PORT_COUNT" -gt 0 ]]; then
+            info "Found $PORT_COUNT NVMe-oF port(s)"
+            echo "$PORTS" | jq -r '.[] | "   - \(.addr_trtype) on \(.addr_traddr):\(.addr_trsvcid)"'
             
-            # Check for TCP portal
-            TCP_COUNT=$(echo "$PORTALS" | jq '[.[] | select(.addr_trtype == "TCP")] | length' 2>/dev/null || echo "0")
+            # Check for TCP port
+            TCP_COUNT=$(echo "$PORTS" | jq '[.[] | select(.addr_trtype == "TCP")] | length' 2>/dev/null || echo "0")
             if [[ "$TCP_COUNT" -gt 0 ]]; then
-                info "Found TCP portal (required for CSI driver)"
+                info "Found TCP port (required for CSI driver)"
             else
-                error "No TCP portal found"
-                echo "   The CSI driver requires at least one TCP portal"
+                error "No TCP port found"
+                echo "   The CSI driver requires at least one TCP port"
             fi
         else
-            error "No NVMe-oF portals configured"
+            error "No NVMe-oF ports configured"
             echo ""
             echo "   ⚠️  This is a REQUIRED step before provisioning NVMe-oF volumes"
             echo ""
-            echo "   To configure:"
+            echo "   To configure (TrueNAS 25.10+):"
             echo "   1. Log in to TrueNAS web UI"
-            echo "   2. Navigate to: Sharing → Block Shares (NVMe-oF)"
-            echo "   3. Click 'Portals' tab"
-            echo "   4. Click 'Add'"
+            echo "   2. Navigate to: Shares → NVMe-oF Subsystems"
+            echo "   3. Click 'Add' to create a subsystem (or edit existing)"
+            echo "   4. After creating subsystem, click 'Add Port'"
             echo "   5. Configure:"
-            echo "      - Listen Address: 0.0.0.0 (or specific interface)"
+            echo "      - Address: 0.0.0.0 (or specific interface)"
             echo "      - Port: 4420"
             echo "      - Transport: TCP"
             echo "   6. Click 'Save'"
+            echo ""
+            echo "   Note: Requires TrueNAS Scale 25.10 or later"
             echo ""
             exit 1
         fi

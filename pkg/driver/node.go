@@ -270,30 +270,54 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-// publishBlockVolume publishes a block volume by bind mounting from staging to target.
+// publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
 func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, readonly bool) (*csi.NodePublishVolumeResponse, error) {
-	klog.Infof("Bind mounting block volume from %s to %s", stagingTargetPath, targetPath)
+	klog.Infof("Publishing block device from %s to %s", stagingTargetPath, targetPath)
 
-	// Check if target path exists, create if not
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-		klog.V(4).Infof("Creating target path: %s", targetPath)
-		if err := os.MkdirAll(targetPath, 0750); err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to create target path: %v", err)
+	// Verify staging path exists and is a device or symlink
+	stagingInfo, err := os.Stat(stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Staging path %s not found: %v", stagingTargetPath, err)
+	}
+
+	// For block volumes, staging path should be a file (device node or symlink), not a directory
+	if stagingInfo.IsDir() {
+		return nil, status.Errorf(codes.Internal, "Staging path %s is a directory, expected block device or symlink", stagingTargetPath)
+	}
+
+	// Create parent directory for target path if it doesn't exist
+	targetDir := filepath.Dir(targetPath)
+	if err := os.MkdirAll(targetDir, 0750); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create target parent directory: %v", err)
+	}
+
+	// Check if target already exists
+	if _, err := os.Stat(targetPath); err == nil {
+		// Target exists - check if it's the same as source
+		klog.V(4).Infof("Target path %s already exists", targetPath)
+		// Check if it's already bind mounted
+		mounted, err := s.isDeviceMounted(targetPath)
+		if err != nil {
+			klog.Warningf("Failed to check if device is mounted: %v", err)
+		}
+		if mounted {
+			klog.V(4).Infof("Target path %s is already mounted", targetPath)
+			return &csi.NodePublishVolumeResponse{}, nil
+		}
+		// Remove existing file if not mounted
+		if err := os.Remove(targetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to remove existing target path: %v", err)
 		}
 	}
 
-	// Check if already mounted
-	mounted, err := s.isMounted(targetPath)
+	// Create target as an empty file
+	targetFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL, 0660)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to create target file: %v", err)
 	}
+	targetFile.Close()
 
-	if mounted {
-		klog.V(4).Infof("Path %s is already mounted", targetPath)
-		return &csi.NodePublishVolumeResponse{}, nil
-	}
-
-	// Bind mount from staging to target
+	// Bind mount the device from staging to target
 	mountOptions := []string{"bind"}
 	if readonly {
 		mountOptions = append(mountOptions, "ro")
@@ -308,10 +332,12 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 	cmd := exec.CommandContext(ctx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to bind mount: %v, output: %s", err, string(output))
+		// Cleanup: remove target file on failure
+		os.Remove(targetPath)
+		return nil, status.Errorf(codes.Internal, "Failed to bind mount block device: %v, output: %s", err, string(output))
 	}
 
-	klog.Infof("Successfully bind mounted block volume to %s", targetPath)
+	klog.Infof("Successfully bind mounted block device to %s", targetPath)
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
@@ -455,6 +481,7 @@ func joinMountOptions(options []string) string {
 func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
+	volumeCapability := req.GetVolumeCapability()
 
 	// Get NVMe-oF parameters from volume context
 	nqn := volumeContext["nqn"]
@@ -474,14 +501,20 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 		port = "4420"
 	}
 
-	klog.Infof("Staging NVMe-oF volume %s: connecting to %s:%s (NQN: %s)", volumeID, server, port, nqn)
+	// Check if this is a block volume or filesystem volume
+	isBlockVolume := volumeCapability.GetBlock() != nil
+
+	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s)", volumeID, isBlockVolume, server, port, nqn)
 
 	// Check if already connected
 	devicePath, err := s.findNVMeDeviceByNQN(nqn)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		// Device already connected, proceed to format and mount
-		return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, req.GetVolumeCapability())
+		// Device already connected, proceed based on volume type
+		if isBlockVolume {
+			return s.stageBlockDevice(devicePath, stagingTargetPath)
+		}
+		return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, volumeCapability)
 	}
 
 	// Check if nvme-cli is installed
@@ -527,8 +560,11 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
 
-	// Format and mount the device
-	return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, req.GetVolumeCapability())
+	// Stage based on volume type
+	if isBlockVolume {
+		return s.stageBlockDevice(devicePath, stagingTargetPath)
+	}
+	return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, volumeCapability)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
@@ -844,4 +880,65 @@ func (s *NodeService) formatDevice(devicePath, fsType string) error {
 
 	klog.V(4).Infof("Format output: %s", string(output))
 	return nil
+}
+
+// stageBlockDevice stages a raw block device by creating a symlink at staging path.
+func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*csi.NodeStageVolumeResponse, error) {
+	klog.Infof("Staging block device %s to %s", devicePath, stagingTargetPath)
+
+	// Verify device exists
+	if _, err := os.Stat(devicePath); err != nil {
+		return nil, status.Errorf(codes.Internal, "Device path %s not found: %v", devicePath, err)
+	}
+
+	// Check if staging path already exists
+	if _, err := os.Stat(stagingTargetPath); err == nil {
+		// Staging path exists - check if it's a valid symlink or device
+		klog.V(4).Infof("Staging path %s already exists", stagingTargetPath)
+		// Verify it points to the correct device
+		targetDevice, err := filepath.EvalSymlinks(stagingTargetPath)
+		if err == nil && targetDevice == devicePath {
+			klog.V(4).Infof("Staging path already points to correct device")
+			return &csi.NodeStageVolumeResponse{}, nil
+		}
+		// Remove existing staging path if it doesn't match
+		klog.Warningf("Removing incorrect staging path: %s", stagingTargetPath)
+		if err := os.Remove(stagingTargetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to remove incorrect staging path: %v", err)
+		}
+	}
+
+	// Create parent directory if needed
+	stagingDir := filepath.Dir(stagingTargetPath)
+	if err := os.MkdirAll(stagingDir, 0750); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create staging directory: %v", err)
+	}
+
+	// Create symlink from staging path to device
+	if err := os.Symlink(devicePath, stagingTargetPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create symlink from %s to %s: %v", stagingTargetPath, devicePath, err)
+	}
+
+	klog.Infof("Successfully staged block device at %s -> %s", stagingTargetPath, devicePath)
+	return &csi.NodeStageVolumeResponse{}, nil
+}
+
+// isDeviceMounted checks if a device path is mounted (for block devices).
+func (s *NodeService) isDeviceMounted(targetPath string) (bool, error) {
+	// For block devices, check if it's bind mounted
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "findmnt", "-o", "SOURCE", "-n", targetPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// findmnt returns non-zero if not found
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check mount: %w", err)
+	}
+
+	// If we got output, the path is mounted
+	return len(output) > 0, nil
 }

@@ -87,7 +87,7 @@ jobs:
           # Create secret
           kubectl create secret generic truenas-csi-secret \
             --from-literal=api-key="${TRUENAS_API_KEY}" \
-            --from-literal=api-url="wss://${TRUENAS_HOST}:1443/api/current" \
+            --from-literal=api-url="wss://${TRUENAS_HOST}:443/api/current" \
             --namespace kube-system \
             --dry-run=client -o yaml | kubectl apply -f -
           
@@ -97,7 +97,7 @@ jobs:
             --set image.repository=bfenski/tns-csi \
             --set image.tag=latest \
             --set image.pullPolicy=Never \
-            --set truenas.url="wss://${TRUENAS_HOST}:1443/api/current" \
+            --set truenas.url="wss://${TRUENAS_HOST}:443/api/current" \
             --set truenas.apiKey="${TRUENAS_API_KEY}" \
             --set storageClasses.nfs.enabled=true \
             --set storageClasses.nfs.pool="${TRUENAS_POOL}" \

@@ -25,7 +25,7 @@ type Response struct {
 	Error  json.RawMessage `json:"error,omitempty"`
 }
 
-//nolint:gocognit // Test utility with multiple operations - complexity is acceptable
+//nolint:gocognit,gocyclo // Test utility with multiple operations - complexity is acceptable for manual test
 func main() {
 	// Read credentials
 	creds, err := os.ReadFile(".tns-credentials")
@@ -70,8 +70,8 @@ func main() {
 		return
 	}
 	defer func() {
-		if err := conn.Close(); err != nil {
-			fmt.Printf("Error closing connection: %v\n", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			fmt.Printf("Error closing connection: %v\n", closeErr)
 		}
 	}()
 
@@ -83,9 +83,9 @@ func main() {
 
 	go func() {
 		for {
-			_, msg, err := conn.ReadMessage()
-			if err != nil {
-				errorCh <- err
+			_, msg, readErr := conn.ReadMessage()
+			if readErr != nil {
+				errorCh <- readErr
 				return
 			}
 			responseCh <- msg

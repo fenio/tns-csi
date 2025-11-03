@@ -15,8 +15,6 @@ import (
 )
 
 // APIClient defines the interface for TrueNAS API operations.
-//
-//nolint:dupl // Interface and mock struct have similar structure by design
 type APIClient interface {
 	CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	DeleteDataset(ctx context.Context, datasetID string) error
@@ -37,10 +35,10 @@ type VolumeMetadata struct {
 	Protocol          string `json:"protocol"`
 	DatasetID         string `json:"datasetID,omitempty"`
 	DatasetName       string `json:"datasetName,omitempty"`
+	NVMeOFNQN         string `json:"nvmeofNQN,omitempty"`
 	NFSShareID        int    `json:"nfsShareID,omitempty"`
 	NVMeOFSubsystemID int    `json:"nvmeofSubsystemID,omitempty"`
 	NVMeOFNamespaceID int    `json:"nvmeofNamespaceID,omitempty"`
-	NVMeOFNQN         string `json:"nvmeofNQN,omitempty"`
 }
 
 // encodeVolumeID encodes volume metadata into a volumeID string.
@@ -82,6 +80,7 @@ func isEncodedVolumeID(volumeID string) bool {
 	for _, c := range volumeID {
 		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') &&
 			(c < '0' || c > '9') && c != '-' && c != '_' {
+
 			return false
 		}
 	}
@@ -429,6 +428,7 @@ func (s *ControllerService) createISCSIVolume(_ context.Context, _ *csi.CreateVo
 	return nil, status.Error(codes.Unimplemented, "iSCSI volume creation not yet implemented")
 }
 
+//nolint:gocognit,gocyclo // Complex NVMe-oF provisioning logic - refactoring would risk stability of working code
 func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Info("Creating NVMe-oF volume")
 
@@ -535,15 +535,15 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	// Attach subsystem to the port
 	klog.Infof("Attaching subsystem %d to port %d", subsystem.ID, portID)
-	if err := s.apiClient.AddSubsystemToPort(ctx, subsystem.ID, portID); err != nil {
-		klog.Errorf("Failed to attach subsystem to port, cleaning up: %v", err)
+	if attachErr := s.apiClient.AddSubsystemToPort(ctx, subsystem.ID, portID); attachErr != nil {
+		klog.Errorf("Failed to attach subsystem to port, cleaning up: %v", attachErr)
 		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to attach subsystem to port: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to attach subsystem to port: %v", attachErr)
 	}
 
 	klog.Infof("Successfully attached subsystem %d to port %d", subsystem.ID, portID)

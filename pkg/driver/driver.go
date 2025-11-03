@@ -25,12 +25,12 @@ type Config struct {
 
 // Driver is the TNS CSI driver.
 type Driver struct {
-	config     Config
 	srv        *grpc.Server
 	apiClient  *tnsapi.Client
 	controller *ControllerService
 	node       *NodeService
 	identity   *IdentityService
+	config     Config
 }
 
 // NewDriver creates a new driver instance.
@@ -66,8 +66,8 @@ func (d *Driver) Run() error {
 	var addr string
 	if u.Scheme == "unix" {
 		addr = u.Path
-		if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
-			return err
+		if removeErr := os.Remove(addr); removeErr != nil && !os.IsNotExist(removeErr) {
+			return removeErr
 		}
 	} else {
 		addr = u.Host

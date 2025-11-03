@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+//nolint:gocognit // Comprehensive test with multiple subtests - refactoring would reduce test coverage clarity
 func TestGetPluginInfo(t *testing.T) {
 	tests := []struct {
 		name       string

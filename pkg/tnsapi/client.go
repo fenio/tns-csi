@@ -17,17 +17,17 @@ import (
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
 type Client struct {
-	url           string
-	apiKey        string
 	conn          *websocket.Conn
-	mu            sync.Mutex
-	reqID         uint64
 	pending       map[string]chan *Response
 	closeCh       chan struct{}
+	url           string
+	apiKey        string
+	retryInterval time.Duration
+	reqID         uint64
+	maxRetries    int
+	mu            sync.Mutex
 	closed        bool
 	reconnecting  bool
-	maxRetries    int
-	retryInterval time.Duration
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
@@ -40,24 +40,21 @@ type Request struct {
 
 // Response represents a storage API WebSocket response.
 type Response struct {
+	Error  *Error          `json:"error,omitempty"`
 	ID     string          `json:"id"`
 	Msg    string          `json:"msg,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
-	Error  *Error          `json:"error,omitempty"`
 }
 
 // Error represents a storage API error.
 type Error struct {
-	// Storage API error format
-	ErrorCode int    `json:"error"`
-	ErrorName string `json:"errname"`
-	Reason    string `json:"reason"`
-	Type      string `json:"type"`
-
-	// Fallback to JSON-RPC 2.0 format
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+	ErrorName string      `json:"errname"`
+	Reason    string      `json:"reason"`
+	Type      string      `json:"type"`
+	Message   string      `json:"message"`
+	ErrorCode int         `json:"error"`
+	Code      int         `json:"code"`
 }
 
 func (e *Error) Error() string {
@@ -317,6 +314,8 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 }
 
 // readLoop reads responses from WebSocket.
+//
+//nolint:gocognit // Complex WebSocket handling with reconnection - refactoring would risk stability
 func (c *Client) readLoop() {
 	defer func() {
 		c.mu.Lock()
@@ -598,19 +597,19 @@ func (c *Client) GetDataset(ctx context.Context, datasetID string) (*Dataset, er
 type NFSShareCreateParams struct {
 	Path         string   `json:"path"`
 	Comment      string   `json:"comment,omitempty"`
-	Hosts        []string `json:"hosts,omitempty"`
-	Networks     []string `json:"networks,omitempty"`
 	MaprootUser  string   `json:"maproot_user,omitempty"`
 	MaprootGroup string   `json:"maproot_group,omitempty"`
+	Hosts        []string `json:"hosts,omitempty"`
+	Networks     []string `json:"networks,omitempty"`
 	Enabled      bool     `json:"enabled"`
 }
 
 // NFSShare represents an NFS share.
 type NFSShare struct {
-	ID      int      `json:"id"`
 	Path    string   `json:"path"`
 	Comment string   `json:"comment"`
 	Hosts   []string `json:"hosts"`
+	ID      int      `json:"id"`
 	Enabled bool     `json:"enabled"`
 }
 
@@ -664,9 +663,9 @@ func (c *Client) QueryNFSShare(ctx context.Context, path string) ([]NFSShare, er
 // ZvolCreateParams represents parameters for ZVOL creation.
 type ZvolCreateParams struct {
 	Name         string `json:"name"`
-	Type         string `json:"type"` // VOLUME
+	Type         string `json:"type"`
+	Volblocksize string `json:"volblocksize,omitempty"`
 	Volsize      int64  `json:"volsize"`
-	Volblocksize string `json:"volblocksize,omitempty"` // e.g., "16K"
 }
 
 // CreateZvol creates a new ZVOL (block device).
@@ -691,9 +690,9 @@ type NVMeOFSubsystemCreateParams struct {
 
 // NVMeOFSubsystem represents an NVMe-oF subsystem.
 type NVMeOFSubsystem struct {
-	ID      int    `json:"id"`
-	NQN     string `json:"subnqn"` // Storage system uses "subnqn" field name
+	NQN     string `json:"subnqn"`
 	Serial  string `json:"serial"`
+	ID      int    `json:"id"`
 	Enabled bool   `json:"enabled"`
 }
 
@@ -727,17 +726,17 @@ func (c *Client) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) err
 
 // NVMeOFNamespaceCreateParams represents parameters for NVMe-oF namespace creation.
 type NVMeOFNamespaceCreateParams struct {
+	DevicePath string `json:"device_path"`
+	DeviceType string `json:"device_type"`
 	SubsysID   int    `json:"subsys_id"`
-	DevicePath string `json:"device_path"`    // Path to ZVOL, e.g., "/dev/zvol/pool/dataset"
-	DeviceType string `json:"device_type"`    // Device type, e.g., "DEVICE"
-	NSID       int    `json:"nsid,omitempty"` // Namespace ID (optional, auto-assigned if 0)
+	NSID       int    `json:"nsid,omitempty"`
 }
 
 // NVMeOFNamespace represents an NVMe-oF namespace.
 type NVMeOFNamespace struct {
+	Device    string `json:"device"`
 	ID        int    `json:"id"`
 	Subsystem int    `json:"subsystem"`
-	Device    string `json:"device"`
 	NSID      int    `json:"nsid"`
 }
 
@@ -821,8 +820,8 @@ func (c *Client) QueryNVMeOFPorts(ctx context.Context) ([]NVMeOFPort, error) {
 
 // NVMeOFPort represents an NVMe-oF port/listener.
 type NVMeOFPort struct {
-	ID        int    `json:"id"`
 	Transport string `json:"addr_trtype"`
 	Address   string `json:"addr_traddr"`
+	ID        int    `json:"id"`
 	Port      int    `json:"addr_trsvcid"`
 }

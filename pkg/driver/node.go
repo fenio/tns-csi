@@ -27,8 +27,8 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	nodeID    string
 	apiClient *tnsapi.Client
+	nodeID    string
 }
 
 // NewNodeService creates a new node service.
@@ -118,10 +118,10 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 			klog.Warningf("Failed to check if staging path is mounted: %v", err)
 		}
 		if mounted {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			umountCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			//nolint:gosec // umount command with path variable is expected for CSI driver
-			cmd := exec.CommandContext(ctx, "umount", stagingTargetPath)
+			cmd := exec.CommandContext(umountCtx, "umount", stagingTargetPath)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				klog.Warningf("Failed to unmount staging path: %v, output: %s", err, string(output))
 			}
@@ -228,7 +228,7 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 	// Check if target path exists, create if not
 	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
 		klog.V(4).Infof("Creating target path: %s", targetPath)
-		if err := os.MkdirAll(targetPath, 0750); err != nil {
+		if err := os.MkdirAll(targetPath, 0o750); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to create target path: %v", err)
 		}
 	}
@@ -288,19 +288,20 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 	// For block volumes, CSI driver must create the parent directory and target file.
 	// Create parent directory if it doesn't exist
 	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0750); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create target directory %s: %v", targetDir, err)
+	if mkdirErr := os.MkdirAll(targetDir, 0o750); mkdirErr != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create target directory %s: %v", targetDir, mkdirErr)
 	}
 
 	// Create target file if it doesn't exist
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(targetPath); os.IsNotExist(statErr) {
 		klog.V(4).Infof("Creating target file: %s", targetPath)
-		file, err := os.OpenFile(targetPath, os.O_CREATE, 0600)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to create target file %s: %v", targetPath, err)
+		//nolint:gosec // Target path from CSI request is validated by Kubernetes CSI framework
+		file, fileErr := os.OpenFile(targetPath, os.O_CREATE, 0o600)
+		if fileErr != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to create target file %s: %v", targetPath, fileErr)
 		}
-		if err := file.Close(); err != nil {
-			klog.Warningf("Failed to close target file %s: %v", targetPath, err)
+		if closeErr := file.Close(); closeErr != nil {
+			klog.Warningf("Failed to close target file %s: %v", targetPath, closeErr)
 		}
 	}
 
@@ -517,8 +518,8 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 	}
 
 	// Check if nvme-cli is installed
-	if err := s.checkNVMeCLI(); err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", err)
+	if checkErr := s.checkNVMeCLI(); checkErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
 
 	// Discover the NVMe-oF target
@@ -527,8 +528,8 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 	defer discoverCancel()
 	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
 	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", transport, "-a", server, "-s", port)
-	if output, err := discoverCmd.CombinedOutput(); err != nil {
-		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", err, string(output))
+	if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
+		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
 	}
 
 	// Connect to the NVMe-oF target
@@ -628,6 +629,8 @@ func (s *NodeService) checkNVMeCLI() error {
 }
 
 // findNVMeDeviceByNQN finds the device path for a given NQN.
+//
+//nolint:gocognit // Complex NVMe device discovery - refactoring would risk stability of working code
 func (s *NodeService) findNVMeDeviceByNQN(nqn string) (string, error) {
 	// Use nvme list-subsys which shows NQN
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -770,16 +773,16 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 
 	if needsFormat {
 		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
-		if err := s.formatDevice(devicePath, fsType); err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", err)
+		if formatErr := s.formatDevice(devicePath, fsType); formatErr != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 	} else {
 		klog.V(4).Infof("Device %s is already formatted", devicePath)
 	}
 
 	// Create staging target path if it doesn't exist
-	if err := os.MkdirAll(stagingTargetPath, 0750); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", err)
+	if mkdirErr := os.MkdirAll(stagingTargetPath, 0o750); mkdirErr != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", mkdirErr)
 	}
 
 	// Check if already mounted
@@ -902,7 +905,7 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 
 	// Create parent directory if needed
 	stagingDir := filepath.Dir(stagingTargetPath)
-	if err := os.MkdirAll(stagingDir, 0750); err != nil {
+	if err := os.MkdirAll(stagingDir, 0o750); err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to create staging directory: %v", err)
 	}
 

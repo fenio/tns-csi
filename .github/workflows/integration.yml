@@ -256,7 +256,16 @@ jobs:
             --wait --timeout 3m
           
           # Verify StorageClass was created
+          echo "=== NVMe-oF StorageClass ==="
           kubectl get storageclass tns-nvmeof -o yaml
+          
+          # Restart CSI controller to ensure it picks up new StorageClass
+          echo "=== Restarting CSI controller ==="
+          kubectl rollout restart deployment/tns-csi-controller -n kube-system
+          kubectl rollout status deployment/tns-csi-controller -n kube-system --timeout=120s
+          
+          # Give it a moment to settle
+          sleep 5
       
       - name: Run NVMe-oF test
         run: |

@@ -78,6 +78,16 @@ jobs:
           # Import image into k3s
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
       
+      - name: Clean up previous deployment
+        run: |
+          # Remove any stuck Helm releases
+          helm uninstall tns-csi --namespace kube-system --wait || true
+          # Clean up any remaining resources
+          kubectl delete secret truenas-csi-secret -n kube-system --ignore-not-found=true
+          kubectl delete storageclass tns-csi-nfs --ignore-not-found=true
+          # Give k8s time to cleanup
+          sleep 5
+      
       - name: Deploy CSI driver
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

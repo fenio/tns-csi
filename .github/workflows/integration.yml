@@ -384,7 +384,48 @@ jobs:
           
           # Wait for pod to be ready
           echo "=== Waiting for pod to be ready ==="
+          set +e  # Temporarily disable exit on error
           kubectl wait --for=condition=Ready pod/test-pod-nvmeof --timeout=120s
+          WAIT_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          if [ $WAIT_EXIT_CODE -ne 0 ]; then
+            echo "❌ Pod failed to become ready within timeout"
+            
+            # Capture diagnostic information BEFORE cleanup
+            echo "=== Pod Status (YAML) ==="
+            kubectl get pod test-pod-nvmeof -o yaml || true
+            
+            echo "=== Pod Description ==="
+            kubectl describe pod test-pod-nvmeof || true
+            
+            echo "=== Pod Events ==="
+            kubectl get events --field-selector involvedObject.name=test-pod-nvmeof --sort-by='.lastTimestamp' || true
+            
+            echo "=== Controller Logs ==="
+            kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=100 || true
+            
+            echo "=== Node Logs ==="
+            kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --tail=100 || true
+            
+            echo "=== NVMe Connection Status ==="
+            sudo nvme list || echo "No NVMe devices found"
+            
+            echo "=== NVMe Subsystems ==="
+            sudo nvme list-subsys || echo "No NVMe subsystems found"
+            
+            echo "=== Kernel NVMe Logs (dmesg) ==="
+            sudo dmesg | grep -i nvme | tail -50 || echo "No NVMe messages in dmesg"
+            
+            echo "=== Block Devices ==="
+            lsblk || true
+            
+            # Cleanup and fail
+            kubectl delete pod test-pod-nvmeof --ignore-not-found=true --wait=false
+            kubectl delete pvc test-pvc-nvmeof --ignore-not-found=true --wait=false
+            exit 1
+          fi
+          
           echo "✓ Pod is ready"
           
           # Show pod logs
@@ -409,16 +450,12 @@ jobs:
           # Give it a moment to cleanup
           sleep 5
       
-      - name: Show logs on failure
+      - name: Show additional logs on failure
         if: failure()
         run: |
-          echo "=== Controller logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=100 || true
-          echo "=== Node logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --tail=100 || true
-          echo "=== PVC status ==="
-          kubectl describe pvc test-pvc-nvmeof || true
-          echo "=== Pod status ==="
-          kubectl describe pod test-pod-nvmeof || true
-          echo "=== NVMe subsystems ==="
-          sudo nvme list || true
+          echo "=== All pods in kube-system ==="
+          kubectl get pods -n kube-system || true
+          echo "=== All PVCs ==="
+          kubectl get pvc -A || true
+          echo "=== All PVs ==="
+          kubectl get pv || true

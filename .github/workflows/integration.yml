@@ -82,11 +82,15 @@ jobs:
         run: |
           # Remove any stuck Helm releases
           helm uninstall tns-csi --namespace kube-system --wait || true
+          # Force delete any remaining pods
+          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
           # Clean up any remaining resources
           kubectl delete secret truenas-csi-secret -n kube-system --ignore-not-found=true
           kubectl delete storageclass tns-csi-nfs --ignore-not-found=true
           # Give k8s time to cleanup
-          sleep 5
+          sleep 10
+          # Verify no old pods remain
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver || echo "No old pods found (good)"
       
       - name: Deploy CSI driver
         env:
@@ -117,6 +121,10 @@ jobs:
       - name: Wait for CSI driver to be ready
         run: |
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=tns-csi-driver -n kube-system --timeout=120s
+          
+          # Verify pods are using the correct image
+          echo "=== Verifying image version ==="
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
       
       - name: Run NFS test
         run: |

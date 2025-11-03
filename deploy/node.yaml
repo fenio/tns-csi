@@ -71,7 +71,7 @@ spec:
 
         # CSI Node Driver Registrar sidecar
         - name: csi-node-driver-registrar
-          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.2
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.12.0
           imagePullPolicy: Always
           args:
             - "--csi-address=$(ADDRESS)"

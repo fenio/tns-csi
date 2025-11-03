@@ -114,6 +114,7 @@ jobs:
             --set truenas.url="wss://${TRUENAS_HOST}:443/api/current" \
             --set truenas.apiKey="${TRUENAS_API_KEY}" \
             --set storageClasses.nfs.enabled=true \
+            --set storageClasses.nfs.name=tns-csi-nfs \
             --set storageClasses.nfs.pool="${TRUENAS_POOL}" \
             --set storageClasses.nfs.server="${TRUENAS_HOST}" \
             --wait --timeout 5m

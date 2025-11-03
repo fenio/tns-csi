@@ -56,13 +56,8 @@ func (s *IdentityService) GetPluginCapabilities(_ context.Context, _ *csi.GetPlu
 					},
 				},
 			},
-			{
-				Type: &csi.PluginCapability_Service_{
-					Service: &csi.PluginCapability_Service{
-						Type: csi.PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS,
-					},
-				},
-			},
+			// VOLUME_ACCESSIBILITY_CONSTRAINTS removed - not needed and causes issues
+			// with csi-provisioner v5+ which enables topology by default when this is present
 		},
 	}, nil
 }

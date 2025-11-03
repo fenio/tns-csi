@@ -99,15 +99,12 @@ func TestGetPluginCapabilities(t *testing.T) {
 
 	// Verify expected capabilities
 	hasControllerService := false
-	hasVolumeAccessibilityConstraints := false
 
 	for _, cap := range resp.Capabilities {
 		if service := cap.GetService(); service != nil {
 			switch service.Type {
 			case csi.PluginCapability_Service_CONTROLLER_SERVICE:
 				hasControllerService = true
-			case csi.PluginCapability_Service_VOLUME_ACCESSIBILITY_CONSTRAINTS:
-				hasVolumeAccessibilityConstraints = true
 			}
 		}
 	}
@@ -116,9 +113,7 @@ func TestGetPluginCapabilities(t *testing.T) {
 		t.Error("GetPluginCapabilities() missing CONTROLLER_SERVICE capability")
 	}
 
-	if !hasVolumeAccessibilityConstraints {
-		t.Error("GetPluginCapabilities() missing VOLUME_ACCESSIBILITY_CONSTRAINTS capability")
-	}
+	// Note: VOLUME_ACCESSIBILITY_CONSTRAINTS intentionally removed for csi-provisioner v5+ compatibility
 }
 
 func TestProbe(t *testing.T) {

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": ["dependencies"],
+  "semanticCommits": "enabled",
+  "commitMessagePrefix": "chore(deps):",
+  "schedule": ["before 6am on monday"],
+  "timezone": "America/New_York",
+  "packageRules": [
+    {
+      "description": "Group Go module updates together",
+      "matchManagers": ["gomod"],
+      "groupName": "Go dependencies",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "automerge": false
+    },
+    {
+      "description": "Group Docker base image updates",
+      "matchManagers": ["dockerfile"],
+      "groupName": "Docker base images",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Group Helm dependencies",
+      "matchFileNames": ["charts/**"],
+      "groupName": "Helm charts",
+      "schedule": ["before 6am on monday"]
+    },
+    {
+      "description": "Require approval for major Go version updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Auto-merge minor and patch updates for Go modules",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "description": "Kubernetes API versions - require approval",
+      "matchPackagePatterns": ["^k8s.io/"],
+      "dependencyDashboardApproval": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "assignees": ["@bfenski"]
+  },
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "enabledManagers": [
+    "gomod",
+    "github-actions",
+    "dockerfile",
+    "helm-values"
+  ]
+}

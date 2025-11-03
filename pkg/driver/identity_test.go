@@ -102,8 +102,7 @@ func TestGetPluginCapabilities(t *testing.T) {
 
 	for _, cap := range resp.Capabilities {
 		if service := cap.GetService(); service != nil {
-			switch service.Type {
-			case csi.PluginCapability_Service_CONTROLLER_SERVICE:
+			if service.Type == csi.PluginCapability_Service_CONTROLLER_SERVICE {
 				hasControllerService = true
 			}
 		}

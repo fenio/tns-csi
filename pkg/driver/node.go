@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -392,13 +393,65 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
-	if req.GetVolumePath() == "" {
+	volumePath := req.GetVolumePath()
+	if volumePath == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume path is required")
 	}
 
-	// TODO: Implement volume stats
+	// Verify the volume path exists
+	pathInfo, err := os.Stat(volumePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, status.Errorf(codes.NotFound, "Volume path %s does not exist", volumePath)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to stat volume path: %v", err)
+	}
 
-	return &csi.NodeGetVolumeStatsResponse{}, nil
+	// Get filesystem statistics
+	var statfs syscall.Statfs_t
+	if err := syscall.Statfs(volumePath, &statfs); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get volume stats: %v", err)
+	}
+
+	// Calculate capacity, used, and available bytes
+	// Note: statfs returns values in blocks, need to multiply by block size
+	blockSize := uint64(statfs.Bsize)
+	totalBytes := statfs.Blocks * blockSize
+	availableBytes := statfs.Bavail * blockSize
+	usedBytes := totalBytes - (statfs.Bfree * blockSize)
+
+	klog.V(4).Infof("Volume stats for %s: total=%d, used=%d, available=%d",
+		volumePath, totalBytes, usedBytes, availableBytes)
+
+	resp := &csi.NodeGetVolumeStatsResponse{
+		Usage: []*csi.VolumeUsage{
+			{
+				Unit:      csi.VolumeUsage_BYTES,
+				Total:     safeUint64ToInt64(totalBytes),
+				Used:      safeUint64ToInt64(usedBytes),
+				Available: safeUint64ToInt64(availableBytes),
+			},
+		},
+	}
+
+	// For directories (filesystem mounts), also report inode statistics
+	if pathInfo.IsDir() {
+		totalInodes := statfs.Files
+		freeInodes := statfs.Ffree
+		usedInodes := totalInodes - freeInodes
+
+		resp.Usage = append(resp.Usage, &csi.VolumeUsage{
+			Unit:      csi.VolumeUsage_INODES,
+			Total:     safeUint64ToInt64(totalInodes),
+			Used:      safeUint64ToInt64(usedInodes),
+			Available: safeUint64ToInt64(freeInodes),
+		})
+
+		klog.V(4).Infof("Inode stats for %s: total=%d, used=%d, free=%d",
+			volumePath, totalInodes, usedInodes, freeInodes)
+	}
+
+	return resp, nil
 }
 
 // NodeExpandVolume expands a volume.
@@ -473,6 +526,16 @@ func joinMountOptions(options []string) string {
 		result += "," + options[i]
 	}
 	return result
+}
+
+// safeUint64ToInt64 safely converts uint64 to int64, capping at math.MaxInt64.
+// This is necessary for CSI VolumeUsage which uses int64 per the protobuf spec.
+func safeUint64ToInt64(val uint64) int64 {
+	const maxInt64 = 9223372036854775807 // math.MaxInt64
+	if val > maxInt64 {
+		return maxInt64
+	}
+	return int64(val)
 }
 
 // Protocol-specific staging functions

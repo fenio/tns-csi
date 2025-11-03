@@ -520,14 +520,17 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	if portID == 0 {
-		klog.Errorf("No TCP NVMe-oF port found, cleaning up")
+		klog.Errorf("No TCP NVMe-oF port found on TrueNAS server. NVMe-oF ports must be pre-configured before provisioning volumes.")
+		klog.Infof("To configure NVMe-oF: In TrueNAS UI, go to Sharing > Block (iSCSI) Shares > Portals and create an NVMe-oF TCP portal")
+		klog.Infof("Cleaning up subsystem and ZVOL...")
 		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
-		return nil, status.Error(codes.Internal, "No TCP NVMe-oF port found")
+		return nil, status.Error(codes.FailedPrecondition,
+			"No TCP NVMe-oF port configured on TrueNAS server. Please configure an NVMe-oF TCP portal in TrueNAS before provisioning NVMe-oF volumes.")
 	}
 
 	// Attach subsystem to the port

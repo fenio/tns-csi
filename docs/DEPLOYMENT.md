@@ -64,15 +64,39 @@ For better organization, create a parent dataset for Kubernetes volumes:
 
 ### 1.4 Enable NVMe-oF Service (For NVMe-oF Support)
 
+**⚠️ IMPORTANT:** NVMe-oF requires pre-configuration before volume provisioning will work.
+
 If you plan to use NVMe-oF storage:
+
+#### Enable the NVMe-oF Service
+
 1. Navigate to **System Settings** > **Services**
 2. Find **NVMe-oF** service
 3. Click the toggle to enable it
-4. Click the pencil icon to configure:
-   - Set the transport type (TCP recommended for most deployments)
-   - Configure the listen address (0.0.0.0 for all interfaces)
-   - Set the port (default: 4420 for TCP)
-5. Click **Save** and verify the service is running
+4. Click **Save** and verify the service is running
+
+#### Configure NVMe-oF TCP Portal (REQUIRED)
+
+**This step is mandatory** - the CSI driver cannot create portals automatically:
+
+1. Navigate to **Sharing** → **Block Shares (NVMe-oF)**
+2. Click the **Portals** tab
+3. Click **Add** to create a new portal
+4. Configure the portal:
+   - **Listen Address:** Select your network interface (use `0.0.0.0` for all interfaces)
+   - **Port:** `4420` (default NVMe-oF TCP port, must match your StorageClass configuration)
+   - **Transport:** `TCP`
+5. Click **Save**
+6. Verify the portal appears in the list with status "Active"
+
+**Why is this required?**
+
+The CSI driver will automatically create NVMe-oF subsystems and namespaces for each volume, but it requires at least one pre-configured portal to attach them to. Without a portal, volume provisioning will fail with the error:
+
+```
+No TCP NVMe-oF port configured on TrueNAS server. 
+Please configure an NVMe-oF TCP portal in TrueNAS before provisioning NVMe-oF volumes.
+```
 
 ## Step 2: Install Using Helm (Recommended)
 

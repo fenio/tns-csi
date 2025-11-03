@@ -48,8 +48,41 @@ NFS works perfectly in containers and doesn't require special kernel modules.
    - **RAM:** 4 GB
    - **Disk:** 50 GB
    - **Network:** Bridged (to access TrueNAS)
-3. **TrueNAS Scale** server with NVMe-oF service enabled
+3. **TrueNAS Scale** server with:
+   - NVMe-oF service enabled
+   - **⚠️ IMPORTANT: NVMe-oF TCP Portal configured** (see below)
 4. **Docker Desktop** for building images
+
+#### ⚠️ Required: Configure NVMe-oF Portal on TrueNAS
+
+**Before provisioning NVMe-oF volumes**, you must configure an NVMe-oF TCP portal on your TrueNAS server:
+
+1. **Log in to TrueNAS Scale web UI**
+
+2. **Navigate to:** Sharing → Block Shares (NVMe-oF)
+
+3. **Click "Portals" tab** and **"Add"**
+
+4. **Configure portal:**
+   - **Listen Address:** Choose your TrueNAS network interface (e.g., `0.0.0.0` for all interfaces)
+   - **Port:** `4420` (default NVMe-oF TCP port)
+   - **Transport:** `TCP`
+
+5. **Save** the portal configuration
+
+6. **Verify:** The portal should appear in the Portals list with status "Active"
+
+**Why is this required?**
+
+The CSI driver cannot automatically create NVMe-oF portals - they must be pre-configured on the TrueNAS server. The driver will create subsystems and namespaces automatically, but needs an existing portal to attach them to.
+
+**What happens if not configured?**
+
+If no NVMe-oF TCP portal is configured, volume provisioning will fail with:
+```
+No TCP NVMe-oF port configured on TrueNAS server. 
+Please configure an NVMe-oF TCP portal in TrueNAS before provisioning NVMe-oF volumes.
+```
 
 ### VM Setup
 

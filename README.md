@@ -1,8 +1,10 @@
 # TNS CSI Driver
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/yourusername/tns-csi)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/bfenski/tns-csi)](https://go.dev/)
+[![CI Status](https://img.shields.io/github/actions/workflow/status/bfenski/tns-csi/integration.yml?branch=main&label=integration%20tests)](https://github.com/bfenski/tns-csi/actions/workflows/integration.yml)
 [![Docker Image](https://img.shields.io/docker/v/bfenski/tns-csi-driver?label=docker)](https://hub.docker.com/r/bfenski/tns-csi-driver)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bfenski/tns-csi)](https://goreportcard.com/report/github.com/bfenski/tns-csi)
 
 A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems with TNS-compatible APIs.
 

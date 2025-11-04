@@ -210,10 +210,12 @@ wait_for_driver() {
 # Arguments:
 #   Manifest file path
 #   PVC name
+#   Wait for binding (optional, default: true, set to "false" for WaitForFirstConsumer)
 #######################################
 create_pvc() {
     local manifest=$1
     local pvc_name=$2
+    local wait_for_binding="${3:-true}"
     
     test_step 4 7 "Creating PersistentVolumeClaim: ${pvc_name}"
     
@@ -234,20 +236,26 @@ create_pvc() {
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
         --tail=30 || true
     
-    # Wait for PVC to be bound
-    echo ""
-    test_info "Waiting for PVC to be bound (timeout: ${TIMEOUT_PVC})..."
-    kubectl wait --for=jsonpath='{.status.phase}'=Bound \
-        pvc/"${pvc_name}" \
-        -n "${TEST_NAMESPACE}" \
-        --timeout="${TIMEOUT_PVC}"
-    
-    test_success "PVC is bound"
-    
-    # Get PV name
-    local pv_name
-    pv_name=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
-    test_info "Created PV: ${pv_name}"
+    # Wait for PVC to be bound (skip if volumeBindingMode is WaitForFirstConsumer)
+    if [[ "${wait_for_binding}" == "true" ]]; then
+        echo ""
+        test_info "Waiting for PVC to be bound (timeout: ${TIMEOUT_PVC})..."
+        kubectl wait --for=jsonpath='{.status.phase}'=Bound \
+            pvc/"${pvc_name}" \
+            -n "${TEST_NAMESPACE}" \
+            --timeout="${TIMEOUT_PVC}"
+        
+        test_success "PVC is bound"
+        
+        # Get PV name
+        local pv_name
+        pv_name=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
+        test_info "Created PV: ${pv_name}"
+    else
+        echo ""
+        test_info "Skipping PVC binding wait (volumeBindingMode: WaitForFirstConsumer)"
+        test_success "PVC created (will bind when pod is scheduled)"
+    fi
 }
 
 #######################################

@@ -47,8 +47,8 @@ fi
 
 test_success "NVMe-oF is configured, proceeding with tests"
 
-# Continue with full test
-create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}"
+# Continue with full test (NVMe-oF uses WaitForFirstConsumer binding mode)
+create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" "false"
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_io_operations "${POD_NAME}" "/data" "filesystem"
 cleanup_test "${POD_NAME}" "${PVC_NAME}"

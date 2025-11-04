@@ -1,0 +1,365 @@
+package driver
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/mount"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"k8s.io/klog/v2"
+)
+
+// Static errors for NVMe-oF operations.
+var (
+	ErrNVMeCLINotFound    = errors.New("nvme command not found - please install nvme-cli")
+	ErrNVMeDeviceNotFound = errors.New("NVMe device not found")
+	ErrNVMeDeviceTimeout  = errors.New("timeout waiting for NVMe device to appear")
+)
+
+// stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.
+func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTargetPath := req.GetStagingTargetPath()
+	volumeCapability := req.GetVolumeCapability()
+
+	// Get NVMe-oF parameters from volume context
+	nqn := volumeContext["nqn"]
+	server := volumeContext["server"]
+	transport := volumeContext["transport"]
+	port := volumeContext["port"]
+
+	if nqn == "" || server == "" {
+		return nil, status.Error(codes.InvalidArgument, "nqn and server must be provided in volume context for NVMe-oF volumes")
+	}
+
+	// Default values
+	if transport == "" {
+		transport = "tcp"
+	}
+	if port == "" {
+		port = "4420"
+	}
+
+	// Check if this is a block volume or filesystem volume
+	isBlockVolume := volumeCapability.GetBlock() != nil
+
+	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s)", volumeID, isBlockVolume, server, port, nqn)
+
+	// Check if already connected
+	devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
+	if err == nil && devicePath != "" {
+		klog.Infof("NVMe-oF device already connected at %s", devicePath)
+		// Device already connected, proceed based on volume type
+		if isBlockVolume {
+			return s.stageBlockDevice(devicePath, stagingTargetPath)
+		}
+		return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
+	}
+
+	// Check if nvme-cli is installed
+	if checkErr := s.checkNVMeCLI(ctx); checkErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
+	}
+
+	// Discover the NVMe-oF target
+	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", server, port)
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer discoverCancel()
+	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
+	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", transport, "-a", server, "-s", port)
+	if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
+		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
+	}
+
+	// Connect to the NVMe-oF target
+	klog.Infof("Connecting to NVMe-oF target: %s", nqn)
+	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer connectCancel()
+	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
+	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", transport, "-n", nqn, "-a", server, "-s", port)
+	output, err := connectCmd.CombinedOutput()
+	if err != nil {
+		// Check if already connected
+		if strings.Contains(string(output), "already connected") {
+			klog.V(4).Infof("NVMe device already connected (output: %s)", string(output))
+		} else {
+			return nil, status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target: %v, output: %s", err, string(output))
+		}
+	}
+
+	// Wait for device to appear and find the device path
+	devicePath, err = s.waitForNVMeDevice(ctx, nqn, 30*time.Second)
+	if err != nil {
+		// Cleanup: disconnect on failure
+		if disconnectErr := s.disconnectNVMeOF(ctx, nqn); disconnectErr != nil {
+			klog.Warningf("Failed to disconnect NVMe-oF after device wait failure: %v", disconnectErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to find NVMe device after connection: %v", err)
+	}
+
+	klog.Infof("NVMe-oF device connected at %s", devicePath)
+
+	// Stage based on volume type
+	if isBlockVolume {
+		return s.stageBlockDevice(devicePath, stagingTargetPath)
+	}
+	return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
+}
+
+// unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
+func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest, volumeContext map[string]string) (*csi.NodeUnstageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTargetPath := req.GetStagingTargetPath()
+
+	klog.Infof("Unstaging NVMe-oF volume %s from %s", volumeID, stagingTargetPath)
+
+	// Get NQN from volume context
+	nqn := volumeContext["nqn"]
+	if nqn == "" {
+		// Try to decode from volumeID
+		meta, err := decodeVolumeID(volumeID)
+		if err != nil {
+			klog.Warningf("Failed to get NQN for volume %s: %v", volumeID, err)
+			return &csi.NodeUnstageVolumeResponse{}, nil
+		}
+		nqn = meta.NVMeOFNQN
+	}
+
+	// Check if mounted and unmount if necessary
+	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
+	}
+
+	if mounted {
+		klog.Infof("Unmounting staging path: %s", stagingTargetPath)
+		if err := mount.Unmount(ctx, stagingTargetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to unmount staging path: %v", err)
+		}
+	}
+
+	// Disconnect from NVMe-oF target
+	if nqn != "" {
+		if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
+			klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
+		} else {
+			klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
+		}
+	}
+
+	return &csi.NodeUnstageVolumeResponse{}, nil
+}
+
+// formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
+	klog.Infof("Formatting and mounting NVMe device %s to %s", devicePath, stagingTargetPath)
+
+	// Determine filesystem type from volume capability
+	fsType := "ext4" // default
+	if mnt := volumeCapability.GetMount(); mnt != nil && mnt.FsType != "" {
+		fsType = mnt.FsType
+	}
+
+	// Check if device is already formatted
+	needsFormat, err := needsFormat(ctx, devicePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
+	}
+
+	if needsFormat {
+		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
+		if formatErr := formatDevice(ctx, devicePath, fsType); formatErr != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
+		}
+	} else {
+		klog.V(4).Infof("Device %s is already formatted", devicePath)
+	}
+
+	// Create staging target path if it doesn't exist
+	if mkdirErr := os.MkdirAll(stagingTargetPath, 0o750); mkdirErr != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", mkdirErr)
+	}
+
+	// Check if already mounted
+	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
+	}
+
+	if mounted {
+		klog.V(4).Infof("Staging path %s is already mounted", stagingTargetPath)
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
+	// Mount the device
+	klog.Infof("Mounting device %s to %s", devicePath, stagingTargetPath)
+	mountOptions := []string{}
+	if mnt := volumeCapability.GetMount(); mnt != nil {
+		mountOptions = mnt.MountFlags
+	}
+
+	args := []string{devicePath, stagingTargetPath}
+	if len(mountOptions) > 0 {
+		args = []string{"-o", mount.JoinMountOptions(mountOptions), devicePath, stagingTargetPath}
+	}
+
+	mountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	//nolint:gosec // mount command with dynamic args is expected for CSI driver
+	cmd := exec.CommandContext(mountCtx, "mount", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to mount device: %v, output: %s", err, string(output))
+	}
+
+	klog.Infof("Successfully mounted NVMe device to staging path")
+	return &csi.NodeStageVolumeResponse{}, nil
+}
+
+// checkNVMeCLI checks if nvme-cli is installed.
+func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(checkCtx, "nvme", "version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %w", ErrNVMeCLINotFound, err)
+	}
+	return nil
+}
+
+// findNVMeDeviceByNQN finds the device path for a given NQN.
+//
+//nolint:gocognit // Complex NVMe device discovery - refactoring would risk stability of working code
+func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (string, error) {
+	// Use nvme list-subsys which shows NQN
+	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	subsysCmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
+	subsysOutput, err := subsysCmd.CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("nvme list-subsys failed: %v", err)
+		// Fall back to checking /sys/class/nvme
+		return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
+	}
+
+	// Parse output to find NQN and extract controller name
+	// The JSON format from nvme list-subsys has: "Name" : "nvmeX" under Paths
+	// We need to construct the device path as /dev/nvmeXn1
+	lines := strings.Split(string(subsysOutput), "\n")
+	foundNQN := false
+	for i, line := range lines {
+		// Look for the NQN line
+		if strings.Contains(line, nqn) {
+			foundNQN = true
+			// Now look ahead for the "Name" field in the Paths section
+			for j := i; j < len(lines) && j < i+20; j++ {
+				if strings.Contains(lines[j], "\"Name\"") && strings.Contains(lines[j], "nvme") {
+					// Extract controller name - format: "Name" : "nvme0"
+					parts := strings.Split(lines[j], "\"")
+					for k := range len(parts) - 1 {
+						if parts[k] == "Name" && k+2 < len(parts) {
+							controllerName := strings.TrimSpace(parts[k+2])
+							// Construct device path - typically nvme0 -> /dev/nvme0n1
+							devicePath := fmt.Sprintf("/dev/%sn1", controllerName)
+							return devicePath, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if foundNQN {
+		klog.Warningf("Found NQN but could not extract device name, falling back to sysfs")
+	}
+
+	// Fall back to checking /sys/class/nvme if JSON parsing failed
+	return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
+}
+
+// findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
+func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string) (string, error) {
+	_ = ctx // Reserved for future cancellation support
+	// Read /sys/class/nvme/nvmeX/subsysnqn for each device
+	nvmeDir := "/sys/class/nvme"
+	entries, err := os.ReadDir(nvmeDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", nvmeDir, err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		deviceName := entry.Name()
+		nqnPath := filepath.Join(nvmeDir, deviceName, "subsysnqn")
+
+		//nolint:gosec // Reading NVMe subsystem info from standard sysfs path
+		data, err := os.ReadFile(nqnPath)
+		if err != nil {
+			continue
+		}
+
+		if strings.TrimSpace(string(data)) == nqn {
+			// Found the device, now find the namespace
+			// Typically nvme0 -> /dev/nvme0n1
+			devicePath := fmt.Sprintf("/dev/%sn1", deviceName)
+			if _, err := os.Stat(devicePath); err == nil {
+				return devicePath, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("%w for NQN: %s", ErrNVMeDeviceNotFound, nqn)
+}
+
+// waitForNVMeDevice waits for the NVMe device to appear after connection.
+func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout time.Duration) (string, error) {
+	deadline := time.Now().Add(timeout)
+	attempt := 0
+	for time.Now().Before(deadline) {
+		attempt++
+		devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
+		if err == nil && devicePath != "" {
+			// Verify device is accessible
+			if _, err := os.Stat(devicePath); err == nil {
+				klog.Infof("NVMe device found at %s after %d attempts", devicePath, attempt)
+				return devicePath, nil
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	return "", fmt.Errorf("%w after %d attempts", ErrNVMeDeviceTimeout, attempt)
+}
+
+// disconnectNVMeOF disconnects from an NVMe-oF target.
+func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
+	klog.V(4).Infof("Disconnecting from NVMe-oF target: %s", nqn)
+
+	disconnectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(disconnectCtx, "nvme", "disconnect", "-n", nqn)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check if already disconnected
+		if strings.Contains(string(output), "No subsystems") || strings.Contains(string(output), "not found") {
+			klog.V(4).Infof("NVMe device already disconnected")
+			return nil
+		}
+		return fmt.Errorf("failed to disconnect NVMe-oF device: %w, output: %s", err, string(output))
+	}
+
+	klog.V(4).Infof("Successfully disconnected from NVMe-oF target")
+	return nil
+}

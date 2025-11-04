@@ -2,7 +2,6 @@ package driver
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -353,10 +352,10 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	volumeID := req.GetVolumeId()
 	volumePath := req.GetVolumePath()
 
-	// Parse volume metadata
-	var volMeta VolumeMetadata
-	if err := json.Unmarshal([]byte(volumeID), &volMeta); err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to parse volume ID: %v", err)
+	// Parse volume metadata using decodeVolumeID helper
+	volMeta, err := decodeVolumeID(volumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
 	}
 
 	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)

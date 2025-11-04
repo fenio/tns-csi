@@ -9,6 +9,14 @@ This CSI driver is **working and production-ready** with the following features:
 - ✅ Self-hosted GitHub runner for integration testing
 - ✅ Automated CI/CD with GitHub Actions
 
+### Protocol Focus: NFS and NVMe-oF Only
+
+**IMPORTANT:** This driver exclusively supports NFS and NVMe-oF protocols. Do not implement or suggest adding:
+- **iSCSI support** - NVMe-oF is superior in performance (lower latency, higher IOPS) and is the preferred block storage protocol
+- **SMB/CIFS support** - Low priority due to author preference for Linux-native protocols
+
+Any work on additional protocols should be explicitly requested by the project maintainer. Focus development efforts on improving the existing NFS and NVMe-oF implementations.
+
 ## Critical Development Practices
 
 ### 1. **Testing Infrastructure**
@@ -49,12 +57,16 @@ The following components are **stable and tested** - only modify if there's a pr
 ### 3. **What to Focus On**
 
 When working on this project, prioritize:
-- **New features**: Snapshots, cloning, volume expansion
+- **New features for NFS/NVMe-oF**: Snapshots, cloning, improved volume expansion
 - **Error handling improvements**: Better error messages, retry logic
 - **Observability**: Metrics, additional logging for troubleshooting
-- **Documentation**: Usage guides, troubleshooting tips
+- **Documentation**: Usage guides, troubleshooting tips, performance tuning
 - **Performance optimization**: Based on profiling data, not speculation
-- **Additional protocol support**: iSCSI, S3, etc.
+- **NFS/NVMe-oF enhancements**: Improved mount options, better multipathing, connection optimization
+
+**Do NOT work on:**
+- iSCSI protocol implementation (NVMe-oF is the preferred block storage protocol)
+- SMB/CIFS protocol implementation (low priority, Linux-focused driver)
 
 ### 4. **Development Workflow**
 

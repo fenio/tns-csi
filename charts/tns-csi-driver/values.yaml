@@ -112,6 +112,19 @@ sidecars:
         cpu: 200m
         memory: 200Mi
   
+  resizer:
+    image:
+      repository: registry.k8s.io/sig-storage/csi-resizer
+      tag: v1.12.0
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        cpu: 200m
+        memory: 200Mi
+  
   nodeDriverRegistrar:
     image:
       repository: registry.k8s.io/sig-storage/csi-node-driver-registrar
@@ -170,7 +183,7 @@ storageClasses:
     fsType: "ext4"
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
-    allowVolumeExpansion: false
+    allowVolumeExpansion: true
     mountOptions: []
     parameters: {}
   

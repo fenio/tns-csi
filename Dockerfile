@@ -25,6 +25,7 @@ RUN apk add --no-cache \
     nfs-utils \
     open-iscsi \
     e2fsprogs \
+    e2fsprogs-extra \
     xfsprogs \
     blkid \
     util-linux \

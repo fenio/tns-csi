@@ -26,6 +26,7 @@ wait_for_driver
 create_pvc "${MANIFEST_DIR}/pvc-nfs.yaml" "${PVC_NAME}"
 create_test_pod "${MANIFEST_DIR}/pod-nfs.yaml" "${POD_NAME}"
 test_io_operations "${POD_NAME}" "/data" "filesystem"
+test_volume_expansion "${PVC_NAME}" "${POD_NAME}" "/data" "3Gi"
 cleanup_test "${POD_NAME}" "${PVC_NAME}"
 
 # Success

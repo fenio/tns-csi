@@ -249,3 +249,39 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	klog.Infof("Successfully deleted NVMe-oF volume: %s", meta.Name)
 	return &csi.DeleteVolumeResponse{}, nil
 }
+
+// expandNVMeOFVolume expands an NVMe-oF volume by updating the ZVOL size.
+//
+//nolint:dupl // Similar to expandNFSVolume but with different parameters (Volsize vs Quota, NodeExpansionRequired)
+func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *VolumeMetadata, requiredBytes int64) (*csi.ControllerExpandVolumeResponse, error) {
+	klog.V(4).Infof("Expanding NVMe-oF volume: %s (ZVOL: %s) to %d bytes", meta.Name, meta.DatasetName, requiredBytes)
+
+	if meta.DatasetID == "" {
+		return nil, status.Error(codes.InvalidArgument, "dataset ID not found in volume metadata")
+	}
+
+	// For NVMe-oF volumes (ZVOLs), we update the volsize property
+	klog.Infof("Expanding NVMe-oF ZVOL - DatasetID: %s, DatasetName: %s, New Size: %d bytes",
+		meta.DatasetID, meta.DatasetName, requiredBytes)
+
+	updateParams := tnsapi.DatasetUpdateParams{
+		Volsize: &requiredBytes,
+	}
+
+	_, err := s.apiClient.UpdateDataset(ctx, meta.DatasetID, updateParams)
+	if err != nil {
+		// Provide detailed error information to help diagnose dataset issues
+		klog.Errorf("Failed to update ZVOL %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		return nil, status.Errorf(codes.Internal,
+			"Failed to update ZVOL size for dataset '%s' (Name: '%s'). "+
+				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
+				"Error: %v", meta.DatasetID, meta.DatasetName, err)
+	}
+
+	klog.Infof("Successfully expanded NVMe-oF volume %s to %d bytes", meta.Name, requiredBytes)
+
+	return &csi.ControllerExpandVolumeResponse{
+		CapacityBytes:         requiredBytes,
+		NodeExpansionRequired: true, // NVMe-oF volumes require node-side filesystem expansion
+	}, nil
+}

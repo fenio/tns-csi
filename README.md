@@ -27,7 +27,14 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 - **NFS** - Network File System for file-based storage
 - **NVMe-oF** - NVMe over Fabrics for high-performance block storage
 
-**Note:** iSCSI and SMB support may be considered for future releases if there is community demand.
+### Why NFS and NVMe-oF?
+
+This driver focuses on these two protocols for specific reasons:
+
+- **NVMe-oF over iSCSI**: NVMe-oF provides superior performance with lower latency and higher IOPS compared to iSCSI. It's designed for modern NVMe SSDs and takes full advantage of their capabilities. For block storage workloads, NVMe-oF is the clear choice.
+- **SMB protocol**: Currently has low priority due to author's preference for Linux-native protocols. If you need Windows file sharing support, consider the official TrueNAS CSI driver or contribute SMB support if there's sufficient community demand.
+
+The driver intentionally focuses on these two production-ready protocols rather than spreading development effort across multiple less-optimal options.
 
 ## Features
 

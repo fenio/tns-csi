@@ -73,15 +73,40 @@ jobs:
       
       - name: Clean up previous deployment
         run: |
-          helm uninstall tns-csi --namespace kube-system --wait || true
-          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
-          # Clean up any leftover test namespaces from previous runs
-          kubectl delete namespace -l test-csi=true --timeout=60s || true
-          # Clean up orphaned PVCs and PVs from previous failed tests
-          kubectl delete pvc --all --all-namespaces --timeout=60s || true
-          kubectl delete pv --all --timeout=60s || true
-          sleep 10
+          # Step 1: Uninstall driver first (stops CSI controllers/nodes from reconciling)
+          helm uninstall tns-csi --namespace kube-system --wait --timeout 2m || true
+          
+          # Step 2: Force delete all driver pods immediately
+          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 3: Wait for driver pods to be completely gone
+          kubectl wait --for=delete pod -n kube-system -l app.kubernetes.io/name=tns-csi-driver --timeout=30s 2>/dev/null || true
+          
+          # Step 4: Clean up test namespaces (this removes PVCs in those namespaces)
+          kubectl delete namespace -l test-csi=true --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 5: Force delete any remaining PVCs across all namespaces
+          kubectl delete pvc --all --all-namespaces --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 6: Patch any PVs to remove finalizers, then force delete
+          for pv in $(kubectl get pv -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo ""); do
+            if [[ -n "$pv" ]]; then
+              kubectl patch pv "$pv" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+              kubectl delete pv "$pv" --force --grace-period=0 --ignore-not-found=true || true
+            fi
+          done
+          
+          # Step 7: Delete storage classes
+          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true || true
+          
+          # Step 8: Verify cleanup completed
+          echo "=== Remaining PVCs ==="
+          kubectl get pvc --all-namespaces 2>/dev/null || echo "No PVCs remaining"
+          echo "=== Remaining PVs ==="
+          kubectl get pv 2>/dev/null || echo "No PVs remaining"
+          
+          # Step 9: Wait for resources to be fully cleaned up
+          sleep 15
       
       - name: Run NFS Integration Test
         env:
@@ -154,15 +179,40 @@ jobs:
       
       - name: Clean up previous deployment
         run: |
-          helm uninstall tns-csi --namespace kube-system --wait || true
-          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
-          # Clean up any leftover test namespaces from previous runs
-          kubectl delete namespace -l test-csi=true --timeout=60s || true
-          # Clean up orphaned PVCs and PVs from previous failed tests
-          kubectl delete pvc --all --all-namespaces --timeout=60s || true
-          kubectl delete pv --all --timeout=60s || true
-          sleep 10
+          # Step 1: Uninstall driver first (stops CSI controllers/nodes from reconciling)
+          helm uninstall tns-csi --namespace kube-system --wait --timeout 2m || true
+          
+          # Step 2: Force delete all driver pods immediately
+          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 3: Wait for driver pods to be completely gone
+          kubectl wait --for=delete pod -n kube-system -l app.kubernetes.io/name=tns-csi-driver --timeout=30s 2>/dev/null || true
+          
+          # Step 4: Clean up test namespaces (this removes PVCs in those namespaces)
+          kubectl delete namespace -l test-csi=true --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 5: Force delete any remaining PVCs across all namespaces
+          kubectl delete pvc --all --all-namespaces --force --grace-period=0 --ignore-not-found=true || true
+          
+          # Step 6: Patch any PVs to remove finalizers, then force delete
+          for pv in $(kubectl get pv -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo ""); do
+            if [[ -n "$pv" ]]; then
+              kubectl patch pv "$pv" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+              kubectl delete pv "$pv" --force --grace-period=0 --ignore-not-found=true || true
+            fi
+          done
+          
+          # Step 7: Delete storage classes
+          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true || true
+          
+          # Step 8: Verify cleanup completed
+          echo "=== Remaining PVCs ==="
+          kubectl get pvc --all-namespaces 2>/dev/null || echo "No PVCs remaining"
+          echo "=== Remaining PVs ==="
+          kubectl get pv 2>/dev/null || echo "No PVs remaining"
+          
+          # Step 9: Wait for resources to be fully cleaned up
+          sleep 15
       
       - name: Run NVMe-oF Integration Test (Filesystem)
         env:

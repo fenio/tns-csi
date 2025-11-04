@@ -836,3 +836,28 @@ type NVMeOFPort struct {
 	ID        int    `json:"id"`
 	Port      int    `json:"addr_trsvcid"`
 }
+
+// Dataset Update API methods
+
+// DatasetUpdateParams represents parameters for dataset update.
+type DatasetUpdateParams struct {
+	Quota               *int64 `json:"quota,omitempty"`                // Quota in bytes (for NFS)
+	RefQuota            *int64 `json:"refquota,omitempty"`             // Reference quota in bytes
+	Volsize             *int64 `json:"volsize,omitempty"`              // Volume size in bytes (for ZVOLs)
+	RefreservPercentage *int   `json:"refreserv_percentage,omitempty"` // Reference reservation percentage
+	Comments            string `json:"comments,omitempty"`             // Comments
+}
+
+// UpdateDataset updates a ZFS dataset or ZVOL.
+func (c *Client) UpdateDataset(ctx context.Context, datasetID string, params DatasetUpdateParams) (*Dataset, error) {
+	klog.V(4).Infof("Updating dataset: %s with params: %+v", datasetID, params)
+
+	var result Dataset
+	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update dataset: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully updated dataset: %s", result.Name)
+	return &result, nil
+}

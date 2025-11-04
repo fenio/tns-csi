@@ -34,3 +34,13 @@ func (s *ControllerService) deleteISCSIVolume(_ context.Context, _ *VolumeMetada
 
 	return nil, status.Error(codes.Unimplemented, "iSCSI volume deletion not yet implemented")
 }
+
+// expandISCSIVolume expands an iSCSI volume (not yet implemented).
+func (s *ControllerService) expandISCSIVolume(_ context.Context, _ *VolumeMetadata, _ int64) (*csi.ControllerExpandVolumeResponse, error) {
+	klog.V(4).Info("Expanding iSCSI volume")
+
+	// TODO: Implement iSCSI volume expansion
+	// Similar to NVMe-oF: update ZVOL size
+
+	return nil, status.Error(codes.Unimplemented, "iSCSI volume expansion not yet implemented")
+}

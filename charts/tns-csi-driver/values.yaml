@@ -170,7 +170,7 @@ storageClasses:
     fsType: "ext4"
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
-    allowVolumeExpansion: false
+    allowVolumeExpansion: true
     mountOptions: []
     parameters: {}
   

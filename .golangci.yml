@@ -49,6 +49,51 @@ linters:
     - nilnil          # Checks returning nil even if nil is a valid value
     - nolintlint      # Ill-formed or insufficient nolint directives
     - usestdlibvars   # Suggests using constants from stdlib
+    
+    # Additional security & bug detection
+    - asciicheck      # Checks for non-ASCII identifiers
+    - bidichk         # Checks for dangerous unicode sequences
+    - durationcheck   # Checks for two durations multiplied together
+    - err113          # Checks error handling expressions (Go 1.13+)
+    - errname         # Checks error naming conventions (Err prefix, Error suffix)
+    - exhaustive      # Checks exhaustiveness of enum switch statements
+    - makezero        # Finds slice declarations with non-zero initial length
+    - nilerr          # Finds code that returns nil even if it checks error is not nil
+    - nilnesserr      # Reports returning nil with a different nil value error
+    - nosprintfhostport # Checks for Sprintf misuse in URL construction
+    - rowserrcheck    # Checks that sql.Rows.Err is checked
+    - sqlclosecheck   # Checks that sql rows/statements are closed
+    - wastedassign    # Finds wasted assignment statements
+    
+    # Performance
+    - perfsprint      # Checks that fmt.Sprintf can be replaced with faster alternatives
+    - mirror          # Reports wrong mirror patterns of bytes/strings usage
+    
+    # Error handling improvements
+    - wrapcheck       # Checks that errors from external packages are wrapped
+    
+    # Maintainability & readability
+    - contextcheck    # Checks whether functions use non-inherited context
+    - copyloopvar     # Detects places where loop variables are copied
+    - dogsled         # Checks for too many blank identifiers
+    - dupword         # Checks for duplicate words in source code
+    - errchkjson      # Checks types passed to json encoding functions
+    - gocheckcompilerdirectives # Validates go compiler directives
+    - godox           # Detects FIXME, TODO and other comment keywords
+    - grouper         # Analyzes expression groups
+    - importas        # Enforces consistent import aliases
+    - interfacebloat  # Checks the number of methods in an interface
+    - intrange        # Suggests using integer range in for loops (Go 1.22+)
+    - loggercheck     # Checks key-value pairs for common logger libraries (klog)
+    - nakedret        # Checks for naked returns in long functions
+    - nestif          # Reports deeply nested if statements
+    - reassign        # Checks that package variables are not reassigned
+    - recvcheck       # Checks for receiver type consistency
+    - sloglint        # Ensures consistent code style with log/slog
+    - tagalign        # Checks struct tags are well aligned
+    - thelper         # Detects test helpers not starting with t.Helper()
+    - tparallel       # Detects inappropriate usage of t.Parallel()
+    - testifylint     # Checks usage of testify
 
   settings:
     errcheck:
@@ -137,6 +182,46 @@ linters:
     whitespace:
       multi-if: true
       multi-func: true
+      
+    exhaustive:
+      default-signifies-exhaustive: true
+      
+    err113:
+      check-generated: false
+      
+    wrapcheck:
+      # Consider all errors from external packages that should be wrapped
+      ignoreSigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+      ignorePackageGlobs:
+        - github.com/fenio/tns-csi/*
+        
+    nakedret:
+      max-func-lines: 30
+      
+    nestif:
+      min-complexity: 5
+      
+    loggercheck:
+      require-string-key: true
+      
+    tagalign:
+      align: true
+      sort: true
+      
+    interfacebloat:
+      max: 10
+      
+    godox:
+      keywords:
+        - BUG
+        - FIXME
+        - HACK
 
   exclusions:
     generated: lax
@@ -145,20 +230,33 @@ linters:
       - path: _test\.go
         linters:
           - gocyclo
+          - gocognit
           - errcheck
           - dupl
           - gosec
           - goconst
+          - wrapcheck
+          - err113
+          - nestif
+          - interfacebloat
+          - funlen
+          - maintidx
           
       # Ignore long lines in generated files
       - path: \.pb\.go$
         linters:
           - revive
+          - lll
           
       # Allow fmt.Sprintf in certain cases
       - text: "printf-like formatting function"
         linters:
           - revive
+          
+      # Known TODO items are tracked, not immediate problems
+      - text: "Line contains TODO/BUG/FIXME"
+        linters:
+          - godox
 
 formatters:
   enable:

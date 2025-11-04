@@ -1,0 +1,169 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Full history for changelog generation
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.3'
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Run tests
+        run: make test
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          args: --config .golangci.yml
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi
+            ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Update Helm chart versions
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          # Update Chart.yaml with new versions
+          sed -i "s/^version:.*/version: ${VERSION#v}/" charts/tns-csi-driver/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/tns-csi-driver/Chart.yaml
+          # Update values.yaml with new image tag
+          sed -i "s/tag:.*/tag: ${VERSION}/" charts/tns-csi-driver/values.yaml
+
+      - name: Package Helm chart
+        run: |
+          helm package charts/tns-csi-driver -d .helm-releases
+
+      - name: Push Helm chart to Docker Hub (OCI)
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          CHART_VERSION=${VERSION#v}
+          echo ${{ secrets.DOCKERHUB_TOKEN }} | helm registry login registry-1.docker.io -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+          helm push .helm-releases/tns-csi-driver-${CHART_VERSION}.tgz oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
+
+      - name: Push Helm chart to GHCR (OCI)
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          CHART_VERSION=${VERSION#v}
+          echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+          helm push .helm-releases/tns-csi-driver-${CHART_VERSION}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, showing all commits"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+          else
+            echo "Generating changelog from ${PREV_TAG} to ${{ steps.version.outputs.version }}"
+            CHANGELOG=$(git log ${PREV_TAG}..${{ steps.version.outputs.version }} --pretty=format:"- %s (%h)" --no-merges)
+          fi
+          
+          # Save to file for GitHub Release
+          cat > CHANGELOG.md << EOF
+          ## What's Changed
+          
+          ${CHANGELOG}
+          
+          ## Installation
+          
+          ### Using Docker
+          \`\`\`bash
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi:${{ steps.version.outputs.version }}
+          \`\`\`
+          
+          ### Using Helm (Docker Hub)
+          \`\`\`bash
+          helm install tns-csi oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi-driver --version ${VERSION#v}
+          \`\`\`
+          
+          ### Using Helm (GitHub Container Registry)
+          \`\`\`bash
+          helm install tns-csi oci://ghcr.io/${{ github.repository_owner }}/charts/tns-csi-driver --version ${VERSION#v}
+          \`\`\`
+          
+          For detailed installation instructions, see the [README](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.version }}/README.md).
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          files: |
+            .helm-releases/*.tgz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update latest tag
+        run: |
+          git tag -f latest
+          git push -f origin latest

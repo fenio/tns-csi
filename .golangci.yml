@@ -70,7 +70,9 @@ linters:
     - mirror          # Reports wrong mirror patterns of bytes/strings usage
     
     # Error handling improvements
-    - wrapcheck       # Checks that errors from external packages are wrapped
+    # wrapcheck disabled: CSI drivers intentionally don't wrap gRPC status.Error() calls
+    # as they are spec-compliant status responses, not errors to be wrapped
+    # - wrapcheck       # Checks that errors from external packages are wrapped
     
     # Maintainability & readability
     - contextcheck    # Checks whether functions use non-inherited context
@@ -189,18 +191,7 @@ linters:
     err113:
       check-generated: false
       
-    wrapcheck:
-      # Consider all errors from external packages that should be wrapped
-      ignoreSigs:
-        - .Errorf(
-        - errors.New(
-        - errors.Unwrap(
-        - errors.Join(
-        - .Wrap(
-        - .Wrapf(
-      ignorePackageGlobs:
-        - github.com/fenio/tns-csi/*
-        
+
     nakedret:
       max-func-lines: 30
       

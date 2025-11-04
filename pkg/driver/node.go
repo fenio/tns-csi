@@ -2,7 +2,10 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -323,10 +326,72 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 	return resp, nil
 }
 
-// NodeExpandVolume expands a volume.
-func (s *NodeService) NodeExpandVolume(_ context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	klog.V(4).Infof("NodeExpandVolume called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not implemented")
+// NodeExpandVolume expands a volume on the node.
+// For NFS volumes, no action is needed as the server handles quota changes.
+// For NVMe-oF block volumes, no action is needed.
+// For NVMe-oF filesystem volumes, we resize the filesystem.
+func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
+	klog.Infof("NodeExpandVolume called with request: %+v", req)
+
+	// Validate request
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
+	if req.GetVolumePath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume path is required")
+	}
+
+	volumeID := req.GetVolumeId()
+	volumePath := req.GetVolumePath()
+
+	// Parse volume metadata
+	var volMeta VolumeMetadata
+	if err := json.Unmarshal([]byte(volumeID), &volMeta); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to parse volume ID: %v", err)
+	}
+
+	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)
+
+	// For NFS volumes, no node-side expansion is needed
+	if volMeta.Protocol == "nfs" {
+		klog.Info("NFS volume expansion handled by controller, no node-side action needed")
+		return &csi.NodeExpandVolumeResponse{
+			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
+		}, nil
+	}
+
+	// For NVMe-oF volumes, check if this is a block or filesystem volume
+	volumeCap := req.GetVolumeCapability()
+	if volumeCap != nil && volumeCap.GetBlock() != nil {
+		klog.Info("Block volume expansion, no filesystem resize needed")
+		return &csi.NodeExpandVolumeResponse{
+			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
+		}, nil
+	}
+
+	// For filesystem volumes, we need to resize the filesystem
+	// The volume path for filesystem volumes is typically the staging path
+	klog.Infof("Resizing filesystem on volume path: %s", volumePath)
+
+	// Detect filesystem type
+	fsType, err := detectFilesystemType(ctx, volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to detect filesystem type: %v", err)
+	}
+
+	klog.Infof("Detected filesystem type: %s", fsType)
+
+	// Resize based on filesystem type
+	if err := resizeFilesystem(ctx, volumePath, fsType); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to resize filesystem: %v", err)
+	}
+
+	klog.Infof("Successfully resized filesystem for volume %s", volMeta.Name)
+
+	return &csi.NodeExpandVolumeResponse{
+		CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
+	}, nil
 }
 
 // NodeGetCapabilities returns node capabilities.
@@ -346,6 +411,13 @@ func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapab
 				Type: &csi.NodeServiceCapability_Rpc{
 					Rpc: &csi.NodeServiceCapability_RPC{
 						Type: csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
+					},
+				},
+			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
 					},
 				},
 			},
@@ -372,4 +444,65 @@ func safeUint64ToInt64(val uint64) int64 {
 		return maxInt64
 	}
 	return int64(val)
+}
+
+// detectFilesystemType detects the filesystem type at the given mount point.
+// It uses findmnt to determine the filesystem type.
+func detectFilesystemType(ctx context.Context, mountPath string) (string, error) {
+	// Use findmnt to get filesystem information
+	// -n = no headings, -o FSTYPE = only output filesystem type
+	cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "FSTYPE", mountPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "Failed to detect filesystem type: %v, output: %s", err, string(output))
+	}
+
+	fsType := strings.TrimSpace(string(output))
+	if fsType == "" {
+		return "", status.Error(codes.Internal, "Empty filesystem type returned from findmnt")
+	}
+
+	return fsType, nil
+}
+
+// resizeFilesystem resizes the filesystem at the given path based on filesystem type.
+func resizeFilesystem(ctx context.Context, mountPath string, fsType string) error {
+	switch fsType {
+	case "ext2", "ext3", "ext4":
+		// For ext filesystems, we need to find the underlying device
+		// Use findmnt to get the source device
+		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return status.Errorf(codes.Internal, "Failed to find device for mount path: %v, output: %s", err, string(output))
+		}
+
+		device := strings.TrimSpace(string(output))
+		if device == "" {
+			return status.Error(codes.Internal, "Empty device path returned from findmnt")
+		}
+
+		klog.Infof("Resizing ext filesystem on device %s", device)
+		cmd = exec.CommandContext(ctx, "resize2fs", device)
+		output, err = cmd.CombinedOutput()
+		if err != nil {
+			return status.Errorf(codes.Internal, "resize2fs failed: %v, output: %s", err, string(output))
+		}
+		klog.Infof("resize2fs output: %s", string(output))
+		return nil
+
+	case "xfs":
+		// For XFS, xfs_growfs operates on the mount point
+		klog.Infof("Resizing XFS filesystem at mount point %s", mountPath)
+		cmd := exec.CommandContext(ctx, "xfs_growfs", mountPath)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return status.Errorf(codes.Internal, "xfs_growfs failed: %v, output: %s", err, string(output))
+		}
+		klog.Infof("xfs_growfs output: %s", string(output))
+		return nil
+
+	default:
+		return status.Errorf(codes.Unimplemented, "Filesystem type %s is not supported for expansion", fsType)
+	}
 }

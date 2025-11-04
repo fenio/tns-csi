@@ -181,20 +181,34 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return s.publishNFSVolume(ctx, req)
 
 	case ProtocolNVMeOF:
-		// For block volumes with staging, this is a bind mount from staging to target
+		// NVMe-oF supports both block and filesystem volume modes
 		stagingTargetPath := req.GetStagingTargetPath()
 		if stagingTargetPath == "" {
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for NVMe-oF volumes")
 		}
-		return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+
+		// Check volume capability to determine how to publish
+		if req.GetVolumeCapability().GetBlock() != nil {
+			// Block volume: staging path is a device file, bind mount it
+			return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+		}
+		// Filesystem volume: staging path is a mounted directory, bind mount the directory
+		return s.publishFilesystemVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
 
 	case ProtocolISCSI:
-		// Same as NVMe-oF - bind mount from staging to target
+		// iSCSI supports both block and filesystem volume modes
 		stagingTargetPath := req.GetStagingTargetPath()
 		if stagingTargetPath == "" {
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for iSCSI volumes")
 		}
-		return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+
+		// Check volume capability to determine how to publish
+		if req.GetVolumeCapability().GetBlock() != nil {
+			// Block volume: staging path is a device file, bind mount it
+			return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+		}
+		// Filesystem volume: staging path is a mounted directory, bind mount the directory
+		return s.publishFilesystemVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
 
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)

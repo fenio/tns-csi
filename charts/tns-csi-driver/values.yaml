@@ -166,6 +166,8 @@ storageClasses:
     transport: "tcp"
     # NVMe-oF port
     port: "4420"
+    # Filesystem type for formatted volumes (ext4, ext3, xfs)
+    fsType: "ext4"
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
     allowVolumeExpansion: false
@@ -182,6 +184,8 @@ storageClasses:
     portal: ""
     # iSCSI IQN prefix
     iqnPrefix: "iqn.2025-01.io.tns.csi"
+    # Filesystem type for formatted volumes (ext4, ext3, xfs)
+    fsType: "ext4"
     reclaimPolicy: Delete
     volumeBindingMode: WaitForFirstConsumer
     allowVolumeExpansion: true

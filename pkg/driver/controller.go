@@ -141,12 +141,10 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	switch protocol {
 	case ProtocolNFS:
 		return s.createNFSVolume(ctx, req)
-	case ProtocolISCSI:
-		return s.createISCSIVolume(ctx, req)
 	case ProtocolNVMeOF:
 		return s.createNVMeOFVolume(ctx, req)
 	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s", protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", protocol)
 	}
 }
 
@@ -176,8 +174,6 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	switch meta.Protocol {
 	case ProtocolNFS:
 		return s.deleteNFSVolume(ctx, meta)
-	case ProtocolISCSI:
-		return s.deleteISCSIVolume(ctx, meta)
 	case ProtocolNVMeOF:
 		return s.deleteNVMeOFVolume(ctx, meta)
 	default:
@@ -190,8 +186,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume called with request: %+v", req)
 
-	// For NFS, this is typically a no-op
-	// For iSCSI/NVMe-oF, we would configure access here
+	// For NFS and NVMe-oF, this is typically a no-op
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
 
@@ -199,8 +194,7 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume called with request: %+v", req)
 
-	// For NFS, this is typically a no-op
-	// For iSCSI/NVMe-oF, we would remove access here
+	// For NFS and NVMe-oF, this is typically a no-op
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 
@@ -335,8 +329,6 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	switch meta.Protocol {
 	case ProtocolNFS:
 		return s.expandNFSVolume(ctx, meta, requiredBytes)
-	case ProtocolISCSI:
-		return s.expandISCSIVolume(ctx, meta, requiredBytes)
 	case ProtocolNVMeOF:
 		return s.expandNVMeOFVolume(ctx, meta, requiredBytes)
 	default:

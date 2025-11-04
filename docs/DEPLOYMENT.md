@@ -358,7 +358,7 @@ kubectl get pvc test-pvc
 1. Log in to TrueNAS web interface
 2. Navigate to **Datasets**
 3. You should see a new ZVOL (block device): `pool1/test-nvmeof-pvc`
-4. Navigate to **Sharing** > **Block (iSCSI/NVMe-oF)**
+4. Navigate to **Sharing** > **Block Shares (NVMe-oF)**
 5. Click the **NVMe-oF** tab
 6. You should see a new subsystem and namespace for the volume
 7. On the Kubernetes node, verify the NVMe device is connected:
@@ -545,16 +545,15 @@ This CSI driver supports multiple storage protocols:
 
 - **NFS** (Network File System): Shared filesystem storage with `ReadWriteMany` support
 - **NVMe-oF** (NVMe over Fabrics): High-performance block storage with `ReadWriteOnce` support
-- **iSCSI**: Planned for future release
 
 ## Next Steps
 
 Future enhancements planned:
 
-- **iSCSI Support**: Add block storage support via iSCSI protocol
 - **Snapshots**: Implement CSI snapshot support using TrueNAS snapshots
 - **Volume Cloning**: Implement CSI volume cloning using TrueNAS clone features
 - **Metrics**: Add Prometheus metrics endpoint
 - **Topology**: Add topology awareness for multi-zone deployments
+- **Additional Protocols**: iSCSI and SMB support may be considered based on community demand
 
 Note: Volume expansion is already supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (enabled by default in the Helm chart for NFS).

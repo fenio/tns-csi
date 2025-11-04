@@ -22,11 +22,12 @@ If you need official support, please use the official TrueNAS CSI driver availab
 
 ## Overview
 
-This CSI driver enables Kubernetes to provision and manage persistent volumes on TrueNAS and systems with TNS-compatible APIs. It supports multiple storage protocols:
+This CSI driver enables Kubernetes to provision and manage persistent volumes on TrueNAS and systems with TNS-compatible APIs. It currently supports:
 
 - **NFS** - Network File System for file-based storage
 - **NVMe-oF** - NVMe over Fabrics for high-performance block storage
-- **iSCSI** - (Planned) Internet Small Computer Systems Interface
+
+**Note:** iSCSI and SMB support may be considered for future releases if there is community demand.
 
 ## Features
 
@@ -157,8 +158,7 @@ parameters:
 
 ## Known Limitations
 
-- **Volume Deletion**: Implemented for NFS and NVMe-oF. Datasets, shares, subsystems, and namespaces are cleaned up on PVC deletion. (iSCSI deletion not yet implemented).
-- **Protocol Support**: NFS and NVMe-oF are implemented. iSCSI is planned for future releases.
+- **Protocol Support**: Currently supports NFS and NVMe-oF. iSCSI and SMB may be considered for future releases.
 - **Volume Expansion**: Supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default for NFS)
 - **Snapshots**: Not yet implemented
 - **Testing**: Limited testing on production environments - use with caution

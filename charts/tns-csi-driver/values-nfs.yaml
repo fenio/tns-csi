@@ -33,8 +33,6 @@ storageClasses:
   # Disable other protocols
   nvmeof:
     enabled: false
-  iscsi:
-    enabled: false
 
 # Resource limits optimized for NFS workloads
 controller:

@@ -6,7 +6,7 @@ metadata:
   name: tns-nfs
 provisioner: tns.csi.io
 parameters:
-  # Protocol to use (nfs, iscsi, nvmeof)
+  # Protocol to use (nfs, nvmeof)
   protocol: "nfs"
   
   # Storage pool name where datasets will be created
@@ -27,25 +27,6 @@ reclaimPolicy: Delete
 
 # Volume binding mode
 volumeBindingMode: Immediate
-
----
-# StorageClass for iSCSI volumes (future implementation)
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: tns-iscsi
-provisioner: tns.csi.io
-parameters:
-  protocol: "iscsi"
-  pool: "pool1"
-  # iSCSI target portal (storage server IP and port)
-  # Replace with your TrueNAS server IP
-  portal: "YOUR-TRUENAS-IP:3260"
-  # iSCSI IQN prefix
-  iqnPrefix: "iqn.2025-01.io.tns.csi"
-allowVolumeExpansion: true
-reclaimPolicy: Delete
-volumeBindingMode: WaitForFirstConsumer
 
 ---
 # StorageClass for NVMe-oF volumes

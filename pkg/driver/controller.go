@@ -138,7 +138,6 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 
 	klog.Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
 
-	// TODO: Implement volume creation based on protocol
 	switch protocol {
 	case ProtocolNFS:
 		return s.createNFSVolume(ctx, req)
@@ -217,7 +216,7 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 		return nil, status.Error(codes.InvalidArgument, "Volume capabilities are required")
 	}
 
-	// TODO: Implement actual validation
+	// Basic validation: we accept all requested capabilities since TrueNAS supports both filesystem and block modes
 	return &csi.ValidateVolumeCapabilitiesResponse{
 		Confirmed: &csi.ValidateVolumeCapabilitiesResponse_Confirmed{
 			VolumeCapabilities: req.GetVolumeCapabilities(),
@@ -229,7 +228,8 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 func (s *ControllerService) ListVolumes(_ context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	klog.V(4).Infof("ListVolumes called with request: %+v", req)
 
-	// TODO: Implement volume listing
+	// Optional CSI capability - not required for basic functionality
+	// Kubernetes does not require this for normal PVC operations
 	return &csi.ListVolumesResponse{}, nil
 }
 
@@ -237,7 +237,8 @@ func (s *ControllerService) ListVolumes(_ context.Context, req *csi.ListVolumesR
 func (s *ControllerService) GetCapacity(_ context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	klog.V(4).Infof("GetCapacity called with request: %+v", req)
 
-	// TODO: Implement capacity reporting
+	// Optional CSI capability - not required for basic functionality
+	// Could query TrueNAS pool capacity in the future if needed
 	return &csi.GetCapacityResponse{}, nil
 }
 

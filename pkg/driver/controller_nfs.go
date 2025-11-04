@@ -165,7 +165,8 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 	// For NFS volumes, we update the quota on the dataset
 	// Note: ZFS datasets don't have a strict "size", but we can set a quota
 	// to limit the maximum space usage
-	klog.Infof("Setting quota on dataset %s to %d bytes", meta.DatasetID, requiredBytes)
+	klog.Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New Quota: %d bytes",
+		meta.DatasetID, meta.DatasetName, requiredBytes)
 
 	updateParams := tnsapi.DatasetUpdateParams{
 		Quota: &requiredBytes,
@@ -173,7 +174,12 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 
 	_, err := s.apiClient.UpdateDataset(ctx, meta.DatasetID, updateParams)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to update dataset quota: %v", err)
+		// Provide detailed error information to help diagnose dataset issues
+		klog.Errorf("Failed to update dataset quota for %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		return nil, status.Errorf(codes.Internal,
+			"Failed to update dataset quota for '%s' (Name: '%s'). "+
+				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
+				"Error: %v", meta.DatasetID, meta.DatasetName, err)
 	}
 
 	klog.Infof("Successfully expanded NFS volume %s to %d bytes", meta.Name, requiredBytes)

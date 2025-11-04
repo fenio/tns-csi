@@ -261,7 +261,8 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	// For NVMe-oF volumes (ZVOLs), we update the volsize property
-	klog.Infof("Setting volsize on ZVOL %s to %d bytes", meta.DatasetID, requiredBytes)
+	klog.Infof("Expanding NVMe-oF ZVOL - DatasetID: %s, DatasetName: %s, New Size: %d bytes",
+		meta.DatasetID, meta.DatasetName, requiredBytes)
 
 	updateParams := tnsapi.DatasetUpdateParams{
 		Volsize: &requiredBytes,
@@ -269,7 +270,12 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 
 	_, err := s.apiClient.UpdateDataset(ctx, meta.DatasetID, updateParams)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to update ZVOL size: %v", err)
+		// Provide detailed error information to help diagnose dataset issues
+		klog.Errorf("Failed to update ZVOL %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		return nil, status.Errorf(codes.Internal,
+			"Failed to update ZVOL size for dataset '%s' (Name: '%s'). "+
+				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
+				"Error: %v", meta.DatasetID, meta.DatasetName, err)
 	}
 
 	klog.Infof("Successfully expanded NVMe-oF volume %s to %d bytes", meta.Name, requiredBytes)

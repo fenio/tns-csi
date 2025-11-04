@@ -352,6 +352,7 @@ func (c *Client) readLoop() {
 
 		// Read raw message first for logging
 		_, rawMsg, err := c.conn.ReadMessage()
+		//nolint:nestif // Complex WebSocket error handling with reconnection - necessary for stability
 		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				klog.Errorf("WebSocket read error: %v", err)

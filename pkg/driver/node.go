@@ -730,7 +730,7 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 				if strings.Contains(lines[j], "\"Name\"") && strings.Contains(lines[j], "nvme") {
 					// Extract controller name - format: "Name" : "nvme0"
 					parts := strings.Split(lines[j], "\"")
-					for k := 0; k < len(parts)-1; k++ {
+					for k := range len(parts) - 1 {
 						if parts[k] == "Name" && k+2 < len(parts) {
 							controllerName := strings.TrimSpace(parts[k+2])
 							// Construct device path - typically nvme0 -> /dev/nvme0n1
@@ -753,6 +753,7 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 
 // findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
 func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string) (string, error) {
+	_ = ctx // Reserved for future cancellation support
 	// Read /sys/class/nvme/nvmeX/subsysnqn for each device
 	nvmeDir := "/sys/class/nvme"
 	entries, err := os.ReadDir(nvmeDir)

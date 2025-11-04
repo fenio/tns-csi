@@ -47,6 +47,10 @@ fi
 
 test_success "NVMe-oF is configured, proceeding with tests"
 
+# Delete pre-check PVC before running actual test
+kubectl delete pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+sleep 5
+
 # Continue with full test (NVMe-oF uses WaitForFirstConsumer binding mode)
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" "false"
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"

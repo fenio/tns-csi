@@ -78,6 +78,9 @@ jobs:
           kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
           # Clean up any leftover test namespaces from previous runs
           kubectl delete namespace -l test-csi=true --timeout=60s || true
+          # Clean up orphaned PVCs and PVs from previous failed tests
+          kubectl delete pvc --all --all-namespaces --timeout=60s || true
+          kubectl delete pv --all --timeout=60s || true
           sleep 10
       
       - name: Run NFS Integration Test
@@ -156,6 +159,9 @@ jobs:
           kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
           # Clean up any leftover test namespaces from previous runs
           kubectl delete namespace -l test-csi=true --timeout=60s || true
+          # Clean up orphaned PVCs and PVs from previous failed tests
+          kubectl delete pvc --all --all-namespaces --timeout=60s || true
+          kubectl delete pv --all --timeout=60s || true
           sleep 10
       
       - name: Run NVMe-oF Integration Test (Filesystem)

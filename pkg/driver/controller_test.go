@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-//nolint:gocognit // Test function with many cases - complexity is acceptable
 func TestEncodeDecodeVolumeID(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -93,6 +93,58 @@ func (s *NodeService) publishBlockVolume(ctx context.Context, stagingTargetPath,
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
+// publishFilesystemVolume publishes a filesystem volume by bind mounting the staged directory to target.
+func (s *NodeService) publishFilesystemVolume(ctx context.Context, stagingTargetPath, targetPath string, readonly bool) (*csi.NodePublishVolumeResponse, error) {
+	klog.Infof("Publishing filesystem volume from %s to %s", stagingTargetPath, targetPath)
+
+	// Verify staging path exists and is a directory
+	stagingInfo, err := os.Stat(stagingTargetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Staging path %s not found: %v", stagingTargetPath, err)
+	}
+
+	// For filesystem volumes, staging path should be a directory
+	if !stagingInfo.IsDir() {
+		return nil, status.Errorf(codes.Internal, "Staging path %s is not a directory", stagingTargetPath)
+	}
+
+	// Create target directory if it doesn't exist
+	if err := os.MkdirAll(targetPath, 0o750); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create target directory %s: %v", targetPath, err)
+	}
+
+	// Check if already mounted
+	mounted, err := mount.IsMounted(ctx, targetPath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if target path is mounted: %v", err)
+	}
+	if mounted {
+		klog.V(4).Infof("Target path %s is already mounted", targetPath)
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
+	// Bind mount the staged directory to target
+	mountOptions := []string{"bind"}
+	if readonly {
+		mountOptions = append(mountOptions, "ro")
+	}
+
+	args := []string{"-o", mount.JoinMountOptions(mountOptions), stagingTargetPath, targetPath}
+
+	klog.V(4).Infof("Executing bind mount command: mount %v", args)
+	mountCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	//nolint:gosec // mount command with dynamic args is expected for CSI driver
+	cmd := exec.CommandContext(mountCtx, "mount", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to bind mount filesystem: %v, output: %s", err, string(output))
+	}
+
+	klog.Infof("Successfully bind mounted filesystem to %s", targetPath)
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
 // stageBlockDevice stages a raw block device by creating a symlink at staging path.
 func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*csi.NodeStageVolumeResponse, error) {
 	klog.Infof("Staging block device %s to %s", devicePath, stagingTargetPath)

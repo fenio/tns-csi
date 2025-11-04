@@ -13,7 +13,9 @@ export CYAN='\033[0;36m'
 export NC='\033[0m' # No Color
 
 # Test configuration
-export TEST_NAMESPACE="${TEST_NAMESPACE:-default}"
+# Generate unique namespace for each test run to ensure isolation
+export TEST_RUN_ID="${GITHUB_RUN_ID:-$(date +%s)}"
+export TEST_NAMESPACE="${TEST_NAMESPACE:-test-csi-${TEST_RUN_ID}}"
 export TIMEOUT_PVC="${TIMEOUT_PVC:-120s}"
 export TIMEOUT_POD="${TIMEOUT_POD:-120s}"
 export TIMEOUT_DRIVER="${TIMEOUT_DRIVER:-120s}"
@@ -71,7 +73,7 @@ test_info() {
 }
 
 #######################################
-# Verify cluster is accessible
+# Verify cluster is accessible and create test namespace
 #######################################
 verify_cluster() {
     test_step 1 8 "Verifying cluster access"
@@ -83,6 +85,14 @@ verify_cluster() {
     
     test_success "Cluster is accessible"
     kubectl get nodes
+    
+    # Create unique test namespace for isolation
+    echo ""
+    test_info "Creating test namespace: ${TEST_NAMESPACE}"
+    kubectl create namespace "${TEST_NAMESPACE}" || true
+    # Label namespace for easy cleanup of orphaned test namespaces
+    kubectl label namespace "${TEST_NAMESPACE}" test-csi=true --overwrite
+    test_success "Test namespace ready: ${TEST_NAMESPACE}"
 }
 
 #######################################
@@ -481,29 +491,31 @@ cleanup_test() {
     
     test_step 8 8 "Cleaning up test resources"
     
-    test_info "Deleting pod: ${pod_name}"
-    kubectl delete pod "${pod_name}" -n "${TEST_NAMESPACE}" \
-        --ignore-not-found=true --wait=false
+    # Delete the entire namespace - this automatically cleans up all resources
+    test_info "Deleting test namespace: ${TEST_NAMESPACE}"
+    kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=120s || {
+        test_warning "Namespace deletion timed out, forcing deletion"
+        kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
+    }
     
-    test_info "Deleting PVC: ${pvc_name}"
-    kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" \
-        --ignore-not-found=true --wait=false
+    # Wait for namespace to be fully deleted
+    local retries=0
+    local max_retries=30
+    while kubectl get namespace "${TEST_NAMESPACE}" &>/dev/null && [[ $retries -lt $max_retries ]]; do
+        sleep 2
+        retries=$((retries + 1))
+    done
     
-    # Give Kubernetes time to cleanup
-    sleep 5
-    
-    # Verify cleanup
-    if kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
-        test_warning "Pod still exists (cleanup in progress)"
+    if kubectl get namespace "${TEST_NAMESPACE}" &>/dev/null; then
+        test_warning "Namespace still exists (cleanup may take longer)"
     else
-        test_success "Pod deleted"
+        test_success "Test namespace deleted successfully"
     fi
     
-    if kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
-        test_warning "PVC still exists (cleanup in progress)"
-    else
-        test_success "PVC deleted"
-    fi
+    # Wait additional time for TrueNAS backend cleanup
+    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
+    sleep 30
+    test_success "Cleanup complete"
 }
 
 #######################################

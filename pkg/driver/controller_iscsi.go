@@ -1,4 +1,8 @@
 // Package driver implements iSCSI-specific CSI controller operations.
+//
+// NOTE: iSCSI support is planned for future implementation. Currently, all iSCSI
+// operations return codes.Unimplemented errors per CSI specification.
+// Focus is on NFS and NVMe-oF protocols which are fully functional.
 package driver
 
 import (

@@ -94,7 +94,7 @@ jobs:
           echo "=== Cluster nodes ==="
           kubectl get nodes
           echo "=== Cluster version ==="
-          kubectl version --short
+          kubectl version
       
       - name: Build CSI driver image
         run: |
@@ -196,7 +196,7 @@ jobs:
           echo "=== Cluster nodes ==="
           kubectl get nodes
           echo "=== Cluster version ==="
-          kubectl version --short
+          kubectl version
       
       - name: Build CSI driver image
         run: |

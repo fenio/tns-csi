@@ -114,12 +114,12 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	if err != nil {
 		klog.Warningf("Failed to decode volume ID %s: %v, attempting unstage anyway", volumeID, err)
 		// Try to unmount staging path if it exists
-		mounted, err := s.isMounted(stagingTargetPath)
+		mounted, err := s.isMounted(ctx, stagingTargetPath)
 		if err != nil {
 			klog.Warningf("Failed to check if staging path is mounted: %v", err)
 		}
 		if mounted {
-			umountCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			umountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			//nolint:gosec // umount command with path variable is expected for CSI driver
 			cmd := exec.CommandContext(umountCtx, "umount", stagingTargetPath)
@@ -156,7 +156,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 }
 
 // NodePublishVolume mounts the volume to the target path.
-func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	klog.V(4).Infof("NodePublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -179,7 +179,7 @@ func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 	if err != nil {
 		klog.Warningf("Failed to decode volume ID %s: %v, assuming NFS", volumeID, err)
 		// Fall back to NFS behavior for backwards compatibility
-		return s.publishNFSVolume(req)
+		return s.publishNFSVolume(ctx, req)
 	}
 
 	klog.Infof("Publishing volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, targetPath)
@@ -187,7 +187,7 @@ func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 	// Publish volume based on protocol
 	switch meta.Protocol {
 	case ProtocolNFS:
-		return s.publishNFSVolume(req)
+		return s.publishNFSVolume(ctx, req)
 
 	case ProtocolNVMeOF:
 		// For block volumes with staging, this is a bind mount from staging to target
@@ -195,7 +195,7 @@ func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 		if stagingTargetPath == "" {
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for NVMe-oF volumes")
 		}
-		return s.publishBlockVolume(stagingTargetPath, targetPath, req.GetReadonly())
+		return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
 
 	case ProtocolISCSI:
 		// Same as NVMe-oF - bind mount from staging to target
@@ -203,7 +203,7 @@ func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 		if stagingTargetPath == "" {
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for iSCSI volumes")
 		}
-		return s.publishBlockVolume(stagingTargetPath, targetPath, req.GetReadonly())
+		return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
 
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)
@@ -211,7 +211,7 @@ func (s *NodeService) NodePublishVolume(_ context.Context, req *csi.NodePublishV
 }
 
 // publishNFSVolume publishes an NFS volume.
-func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	targetPath := req.GetTargetPath()
 	volumeContext := req.GetVolumeContext()
@@ -235,7 +235,7 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 	}
 
 	// Check if already mounted
-	mounted, err := s.isMounted(targetPath)
+	mounted, err := s.isMounted(ctx, targetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
@@ -258,10 +258,10 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 	args := []string{"-t", "nfs", "-o", joinMountOptions(mountOptions), nfsSource, targetPath}
 
 	klog.V(4).Infof("Executing mount command: mount %v", args)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	mountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	//nolint:gosec // mount command with dynamic args is expected for CSI driver
-	cmd := exec.CommandContext(ctx, "mount", args...)
+	cmd := exec.CommandContext(mountCtx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to mount NFS share: %v, output: %s", err, string(output))
@@ -272,7 +272,7 @@ func (s *NodeService) publishNFSVolume(req *csi.NodePublishVolumeRequest) (*csi.
 }
 
 // publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
-func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, readonly bool) (*csi.NodePublishVolumeResponse, error) {
+func (s *NodeService) publishBlockVolume(ctx context.Context, stagingTargetPath, targetPath string, readonly bool) (*csi.NodePublishVolumeResponse, error) {
 	klog.Infof("Publishing block device from %s to %s", stagingTargetPath, targetPath)
 
 	// Verify staging path exists and is a device or symlink
@@ -307,7 +307,7 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 	}
 
 	// Check if already mounted
-	mounted, err := s.isDeviceMounted(targetPath)
+	mounted, err := s.isDeviceMounted(ctx, targetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if device is mounted: %v", err)
 	}
@@ -325,10 +325,10 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 	args := []string{"-o", joinMountOptions(mountOptions), stagingTargetPath, targetPath}
 
 	klog.V(4).Infof("Executing bind mount command: mount %v", args)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	mountCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	//nolint:gosec // mount command with dynamic args is expected for CSI driver
-	cmd := exec.CommandContext(ctx, "mount", args...)
+	cmd := exec.CommandContext(mountCtx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Cleanup: remove target file on failure
@@ -343,7 +343,7 @@ func (s *NodeService) publishBlockVolume(stagingTargetPath, targetPath string, r
 }
 
 // NodeUnpublishVolume unmounts the volume from the target path.
-func (s *NodeService) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("NodeUnpublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -360,7 +360,7 @@ func (s *NodeService) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpubl
 	klog.Infof("Unmounting volume %s from %s", volumeID, targetPath)
 
 	// Check if mounted
-	mounted, err := s.isMounted(targetPath)
+	mounted, err := s.isMounted(ctx, targetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
@@ -372,7 +372,7 @@ func (s *NodeService) NodeUnpublishVolume(_ context.Context, req *csi.NodeUnpubl
 
 	// Unmount
 	klog.V(4).Infof("Executing umount command for: %s", targetPath)
-	umountCtx, umountCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	umountCtx, umountCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer umountCancel()
 	//nolint:gosec // umount command with path variable is expected for CSI driver
 	cmd := exec.CommandContext(umountCtx, "umount", targetPath)
@@ -497,12 +497,11 @@ func (s *NodeService) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) 
 // Helper functions
 
 // isMounted checks if a path is mounted.
-func (s *NodeService) isMounted(targetPath string) (bool, error) {
-	// Use findmnt to check if path is mounted
-	// Use a background context with timeout for mount checks
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *NodeService) isMounted(ctx context.Context, targetPath string) (bool, error) {
+	// Use findmnt to check if path is mounted with timeout
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "findmnt", "-o", "TARGET", "-n", "-l", targetPath)
+	cmd := exec.CommandContext(checkCtx, "findmnt", "-o", "TARGET", "-n", "-l", targetPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// findmnt returns non-zero exit code if path is not found
@@ -542,7 +541,7 @@ func safeUint64ToInt64(val uint64) int64 {
 // Protocol-specific staging functions
 
 // stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.
-func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 	volumeCapability := req.GetVolumeCapability()
@@ -571,24 +570,24 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s)", volumeID, isBlockVolume, server, port, nqn)
 
 	// Check if already connected
-	devicePath, err := s.findNVMeDeviceByNQN(nqn)
+	devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
 		// Device already connected, proceed based on volume type
 		if isBlockVolume {
 			return s.stageBlockDevice(devicePath, stagingTargetPath)
 		}
-		return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, volumeCapability)
+		return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
 	}
 
 	// Check if nvme-cli is installed
-	if checkErr := s.checkNVMeCLI(); checkErr != nil {
+	if checkErr := s.checkNVMeCLI(ctx); checkErr != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
 
 	// Discover the NVMe-oF target
 	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", server, port)
-	discoverCtx, discoverCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer discoverCancel()
 	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
 	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", transport, "-a", server, "-s", port)
@@ -598,7 +597,7 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 
 	// Connect to the NVMe-oF target
 	klog.Infof("Connecting to NVMe-oF target: %s", nqn)
-	connectCtx, connectCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer connectCancel()
 	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
 	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", transport, "-n", nqn, "-a", server, "-s", port)
@@ -613,10 +612,10 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 	}
 
 	// Wait for device to appear and find the device path
-	devicePath, err = s.waitForNVMeDevice(nqn, 30*time.Second)
+	devicePath, err = s.waitForNVMeDevice(ctx, nqn, 30*time.Second)
 	if err != nil {
 		// Cleanup: disconnect on failure
-		if disconnectErr := s.disconnectNVMeOF(nqn); disconnectErr != nil {
+		if disconnectErr := s.disconnectNVMeOF(ctx, nqn); disconnectErr != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF after device wait failure: %v", disconnectErr)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to find NVMe device after connection: %v", err)
@@ -628,11 +627,11 @@ func (s *NodeService) stageNVMeOFVolume(_ context.Context, req *csi.NodeStageVol
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}
-	return s.formatAndMountNVMeDevice(devicePath, stagingTargetPath, volumeCapability)
+	return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
-func (s *NodeService) unstageNVMeOFVolume(_ context.Context, req *csi.NodeUnstageVolumeRequest, volumeContext map[string]string) (*csi.NodeUnstageVolumeResponse, error) {
+func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest, volumeContext map[string]string) (*csi.NodeUnstageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
@@ -651,17 +650,17 @@ func (s *NodeService) unstageNVMeOFVolume(_ context.Context, req *csi.NodeUnstag
 	}
 
 	// Check if mounted and unmount if necessary
-	mounted, err := s.isMounted(stagingTargetPath)
+	mounted, err := s.isMounted(ctx, stagingTargetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
 	}
 
 	if mounted {
 		klog.Infof("Unmounting staging path: %s", stagingTargetPath)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		umountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		//nolint:gosec // umount command with path variable is expected for CSI driver
-		cmd := exec.CommandContext(ctx, "umount", stagingTargetPath)
+		cmd := exec.CommandContext(umountCtx, "umount", stagingTargetPath)
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmount staging path: %v, output: %s", err, string(output))
 		}
@@ -669,7 +668,7 @@ func (s *NodeService) unstageNVMeOFVolume(_ context.Context, req *csi.NodeUnstag
 
 	// Disconnect from NVMe-oF target
 	if nqn != "" {
-		if err := s.disconnectNVMeOF(nqn); err != nil {
+		if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
 		} else {
 			klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
@@ -682,10 +681,10 @@ func (s *NodeService) unstageNVMeOFVolume(_ context.Context, req *csi.NodeUnstag
 // NVMe-oF helper functions
 
 // checkNVMeCLI checks if nvme-cli is installed.
-func (s *NodeService) checkNVMeCLI() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "nvme", "version")
+	cmd := exec.CommandContext(checkCtx, "nvme", "version")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("nvme command not found - please install nvme-cli")
 	}
@@ -695,16 +694,16 @@ func (s *NodeService) checkNVMeCLI() error {
 // findNVMeDeviceByNQN finds the device path for a given NQN.
 //
 //nolint:gocognit // Complex NVMe device discovery - refactoring would risk stability of working code
-func (s *NodeService) findNVMeDeviceByNQN(nqn string) (string, error) {
+func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (string, error) {
 	// Use nvme list-subsys which shows NQN
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	subsysCmd := exec.CommandContext(ctx, "nvme", "list-subsys", "-o", "json")
+	subsysCmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
 	subsysOutput, err := subsysCmd.CombinedOutput()
 	if err != nil {
 		klog.V(4).Infof("nvme list-subsys failed: %v", err)
 		// Fall back to checking /sys/class/nvme
-		return s.findNVMeDeviceByNQNFromSys(nqn)
+		return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
 	}
 
 	// Parse output to find NQN and extract controller name
@@ -739,11 +738,11 @@ func (s *NodeService) findNVMeDeviceByNQN(nqn string) (string, error) {
 	}
 
 	// Fall back to checking /sys/class/nvme if JSON parsing failed
-	return s.findNVMeDeviceByNQNFromSys(nqn)
+	return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
 }
 
 // findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
-func (s *NodeService) findNVMeDeviceByNQNFromSys(nqn string) (string, error) {
+func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string) (string, error) {
 	// Read /sys/class/nvme/nvmeX/subsysnqn for each device
 	nvmeDir := "/sys/class/nvme"
 	entries, err := os.ReadDir(nvmeDir)
@@ -778,12 +777,12 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(nqn string) (string, error) {
 }
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
-func (s *NodeService) waitForNVMeDevice(nqn string, timeout time.Duration) (string, error) {
+func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	attempt := 0
 	for time.Now().Before(deadline) {
 		attempt++
-		devicePath, err := s.findNVMeDeviceByNQN(nqn)
+		devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, err := os.Stat(devicePath); err == nil {
@@ -798,13 +797,13 @@ func (s *NodeService) waitForNVMeDevice(nqn string, timeout time.Duration) (stri
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target.
-func (s *NodeService) disconnectNVMeOF(nqn string) error {
+func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	klog.V(4).Infof("Disconnecting from NVMe-oF target: %s", nqn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	disconnectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "nvme", "disconnect", "-n", nqn)
+	cmd := exec.CommandContext(disconnectCtx, "nvme", "disconnect", "-n", nqn)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Check if already disconnected
@@ -820,7 +819,7 @@ func (s *NodeService) disconnectNVMeOF(nqn string) error {
 }
 
 // formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
-func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
 	klog.Infof("Formatting and mounting NVMe device %s to %s", devicePath, stagingTargetPath)
 
 	// Determine filesystem type from volume capability
@@ -830,14 +829,14 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 	}
 
 	// Check if device is already formatted
-	needsFormat, err := s.needsFormat(devicePath)
+	needsFormat, err := s.needsFormat(ctx, devicePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
 	}
 
 	if needsFormat {
 		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
-		if formatErr := s.formatDevice(devicePath, fsType); formatErr != nil {
+		if formatErr := s.formatDevice(ctx, devicePath, fsType); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 	} else {
@@ -850,7 +849,7 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 	}
 
 	// Check if already mounted
-	mounted, err := s.isMounted(stagingTargetPath)
+	mounted, err := s.isMounted(ctx, stagingTargetPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
 	}
@@ -872,11 +871,11 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 		args = []string{"-o", joinMountOptions(mountOptions), devicePath, stagingTargetPath}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	mountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	//nolint:gosec // mount command with dynamic args is expected for CSI driver
-	cmd := exec.CommandContext(ctx, "mount", args...)
+	cmd := exec.CommandContext(mountCtx, "mount", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to mount device: %v, output: %s", err, string(output))
@@ -887,12 +886,12 @@ func (s *NodeService) formatAndMountNVMeDevice(devicePath, stagingTargetPath str
 }
 
 // needsFormat checks if a device needs to be formatted.
-func (s *NodeService) needsFormat(devicePath string) (bool, error) {
+func (s *NodeService) needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	// Use blkid to check if device has a filesystem
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "blkid", devicePath)
+	cmd := exec.CommandContext(checkCtx, "blkid", devicePath)
 	output, err := cmd.CombinedOutput()
 
 	// If blkid returns non-zero and output is empty, device needs formatting
@@ -911,9 +910,9 @@ func (s *NodeService) needsFormat(devicePath string) (bool, error) {
 }
 
 // formatDevice formats a device with the specified filesystem.
-func (s *NodeService) formatDevice(devicePath, fsType string) error {
+func (s *NodeService) formatDevice(ctx context.Context, devicePath, fsType string) error {
 	// Formatting can take time, allow up to 60 seconds
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -921,12 +920,12 @@ func (s *NodeService) formatDevice(devicePath, fsType string) error {
 	switch fsType {
 	case "ext4":
 		// -F force, don't ask for confirmation
-		cmd = exec.CommandContext(ctx, "mkfs.ext4", "-F", devicePath)
+		cmd = exec.CommandContext(formatCtx, "mkfs.ext4", "-F", devicePath)
 	case "ext3":
-		cmd = exec.CommandContext(ctx, "mkfs.ext3", "-F", devicePath)
+		cmd = exec.CommandContext(formatCtx, "mkfs.ext3", "-F", devicePath)
 	case "xfs":
 		// -f force overwrite
-		cmd = exec.CommandContext(ctx, "mkfs.xfs", "-f", devicePath)
+		cmd = exec.CommandContext(formatCtx, "mkfs.xfs", "-f", devicePath)
 	default:
 		return fmt.Errorf("unsupported filesystem type: %s", fsType)
 	}
@@ -983,11 +982,11 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 }
 
 // isDeviceMounted checks if a device path is mounted (for block devices).
-func (s *NodeService) isDeviceMounted(targetPath string) (bool, error) {
-	// For block devices, check if it's bind mounted
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *NodeService) isDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
+	// For block devices, check if it's bind mounted with timeout
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "findmnt", "-o", "SOURCE", "-n", targetPath)
+	cmd := exec.CommandContext(checkCtx, "findmnt", "-o", "SOURCE", "-n", targetPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// findmnt returns non-zero if not found

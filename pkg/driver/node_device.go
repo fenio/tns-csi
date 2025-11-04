@@ -109,7 +109,8 @@ func (s *NodeService) publishFilesystemVolume(ctx context.Context, stagingTarget
 	}
 
 	// Create target directory if it doesn't exist
-	if err := os.MkdirAll(targetPath, 0o750); err != nil {
+	err = os.MkdirAll(targetPath, 0o750)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to create target directory %s: %v", targetPath, err)
 	}
 

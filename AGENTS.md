@@ -14,7 +14,7 @@ This CSI driver is **working and production-ready** with the following features:
 ### 1. **Testing Infrastructure**
 
 This project uses **self-hosted infrastructure** for all testing:
-- **Self-hosted GitHub runner** - All CI/CD runs on dedicated hardware
+- **Self-hosted GitHub runner** - TrueNAS related CI/CD runs on dedicated hardware
 - **Self-hosted TrueNAS server** - Real TrueNAS instance for integration tests
 - **GitHub Actions workflows** - `.github/workflows/integration.yml` runs both NFS and NVMe-oF tests
 - **Secrets management** - TrueNAS credentials stored in GitHub repository secrets

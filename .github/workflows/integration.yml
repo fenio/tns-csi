@@ -29,15 +29,13 @@ jobs:
           else
             echo "Docker already installed"
           fi
-          # Add current user to docker group
           sudo usermod -aG docker $USER
-          # Apply group changes (newgrp doesn't work in scripts, so we'll use sudo for docker commands)
       
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.3'
-          cache: false  # Disable cache on self-hosted runner to avoid tar warnings
+          cache: false
       
       - name: Install Helm
         run: |
@@ -50,7 +48,6 @@ jobs:
       
       - name: Install k3s
         run: |
-          # Check if k3s is already installed
           if ! command -v k3s &> /dev/null; then
             echo "Installing k3s..."
             curl -sfL https://get.k3s.io | sh -s - \
@@ -60,8 +57,6 @@ jobs:
           else
             echo "k3s already installed"
           fi
-          
-          # Wait for k3s to be ready
           sudo k3s kubectl wait --for=condition=Ready node --all --timeout=60s
       
       - name: Configure kubectl
@@ -69,150 +64,27 @@ jobs:
           mkdir -p ~/.kube
           sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
           sudo chown $USER:$USER ~/.kube/config
-          export KUBECONFIG=~/.kube/config
           kubectl get nodes
       
       - name: Build CSI driver image
         run: |
-          # Build with sudo since group membership requires logout/login
           sudo -E make docker-build
-          # Import image into k3s
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
       
       - name: Clean up previous deployment
         run: |
-          # Remove any stuck Helm releases
           helm uninstall tns-csi --namespace kube-system --wait || true
-          # Force delete any remaining pods
           kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
-          # Clean up any remaining resources
-          kubectl delete secret truenas-csi-secret -n kube-system --ignore-not-found=true
-          kubectl delete storageclass tns-csi-nfs --ignore-not-found=true
-          # Give k8s time to cleanup
+          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
           sleep 10
-          # Verify no old pods remain
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver || echo "No old pods found (good)"
       
-      - name: Deploy CSI driver
+      - name: Run NFS Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
-          # Create secret
-          kubectl create secret generic truenas-csi-secret \
-            --from-literal=api-key="${TRUENAS_API_KEY}" \
-            --from-literal=api-url="wss://${TRUENAS_HOST}:443/api/current" \
-            --namespace kube-system \
-            --dry-run=client -o yaml | kubectl apply -f -
-          
-          # Deploy using Helm
-          helm upgrade --install tns-csi ./charts/tns-csi-driver \
-            --namespace kube-system \
-            --set image.repository=bfenski/tns-csi \
-            --set image.tag=latest \
-            --set image.pullPolicy=Never \
-            --set truenas.url="wss://${TRUENAS_HOST}:443/api/current" \
-            --set truenas.apiKey="${TRUENAS_API_KEY}" \
-            --set storageClasses.nfs.enabled=true \
-            --set storageClasses.nfs.name=tns-csi-nfs \
-            --set storageClasses.nfs.pool="${TRUENAS_POOL}" \
-            --set storageClasses.nfs.server="${TRUENAS_HOST}" \
-            --wait --timeout 5m
-      
-      - name: Wait for CSI driver to be ready
-        run: |
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=tns-csi-driver -n kube-system --timeout=120s
-          
-          # Verify pods are using the correct image
-          echo "=== Verifying image version ==="
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
-      
-      - name: Run NFS test
-        run: |
-          # Create test PVC
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: test-pvc-nfs
-          spec:
-            accessModes:
-              - ReadWriteOnce
-            resources:
-              requests:
-                storage: 1Gi
-            storageClassName: tns-csi-nfs
-          EOF
-          
-          # Give it a moment to start provisioning
-          sleep 5
-          
-          # Check PVC status
-          echo "=== PVC Status ==="
-          kubectl describe pvc test-pvc-nfs
-          
-          # Check controller logs
-          echo "=== Controller Logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=50
-          
-          # Wait for PVC to be bound
-          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/test-pvc-nfs --timeout=120s
-          
-          # Create test pod
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: test-pod-nfs
-          spec:
-            containers:
-            - name: test
-              image: busybox
-              command: ["sh", "-c", "echo 'Hello from CSI' > /data/test.txt && cat /data/test.txt && sleep 30"]
-              volumeMounts:
-              - name: data
-                mountPath: /data
-            volumes:
-            - name: data
-              persistentVolumeClaim:
-                claimName: test-pvc-nfs
-          EOF
-          
-          # Wait for pod to complete
-          kubectl wait --for=condition=Ready pod/test-pod-nfs --timeout=120s
-          kubectl logs test-pod-nfs -f || true
-          sleep 5
-      
-      - name: Check test results
-        run: |
-          # Verify pod ran successfully
-          kubectl get pod test-pod-nfs -o jsonpath='{.status.phase}' | grep -q Running
-          echo "✓ Test pod is running"
-          
-          # Check logs
-          kubectl logs test-pod-nfs | grep -q "Hello from CSI"
-          echo "✓ Data written and read successfully"
-      
-      - name: Cleanup test resources
-        if: always()
-        run: |
-          kubectl delete pod test-pod-nfs --ignore-not-found=true --wait=false
-          kubectl delete pvc test-pvc-nfs --ignore-not-found=true --wait=false
-          # Give it a moment to cleanup
-          sleep 5
-      
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          echo "=== Controller logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=100 || true
-          echo "=== Node logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --tail=100 || true
-          echo "=== PVC status ==="
-          kubectl describe pvc test-pvc-nfs || true
-          echo "=== Pod status ==="
-          kubectl describe pod test-pod-nfs || true
+          ./tests/integration/test-nfs.sh
 
   integration-nvmeof:
     name: NVMe-oF Integration Tests
@@ -223,11 +95,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl wget git make nfs-common nvme-cli
-          # Load nvme-tcp kernel module
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded or not available"
-          # Verify nvme-tcp is available
-          lsmod | grep nvme || echo "Warning: nvme modules not loaded"
+          sudo apt-get install -y curl wget git make nvme-cli
+          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
       
       - name: Install Docker
         run: |
@@ -239,14 +108,13 @@ jobs:
           else
             echo "Docker already installed"
           fi
-          # Add current user to docker group
           sudo usermod -aG docker $USER
       
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.3'
-          cache: false  # Disable cache on self-hosted runner to avoid tar warnings
+          cache: false
       
       - name: Install Helm
         run: |
@@ -265,8 +133,6 @@ jobs:
           else
             echo "k3s already installed"
           fi
-          
-          # Wait for k3s to be ready
           sudo k3s kubectl wait --for=condition=Ready node --all --timeout=60s
       
       - name: Configure kubectl
@@ -274,264 +140,40 @@ jobs:
           mkdir -p ~/.kube
           sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
           sudo chown $USER:$USER ~/.kube/config
-          export KUBECONFIG=~/.kube/config
           kubectl get nodes
       
       - name: Build CSI driver image
         run: |
-          # Build with sudo since group membership requires logout/login
           sudo -E make docker-build
-          # Import image into k3s
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
       
       - name: Clean up previous deployment
         run: |
-          # Remove any stuck Helm releases
           helm uninstall tns-csi --namespace kube-system --wait || true
-          # Force delete any remaining pods
           kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
-          # Clean up any remaining resources
-          kubectl delete secret truenas-csi-secret -n kube-system --ignore-not-found=true
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof --ignore-not-found=true
-          # Give k8s time to cleanup
+          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
           sleep 10
-          # Verify no old pods remain
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver || echo "No old pods found (good)"
       
-      - name: Deploy CSI driver with NVMe-oF support
+      - name: Run NVMe-oF Integration Test (Filesystem)
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
-          # Construct TrueNAS WebSocket URL
-          TRUENAS_URL="wss://${TRUENAS_HOST}/api/current"
-          echo "Using TrueNAS URL: ${TRUENAS_URL}"
-          
-          helm install tns-csi ./charts/tns-csi-driver \
-            --namespace kube-system \
-            --create-namespace \
-            --set image.repository=bfenski/tns-csi \
-            --set image.tag=latest \
-            --set image.pullPolicy=Never \
-            --set truenas.url="${TRUENAS_URL}" \
-            --set truenas.apiKey="${TRUENAS_API_KEY}" \
-            --set storageClasses.nfs.enabled=false \
-            --set storageClasses.nvmeof.enabled=true \
-            --set storageClasses.nvmeof.name=tns-nvmeof \
-            --set storageClasses.nvmeof.pool="${TRUENAS_POOL}" \
-            --set storageClasses.nvmeof.server="${TRUENAS_HOST}" \
-            --set storageClasses.nvmeof.transport=tcp \
-            --set storageClasses.nvmeof.port=4420 \
-            --wait --timeout 3m
-          
-          # Verify deployment
-          echo "=== Helm deployment status ==="
-          helm list -n kube-system
-          
-          echo "=== CSI driver pods ==="
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
-          
-          echo "=== NVMe-oF StorageClass ==="
-          kubectl get storageclass tns-nvmeof -o yaml
+          ./tests/integration/test-nvmeof.sh
       
-      - name: Wait for CSI driver to be ready
-        run: |
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=tns-csi-driver -n kube-system --timeout=120s
-          
-          # Verify pods are using the correct image
-          echo "=== Verifying image version ==="
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
-      
-      - name: Run NVMe-oF test
-        run: |
-          # Create a test PVC to check if NVMe-oF ports are configured
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: test-pvc-nvmeof-precheck
-          spec:
-            accessModes:
-              - ReadWriteOnce
-            volumeMode: Block
-            resources:
-              requests:
-                storage: 1Gi
-            storageClassName: tns-nvmeof
-          EOF
-          
-          # Create a temporary pod to trigger provisioning
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: test-pod-nvmeof-precheck
-          spec:
-            containers:
-            - name: test
-              image: busybox
-              command: ["sleep", "10"]
-              volumeDevices:
-              - name: data
-                devicePath: /dev/xvda
-            volumes:
-            - name: data
-              persistentVolumeClaim:
-                claimName: test-pvc-nvmeof-precheck
-          EOF
-          
-          # Wait briefly to see if provisioning starts
-          sleep 10
-          
-          # Check if PVC failed due to missing NVMe-oF port
-          PVC_STATUS=$(kubectl get pvc test-pvc-nvmeof-precheck -o jsonpath='{.status.phase}')
-          echo "=== Pre-check PVC Status: $PVC_STATUS ==="
-          
-          # Check controller logs for port configuration error
-          LOGS=$(kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=20 || true)
-          echo "$LOGS"
-          
-          if echo "$LOGS" | grep -q "No TCP NVMe-oF port"; then
-            echo "⚠️  NVMe-oF ports not configured on TrueNAS server"
-            echo "⚠️  Skipping NVMe-oF tests - this is expected if NVMe-oF is not set up"
-            echo "📝 To enable NVMe-oF: Configure an NVMe-oF TCP portal in TrueNAS UI"
-            kubectl delete pod test-pod-nvmeof-precheck --ignore-not-found=true --wait=false
-            kubectl delete pvc test-pvc-nvmeof-precheck --ignore-not-found=true --wait=false
-            exit 0
-          fi
-          
-          # Clean up pre-check resources
-          kubectl delete pod test-pod-nvmeof-precheck --ignore-not-found=true --wait=false
-          kubectl delete pvc test-pvc-nvmeof-precheck --ignore-not-found=true --wait=false
-          sleep 5
-          
-          # If we got here, ports are configured - proceed with actual test
-          echo "✓ NVMe-oF ports are configured, proceeding with tests"
-          
-          # Create test PVC with volumeMode: Block
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: test-pvc-nvmeof
-          spec:
-            accessModes:
-              - ReadWriteOnce
-            volumeMode: Block
-            resources:
-              requests:
-                storage: 1Gi
-            storageClassName: tns-nvmeof
-          EOF
-          
-          # Check PVC status (should be Pending with WaitForFirstConsumer)
-          echo "=== Initial PVC Status ==="
-          kubectl describe pvc test-pvc-nvmeof
-          
-          # Create test pod with block device (this will trigger binding)
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: test-pod-nvmeof
-          spec:
-            containers:
-            - name: test
-              image: busybox
-              command: ["sh", "-c", "dd if=/dev/zero of=/dev/xvda bs=1M count=10 && echo 'Block device write successful' && sleep 30"]
-              volumeDevices:
-              - name: data
-                devicePath: /dev/xvda
-            volumes:
-            - name: data
-              persistentVolumeClaim:
-                claimName: test-pvc-nvmeof
-          EOF
-          
-          # Now PVC should bind since pod is created
-          echo "=== Waiting for PVC to bind ==="
-          kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/test-pvc-nvmeof --timeout=120s
-          echo "✓ PVC is bound"
-          
-          # Check controller logs for provisioning
-          echo "=== Controller Logs ==="
-          kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=50
-          
-          # Wait for pod to be ready
-          echo "=== Waiting for pod to be ready ==="
-          set +e  # Temporarily disable exit on error
-          kubectl wait --for=condition=Ready pod/test-pod-nvmeof --timeout=120s
-          WAIT_EXIT_CODE=$?
-          set -e  # Re-enable exit on error
-          
-          if [ $WAIT_EXIT_CODE -ne 0 ]; then
-            echo "❌ Pod failed to become ready within timeout"
-            
-            # Capture diagnostic information BEFORE cleanup
-            echo "=== Pod Status (YAML) ==="
-            kubectl get pod test-pod-nvmeof -o yaml || true
-            
-            echo "=== Pod Description ==="
-            kubectl describe pod test-pod-nvmeof || true
-            
-            echo "=== Pod Events ==="
-            kubectl get events --field-selector involvedObject.name=test-pod-nvmeof --sort-by='.lastTimestamp' || true
-            
-            echo "=== Controller Logs ==="
-            kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=100 || true
-            
-            echo "=== Node Logs ==="
-            kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --tail=100 || true
-            
-            echo "=== NVMe Connection Status ==="
-            sudo nvme list || echo "No NVMe devices found"
-            
-            echo "=== NVMe Subsystems ==="
-            sudo nvme list-subsys || echo "No NVMe subsystems found"
-            
-            echo "=== Kernel NVMe Logs (dmesg) ==="
-            sudo dmesg | grep -i nvme | tail -50 || echo "No NVMe messages in dmesg"
-            
-            echo "=== Block Devices ==="
-            lsblk || true
-            
-            # Cleanup and fail
-            kubectl delete pod test-pod-nvmeof --ignore-not-found=true --wait=false
-            kubectl delete pvc test-pvc-nvmeof --ignore-not-found=true --wait=false
-            exit 1
-          fi
-          
-          echo "✓ Pod is ready"
-          
-          # Show pod logs
-          kubectl logs test-pod-nvmeof -f || true
-          sleep 5
-      
-      - name: Check test results
-        run: |
-          # Verify pod ran successfully
-          kubectl get pod test-pod-nvmeof -o jsonpath='{.status.phase}' | grep -q Running
-          echo "✓ Test pod is running"
-          
-          # Check logs for successful write
-          kubectl logs test-pod-nvmeof | grep -q "Block device write successful"
-          echo "✓ Block device write successful"
-      
-      - name: Cleanup test resources
+      - name: Clean up between tests
         if: always()
         run: |
-          kubectl delete pod test-pod-nvmeof --ignore-not-found=true --wait=false
-          kubectl delete pvc test-pvc-nvmeof --ignore-not-found=true --wait=false
-          # Give it a moment to cleanup
-          sleep 5
+          helm uninstall tns-csi --namespace kube-system --wait || true
+          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
+          kubectl delete pvc --all --wait=false || true
+          sleep 10
       
-      - name: Show additional logs on failure
-        if: failure()
+      - name: Run NVMe-oF Integration Test (Block)
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
-          echo "=== All pods in kube-system ==="
-          kubectl get pods -n kube-system || true
-          echo "=== All PVCs ==="
-          kubectl get pvc -A || true
-          echo "=== All PVs ==="
-          kubectl get pv || true
+          ./tests/integration/test-nvmeof-block.sh

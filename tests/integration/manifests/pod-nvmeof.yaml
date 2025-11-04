@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod-nvmeof
+  namespace: default
+spec:
+  containers:
+  - name: test
+    image: busybox
+    command: 
+      - "sh"
+      - "-c"
+      - "echo 'NVMe-oF volume mounted' && sleep 3600"
+    volumeMounts:
+    - name: data
+      mountPath: /data
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: test-pvc-nvmeof

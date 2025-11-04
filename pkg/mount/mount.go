@@ -1,3 +1,4 @@
+// Package mount provides common mount utilities for CSI driver operations.
 package mount
 
 import (
@@ -53,7 +54,6 @@ func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
 func Unmount(ctx context.Context, targetPath string) error {
 	umountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	//nolint:gosec // umount command with path variable is expected for CSI driver
 	cmd := exec.CommandContext(umountCtx, "umount", targetPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

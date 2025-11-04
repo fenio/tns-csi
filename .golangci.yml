@@ -187,10 +187,6 @@ linters:
       
     exhaustive:
       default-signifies-exhaustive: true
-      
-    err113:
-      check-generated: false
-      
 
     nakedret:
       max-func-lines: 30

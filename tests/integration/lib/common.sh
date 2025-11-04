@@ -14,8 +14,8 @@ export NC='\033[0m' # No Color
 
 # Test configuration
 # Generate unique namespace for each test run to ensure isolation
-export TEST_RUN_ID="${GITHUB_RUN_ID:-$(date +%s)}"
-export TEST_NAMESPACE="${TEST_NAMESPACE:-test-csi-${TEST_RUN_ID}}"
+# Use timestamp + random suffix to guarantee uniqueness across parallel jobs
+export TEST_NAMESPACE="${TEST_NAMESPACE:-test-csi-$(date +%s)-${RANDOM}}"
 export TIMEOUT_PVC="${TIMEOUT_PVC:-120s}"
 export TIMEOUT_POD="${TIMEOUT_POD:-120s}"
 export TIMEOUT_DRIVER="${TIMEOUT_DRIVER:-120s}"

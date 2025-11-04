@@ -151,3 +151,41 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	klog.Infof("Successfully deleted NFS volume: %s", meta.Name)
 	return &csi.DeleteVolumeResponse{}, nil
 }
+
+// expandNFSVolume expands an NFS volume by updating the dataset quota.
+//
+//nolint:dupl // Similar to expandNVMeOFVolume but with different parameters (Quota vs Volsize, NodeExpansionRequired)
+func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMetadata, requiredBytes int64) (*csi.ControllerExpandVolumeResponse, error) {
+	klog.V(4).Infof("Expanding NFS volume: %s (dataset: %s) to %d bytes", meta.Name, meta.DatasetName, requiredBytes)
+
+	if meta.DatasetID == "" {
+		return nil, status.Error(codes.InvalidArgument, "dataset ID not found in volume metadata")
+	}
+
+	// For NFS volumes, we update the quota on the dataset
+	// Note: ZFS datasets don't have a strict "size", but we can set a quota
+	// to limit the maximum space usage
+	klog.Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New Quota: %d bytes",
+		meta.DatasetID, meta.DatasetName, requiredBytes)
+
+	updateParams := tnsapi.DatasetUpdateParams{
+		Quota: &requiredBytes,
+	}
+
+	_, err := s.apiClient.UpdateDataset(ctx, meta.DatasetID, updateParams)
+	if err != nil {
+		// Provide detailed error information to help diagnose dataset issues
+		klog.Errorf("Failed to update dataset quota for %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		return nil, status.Errorf(codes.Internal,
+			"Failed to update dataset quota for '%s' (Name: '%s'). "+
+				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
+				"Error: %v", meta.DatasetID, meta.DatasetName, err)
+	}
+
+	klog.Infof("Successfully expanded NFS volume %s to %d bytes", meta.Name, requiredBytes)
+
+	return &csi.ControllerExpandVolumeResponse{
+		CapacityBytes:         requiredBytes,
+		NodeExpansionRequired: false, // NFS volumes don't require node-side expansion
+	}, nil
+}

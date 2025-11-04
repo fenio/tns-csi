@@ -26,6 +26,7 @@ var (
 type APIClient interface {
 	CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	DeleteDataset(ctx context.Context, datasetID string) error
+	UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
 	CreateNFSShare(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
 	DeleteNFSShare(ctx context.Context, shareID int) error
 	CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
@@ -274,6 +275,13 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 					},
 				},
 			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
+					},
+				},
+			},
 		},
 	}, nil
 }
@@ -297,9 +305,42 @@ func (s *ControllerService) ListSnapshots(_ context.Context, req *csi.ListSnapsh
 }
 
 // ControllerExpandVolume expands a volume.
-func (s *ControllerService) ControllerExpandVolume(_ context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
+func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	klog.V(4).Infof("ControllerExpandVolume called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume not implemented")
+
+	// Validate request
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
+	if req.GetCapacityRange() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Capacity range is required")
+	}
+
+	volumeID := req.GetVolumeId()
+	requiredBytes := req.GetCapacityRange().GetRequiredBytes()
+
+	klog.Infof("Expanding volume %s to %d bytes", volumeID, requiredBytes)
+
+	// Decode volume metadata from volumeID
+	meta, err := decodeVolumeID(volumeID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
+	}
+
+	klog.Infof("Expanding volume %s with protocol %s, dataset %s", meta.Name, meta.Protocol, meta.DatasetName)
+
+	// Expand volume based on protocol
+	switch meta.Protocol {
+	case ProtocolNFS:
+		return s.expandNFSVolume(ctx, meta, requiredBytes)
+	case ProtocolISCSI:
+		return s.expandISCSIVolume(ctx, meta, requiredBytes)
+	case ProtocolNVMeOF:
+		return s.expandNVMeOFVolume(ctx, meta, requiredBytes)
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol for expansion: %s", meta.Protocol)
+	}
 }
 
 // ControllerGetVolume gets volume information.

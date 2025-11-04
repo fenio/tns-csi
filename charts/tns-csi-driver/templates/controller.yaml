@@ -104,6 +104,25 @@ spec:
           resources:
             {{- toYaml .Values.sidecars.attacher.resources | nindent 12 }}
 
+        # CSI Resizer sidecar
+        - name: csi-resizer
+          image: "{{ .Values.sidecars.resizer.image.repository }}:{{ .Values.sidecars.resizer.image.tag }}"
+          imagePullPolicy: {{ .Values.sidecars.resizer.image.pullPolicy }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--v={{ .Values.controller.logLevel }}"
+            - "--leader-election"
+            - "--timeout=60s"
+            - "--handle-volume-inuse-error=true"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {{- toYaml .Values.sidecars.resizer.resources | nindent 12 }}
+
       volumes:
         - name: socket-dir
           emptyDir: {}

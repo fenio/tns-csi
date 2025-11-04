@@ -229,7 +229,7 @@ create_pvc() {
     
     test_step 4 8 "Creating PersistentVolumeClaim: ${pvc_name}"
     
-    kubectl apply -f "${manifest}"
+    kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
     # Give it a moment to start provisioning
     sleep 5
@@ -280,7 +280,7 @@ create_test_pod() {
     
     test_step 5 8 "Creating test pod: ${pod_name}"
     
-    kubectl apply -f "${manifest}"
+    kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
     # Wait for pod to be ready
     echo ""

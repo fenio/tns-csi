@@ -113,6 +113,7 @@ spec:
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
             - "--timeout=60s"
+            - "--handle-volume-inuse-error=true"
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock

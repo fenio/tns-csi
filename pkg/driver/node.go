@@ -529,11 +529,13 @@ func joinMountOptions(options []string) string {
 	if len(options) == 0 {
 		return ""
 	}
-	result := options[0]
+	var builder strings.Builder
+	builder.WriteString(options[0])
 	for i := 1; i < len(options); i++ {
-		result += "," + options[i]
+		builder.WriteString(",")
+		builder.WriteString(options[i])
 	}
-	return result
+	return builder.String()
 }
 
 // safeUint64ToInt64 safely converts uint64 to int64, capping at math.MaxInt64.

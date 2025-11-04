@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -197,7 +198,7 @@ func (c *Client) authenticateDirect() error {
 	c.mu.Lock()
 
 	// Generate request ID
-	id := fmt.Sprintf("%d", atomic.AddUint64(&c.reqID, 1))
+	id := strconv.FormatUint(atomic.AddUint64(&c.reqID, 1), 10)
 
 	// Create authentication request
 	req := &Request{
@@ -273,7 +274,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	}
 
 	// Generate request ID
-	id := fmt.Sprintf("%d", atomic.AddUint64(&c.reqID, 1))
+	id := strconv.FormatUint(atomic.AddUint64(&c.reqID, 1), 10)
 
 	// Create request
 	req := &Request{

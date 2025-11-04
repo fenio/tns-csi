@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -357,7 +358,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	// Step 2: Create NFS share for the dataset
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 		Path:         dataset.Mountpoint,
-		Comment:      fmt.Sprintf("CSI Volume: %s", volumeID),
+		Comment:      "CSI Volume: " + volumeID,
 		MaprootUser:  "root",
 		MaprootGroup: "wheel",
 		Enabled:      true,
@@ -402,7 +403,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		"share":       dataset.Mountpoint,
 		"datasetID":   dataset.ID,
 		"datasetName": dataset.Name,
-		"nfsShareID":  fmt.Sprintf("%d", nfsShare.ID),
+		"nfsShareID":  strconv.Itoa(nfsShare.ID),
 	}
 
 	// Get requested capacity
@@ -556,7 +557,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	// Step 3: Create NVMe-oF namespace
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
-	devicePath := fmt.Sprintf("zvol/%s", zvolName)
+	devicePath := "zvol/" + zvolName
 
 	klog.Infof("Creating NVMe-oF namespace for device: %s", devicePath)
 
@@ -613,9 +614,9 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		"nqn":               subsystem.NQN,
 		"datasetID":         zvol.ID,
 		"datasetName":       zvol.Name,
-		"nvmeofSubsystemID": fmt.Sprintf("%d", subsystem.ID),
-		"nvmeofNamespaceID": fmt.Sprintf("%d", namespace.ID),
-		"nsid":              fmt.Sprintf("%d", namespace.NSID),
+		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
+		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
+		"nsid":              strconv.Itoa(namespace.NSID),
 	}
 
 	klog.Infof("Successfully created NVMe-oF volume with encoded ID: %s", encodedVolumeID)

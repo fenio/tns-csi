@@ -46,67 +46,42 @@ jobs:
             echo "Helm already installed"
           fi
       
-      - name: Install k3s
+      - name: Destroy existing k3s cluster
         run: |
-          if ! command -v k3s &> /dev/null; then
-            echo "Installing k3s..."
-            curl -sfL https://get.k3s.io | sh -s - \
-              --write-kubeconfig-mode 644 \
-              --disable traefik \
-              --disable servicelb
-          else
-            echo "k3s already installed"
+          echo "=== Destroying existing k3s cluster for clean state ==="
+          if command -v k3s-uninstall.sh &> /dev/null; then
+            sudo k3s-uninstall.sh || true
           fi
-          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=60s
+          # Clean up any remaining k3s artifacts
+          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
+          echo "k3s cluster destroyed"
+      
+      - name: Install k3s (fresh cluster)
+        run: |
+          echo "=== Installing fresh k3s cluster ==="
+          curl -sfL https://get.k3s.io | sh -s - \
+            --write-kubeconfig-mode 644 \
+            --disable traefik \
+            --disable servicelb
+          
+          echo "Waiting for cluster to be ready..."
+          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=120s
+          echo "Fresh k3s cluster ready"
       
       - name: Configure kubectl
         run: |
           mkdir -p ~/.kube
           sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
           sudo chown $USER:$USER ~/.kube/config
+          echo "=== Cluster nodes ==="
           kubectl get nodes
+          echo "=== Cluster version ==="
+          kubectl version --short
       
       - name: Build CSI driver image
         run: |
           sudo -E make docker-build
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
-      - name: Clean up previous deployment
-        run: |
-          # Step 1: Uninstall driver first (stops CSI controllers/nodes from reconciling)
-          helm uninstall tns-csi --namespace kube-system --wait --timeout 2m || true
-          
-          # Step 2: Force delete all driver pods immediately
-          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 3: Wait for driver pods to be completely gone
-          kubectl wait --for=delete pod -n kube-system -l app.kubernetes.io/name=tns-csi-driver --timeout=30s 2>/dev/null || true
-          
-          # Step 4: Clean up test namespaces (this removes PVCs in those namespaces)
-          kubectl delete namespace -l test-csi=true --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 5: Force delete any remaining PVCs across all namespaces
-          kubectl delete pvc --all --all-namespaces --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 6: Patch any PVs to remove finalizers, then force delete
-          for pv in $(kubectl get pv -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo ""); do
-            if [[ -n "$pv" ]]; then
-              kubectl patch pv "$pv" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
-              kubectl delete pv "$pv" --force --grace-period=0 --ignore-not-found=true || true
-            fi
-          done
-          
-          # Step 7: Delete storage classes
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true || true
-          
-          # Step 8: Verify cleanup completed
-          echo "=== Remaining PVCs ==="
-          kubectl get pvc --all-namespaces 2>/dev/null || echo "No PVCs remaining"
-          echo "=== Remaining PVs ==="
-          kubectl get pv 2>/dev/null || echo "No PVs remaining"
-          
-          # Step 9: Wait for resources to be fully cleaned up
-          sleep 15
       
       - name: Run NFS Integration Test
         env:
@@ -155,64 +130,42 @@ jobs:
             echo "Helm already installed"
           fi
       
-      - name: Install k3s
+      - name: Destroy existing k3s cluster
         run: |
-          if ! command -v k3s &> /dev/null; then
-            echo "Installing k3s..."
-            curl -sfL https://get.k3s.io | sh -
-          else
-            echo "k3s already installed"
+          echo "=== Destroying existing k3s cluster for clean state ==="
+          if command -v k3s-uninstall.sh &> /dev/null; then
+            sudo k3s-uninstall.sh || true
           fi
-          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=60s
+          # Clean up any remaining k3s artifacts
+          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
+          echo "k3s cluster destroyed"
+      
+      - name: Install k3s (fresh cluster)
+        run: |
+          echo "=== Installing fresh k3s cluster ==="
+          curl -sfL https://get.k3s.io | sh -s - \
+            --write-kubeconfig-mode 644 \
+            --disable traefik \
+            --disable servicelb
+          
+          echo "Waiting for cluster to be ready..."
+          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=120s
+          echo "Fresh k3s cluster ready"
       
       - name: Configure kubectl
         run: |
           mkdir -p ~/.kube
           sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
           sudo chown $USER:$USER ~/.kube/config
+          echo "=== Cluster nodes ==="
           kubectl get nodes
+          echo "=== Cluster version ==="
+          kubectl version --short
       
       - name: Build CSI driver image
         run: |
           sudo -E make docker-build
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
-      - name: Clean up previous deployment
-        run: |
-          # Step 1: Uninstall driver first (stops CSI controllers/nodes from reconciling)
-          helm uninstall tns-csi --namespace kube-system --wait --timeout 2m || true
-          
-          # Step 2: Force delete all driver pods immediately
-          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 3: Wait for driver pods to be completely gone
-          kubectl wait --for=delete pod -n kube-system -l app.kubernetes.io/name=tns-csi-driver --timeout=30s 2>/dev/null || true
-          
-          # Step 4: Clean up test namespaces (this removes PVCs in those namespaces)
-          kubectl delete namespace -l test-csi=true --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 5: Force delete any remaining PVCs across all namespaces
-          kubectl delete pvc --all --all-namespaces --force --grace-period=0 --ignore-not-found=true || true
-          
-          # Step 6: Patch any PVs to remove finalizers, then force delete
-          for pv in $(kubectl get pv -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || echo ""); do
-            if [[ -n "$pv" ]]; then
-              kubectl patch pv "$pv" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
-              kubectl delete pv "$pv" --force --grace-period=0 --ignore-not-found=true || true
-            fi
-          done
-          
-          # Step 7: Delete storage classes
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true || true
-          
-          # Step 8: Verify cleanup completed
-          echo "=== Remaining PVCs ==="
-          kubectl get pvc --all-namespaces 2>/dev/null || echo "No PVCs remaining"
-          echo "=== Remaining PVs ==="
-          kubectl get pv 2>/dev/null || echo "No PVs remaining"
-          
-          # Step 9: Wait for resources to be fully cleaned up
-          sleep 15
       
       - name: Run NVMe-oF Integration Test (Filesystem)
         env:

@@ -25,6 +25,14 @@ const (
 	ProtocolISCSI  = "iscsi"
 )
 
+// Static errors for node operations.
+var (
+	ErrNVMeCLINotFound    = errors.New("nvme command not found - please install nvme-cli")
+	ErrNVMeDeviceNotFound = errors.New("NVMe device not found")
+	ErrNVMeDeviceTimeout  = errors.New("timeout waiting for NVMe device to appear")
+	ErrUnsupportedFSType  = errors.New("unsupported filesystem type")
+)
+
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
@@ -686,7 +694,7 @@ func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
 	defer cancel()
 	cmd := exec.CommandContext(checkCtx, "nvme", "version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("nvme command not found - please install nvme-cli")
+		return fmt.Errorf("%w: %w", ErrNVMeCLINotFound, err)
 	}
 	return nil
 }
@@ -773,7 +781,7 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		}
 	}
 
-	return "", fmt.Errorf("NVMe device not found for NQN: %s", nqn)
+	return "", fmt.Errorf("%w for NQN: %s", ErrNVMeDeviceNotFound, nqn)
 }
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
@@ -793,7 +801,7 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 		time.Sleep(1 * time.Second)
 	}
 
-	return "", fmt.Errorf("timeout waiting for NVMe device to appear after %d attempts", attempt)
+	return "", fmt.Errorf("%w after %d attempts", ErrNVMeDeviceTimeout, attempt)
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target.
@@ -927,7 +935,7 @@ func (s *NodeService) formatDevice(ctx context.Context, devicePath, fsType strin
 		// -f force overwrite
 		cmd = exec.CommandContext(formatCtx, "mkfs.xfs", "-f", devicePath)
 	default:
-		return fmt.Errorf("unsupported filesystem type: %s", fsType)
+		return fmt.Errorf("%w: %s", ErrUnsupportedFSType, fsType)
 	}
 
 	klog.V(4).Infof("Running format command: %v", cmd.Args)

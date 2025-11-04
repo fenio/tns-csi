@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +14,14 @@ import (
 
 	"github.com/gorilla/websocket"
 	"k8s.io/klog/v2"
+)
+
+// Static errors for client operations.
+var (
+	ErrAuthenticationRejected = errors.New("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
+	ErrResponseIDMismatch     = errors.New("authentication response ID mismatch")
+	ErrClientClosed           = errors.New("client is closed")
+	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -173,7 +182,7 @@ func (c *Client) authenticate() error {
 
 	if !authResult {
 		klog.Errorf("Storage system rejected API key (length: %d, prefix: %s...)", len(c.apiKey), c.apiKey[:min(10, len(c.apiKey))])
-		return fmt.Errorf("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
+		return ErrAuthenticationRejected
 	}
 
 	klog.V(4).Info("Successfully authenticated with storage system")
@@ -235,7 +244,7 @@ func (c *Client) authenticateDirect() error {
 
 	// Verify response ID matches
 	if resp.ID != id {
-		return fmt.Errorf("authentication response ID mismatch: expected %s, got %s", id, resp.ID)
+		return fmt.Errorf("%w: expected %s, got %s", ErrResponseIDMismatch, id, resp.ID)
 	}
 
 	// Parse auth result
@@ -248,7 +257,7 @@ func (c *Client) authenticateDirect() error {
 
 	if !authResult {
 		klog.Errorf("Storage system rejected API key (length: %d, prefix: %s...)", len(c.apiKey), c.apiKey[:min(10, len(c.apiKey))])
-		return fmt.Errorf("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
+		return ErrAuthenticationRejected
 	}
 
 	klog.V(4).Info("Successfully authenticated with storage system (direct mode)")
@@ -260,7 +269,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
-		return fmt.Errorf("client is closed")
+		return ErrClientClosed
 	}
 
 	// Generate request ID
@@ -292,7 +301,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	case resp, ok := <-respCh:
 		if !ok {
 			// Channel was closed, connection error occurred
-			return fmt.Errorf("connection closed while waiting for response")
+			return ErrConnectionClosed
 		}
 		if resp.Error != nil {
 			return resp.Error
@@ -309,7 +318,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 		c.mu.Unlock()
 		return ctx.Err()
 	case <-c.closeCh:
-		return fmt.Errorf("client closed")
+		return ErrClientClosed
 	}
 }
 

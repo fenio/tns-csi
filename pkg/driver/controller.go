@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -12,6 +13,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
+)
+
+// Static errors for controller operations.
+var (
+	ErrVolumeIDNotEncoded = errors.New("volume ID is not in encoded format")
 )
 
 // APIClient defines the interface for TrueNAS API operations.
@@ -57,7 +63,7 @@ func decodeVolumeID(volumeID string) (*VolumeMetadata, error) {
 	// Handle legacy volume IDs that might not be encoded
 	if !isEncodedVolumeID(volumeID) {
 		klog.Warningf("Volume ID %s appears to be a legacy format, cannot decode metadata", volumeID)
-		return nil, fmt.Errorf("volume ID is not in encoded format")
+		return nil, ErrVolumeIDNotEncoded
 	}
 
 	data, err := base64.RawURLEncoding.DecodeString(volumeID)

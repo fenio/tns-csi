@@ -186,24 +186,7 @@ storageClasses:
     allowVolumeExpansion: true
     mountOptions: []
     parameters: {}
-  
-  # iSCSI storage class (NOT YET IMPLEMENTED)
-  iscsi:
-    enabled: false
-    name: tns-iscsi
-    isDefault: false
-    pool: "storage"
-    # iSCSI target portal (IP:port)
-    portal: ""
-    # iSCSI IQN prefix
-    iqnPrefix: "iqn.2025-01.io.tns.csi"
-    # Filesystem type for formatted volumes (ext4, ext3, xfs)
-    fsType: "ext4"
-    reclaimPolicy: Delete
-    volumeBindingMode: WaitForFirstConsumer
-    allowVolumeExpansion: true
-    mountOptions: []
-    parameters: {}
+
 
 # Security context for controller pod
 securityContext:

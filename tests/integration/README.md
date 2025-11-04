@@ -1,6 +1,6 @@
 # Integration Test Framework
 
-This directory contains the standardized integration test framework for the TrueNAS CSI driver. All protocols (NFS, NVMe-oF, iSCSI) are tested using the same approach for consistency and maintainability.
+This directory contains the standardized integration test framework for the TrueNAS CSI driver. All protocols (NFS, NVMe-oF) are tested using the same approach for consistency and maintainability.
 
 ## Directory Structure
 
@@ -14,13 +14,10 @@ tests/integration/
 │   ├── pvc-nvmeof.yaml     # NVMe-oF PVC (filesystem mode)
 │   ├── pod-nvmeof.yaml     # NVMe-oF test pod (filesystem)
 │   ├── pvc-nvmeof-block.yaml  # NVMe-oF PVC (block mode)
-│   ├── pod-nvmeof-block.yaml  # NVMe-oF test pod (block)
-│   ├── pvc-iscsi.yaml      # iSCSI PVC definition
-│   └── pod-iscsi.yaml      # iSCSI test pod
+│   └── pod-nvmeof-block.yaml  # NVMe-oF test pod (block)
 ├── test-nfs.sh             # NFS integration test
 ├── test-nvmeof.sh          # NVMe-oF integration test (filesystem)
-├── test-nvmeof-block.sh    # NVMe-oF integration test (block)
-└── test-iscsi.sh           # iSCSI integration test (not yet implemented)
+└── test-nvmeof-block.sh    # NVMe-oF integration test (block)
 ```
 
 ## Test Workflow
@@ -55,7 +52,6 @@ export TRUENAS_POOL="your-pool-name"
 - Protocol-specific tools:
   - NFS: `nfs-common` (Ubuntu/Debian)
   - NVMe-oF: `nvme-cli` and kernel module `nvme-tcp`
-  - iSCSI: `open-iscsi`
 
 ### Cluster Requirements
 
@@ -76,9 +72,6 @@ export TRUENAS_POOL="your-pool-name"
 
 # NVMe-oF test (block device mode)
 ./tests/integration/test-nvmeof-block.sh
-
-# iSCSI test (not yet implemented)
-./tests/integration/test-iscsi.sh
 ```
 
 ### Run All Tests
@@ -180,7 +173,7 @@ To add a test for a new protocol:
 
 The GitHub Actions workflow in `.github/workflows/integration.yml` uses these test scripts:
 
-- **Separate jobs** for each protocol (NFS, NVMe-oF, iSCSI)
+- **Separate jobs** for each protocol (NFS, NVMe-oF)
 - **Self-hosted runner** with real TrueNAS server
 - **Automatic cleanup** between tests
 - **Detailed logging** on failure
@@ -247,11 +240,7 @@ set -x  # Enable bash debug output
 - Supports both filesystem and block device modes
 - Tests check if NVMe-oF ports are configured on TrueNAS (skips if not)
 
-### iSCSI
 
-- Requires `open-iscsi` package on nodes
-- Implementation not yet complete (test script exits with SKIPPED status)
-- Planned support for filesystem and block device modes
 
 ## Contributing
 

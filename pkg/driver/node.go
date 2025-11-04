@@ -19,7 +19,6 @@ import (
 const (
 	ProtocolNFS    = "nfs"
 	ProtocolNVMeOF = "nvmeof"
-	ProtocolISCSI  = "iscsi"
 )
 
 // Filesystem type constants.
@@ -91,11 +90,8 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	case ProtocolNVMeOF:
 		return s.stageNVMeOFVolume(ctx, req, volumeContext)
 
-	case ProtocolISCSI:
-		return nil, status.Error(codes.Unimplemented, "iSCSI staging not yet implemented")
-
 	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
 	}
 }
 
@@ -148,11 +144,8 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		}
 		return s.unstageNVMeOFVolume(ctx, req, volumeContext)
 
-	case ProtocolISCSI:
-		return nil, status.Error(codes.Unimplemented, "iSCSI unstaging not yet implemented")
-
 	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
 	}
 }
 
@@ -195,21 +188,6 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		stagingTargetPath := req.GetStagingTargetPath()
 		if stagingTargetPath == "" {
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for NVMe-oF volumes")
-		}
-
-		// Check volume capability to determine how to publish
-		if req.GetVolumeCapability().GetBlock() != nil {
-			// Block volume: staging path is a device file, bind mount it
-			return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
-		}
-		// Filesystem volume: staging path is a mounted directory, bind mount the directory
-		return s.publishFilesystemVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
-
-	case ProtocolISCSI:
-		// iSCSI supports both block and filesystem volume modes
-		stagingTargetPath := req.GetStagingTargetPath()
-		if stagingTargetPath == "" {
-			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for iSCSI volumes")
 		}
 
 		// Check volume capability to determine how to publish

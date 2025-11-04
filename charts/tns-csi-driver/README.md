@@ -5,7 +5,7 @@ A Container Storage Interface (CSI) driver for TrueNAS that enables dynamic prov
 ## Features
 
 - **Dynamic Volume Provisioning**: Automatically create and delete storage volumes
-- **Multiple Protocols**: Support for NFS, NVMe-oF, and iSCSI (in development)
+- **Multiple Protocols**: Support for NFS and NVMe-oF
 - **Volume Expansion**: Resize volumes without pod recreation
 - **WebSocket API**: Real-time communication with TrueNAS using WebSockets with automatic reconnection
 - **Production Ready**: Connection resilience, proper cleanup, comprehensive error handling
@@ -78,9 +78,6 @@ storageClasses:
       - noatime
   
   nvmeof:
-    enabled: false
-  
-  iscsi:
     enabled: false
 ```
 
@@ -200,16 +197,6 @@ helm install tns-csi ./charts/tns-csi-driver \
 | `storageClasses.nvmeof.reclaimPolicy` | Reclaim policy | `Delete` |
 | `storageClasses.nvmeof.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nvmeof.volumeBindingMode` | Binding mode | `Immediate` |
-
-### Storage Class Configuration - iSCSI
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `storageClasses.iscsi.enabled` | Enable iSCSI storage class | `false` |
-| `storageClasses.iscsi.name` | Storage class name | `truenas-iscsi` |
-| `storageClasses.iscsi.pool` | ZFS pool name on TrueNAS | `""` |
-| `storageClasses.iscsi.portal` | iSCSI portal | `""` |
-| `storageClasses.iscsi.iqnPrefix` | IQN prefix | `iqn.2005-10.org.freenas.ctl` |
 
 ### Controller Settings
 

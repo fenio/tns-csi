@@ -27,8 +27,8 @@ wait_for_driver
 # Check if NVMe-oF is configured on TrueNAS
 test_info "Checking if NVMe-oF is configured on TrueNAS..."
 
-# Create a pre-check PVC to see if provisioning works
-kubectl apply -f "${MANIFEST_DIR}/pvc-nvmeof-block.yaml" || true
+# Create a pre-check PVC to see if provisioning works (in test namespace)
+kubectl apply -f "${MANIFEST_DIR}/pvc-nvmeof-block.yaml" -n "${TEST_NAMESPACE}" || true
 sleep 10
 
 # Check controller logs for port configuration error
@@ -40,7 +40,7 @@ if echo "$LOGS" | grep -q "No TCP NVMe-oF port"; then
     test_warning "NVMe-oF ports not configured on TrueNAS server"
     test_warning "Skipping NVMe-oF tests - this is expected if NVMe-oF is not set up"
     test_info "To enable NVMe-oF: Configure an NVMe-oF TCP portal in TrueNAS UI"
-    kubectl delete pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --wait=false
+    kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
     test_summary "${PROTOCOL}" "SKIPPED"
     exit 0
 fi

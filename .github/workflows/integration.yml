@@ -76,6 +76,8 @@ jobs:
           helm uninstall tns-csi --namespace kube-system --wait || true
           kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
           kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
+          # Clean up any leftover test namespaces from previous runs
+          kubectl delete namespace -l test-csi=true --timeout=60s || true
           sleep 10
       
       - name: Run NFS Integration Test
@@ -152,6 +154,8 @@ jobs:
           helm uninstall tns-csi --namespace kube-system --wait || true
           kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
           kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
+          # Clean up any leftover test namespaces from previous runs
+          kubectl delete namespace -l test-csi=true --timeout=60s || true
           sleep 10
       
       - name: Run NVMe-oF Integration Test (Filesystem)
@@ -161,20 +165,6 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
           ./tests/integration/test-nvmeof.sh
-      
-      - name: Clean up between tests
-        if: always()
-        run: |
-          echo "Cleaning up test resources..."
-          kubectl delete pvc --all --namespace default --ignore-not-found=true || true
-          echo "Waiting for PVC deletion to propagate to TrueNAS backend (30 seconds)..."
-          sleep 30
-          helm uninstall tns-csi --namespace kube-system --wait || true
-          kubectl delete pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver --force --grace-period=0 || true
-          kubectl delete storageclass tns-csi-nfs tns-nvmeof tns-iscsi --ignore-not-found=true
-          echo "Waiting for TrueNAS backend cleanup to complete (30 seconds)..."
-          sleep 30
-          echo "Cleanup complete"
       
       - name: Run NVMe-oF Integration Test (Block)
         env:

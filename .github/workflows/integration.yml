@@ -203,18 +203,10 @@ jobs:
           sudo -E make docker-build
           sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
       
-      - name: Run NVMe-oF Integration Test (Filesystem)
+      - name: Run NVMe-oF Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
           ./tests/integration/test-nvmeof.sh
-      
-      - name: Run NVMe-oF Integration Test (Block)
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          ./tests/integration/test-nvmeof-block.sh

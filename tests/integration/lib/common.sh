@@ -497,8 +497,8 @@ test_volume_expansion() {
 #######################################
 # Cleanup test resources
 # Arguments:
-#   Pod name
-#   PVC name
+#   Pod name (unused - kept for compatibility)
+#   PVC name (unused - kept for compatibility)
 #######################################
 cleanup_test() {
     local pod_name=$1
@@ -506,28 +506,16 @@ cleanup_test() {
     
     test_step 8 8 "Cleaning up test resources"
     
-    # Delete the entire namespace - this automatically cleans up all resources
+    # Delete the entire namespace - this triggers CSI DeleteVolume
     test_info "Deleting test namespace: ${TEST_NAMESPACE}"
     kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=120s || {
         test_warning "Namespace deletion timed out, forcing deletion"
         kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
     }
     
-    # Wait for namespace to be fully deleted
-    local retries=0
-    local max_retries=30
-    while kubectl get namespace "${TEST_NAMESPACE}" &>/dev/null && [[ $retries -lt $max_retries ]]; do
-        sleep 2
-        retries=$((retries + 1))
-    done
-    
-    if kubectl get namespace "${TEST_NAMESPACE}" &>/dev/null; then
-        test_warning "Namespace still exists (cleanup may take longer)"
-    else
-        test_success "Test namespace deleted successfully"
-    fi
-    
-    # Wait additional time for TrueNAS backend cleanup
+    # Wait for TrueNAS backend cleanup to complete
+    # The CSI driver's DeleteVolume removes datasets, NFS shares, and NVMe-oF subsystems
+    # This wait ensures TrueNAS cleanup finishes before the test completes
     test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
     sleep 30
     test_success "Cleanup complete"

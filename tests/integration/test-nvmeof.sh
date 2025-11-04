@@ -1,6 +1,6 @@
 #!/bin/bash
-# NVMe-oF Integration Test (Filesystem Mode)
-# Tests NVMe-oF volume provisioning, mounting, and I/O operations
+# NVMe-oF Integration Test
+# Tests NVMe-oF volume provisioning, mounting, I/O operations, and expansion
 
 set -e
 

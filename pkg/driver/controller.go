@@ -22,6 +22,8 @@ var (
 )
 
 // APIClient defines the interface for TrueNAS API operations.
+//
+//nolint:interfacebloat // Interface represents cohesive TrueNAS storage API - splitting would reduce clarity
 type APIClient interface {
 	CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	DeleteDataset(ctx context.Context, datasetID string) error

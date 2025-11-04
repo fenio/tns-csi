@@ -443,7 +443,22 @@ test_volume_expansion() {
         echo "=== PVC Status ==="
         kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}"
         echo ""
-        echo "=== Controller Logs ==="
+        echo "=== StorageClass Configuration ==="
+        kubectl get sc -o yaml | grep -A 20 "name: tns-csi-" || true
+        echo ""
+        echo "=== Controller Pod Status ==="
+        kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller || true
+        echo ""
+        echo "=== CSI Resizer Logs ==="
+        local controller_pod
+        controller_pod=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        if [[ -n "${controller_pod}" ]]; then
+            kubectl logs -n kube-system "${controller_pod}" -c csi-resizer --tail=100 || true
+        else
+            echo "No controller pod found"
+        fi
+        echo ""
+        echo "=== Controller Driver Logs ==="
         kubectl logs -n kube-system \
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
             --tail=50 || true

@@ -51,6 +51,7 @@ test_success "NVMe-oF is configured, proceeding with tests"
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" "false"
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_io_operations "${POD_NAME}" "/data" "filesystem"
+test_volume_expansion "${PVC_NAME}" "${POD_NAME}" "/data" "3Gi"
 cleanup_test "${POD_NAME}" "${PVC_NAME}"
 
 # Success

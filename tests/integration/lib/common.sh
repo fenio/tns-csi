@@ -74,7 +74,7 @@ test_info() {
 # Verify cluster is accessible
 #######################################
 verify_cluster() {
-    test_step 1 7 "Verifying cluster access"
+    test_step 1 8 "Verifying cluster access"
     
     if ! kubectl cluster-info &>/dev/null; then
         test_error "Cannot access cluster"
@@ -96,7 +96,7 @@ deploy_driver() {
     shift
     local helm_args=("$@")
     
-    test_step 2 7 "Deploying CSI driver for ${protocol}"
+    test_step 2 8 "Deploying CSI driver for ${protocol}"
     
     # Check required environment variables
     if [[ -z "${TRUENAS_HOST}" ]]; then
@@ -189,7 +189,7 @@ deploy_driver() {
 # Wait for CSI driver to be ready
 #######################################
 wait_for_driver() {
-    test_step 3 7 "Waiting for CSI driver to be ready"
+    test_step 3 8 "Waiting for CSI driver to be ready"
     
     kubectl wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=tns-csi-driver \
@@ -217,7 +217,7 @@ create_pvc() {
     local pvc_name=$2
     local wait_for_binding="${3:-true}"
     
-    test_step 4 7 "Creating PersistentVolumeClaim: ${pvc_name}"
+    test_step 4 8 "Creating PersistentVolumeClaim: ${pvc_name}"
     
     kubectl apply -f "${manifest}"
     
@@ -268,7 +268,7 @@ create_test_pod() {
     local manifest=$1
     local pod_name=$2
     
-    test_step 5 7 "Creating test pod: ${pod_name}"
+    test_step 5 8 "Creating test pod: ${pod_name}"
     
     kubectl apply -f "${manifest}"
     
@@ -321,7 +321,7 @@ test_io_operations() {
     local path=$2
     local test_type=${3:-filesystem}
     
-    test_step 6 7 "Testing I/O operations (${test_type})"
+    test_step 6 8 "Testing I/O operations (${test_type})"
     
     if [[ "${test_type}" == "filesystem" ]]; then
         # Filesystem tests
@@ -372,6 +372,104 @@ test_io_operations() {
 }
 
 #######################################
+# Test volume expansion
+# Arguments:
+#   PVC name
+#   Pod name
+#   Mount path (for filesystem verification)
+#   New size (e.g., "3Gi")
+#######################################
+test_volume_expansion() {
+    local pvc_name=$1
+    local pod_name=$2
+    local mount_path=$3
+    local new_size=$4
+    
+    test_step 7 8 "Testing volume expansion to ${new_size}"
+    
+    # Get current PVC size
+    local current_size
+    current_size=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.resources.requests.storage}')
+    test_info "Current PVC size: ${current_size}"
+    
+    # Get current filesystem capacity (if applicable)
+    if [[ -n "${mount_path}" ]]; then
+        echo ""
+        echo "=== Current filesystem usage ==="
+        kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- df -h "${mount_path}" || true
+    fi
+    
+    # Patch PVC to request larger size
+    echo ""
+    test_info "Expanding PVC from ${current_size} to ${new_size}..."
+    kubectl patch pvc "${pvc_name}" -n "${TEST_NAMESPACE}" \
+        -p "{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"${new_size}\"}}}}"
+    
+    test_success "PVC expansion request submitted"
+    
+    # Wait for PVC condition to show expansion in progress or completed
+    echo ""
+    test_info "Waiting for volume expansion to complete (timeout: ${TIMEOUT_PVC})..."
+    
+    # Wait for capacity to update in status (this indicates controller expansion completed)
+    local retries=0
+    local max_retries=60
+    while [[ $retries -lt $max_retries ]]; do
+        local status_capacity
+        status_capacity=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "")
+        
+        if [[ "${status_capacity}" == "${new_size}" ]]; then
+            test_success "Volume expanded to ${new_size}"
+            break
+        fi
+        
+        sleep 2
+        ((retries++))
+    done
+    
+    if [[ $retries -eq $max_retries ]]; then
+        test_error "Timeout waiting for volume expansion"
+        echo ""
+        echo "=== PVC Status ==="
+        kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}"
+        echo ""
+        echo "=== Controller Logs ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=50 || true
+        return 1
+    fi
+    
+    # Verify filesystem expansion (if applicable)
+    if [[ -n "${mount_path}" ]]; then
+        echo ""
+        test_info "Verifying filesystem expansion..."
+        sleep 5  # Give filesystem time to expand
+        
+        echo ""
+        echo "=== New filesystem usage ==="
+        kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- df -h "${mount_path}"
+        
+        # Verify we can still write to the volume after expansion
+        echo ""
+        test_info "Testing I/O after expansion..."
+        kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
+            sh -c "echo 'Post-expansion test' > ${mount_path}/post-expansion.txt"
+        
+        local content
+        content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/post-expansion.txt")
+        if [[ "${content}" == "Post-expansion test" ]]; then
+            test_success "I/O operations work after expansion"
+        else
+            test_error "I/O verification failed after expansion"
+            return 1
+        fi
+    fi
+    
+    test_success "Volume expansion completed successfully"
+}
+
+#######################################
 # Cleanup test resources
 # Arguments:
 #   Pod name
@@ -381,7 +479,7 @@ cleanup_test() {
     local pod_name=$1
     local pvc_name=$2
     
-    test_step 7 7 "Cleaning up test resources"
+    test_step 8 8 "Cleaning up test resources"
     
     test_info "Deleting pod: ${pod_name}"
     kubectl delete pod "${pod_name}" -n "${TEST_NAMESPACE}" \

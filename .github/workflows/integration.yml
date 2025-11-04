@@ -64,9 +64,27 @@ jobs:
             --disable traefik \
             --disable servicelb
           
-          echo "Waiting for cluster to be ready..."
-          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=120s
-          echo "Fresh k3s cluster ready"
+          echo "Waiting for k3s service to start..."
+          sleep 15
+          
+          echo "Waiting for cluster nodes to register and become ready..."
+          retries=0
+          while [[ $retries -lt 24 ]]; do
+            if sudo k3s kubectl get nodes &>/dev/null; then
+              echo "Node registered, checking Ready condition..."
+              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
+                echo "Fresh k3s cluster ready"
+                sudo k3s kubectl get nodes
+                exit 0
+              fi
+            fi
+            echo "Waiting for cluster... (attempt $((retries+1))/24)"
+            sleep 5
+            retries=$((retries + 1))
+          done
+          echo "ERROR: Cluster failed to become ready within 2 minutes"
+          sudo systemctl status k3s || true
+          exit 1
       
       - name: Configure kubectl
         run: |
@@ -148,9 +166,27 @@ jobs:
             --disable traefik \
             --disable servicelb
           
-          echo "Waiting for cluster to be ready..."
-          sudo k3s kubectl wait --for=condition=Ready node --all --timeout=120s
-          echo "Fresh k3s cluster ready"
+          echo "Waiting for k3s service to start..."
+          sleep 15
+          
+          echo "Waiting for cluster nodes to register and become ready..."
+          retries=0
+          while [[ $retries -lt 24 ]]; do
+            if sudo k3s kubectl get nodes &>/dev/null; then
+              echo "Node registered, checking Ready condition..."
+              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
+                echo "Fresh k3s cluster ready"
+                sudo k3s kubectl get nodes
+                exit 0
+              fi
+            fi
+            echo "Waiting for cluster... (attempt $((retries+1))/24)"
+            sleep 5
+            retries=$((retries + 1))
+          done
+          echo "ERROR: Cluster failed to become ready within 2 minutes"
+          sudo systemctl status k3s || true
+          exit 1
       
       - name: Configure kubectl
         run: |

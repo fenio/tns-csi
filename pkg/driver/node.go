@@ -23,6 +23,14 @@ const (
 	ProtocolISCSI  = "iscsi"
 )
 
+// Filesystem type constants.
+const (
+	fsTypeExt2 = "ext2"
+	fsTypeExt3 = "ext3"
+	fsTypeExt4 = "ext4"
+	fsTypeXFS  = "xfs"
+)
+
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
@@ -466,9 +474,9 @@ func detectFilesystemType(ctx context.Context, mountPath string) (string, error)
 }
 
 // resizeFilesystem resizes the filesystem at the given path based on filesystem type.
-func resizeFilesystem(ctx context.Context, mountPath string, fsType string) error {
+func resizeFilesystem(ctx context.Context, mountPath, fsType string) error {
 	switch fsType {
-	case "ext2", "ext3", "ext4":
+	case fsTypeExt2, fsTypeExt3, fsTypeExt4:
 		// For ext filesystems, we need to find the underlying device
 		// Use findmnt to get the source device
 		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
@@ -483,6 +491,7 @@ func resizeFilesystem(ctx context.Context, mountPath string, fsType string) erro
 		}
 
 		klog.Infof("Resizing ext filesystem on device %s", device)
+		// #nosec G204 -- device path is validated via findmnt output
 		cmd = exec.CommandContext(ctx, "resize2fs", device)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
@@ -491,7 +500,7 @@ func resizeFilesystem(ctx context.Context, mountPath string, fsType string) erro
 		klog.Infof("resize2fs output: %s", string(output))
 		return nil
 
-	case "xfs":
+	case fsTypeXFS:
 		// For XFS, xfs_growfs operates on the mount point
 		klog.Infof("Resizing XFS filesystem at mount point %s", mountPath)
 		cmd := exec.CommandContext(ctx, "xfs_growfs", mountPath)

@@ -52,7 +52,9 @@ create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" "false"
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_io_operations "${POD_NAME}" "/data" "filesystem"
 test_volume_expansion "${PVC_NAME}" "${POD_NAME}" "/data" "3Gi"
-cleanup_test "${POD_NAME}" "${PVC_NAME}"
+# Cleanup disabled temporarily to debug expansion issues
+# cleanup_test "${POD_NAME}" "${PVC_NAME}"
+test_warning "Cleanup step skipped - manual cleanup required"
 
 # Success
 test_summary "${PROTOCOL}" "PASSED"

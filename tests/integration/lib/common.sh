@@ -416,7 +416,7 @@ test_volume_expansion() {
     local max_retries=60
     while [[ $retries -lt $max_retries ]]; do
         local status_capacity
-        status_capacity=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "")
+        status_capacity=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.status.capacity.storage}' 2>/dev/null || echo "") || true
         
         if [[ "${status_capacity}" == "${new_size}" ]]; then
             test_success "Volume expanded to ${new_size}"
@@ -424,7 +424,7 @@ test_volume_expansion() {
         fi
         
         sleep 2
-        ((retries++))
+        retries=$((retries + 1))
     done
     
     if [[ $retries -eq $max_retries ]]; then

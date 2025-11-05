@@ -178,15 +178,28 @@ EOF
 
 # Build and run the cleanup script
 echo -e "${YELLOW}Building cleanup tool...${NC}"
-cd /tmp
-go mod init cleanup 2>/dev/null || true
-go mod edit -replace github.com/fenio/tns-csi=$(cd - && pwd) 2>/dev/null || true
-go mod tidy 2>/dev/null || true
+
+# Store current directory
+SCRIPT_DIR=$(pwd)
+CLEANUP_DIR=$(mktemp -d)
+
+# Copy the Go script to a temporary directory
+cp /tmp/truenas-cleanup.go "$CLEANUP_DIR/"
+cd "$CLEANUP_DIR"
+
+# Initialize Go module with proper replace directive
+go mod init cleanup
+go mod edit -replace github.com/fenio/tns-csi="$SCRIPT_DIR"
+go mod tidy
 
 echo -e "${YELLOW}Running cleanup...${NC}"
 echo ""
 
 go run truenas-cleanup.go
+
+# Cleanup
+cd "$SCRIPT_DIR"
+rm -rf "$CLEANUP_DIR"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"

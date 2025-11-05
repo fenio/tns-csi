@@ -308,6 +308,20 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 
 	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
 	if err != nil {
+		// Check if dataset was partially created despite the error
+		// This can happen if the clone operation succeeds but querying the dataset fails
+		klog.Errorf("Failed to clone snapshot: %v. Checking if dataset was created...", err)
+
+		// Try to cleanup any partially created dataset
+		if delErr := s.apiClient.DeleteDataset(ctx, newDatasetName); delErr != nil {
+			// If deletion fails with "not found", that's okay - dataset wasn't created
+			if !isNotFoundError(delErr) {
+				klog.Errorf("Failed to cleanup potentially partially-created dataset %s: %v", newDatasetName, delErr)
+			}
+		} else {
+			klog.Infof("Cleaned up partially-created dataset: %s", newDatasetName)
+		}
+
 		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
 	}
 

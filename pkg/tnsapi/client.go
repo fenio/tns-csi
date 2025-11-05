@@ -937,12 +937,46 @@ type CloneSnapshotParams struct {
 func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error) {
 	klog.V(4).Infof("Cloning snapshot %s to dataset %s", params.Snapshot, params.Dataset)
 
-	var result Dataset
+	// TrueNAS zfs.snapshot.clone returns a boolean indicating success, not the Dataset object
+	var result bool
 	err := c.Call(ctx, "zfs.snapshot.clone", []interface{}{params}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone snapshot: %w", err)
 	}
 
-	klog.V(4).Infof("Successfully cloned snapshot to dataset: %s", result.Name)
-	return &result, nil
+	if !result {
+		return nil, fmt.Errorf("clone operation returned false (unsuccessful)")
+	}
+
+	klog.V(4).Infof("Clone operation successful, querying for cloned dataset: %s", params.Dataset)
+
+	// Query the newly cloned dataset to get its full information
+	datasets, err := c.queryDatasets(ctx, params.Dataset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query cloned dataset: %w", err)
+	}
+
+	if len(datasets) == 0 {
+		return nil, fmt.Errorf("cloned dataset not found after successful clone: %s", params.Dataset)
+	}
+
+	klog.V(4).Infof("Successfully cloned snapshot to dataset: %s", datasets[0].Name)
+	return &datasets[0], nil
+}
+
+// queryDatasets queries datasets by name (internal helper).
+func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Dataset, error) {
+	klog.V(5).Infof("Querying datasets with name: %s", datasetName)
+
+	var result []Dataset
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", datasetName},
+		},
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
+	}
+
+	return result, nil
 }

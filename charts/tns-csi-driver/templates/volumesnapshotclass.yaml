@@ -1,0 +1,33 @@
+{{- if and .Values.snapshots.enabled .Values.snapshots.volumeSnapshotClass.create }}
+{{- if .Values.storageClasses.nfs.enabled }}
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: {{ .Values.storageClasses.nfs.name }}-snapshot
+  labels:
+    {{- include "tns-csi-driver.labels" . | nindent 4 }}
+  {{- with .Values.customAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+driver: {{ .Values.csiDriverName }}
+deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+{{- end }}
+
+{{- if .Values.storageClasses.nvmeof.enabled }}
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: {{ .Values.storageClasses.nvmeof.name }}-snapshot
+  labels:
+    {{- include "tns-csi-driver.labels" . | nindent 4 }}
+  {{- with .Values.customAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+driver: {{ .Values.csiDriverName }}
+deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+{{- end }}
+{{- end }}

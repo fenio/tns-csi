@@ -137,6 +137,19 @@ sidecars:
       limits:
         cpu: 100m
         memory: 100Mi
+  
+  snapshotter:
+    image:
+      repository: registry.k8s.io/sig-storage/csi-snapshotter
+      tag: v8.2.0
+      pullPolicy: IfNotPresent
+    resources:
+      requests:
+        cpu: 10m
+        memory: 20Mi
+      limits:
+        cpu: 200m
+        memory: 200Mi
 
 # Storage class configuration
 storageClasses:
@@ -187,6 +200,18 @@ storageClasses:
     mountOptions: []
     parameters: {}
 
+# Snapshot support
+snapshots:
+  # Enable snapshot support (adds csi-snapshotter sidecar to controller)
+  enabled: true
+  
+  # VolumeSnapshotClass configuration
+  # VolumeSnapshotClass resources will be created for enabled storage classes
+  volumeSnapshotClass:
+    # Enable creation of VolumeSnapshotClass resources
+    create: true
+    # Deletion policy: Delete or Retain
+    deletionPolicy: Delete
 
 # Security context for controller pod
 securityContext:

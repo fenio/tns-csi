@@ -38,11 +38,15 @@ The driver intentionally focuses on these two production-ready protocols rather 
 
 ## Features
 
-- Dynamic volume provisioning
-- Multiple protocol support (NFS, NVMe-oF)
-- Volume lifecycle management
-- Support for ReadWriteOnce and ReadWriteMany access modes
-- Integration with Kubernetes storage classes
+- **Dynamic volume provisioning** - Automatically create and delete storage volumes
+- **Multiple protocol support** - NFS for file storage, NVMe-oF for high-performance block storage
+- **Volume lifecycle management** - Full create, delete, attach, detach, mount, unmount operations
+- **Volume snapshots** - Create, delete, and restore from snapshots (NFS and NVMe-oF)
+- **Volume cloning** - Create new volumes from existing snapshots
+- **Volume expansion** - Resize volumes dynamically (supported for NFS)
+- **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
+- **Storage classes** - Flexible configuration via Kubernetes storage classes
+- **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
 
 ## Prerequisites
 
@@ -166,9 +170,9 @@ parameters:
 ## Known Limitations
 
 - **Protocol Support**: Currently supports NFS and NVMe-oF. iSCSI and SMB may be considered for future releases.
-- **Volume Expansion**: Supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default for NFS)
-- **Snapshots**: Not yet implemented
-- **Testing**: Limited testing on production environments - use with caution
+- **Volume Expansion**: Supported for NFS volumes via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
+- **Snapshots**: Fully implemented for both NFS and NVMe-oF protocols
+- **Testing**: Comprehensive integration testing on self-hosted infrastructure; production use should include thorough validation
 
 ## Troubleshooting
 

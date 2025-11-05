@@ -12,13 +12,9 @@ A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems wi
 
 **This is an independent, community-developed project and is NOT affiliated with, endorsed by, or supported by iXsystems Inc. or the TrueNAS project.**
 
-This driver is designed to work with TrueNAS and systems that provide TrueNAS-compatible APIs, but:
-- It is not an official TrueNAS product
-- It is not supported by iXsystems Inc.
 - TrueNAS is a registered trademark of iXsystems Inc.
+- **This project is in early development phase and is NOT production-ready**
 - Use of this software is entirely at your own risk
-
-If you need official support, please use the official TrueNAS CSI driver available at https://github.com/truenas/charts
 
 ## Overview
 
@@ -43,7 +39,7 @@ The driver intentionally focuses on these two production-ready protocols rather 
 - **Volume lifecycle management** - Full create, delete, attach, detach, mount, unmount operations
 - **Volume snapshots** - Create, delete, and restore from snapshots (NFS and NVMe-oF)
 - **Volume cloning** - Create new volumes from existing snapshots
-- **Volume expansion** - Resize volumes dynamically (supported for NFS)
+- **Volume expansion** - Resize volumes dynamically (supported for both NFS and NVMe-oF)
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
@@ -167,12 +163,20 @@ parameters:
   fsType: ext4  # or xfs
 ```
 
-## Known Limitations
+## Project Status and Limitations
 
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This driver is in early development and requires extensive testing before production use. Key considerations:
+
+- **Development Phase**: Active development with ongoing testing and validation
 - **Protocol Support**: Currently supports NFS and NVMe-oF. iSCSI and SMB may be considered for future releases.
-- **Volume Expansion**: Supported for NFS volumes via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
-- **Snapshots**: Fully implemented for both NFS and NVMe-oF protocols
-- **Testing**: Comprehensive integration testing on self-hosted infrastructure; production use should include thorough validation
+- **Volume Expansion**: Implemented and functional for both NFS and NVMe-oF protocols when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
+- **Snapshots**: Implemented for both NFS and NVMe-oF protocols, testing in progress
+- **Testing**: Integration tests run on self-hosted infrastructure; extensive validation needed for production readiness
+- **Stability**: Core features functional but may have undiscovered edge cases or bugs
+
+**Recommended Use**: Development, testing, and evaluation environments only. Use at your own risk.
 
 ## Troubleshooting
 

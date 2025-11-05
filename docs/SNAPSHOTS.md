@@ -1,20 +1,26 @@
 # Volume Snapshots Guide
 
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This driver is in early development phase. Snapshot functionality is implemented but requires thorough testing. Use only for testing and evaluation.
+
 This guide explains how to use volume snapshots with the TrueNAS CSI driver.
 
 ## Overview
 
 The TrueNAS CSI driver supports creating, deleting, and restoring from volume snapshots for both NFS and NVMe-oF protocols. Snapshots leverage ZFS snapshot capabilities on TrueNAS, providing instant, space-efficient point-in-time copies of your data.
 
-## Features
+## Features (Implementation Status)
 
-- ✅ **Create snapshots** - Instant point-in-time copies of volumes
-- ✅ **Delete snapshots** - Remove snapshots when no longer needed
-- ✅ **List snapshots** - Query existing snapshots
-- ✅ **Restore from snapshots** - Create new volumes from snapshots (cloning)
-- ✅ **NFS support** - Full snapshot support for NFS volumes
-- ✅ **NVMe-oF support** - Full snapshot support for NVMe-oF volumes
+- ✅ **Create snapshots** - Implemented for both NFS and NVMe-oF (testing in progress)
+- ✅ **Delete snapshots** - Implemented for both protocols (testing in progress)
+- ✅ **List snapshots** - Implemented (testing in progress)
+- ✅ **Restore from snapshots** - Create new volumes from snapshots via cloning (testing in progress)
+- ✅ **NFS support** - Snapshot operations implemented (validation needed)
+- ✅ **NVMe-oF support** - Snapshot operations implemented (validation needed)
 - ✅ **Idempotent operations** - Safe to retry create/delete operations
+
+**Note:** While snapshot functionality is implemented, it requires comprehensive testing before production use.
 
 ## Prerequisites
 

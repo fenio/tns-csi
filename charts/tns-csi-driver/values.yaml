@@ -203,7 +203,9 @@ storageClasses:
 # Snapshot support
 snapshots:
   # Enable snapshot support (adds csi-snapshotter sidecar to controller)
-  enabled: true
+  # NOTE: Requires VolumeSnapshot CRDs to be installed in the cluster first
+  # Install with: kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/...
+  enabled: false
   
   # VolumeSnapshotClass configuration
   # VolumeSnapshotClass resources will be created for enabled storage classes

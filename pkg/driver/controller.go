@@ -36,6 +36,10 @@ type APIClient interface {
 	DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error
 	QueryNVMeOFPorts(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
 	AddSubsystemToPort(ctx context.Context, subsystemID, portID int) error
+	CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
+	DeleteSnapshot(ctx context.Context, snapshotID string) error
+	QuerySnapshots(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
+	CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
 }
 
 // VolumeMetadata contains information needed to manage a volume.
@@ -134,6 +138,15 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	protocol := params["protocol"]
 	if protocol == "" {
 		protocol = ProtocolNFS
+	}
+
+	// Check if creating from snapshot
+	if req.GetVolumeContentSource() != nil {
+		if snapshot := req.GetVolumeContentSource().GetSnapshot(); snapshot != nil {
+			klog.Infof("Creating volume %s from snapshot %s with protocol %s",
+				req.GetName(), snapshot.GetSnapshotId(), protocol)
+			return s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
+		}
 	}
 
 	klog.Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
@@ -277,27 +290,32 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 					},
 				},
 			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+					},
+				},
+			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
+					},
+				},
+			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
+					},
+				},
+			},
 		},
 	}, nil
 }
 
-// CreateSnapshot creates a volume snapshot.
-func (s *ControllerService) CreateSnapshot(_ context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
-	klog.V(4).Infof("CreateSnapshot called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "CreateSnapshot not implemented")
-}
-
-// DeleteSnapshot deletes a snapshot.
-func (s *ControllerService) DeleteSnapshot(_ context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
-	klog.V(4).Infof("DeleteSnapshot called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "DeleteSnapshot not implemented")
-}
-
-// ListSnapshots lists snapshots.
-func (s *ControllerService) ListSnapshots(_ context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	klog.V(4).Infof("ListSnapshots called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ListSnapshots not implemented")
-}
+// Snapshot operations are implemented in controller_snapshot.go
 
 // ControllerExpandVolume expands a volume.
 func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {

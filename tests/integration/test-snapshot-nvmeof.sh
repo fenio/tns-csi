@@ -90,48 +90,48 @@ create_snapshot() {
 }
 
 #######################################
-# Test block device I/O with data pattern
+# Test filesystem I/O with data pattern
 #######################################
 test_block_io_with_pattern() {
     local pod_name=$1
-    local device_path=$2
+    local mount_path=$2
     
-    test_step 6 11 "Testing block I/O with data pattern"
+    test_step 6 11 "Testing filesystem I/O with data pattern"
     
-    # Write pattern to block device (first 10MB with specific pattern)
+    # Write pattern to filesystem
     echo ""
-    test_info "Writing test pattern to block device..."
+    test_info "Writing test pattern to filesystem..."
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        sh -c "echo 'NVMeOF-CSI-TEST-PATTERN' | dd of=${device_path} bs=512 count=1 2>&1" | tail -3
+        sh -c "echo 'NVMeOF-CSI-TEST-PATTERN' > ${mount_path}/test-pattern.txt"
     test_success "Test pattern written"
     
-    # Write additional data
+    # Write additional data file
     echo ""
     test_info "Writing large test data (100MB)..."
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        dd if=/dev/zero of="${device_path}" bs=1M count=100 seek=1 2>&1 | tail -3
+        dd if=/dev/zero of="${mount_path}/testfile.dat" bs=1M count=100 2>&1 | tail -3
     test_success "Large data write successful"
 }
 
 #######################################
-# Verify block device pattern
+# Verify filesystem pattern
 #######################################
 verify_block_pattern() {
     local pod_name=$1
-    local device_path=$2
+    local mount_path=$2
     
     test_info "Verifying test pattern from snapshot..."
     
-    # Read first block and verify pattern
+    # Read file and verify pattern
     local pattern
     pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        dd if="${device_path}" bs=512 count=1 2>/dev/null | tr -d '\0')
+        cat "${mount_path}/test-pattern.txt" 2>/dev/null || echo "")
     
     if [[ "${pattern}" == *"NVMeOF-CSI-TEST-PATTERN"* ]]; then
-        test_success "Block device pattern verified"
+        test_success "Filesystem pattern verified"
         return 0
     else
-        test_error "Pattern verification failed"
+        test_error "Pattern verification failed (got: '${pattern}')"
         return 1
     fi
 }
@@ -143,7 +143,6 @@ test_snapshot_restore() {
     local pvc_manifest=$1
     local pvc_name=$2
     local pod_name=$3
-    local device_path=$4
     
     test_step 7 11 "Testing snapshot restore: ${pvc_name}"
     
@@ -168,9 +167,9 @@ spec:
   - name: test-container
     image: busybox:latest
     command: ["sleep", "3600"]
-    volumeDevices:
+    volumeMounts:
     - name: test-volume
-      devicePath: ${device_path}
+      mountPath: /mnt/test
   volumes:
   - name: test-volume
     persistentVolumeClaim:
@@ -200,13 +199,13 @@ EOF
     
     # Verify data pattern from snapshot
     echo ""
-    verify_block_pattern "${pod_name}" "${device_path}"
+    verify_block_pattern "${pod_name}" "/mnt/test"
     
     # Write new data to cloned volume
     echo ""
-    test_info "Writing new data to cloned block device..."
+    test_info "Writing new data to cloned filesystem..."
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        sh -c "echo 'CLONED-VOLUME-DATA' | dd of=${device_path} bs=512 count=1 seek=200 2>&1" | tail -3
+        sh -c "echo 'CLONED-VOLUME-DATA' > /mnt/test/cloned-data.txt"
     test_success "Write to cloned volume successful"
     
     # Verify new data
@@ -214,12 +213,12 @@ EOF
     test_info "Verifying new data on cloned volume..."
     local new_pattern
     new_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        dd if="${device_path}" bs=512 count=1 skip=200 2>/dev/null | tr -d '\0')
+        cat /mnt/test/cloned-data.txt 2>/dev/null || echo "")
     
     if [[ "${new_pattern}" == *"CLONED-VOLUME-DATA"* ]]; then
         test_success "New data verified on cloned volume"
     else
-        test_error "Failed to verify new data"
+        test_error "Failed to verify new data (got: '${new_pattern}')"
         return 1
     fi
 }
@@ -267,9 +266,9 @@ deploy_driver "nvmeof" --set snapshots.enabled=true --set snapshots.volumeSnapsh
 wait_for_driver
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" false  # Don't wait for binding (WaitForFirstConsumer)
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
-test_block_io_with_pattern "${POD_NAME}" "/dev/xvda"
+test_block_io_with_pattern "${POD_NAME}" "/mnt/test"
 create_snapshot "${MANIFEST_DIR}/volumesnapshot-nvmeof.yaml" "${SNAPSHOT_NAME}"
-test_snapshot_restore "${MANIFEST_DIR}/pvc-from-snapshot-nvmeof.yaml" "${PVC_FROM_SNAPSHOT}" "${POD_FROM_SNAPSHOT}" "/dev/xvda"
+test_snapshot_restore "${MANIFEST_DIR}/pvc-from-snapshot-nvmeof.yaml" "${PVC_FROM_SNAPSHOT}" "${POD_FROM_SNAPSHOT}"
 
 # Success
 cleanup_snapshot_test

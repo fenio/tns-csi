@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -90,8 +91,8 @@ func (d *Driver) Run() error {
 		}
 		go func() {
 			klog.Infof("Starting metrics server on %s", d.config.MetricsAddr)
-			if err := d.metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				klog.Errorf("Metrics server error: %v", err)
+			if serveErr := d.metricsSrv.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				klog.Errorf("Metrics server error: %v", serveErr)
 			}
 		}()
 	}

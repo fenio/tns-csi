@@ -29,19 +29,21 @@ var (
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
+//
+//nolint:govet // fieldalignment: struct field order optimized for readability over memory layout
 type Client struct {
+	mu            sync.Mutex
 	conn          *websocket.Conn
 	pending       map[string]chan *Response
 	closeCh       chan struct{}
 	url           string
 	apiKey        string
+	connectedAt   time.Time // Track connection start time for metrics
 	retryInterval time.Duration
 	reqID         uint64
 	maxRetries    int
-	mu            sync.Mutex
 	closed        bool
 	reconnecting  bool
-	connectedAt   time.Time // Track connection start time for metrics
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).

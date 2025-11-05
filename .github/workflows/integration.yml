@@ -311,6 +311,15 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/volumesnapshotcontents.snapshot.storage.k8s.io
           kubectl wait --for condition=established --timeout=60s crd/volumesnapshots.snapshot.storage.k8s.io
       
+      - name: Install Snapshot Controller
+        run: |
+          echo "=== Installing Snapshot Controller ==="
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+          echo "Waiting for snapshot-controller to be ready..."
+          kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true
+          kubectl get pods -n kube-system | grep snapshot-controller
+      
       - name: Build CSI driver image
         run: |
           sudo -E make docker-build
@@ -424,6 +433,15 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/volumesnapshotclasses.snapshot.storage.k8s.io
           kubectl wait --for condition=established --timeout=60s crd/volumesnapshotcontents.snapshot.storage.k8s.io
           kubectl wait --for condition=established --timeout=60s crd/volumesnapshots.snapshot.storage.k8s.io
+      
+      - name: Install Snapshot Controller
+        run: |
+          echo "=== Installing Snapshot Controller ==="
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+          echo "Waiting for snapshot-controller to be ready..."
+          kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true
+          kubectl get pods -n kube-system | grep snapshot-controller
       
       - name: Build CSI driver image
         run: |

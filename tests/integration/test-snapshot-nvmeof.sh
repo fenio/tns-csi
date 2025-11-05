@@ -294,6 +294,7 @@ create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_block_io_with_pattern "${POD_NAME}" "/data"
 create_snapshot "${MANIFEST_DIR}/volumesnapshot-nvmeof.yaml" "${SNAPSHOT_NAME}"
 test_snapshot_restore "${MANIFEST_DIR}/pvc-from-snapshot-nvmeof.yaml" "${PVC_FROM_SNAPSHOT}" "${POD_FROM_SNAPSHOT}"
+verify_metrics
 
 # Success
 cleanup_snapshot_test

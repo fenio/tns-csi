@@ -76,7 +76,7 @@ test_info() {
 # Verify cluster is accessible and create test namespace
 #######################################
 verify_cluster() {
-    test_step 1 8 "Verifying cluster access"
+    test_step 1 9 "Verifying cluster access"
     
     if ! kubectl cluster-info &>/dev/null; then
         test_error "Cannot access cluster"
@@ -106,7 +106,7 @@ deploy_driver() {
     shift
     local helm_args=("$@")
     
-    test_step 2 8 "Deploying CSI driver for ${protocol}"
+    test_step 2 9 "Deploying CSI driver for ${protocol}"
     
     # Check required environment variables
     if [[ -z "${TRUENAS_HOST}" ]]; then
@@ -199,7 +199,7 @@ deploy_driver() {
 # Wait for CSI driver to be ready
 #######################################
 wait_for_driver() {
-    test_step 3 8 "Waiting for CSI driver to be ready"
+    test_step 3 9 "Waiting for CSI driver to be ready"
     
     kubectl wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=tns-csi-driver \
@@ -227,7 +227,7 @@ create_pvc() {
     local pvc_name=$2
     local wait_for_binding="${3:-true}"
     
-    test_step 4 8 "Creating PersistentVolumeClaim: ${pvc_name}"
+    test_step 4 9 "Creating PersistentVolumeClaim: ${pvc_name}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
@@ -278,7 +278,7 @@ create_test_pod() {
     local manifest=$1
     local pod_name=$2
     
-    test_step 5 8 "Creating test pod: ${pod_name}"
+    test_step 5 9 "Creating test pod: ${pod_name}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
@@ -331,7 +331,7 @@ test_io_operations() {
     local path=$2
     local test_type=${3:-filesystem}
     
-    test_step 6 8 "Testing I/O operations (${test_type})"
+    test_step 6 9 "Testing I/O operations (${test_type})"
     
     if [[ "${test_type}" == "filesystem" ]]; then
         # Filesystem tests
@@ -395,7 +395,7 @@ test_volume_expansion() {
     local mount_path=$3
     local new_size=$4
     
-    test_step 7 8 "Testing volume expansion to ${new_size}"
+    test_step 7 9 "Testing volume expansion to ${new_size}"
     
     # Get current PVC size
     local current_size
@@ -495,6 +495,116 @@ test_volume_expansion() {
 }
 
 #######################################
+# Verify Prometheus metrics are being collected
+# This function checks if metrics are available and contain
+# expected data after CSI operations have been performed
+#######################################
+verify_metrics() {
+    test_step 8 9 "Verifying Prometheus metrics collection"
+    
+    # Find the controller pod
+    local controller_pod
+    controller_pod=$(kubectl get pods -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+    
+    if [[ -z "${controller_pod}" ]]; then
+        test_warning "No controller pod found, skipping metrics check"
+        return 0
+    fi
+    
+    test_info "Fetching metrics from controller pod: ${controller_pod}"
+    
+    # Fetch metrics from the controller's metrics endpoint
+    local metrics_output
+    if ! metrics_output=$(kubectl exec -n kube-system "${controller_pod}" -- \
+        wget -q -O - http://localhost:9090/metrics 2>&1); then
+        test_warning "Failed to fetch metrics: ${metrics_output}"
+        return 0
+    fi
+    
+    echo ""
+    echo "=== Prometheus Metrics Output ==="
+    echo "${metrics_output}"
+    echo "================================="
+    echo ""
+    
+    # Check for expected custom metrics
+    local expected_metrics=(
+        "tns_csi_operations_total"
+        "tns_csi_operation_duration_seconds"
+        "tns_csi_volume_operations_total"
+        "tns_csi_volume_operation_duration_seconds"
+        "tns_csi_websocket_connected"
+        "tns_csi_websocket_reconnections_total"
+        "tns_csi_websocket_connection_duration_seconds"
+        "tns_csi_websocket_messages_total"
+        "tns_csi_websocket_message_duration_seconds"
+        "tns_csi_volume_capacity_bytes"
+    )
+    
+    local found_count=0
+    local missing_metrics=()
+    
+    for metric in "${expected_metrics[@]}"; do
+        if echo "${metrics_output}" | grep -q "^${metric}"; then
+            test_success "Found metric: ${metric}"
+            found_count=$((found_count + 1))
+        else
+            test_warning "Missing metric: ${metric}"
+            missing_metrics+=("${metric}")
+        fi
+    done
+    
+    echo ""
+    test_info "Metrics found: ${found_count}/${#expected_metrics[@]}"
+    
+    if [[ ${found_count} -eq 0 ]]; then
+        test_error "No custom metrics found - metrics collection may not be working"
+        return 1
+    fi
+    
+    if [[ ${#missing_metrics[@]} -gt 0 ]]; then
+        test_warning "Some metrics are missing (this may be expected if operations weren't performed)"
+    fi
+    
+    # Check for metrics with actual data (non-zero values or labels)
+    echo ""
+    test_info "Checking for metrics with collected data..."
+    
+    local metrics_with_data=0
+    if echo "${metrics_output}" | grep -E "^tns_csi_operations_total.*[1-9]" >/dev/null; then
+        test_success "CSI operations were recorded"
+        metrics_with_data=$((metrics_with_data + 1))
+    fi
+    
+    if echo "${metrics_output}" | grep -E "^tns_csi_volume_operations_total.*[1-9]" >/dev/null; then
+        test_success "Volume operations were recorded"
+        metrics_with_data=$((metrics_with_data + 1))
+    fi
+    
+    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_connected" >/dev/null; then
+        test_success "WebSocket connection status is tracked"
+        metrics_with_data=$((metrics_with_data + 1))
+    fi
+    
+    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_messages_total.*[1-9]" >/dev/null; then
+        test_success "WebSocket messages were recorded"
+        metrics_with_data=$((metrics_with_data + 1))
+    fi
+    
+    if [[ ${metrics_with_data} -gt 0 ]]; then
+        echo ""
+        test_success "Metrics are being collected during CSI operations (${metrics_with_data} metric types with data)"
+    else
+        test_warning "Metrics endpoint is available but no operation data was found"
+    fi
+    
+    echo ""
+    test_success "Metrics verification completed"
+}
+
+#######################################
 # Cleanup test resources
 # Arguments:
 #   Pod name (unused - kept for compatibility)
@@ -504,7 +614,7 @@ cleanup_test() {
     local pod_name=$1
     local pvc_name=$2
     
-    test_step 8 8 "Cleaning up test resources"
+    test_step 9 9 "Cleaning up test resources"
     
     # Delete the entire namespace - this triggers CSI DeleteVolume
     test_info "Deleting test namespace: ${TEST_NAMESPACE}"

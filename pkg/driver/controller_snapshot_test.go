@@ -247,12 +247,12 @@ func TestCreateSnapshot(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
 		req           *csi.CreateSnapshotRequest
 		mockSetup     func(*MockAPIClientForSnapshots)
-		wantErr       bool
-		wantCode      codes.Code
 		checkResponse func(*testing.T, *csi.CreateSnapshotResponse)
+		name          string
+		wantCode      codes.Code
+		wantErr       bool
 	}{
 		{
 			name: "successful snapshot creation",
@@ -273,6 +273,7 @@ func TestCreateSnapshot(t *testing.T) {
 			},
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.CreateSnapshotResponse) {
+				t.Helper()
 				if resp.Snapshot == nil {
 					t.Error("Expected snapshot to be non-nil")
 					return
@@ -306,6 +307,7 @@ func TestCreateSnapshot(t *testing.T) {
 			},
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.CreateSnapshotResponse) {
+				t.Helper()
 				if resp.Snapshot == nil {
 					t.Error("Expected snapshot to be non-nil")
 					return
@@ -414,11 +416,11 @@ func TestDeleteSnapshot(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
 		req       *csi.DeleteSnapshotRequest
 		mockSetup func(*MockAPIClientForSnapshots)
-		wantErr   bool
+		name      string
 		wantCode  codes.Code
+		wantErr   bool
 	}{
 		{
 			name: "successful snapshot deletion",
@@ -533,12 +535,12 @@ func TestListSnapshots(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
 		req           *csi.ListSnapshotsRequest
 		mockSetup     func(*MockAPIClientForSnapshots)
-		wantErr       bool
-		wantCode      codes.Code
 		checkResponse func(*testing.T, *csi.ListSnapshotsResponse)
+		name          string
+		wantCode      codes.Code
+		wantErr       bool
 	}{
 		{
 			name: "list all snapshots",
@@ -553,6 +555,7 @@ func TestListSnapshots(t *testing.T) {
 			},
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.ListSnapshotsResponse) {
+				t.Helper()
 				if len(resp.Entries) != 2 {
 					t.Errorf("Expected 2 entries, got %d", len(resp.Entries))
 				}
@@ -572,6 +575,7 @@ func TestListSnapshots(t *testing.T) {
 			},
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.ListSnapshotsResponse) {
+				t.Helper()
 				if len(resp.Entries) != 1 {
 					t.Errorf("Expected 1 entry, got %d", len(resp.Entries))
 				}
@@ -592,6 +596,7 @@ func TestListSnapshots(t *testing.T) {
 			},
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.ListSnapshotsResponse) {
+				t.Helper()
 				if len(resp.Entries) != 2 {
 					t.Errorf("Expected 2 entries, got %d", len(resp.Entries))
 				}
@@ -663,8 +668,8 @@ func TestListSnapshots(t *testing.T) {
 
 func TestIsNotFoundError(t *testing.T) {
 	tests := []struct {
-		name string
 		err  error
+		name string
 		want bool
 	}{
 		{

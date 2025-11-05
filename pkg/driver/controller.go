@@ -148,12 +148,10 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 			klog.Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
 				req.GetName(), snapshot.GetSnapshotId(), protocol)
 			return s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
-		} else {
-			klog.Warningf("VolumeContentSource exists but snapshot is nil for volume %s", req.GetName())
 		}
-	} else {
-		klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
+		klog.Warningf("VolumeContentSource exists but snapshot is nil for volume %s", req.GetName())
 	}
+	klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
 
 	klog.Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
 

@@ -861,3 +861,88 @@ func (c *Client) UpdateDataset(ctx context.Context, datasetID string, params Dat
 	klog.V(4).Infof("Successfully updated dataset: %s", result.Name)
 	return &result, nil
 }
+
+// Snapshot API methods
+
+// SnapshotCreateParams represents parameters for snapshot creation.
+type SnapshotCreateParams struct {
+	Dataset   string `json:"dataset"`             // Dataset name (e.g., "pool/dataset")
+	Name      string `json:"name"`                // Snapshot name (will be appended to dataset as dataset@name)
+	Recursive bool   `json:"recursive,omitempty"` // Create recursive snapshot
+}
+
+// Snapshot represents a ZFS snapshot.
+type Snapshot struct {
+	ID         string                 `json:"id"`         // Full snapshot name (dataset@snapshot)
+	Name       string                 `json:"name"`       // Snapshot name portion
+	Dataset    string                 `json:"dataset"`    // Parent dataset name
+	CreateTXG  string                 `json:"createtxg"`  // Creation transaction group
+	Properties map[string]interface{} `json:"properties"` // ZFS properties
+}
+
+// CreateSnapshot creates a new ZFS snapshot.
+func (c *Client) CreateSnapshot(ctx context.Context, params SnapshotCreateParams) (*Snapshot, error) {
+	klog.V(4).Infof("Creating snapshot %s for dataset %s", params.Name, params.Dataset)
+
+	var result Snapshot
+	err := c.Call(ctx, "zfs.snapshot.create", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create snapshot: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully created snapshot: %s", result.ID)
+	return &result, nil
+}
+
+// DeleteSnapshot deletes a ZFS snapshot.
+func (c *Client) DeleteSnapshot(ctx context.Context, snapshotID string) error {
+	klog.V(4).Infof("Deleting snapshot: %s", snapshotID)
+
+	// TrueNAS API expects snapshot deletion parameters
+	params := map[string]interface{}{
+		"defer": false, // Don't defer deletion
+	}
+
+	var result bool
+	err := c.Call(ctx, "zfs.snapshot.delete", []interface{}{snapshotID, params}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to delete snapshot: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully deleted snapshot: %s", snapshotID)
+	return nil
+}
+
+// QuerySnapshots queries ZFS snapshots with optional filters.
+func (c *Client) QuerySnapshots(ctx context.Context, filters []interface{}) ([]Snapshot, error) {
+	klog.V(4).Infof("Querying snapshots with filters: %+v", filters)
+
+	var result []Snapshot
+	err := c.Call(ctx, "zfs.snapshot.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query snapshots: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d snapshots", len(result))
+	return result, nil
+}
+
+// CloneSnapshotParams represents parameters for cloning a snapshot.
+type CloneSnapshotParams struct {
+	Snapshot string `json:"snapshot"`    // Source snapshot ID (dataset@snapshot)
+	Dataset  string `json:"dataset_dst"` // Destination dataset name
+}
+
+// CloneSnapshot clones a ZFS snapshot to a new dataset.
+func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error) {
+	klog.V(4).Infof("Cloning snapshot %s to dataset %s", params.Snapshot, params.Dataset)
+
+	var result Dataset
+	err := c.Call(ctx, "zfs.snapshot.clone", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone snapshot: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully cloned snapshot to dataset: %s", result.Name)
+	return &result, nil
+}

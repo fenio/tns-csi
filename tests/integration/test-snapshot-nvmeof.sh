@@ -169,7 +169,7 @@ spec:
     command: ["sleep", "3600"]
     volumeMounts:
     - name: test-volume
-      mountPath: /mnt/test
+      mountPath: /data
   volumes:
   - name: test-volume
     persistentVolumeClaim:
@@ -199,13 +199,13 @@ EOF
     
     # Verify data pattern from snapshot
     echo ""
-    verify_block_pattern "${pod_name}" "/mnt/test"
+    verify_block_pattern "${pod_name}" "/data"
     
     # Write new data to cloned volume
     echo ""
     test_info "Writing new data to cloned filesystem..."
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        sh -c "echo 'CLONED-VOLUME-DATA' > /mnt/test/cloned-data.txt"
+        sh -c "echo 'CLONED-VOLUME-DATA' > /data/cloned-data.txt"
     test_success "Write to cloned volume successful"
     
     # Verify new data
@@ -213,7 +213,7 @@ EOF
     test_info "Verifying new data on cloned volume..."
     local new_pattern
     new_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        cat /mnt/test/cloned-data.txt 2>/dev/null || echo "")
+        cat /data/cloned-data.txt 2>/dev/null || echo "")
     
     if [[ "${new_pattern}" == *"CLONED-VOLUME-DATA"* ]]; then
         test_success "New data verified on cloned volume"
@@ -266,7 +266,7 @@ deploy_driver "nvmeof" --set snapshots.enabled=true --set snapshots.volumeSnapsh
 wait_for_driver
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" false  # Don't wait for binding (WaitForFirstConsumer)
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
-test_block_io_with_pattern "${POD_NAME}" "/mnt/test"
+test_block_io_with_pattern "${POD_NAME}" "/data"
 create_snapshot "${MANIFEST_DIR}/volumesnapshot-nvmeof.yaml" "${SNAPSHOT_NAME}"
 test_snapshot_restore "${MANIFEST_DIR}/pvc-from-snapshot-nvmeof.yaml" "${PVC_FROM_SNAPSHOT}" "${POD_FROM_SNAPSHOT}"
 

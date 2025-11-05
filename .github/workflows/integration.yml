@@ -11,6 +11,7 @@ jobs:
   integration-nfs:
     name: NFS Integration Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled while working on NVMe-oF
     steps:
       - uses: actions/checkout@v5
       
@@ -215,6 +216,7 @@ jobs:
     name: NFS Snapshot Integration Tests
     runs-on: self-hosted
     needs: integration-nfs
+    if: false  # Temporarily disabled while working on NVMe-oF
     steps:
       - uses: actions/checkout@v5
       

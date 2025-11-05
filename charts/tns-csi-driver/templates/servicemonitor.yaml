@@ -1,0 +1,43 @@
+{{- if and .Values.controller.metrics.enabled .Values.controller.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "tns-csi-driver.fullname" . }}
+  namespace: {{ default .Values.namespace .Values.controller.metrics.serviceMonitor.namespace }}
+  labels:
+    {{- include "tns-csi-driver.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+    {{- with .Values.controller.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.controller.metrics.serviceMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "tns-csi-driver.labels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  namespaceSelector:
+    matchNames:
+      - {{ .Values.namespace }}
+  endpoints:
+    - port: metrics
+      {{- if .Values.controller.metrics.serviceMonitor.interval }}
+      interval: {{ .Values.controller.metrics.serviceMonitor.interval }}
+      {{- end }}
+      {{- if .Values.controller.metrics.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ .Values.controller.metrics.serviceMonitor.scrapeTimeout }}
+      {{- end }}
+      path: /metrics
+      scheme: http
+      {{- with .Values.controller.metrics.serviceMonitor.relabelings }}
+      relabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.metrics.serviceMonitor.metricRelabelings }}
+      metricRelabelings:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

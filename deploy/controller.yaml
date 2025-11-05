@@ -29,6 +29,7 @@ spec:
             - "--api-url=$(TNS_URL)"
             - "--api-key=$(TNS_API_KEY)"
             - "--v=5"
+            - "--metrics-addr=:8080"
           env:
             - name: NODE_ID
               valueFrom:
@@ -44,6 +45,10 @@ spec:
                 secretKeyRef:
                   name: tns-csi-secret
                   key: api-key
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/

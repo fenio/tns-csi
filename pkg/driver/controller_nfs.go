@@ -152,6 +152,86 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
+// setupNFSVolumeFromClone sets up an NFS share for a cloned dataset.
+func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.Dataset, server string) (*csi.CreateVolumeResponse, error) {
+	klog.V(4).Infof("Setting up NFS share for cloned dataset: %s", dataset.Name)
+
+	volumeName := req.GetName()
+
+	// Create NFS share for the cloned dataset
+	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
+		Path:         dataset.Mountpoint,
+		Comment:      "CSI Volume (from snapshot): " + volumeName,
+		MaprootUser:  "root",
+		MaprootGroup: "wheel",
+		Enabled:      true,
+	})
+	if err != nil {
+		// Cleanup: delete the cloned dataset if NFS share creation fails
+		klog.Errorf("Failed to create NFS share for cloned dataset, cleaning up: %v", err)
+		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned dataset after NFS share creation failure: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to create NFS share for cloned volume: %v", err)
+	}
+
+	klog.Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
+
+	// Encode volume metadata into volumeID
+	meta := VolumeMetadata{
+		Name:        volumeName,
+		Protocol:    ProtocolNFS,
+		DatasetID:   dataset.ID,
+		DatasetName: dataset.Name,
+		NFSShareID:  nfsShare.ID,
+	}
+
+	encodedVolumeID, err := encodeVolumeID(meta)
+	if err != nil {
+		// Cleanup: delete NFS share and dataset
+		klog.Errorf("Failed to encode volume ID for cloned volume, cleaning up: %v", err)
+		if delErr := s.apiClient.DeleteNFSShare(ctx, nfsShare.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup NFS share: %v", delErr)
+		}
+		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID for cloned volume: %v", err)
+	}
+
+	// Construct volume context with metadata for node plugin
+	volumeContext := map[string]string{
+		"server":      server,
+		"share":       dataset.Mountpoint,
+		"datasetID":   dataset.ID,
+		"datasetName": dataset.Name,
+		"nfsShareID":  strconv.Itoa(nfsShare.ID),
+	}
+
+	// Get requested capacity
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
+	klog.Infof("Successfully created NFS volume from snapshot with encoded ID: %s", encodedVolumeID)
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      encodedVolumeID,
+			CapacityBytes: requestedCapacity,
+			VolumeContext: volumeContext,
+			ContentSource: &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Snapshot{
+					Snapshot: &csi.VolumeContentSource_SnapshotSource{
+						SnapshotId: req.GetVolumeContentSource().GetSnapshot().GetSnapshotId(),
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 // expandNFSVolume expands an NFS volume by updating the dataset quota.
 //
 //nolint:dupl // Similar to expandNVMeOFVolume but with different parameters (Quota vs Volsize, NodeExpansionRequired)

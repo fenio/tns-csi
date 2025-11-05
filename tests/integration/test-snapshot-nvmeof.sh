@@ -150,15 +150,9 @@ test_snapshot_restore() {
     # Create PVC from snapshot
     kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}"
     
-    # Wait for PVC to be bound
+    # Note: With WaitForFirstConsumer, PVC won't bind until pod is created
     echo ""
-    test_info "Waiting for PVC to be bound (timeout: ${TIMEOUT_PVC})..."
-    kubectl wait --for=jsonpath='{.status.phase}'=Bound \
-        pvc/"${pvc_name}" \
-        -n "${TEST_NAMESPACE}" \
-        --timeout="${TIMEOUT_PVC}"
-    
-    test_success "PVC from snapshot is bound"
+    test_info "PVC created from snapshot (will bind when pod is created)"
     
     # Create test pod manifest on the fly
     echo ""
@@ -191,6 +185,18 @@ EOF
         --timeout="${TIMEOUT_POD}"
     
     test_success "Pod is ready"
+    
+    # Verify PVC is now bound
+    echo ""
+    test_info "Verifying PVC is bound..."
+    local pvc_status
+    pvc_status=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.status.phase}')
+    if [[ "${pvc_status}" == "Bound" ]]; then
+        test_success "PVC from snapshot is bound"
+    else
+        test_error "PVC is not bound (status: ${pvc_status})"
+        return 1
+    fi
     
     # Verify data pattern from snapshot
     echo ""
@@ -259,7 +265,7 @@ cleanup_snapshot_test() {
 verify_cluster
 deploy_driver "nvmeof" --set snapshots.enabled=true --set snapshots.volumeSnapshotClass.create=true
 wait_for_driver
-create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}"
+create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" false  # Don't wait for binding (WaitForFirstConsumer)
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_block_io_with_pattern "${POD_NAME}" "/dev/xvda"
 create_snapshot "${MANIFEST_DIR}/volumesnapshot-nvmeof.yaml" "${SNAPSHOT_NAME}"

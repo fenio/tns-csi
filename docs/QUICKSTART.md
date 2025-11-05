@@ -467,9 +467,51 @@ kubectl delete pvc --all -A
 helm uninstall tns-csi --namespace kube-system
 ```
 
+## Snapshots and Cloning
+
+The driver supports volume snapshots and cloning for both NFS and NVMe-oF protocols.
+
+### Quick Snapshot Example
+
+```bash
+# Create a snapshot
+kubectl apply -f - <<EOF
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: my-app-snapshot
+spec:
+  volumeSnapshotClassName: truenas-nfs-snapclass
+  source:
+    persistentVolumeClaimName: my-app-data
+EOF
+
+# Restore from snapshot
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-app-restored
+spec:
+  storageClassName: tns-nfs
+  dataSource:
+    name: my-app-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+EOF
+```
+
+For complete snapshot documentation including prerequisites, advanced features, and troubleshooting, see [SNAPSHOTS.md](SNAPSHOTS.md).
+
 ## Next Steps
 
 - Review the [Helm Chart README](charts/tns-csi-driver/README.md) for detailed configuration options
+- Check [SNAPSHOTS.md](SNAPSHOTS.md) for snapshot and cloning features
 - Check [TESTING.md](TESTING.md) for comprehensive testing procedures
 - See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment best practices
 

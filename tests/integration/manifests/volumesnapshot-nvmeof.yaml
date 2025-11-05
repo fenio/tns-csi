@@ -1,0 +1,8 @@
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: test-snapshot-nvmeof
+spec:
+  volumeSnapshotClassName: tns-csi-snapshot-nvmeof
+  source:
+    persistentVolumeClaimName: test-pvc-nvmeof

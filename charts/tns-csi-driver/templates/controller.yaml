@@ -123,6 +123,26 @@ spec:
           resources:
             {{- toYaml .Values.sidecars.resizer.resources | nindent 12 }}
 
+        {{- if .Values.snapshots.enabled }}
+        # CSI Snapshotter sidecar
+        - name: csi-snapshotter
+          image: "{{ .Values.sidecars.snapshotter.image.repository }}:{{ .Values.sidecars.snapshotter.image.tag }}"
+          imagePullPolicy: {{ .Values.sidecars.snapshotter.image.pullPolicy }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--v={{ .Values.controller.logLevel }}"
+            - "--leader-election"
+            - "--timeout=60s"
+          env:
+            - name: ADDRESS
+              value: /var/lib/csi/sockets/pluginproxy/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+          resources:
+            {{- toYaml .Values.sidecars.snapshotter.resources | nindent 12 }}
+        {{- end }}
+
       volumes:
         - name: socket-dir
           emptyDir: {}

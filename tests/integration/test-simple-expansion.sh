@@ -80,6 +80,13 @@ kubectl logs -n kube-system \
     -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
     --tail=50 || true
 
+# Verify metrics
+echo ""
+echo "=== Verifying metrics collection ==="
+# Temporarily set TEST_NAMESPACE for metrics verification
+TEST_NAMESPACE="${NAMESPACE}"
+verify_metrics || true
+
 # Cleanup
 echo ""
 echo "Cleaning up..."

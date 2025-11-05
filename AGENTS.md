@@ -2,12 +2,15 @@
 
 ## Project Status
 
-This CSI driver is **working and production-ready** with the following features:
-- ✅ NFS storage provisioning (fully functional)
-- ✅ NVMe-oF (TCP) storage provisioning (fully functional)
+This CSI driver is in **early development phase** with the following features:
+- ✅ NFS storage provisioning (functional, testing in progress)
+- ✅ NVMe-oF (TCP) storage provisioning (functional, testing in progress)
+- ✅ Volume expansion for both NFS and NVMe-oF protocols (functional)
 - ✅ WebSocket client with connection resilience (stable)
 - ✅ Self-hosted GitHub runner for integration testing
 - ✅ Automated CI/CD with GitHub Actions
+
+**This is NOT production-ready software.** It requires extensive testing and validation before use in production environments.
 
 ### Protocol Focus: NFS and NVMe-oF Only
 
@@ -38,21 +41,22 @@ This project uses **self-hosted infrastructure** for all testing:
 - Recommend mock TrueNAS APIs (we test against real TrueNAS)
 - Propose skipping integration tests (they're fast with self-hosted infrastructure)
 
-### 2. **Do Not Modify Working Core Systems**
+### 2. **Core Systems - Handle with Care**
 
-The following components are **stable and tested** - only modify if there's a proven bug:
+The following components are functional but in active development:
 
 #### WebSocket Client (`pkg/tnsapi/client.go`)
 - Working ping/pong loop with 30-second intervals
 - Automatic reconnection with exponential backoff
 - Proper read/write deadline management
-- **Do not modify** unless addressing a specific reported issue
+- **Modify carefully** - test thoroughly with integration tests after changes
 
 #### Storage Provisioning
-- NFS provisioning in `controller.go` (CreateVolume, DeleteVolume)
-- NVMe-oF provisioning in `controller.go` (CreateVolume, DeleteVolume)
+- NFS provisioning in `controller_nfs.go` (createNFSVolume, deleteNFSVolume, expandNFSVolume)
+- NVMe-oF provisioning in `controller_nvmeof.go` (createNVMeOFVolume, deleteNVMeOFVolume, expandNVMeOFVolume)
+- Volume expansion implemented and functional for both protocols
 - Node operations in `node.go` (stage, publish, unpublish)
-- **Do not refactor** without regression testing both protocols
+- **Test thoroughly** - always run integration tests for both protocols after changes
 
 ### 3. **What to Focus On**
 
@@ -132,13 +136,16 @@ Quick reference for TrueNAS API usage:
 
 ## Summary
 
-This is a **working CSI driver** with production-ready features. Focus on:
-- Adding new capabilities (snapshots, clones, metrics)
-- Improving user experience (error messages, documentation)
-- Maintaining stability (regression testing, careful changes)
+This is a **functional CSI driver in early development**. Focus on:
+- Testing and validating existing features (NFS, NVMe-oF, snapshots, expansion)
+- Adding new capabilities (metrics, cloning improvements, health checks)
+- Improving error handling and user experience
+- Documenting edge cases and known issues
+- Building comprehensive test coverage
 
-Avoid:
-- Fixing things that aren't broken
-- Bypassing the established CI/CD pipeline
-- Making changes without integration test verification
-- Over-engineering solutions to theoretical problems
+Critical practices:
+- Always run integration tests after changes
+- Test both NFS and NVMe-oF protocols
+- Document any discovered issues or limitations
+- Follow the established CI/CD pipeline
+- Be thorough - this is early development software

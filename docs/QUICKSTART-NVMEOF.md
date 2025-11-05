@@ -1,6 +1,8 @@
 # Quick Start: Testing NVMe-oF and NFS
 
-**Branch:** `local-nvmeof-testing`
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This driver is in early development phase. Use only for testing and evaluation environments. Use at your own risk.
 
 This guide explains the testing setup for the TrueNAS CSI driver with both NVMe-oF and NFS protocols.
 

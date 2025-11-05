@@ -47,6 +47,9 @@ spec:
             - "--api-url=$(TNS_URL)"
             - "--api-key=$(TNS_API_KEY)"
             - "--v={{ .Values.controller.logLevel }}"
+            {{- if .Values.controller.metrics.enabled }}
+            - "--metrics-addr=:{{ .Values.controller.metrics.port }}"
+            {{- end }}
           env:
             - name: NODE_ID
               valueFrom:
@@ -62,6 +65,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "tns-csi-driver.secretName" . }}
                   key: api-key
+          {{- if .Values.controller.metrics.enabled }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.controller.metrics.port }}
+              protocol: TCP
+          {{- end }}
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/

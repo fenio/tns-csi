@@ -1,0 +1,26 @@
+name: Cleanup TrueNAS Artifacts
+
+on:
+  workflow_dispatch: # Manual trigger only
+
+jobs:
+  cleanup:
+    name: Clean up TrueNAS test artifacts
+    runs-on: self-hosted
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      
+      - name: Run TrueNAS cleanup
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./scripts/cleanup-truenas-artifacts.sh

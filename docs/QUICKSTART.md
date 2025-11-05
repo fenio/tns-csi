@@ -1,5 +1,9 @@
 # TrueNAS CSI Driver - Quick Start Guide
 
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This driver is in early development phase. Use only for testing and evaluation environments. Use at your own risk.
+
 ## Prerequisites
 - Kubernetes cluster (1.20+)
 - Helm 3.0+
@@ -324,16 +328,18 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ## Storage Protocols
 
-### NFS (Tested ✅)
+### NFS
 - **Access Modes**: ReadWriteMany (RWX), ReadWriteOnce (RWO)
 - **Mount Options**: NFSv4.2, nolock
 - **Use Case**: Shared storage across multiple pods
-- **Status**: Production ready
+- **Volume Expansion**: ✅ Implemented and functional
+- **Status**: Functional, testing in progress
 
-### NVMe-oF (Implementation Present)
+### NVMe-oF
 - **Access Modes**: ReadWriteOnce (RWO)
 - **Use Case**: High-performance block storage
-- **Status**: Code implemented, requires TrueNAS NVMe-oF target configuration
+- **Volume Expansion**: ✅ Implemented and functional
+- **Status**: Functional, requires TrueNAS Scale 25.10+, testing in progress
 
 ## Advanced Configuration
 

@@ -1,5 +1,9 @@
 # TrueNAS Scale CSI Driver - Deployment Guide
 
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This driver is in early development phase. Use only for testing and evaluation environments. Use at your own risk.
+
 This guide explains how to deploy the TrueNAS Scale CSI driver on a Kubernetes cluster.
 
 ## Prerequisites

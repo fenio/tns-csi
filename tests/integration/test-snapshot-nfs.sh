@@ -101,8 +101,30 @@ test_snapshot_restore() {
     
     test_step 7 11 "Testing snapshot restore: ${pvc_name}"
     
+    # Show controller logs BEFORE creating PVC from snapshot
+    echo ""
+    echo "=== Controller Logs BEFORE PVC-from-snapshot creation ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        --tail=50 || true
+    
     # Create PVC from snapshot
     kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}"
+    test_info "PVC from snapshot created, waiting for provisioning..."
+    
+    # Wait a moment for the provisioner to pick up the PVC
+    sleep 5
+    
+    # Show controller logs DURING PVC provisioning attempt
+    echo ""
+    echo "=== Controller Logs DURING PVC-from-snapshot provisioning (5s after creation) ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        --tail=100 || true
+    
+    echo ""
+    echo "=== PVC Status ==="
+    kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}" || true
     
     # Wait for PVC to be bound
     echo ""

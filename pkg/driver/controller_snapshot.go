@@ -264,7 +264,8 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
-	klog.V(4).Infof("Creating volume from snapshot: %s", snapshotID)
+	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
+	klog.V(4).Infof("Full request: %+v", req)
 
 	// Decode snapshot metadata
 	snapshotMeta, err := decodeSnapshotID(snapshotID)

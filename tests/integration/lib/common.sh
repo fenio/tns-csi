@@ -515,10 +515,10 @@ verify_metrics() {
     
     test_info "Fetching metrics from controller pod: ${controller_pod}"
     
-    # Fetch metrics from the controller's metrics endpoint
+    # Fetch metrics from the controller's metrics endpoint (default port 8080)
     local metrics_output
     if ! metrics_output=$(kubectl exec -n kube-system "${controller_pod}" -- \
-        wget -q -O - http://localhost:9090/metrics 2>&1); then
+        wget -q -O - http://localhost:8080/metrics 2>&1); then
         test_warning "Failed to fetch metrics: ${metrics_output}"
         return 0
     fi

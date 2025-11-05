@@ -23,6 +23,8 @@ var (
 	ErrResponseIDMismatch     = errors.New("authentication response ID mismatch")
 	ErrClientClosed           = errors.New("client is closed")
 	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
+	ErrCloneFailed            = errors.New("clone operation returned false (unsuccessful)")
+	ErrClonedDatasetNotFound  = errors.New("cloned dataset not found after successful clone")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -873,11 +875,11 @@ type SnapshotCreateParams struct {
 
 // Snapshot represents a ZFS snapshot.
 type Snapshot struct {
+	Properties map[string]interface{} `json:"properties"` // ZFS properties
 	ID         string                 `json:"id"`         // Full snapshot name (dataset@snapshot)
 	Name       string                 `json:"name"`       // Snapshot name portion
 	Dataset    string                 `json:"dataset"`    // Parent dataset name
 	CreateTXG  string                 `json:"createtxg"`  // Creation transaction group
-	Properties map[string]interface{} `json:"properties"` // ZFS properties
 }
 
 // CreateSnapshot creates a new ZFS snapshot.
@@ -945,7 +947,7 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	}
 
 	if !result {
-		return nil, fmt.Errorf("clone operation returned false (unsuccessful)")
+		return nil, ErrCloneFailed
 	}
 
 	klog.V(4).Infof("Clone operation successful, querying for cloned dataset: %s", params.Dataset)
@@ -957,7 +959,7 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	}
 
 	if len(datasets) == 0 {
-		return nil, fmt.Errorf("cloned dataset not found after successful clone: %s", params.Dataset)
+		return nil, fmt.Errorf("%w: %s", ErrClonedDatasetNotFound, params.Dataset)
 	}
 
 	klog.V(4).Infof("Successfully cloned snapshot to dataset: %s", datasets[0].Name)

@@ -96,9 +96,9 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 			CreatedAt:    createdAt,
 		}
 
-		snapshotID, err := encodeSnapshotID(snapshotMeta)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", err)
+		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+		if encodeErr != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 		}
 
 		return &csi.CreateSnapshotResponse{
@@ -106,7 +106,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 				SnapshotId:     snapshotID,
 				SourceVolumeId: sourceVolumeID,
 				CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
-				ReadyToUse:     true,
+				ReadyToUse:     true, // ZFS snapshots are immediately available
 			},
 		}, nil
 	}
@@ -135,9 +135,9 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 		CreatedAt:    createdAt,
 	}
 
-	snapshotID, err := encodeSnapshotID(snapshotMeta)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", err)
+	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+	if encodeErr != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 	}
 
 	return &csi.CreateSnapshotResponse{
@@ -238,9 +238,9 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 			SourceVolume: "", // Unknown - would require querying volumes
 		}
 
-		snapshotID, err := encodeSnapshotID(snapshotMeta)
-		if err != nil {
-			klog.Warningf("Failed to encode snapshot ID for %s: %v", snapshot.ID, err)
+		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+		if encodeErr != nil {
+			klog.Warningf("Failed to encode snapshot ID for %s: %v", snapshot.ID, encodeErr)
 			continue
 		}
 

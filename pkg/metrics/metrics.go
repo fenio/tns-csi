@@ -12,9 +12,9 @@ const (
 	namespace = "tns_csi"
 )
 
-// Operation types for CSI operations
+// Operation types for CSI operations.
 const (
-	// Controller operations
+	// Controller operations.
 	OpCreateVolume              = "CreateVolume"
 	OpDeleteVolume              = "DeleteVolume"
 	OpControllerPublish         = "ControllerPublishVolume"
@@ -28,7 +28,7 @@ const (
 	OpListSnapshots             = "ListSnapshots"
 	OpExpandVolume              = "ControllerExpandVolume"
 
-	// Node operations
+	// Node operations.
 	OpNodeStage           = "NodeStageVolume"
 	OpNodeUnstage         = "NodeUnstageVolume"
 	OpNodePublish         = "NodePublishVolume"
@@ -37,13 +37,13 @@ const (
 	OpNodeGetInfo         = "NodeGetInfo"
 	OpNodeExpandVolume    = "NodeExpandVolume"
 
-	// Identity operations
+	// Identity operations.
 	OpGetPluginInfo         = "GetPluginInfo"
 	OpGetPluginCapabilities = "GetPluginCapabilities"
 	OpProbe                 = "Probe"
 )
 
-// Protocol types
+// Protocol types.
 const (
 	ProtocolNFS     = "nfs"
 	ProtocolNVMeOF  = "nvmeof"
@@ -51,7 +51,7 @@ const (
 )
 
 var (
-	// CSI operation metrics
+	// CSI operation metrics.
 	csiOperationsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -71,7 +71,7 @@ var (
 		[]string{"operation"},
 	)
 
-	// Volume operation metrics with protocol labels
+	// Volume operation metrics with protocol labels.
 	volumeOperationsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -91,7 +91,7 @@ var (
 		[]string{"protocol", "operation"},
 	)
 
-	// WebSocket connection metrics
+	// WebSocket connection metrics.
 	wsConnectionStatus = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -135,7 +135,7 @@ var (
 		},
 	)
 
-	// Volume capacity metrics
+	// Volume capacity metrics.
 	volumeCapacityBytes = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,

@@ -3,29 +3,35 @@ package driver
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 )
 
 // Config contains the configuration for the driver.
 type Config struct {
-	DriverName string
-	Version    string
-	NodeID     string
-	Endpoint   string
-	APIURL     string
-	APIKey     string
+	DriverName  string
+	Version     string
+	NodeID      string
+	Endpoint    string
+	APIURL      string
+	APIKey      string
+	MetricsAddr string // Address to expose Prometheus metrics (e.g., ":8080")
 }
 
 // Driver is the TNS CSI driver.
 type Driver struct {
 	srv        *grpc.Server
+	metricsSrv *http.Server
 	apiClient  *tnsapi.Client
 	controller *ControllerService
 	node       *NodeService
@@ -73,6 +79,23 @@ func (d *Driver) Run() error {
 		addr = u.Host
 	}
 
+	// Start metrics server if configured
+	if d.config.MetricsAddr != "" {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		d.metricsSrv = &http.Server{
+			Addr:              d.config.MetricsAddr,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			klog.Infof("Starting metrics server on %s", d.config.MetricsAddr)
+			if err := d.metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				klog.Errorf("Metrics server error: %v", err)
+			}
+		}()
+	}
+
 	klog.Infof("Listening on %s://%s", u.Scheme, addr)
 	//nolint:noctx // net.Listen is acceptable here - CSI driver lifecycle is managed by gRPC server
 	listener, err := net.Listen(u.Scheme, addr)
@@ -80,9 +103,9 @@ func (d *Driver) Run() error {
 		return err
 	}
 
-	// Create gRPC server
+	// Create gRPC server with metrics interceptor
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(logGRPC),
+		grpc.UnaryInterceptor(d.metricsInterceptor),
 	}
 	d.srv = grpc.NewServer(opts...)
 
@@ -98,27 +121,48 @@ func (d *Driver) Run() error {
 // Stop stops the driver.
 func (d *Driver) Stop() {
 	klog.Info("Stopping TNS CSI Driver")
+
+	// Stop metrics server
+	if d.metricsSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := d.metricsSrv.Shutdown(ctx); err != nil {
+			klog.Errorf("Error shutting down metrics server: %v", err)
+		}
+	}
+
+	// Stop gRPC server
 	if d.srv != nil {
 		d.srv.GracefulStop()
 	}
+
+	// Close API client
 	if d.apiClient != nil {
 		d.apiClient.Close()
 	}
 }
 
-// logGRPC logs gRPC requests.
-func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+// metricsInterceptor intercepts gRPC calls to record metrics and log requests.
+func (d *Driver) metricsInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	methodParts := strings.Split(info.FullMethod, "/")
 	method := methodParts[len(methodParts)-1]
 
 	klog.V(3).Infof("GRPC call: %s", method)
 	klog.V(5).Infof("GRPC request: %+v", req)
 
+	// Start timing
+	timer := metrics.NewOperationTimer(method)
+
+	// Execute the handler
 	resp, err := handler(ctx, req)
+
+	// Record metrics
 	if err != nil {
 		klog.Errorf("GRPC error: %s returned error: %v", method, err)
+		timer.ObserveError()
 	} else {
 		klog.V(5).Infof("GRPC response: %+v", resp)
+		timer.ObserveSuccess()
 	}
 
 	return resp, err

@@ -17,6 +17,7 @@ var (
 	version     = flag.String("version", "v0.1.0", "Version of the driver")
 	apiURL      = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
 	apiKey      = flag.String("api-key", "", "Storage system API key")
+	metricsAddr = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
 	showVersion = flag.Bool("show-version", false, "Show version and exit")
 )
 
@@ -47,12 +48,13 @@ func main() {
 	klog.Infof("Node ID: %s", *nodeID)
 
 	drv, err := driver.NewDriver(driver.Config{
-		DriverName: *driverName,
-		Version:    *version,
-		NodeID:     *nodeID,
-		Endpoint:   *endpoint,
-		APIURL:     *apiURL,
-		APIKey:     *apiKey,
+		DriverName:  *driverName,
+		Version:     *version,
+		NodeID:      *nodeID,
+		Endpoint:    *endpoint,
+		APIURL:      *apiURL,
+		APIKey:      *apiKey,
+		MetricsAddr: *metricsAddr,
 	})
 	if err != nil {
 		klog.Fatalf("Failed to create driver: %v", err)

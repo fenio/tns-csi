@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/gorilla/websocket"
 	"k8s.io/klog/v2"
 )
@@ -40,6 +41,7 @@ type Client struct {
 	mu            sync.Mutex
 	closed        bool
 	reconnecting  bool
+	connectedAt   time.Time // Track connection start time for metrics
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
@@ -166,6 +168,11 @@ func (c *Client) connect() error {
 	})
 
 	c.conn = conn
+	c.connectedAt = time.Now()
+
+	// Update connection metrics
+	metrics.SetWSConnectionStatus(true)
+
 	return nil
 }
 
@@ -269,6 +276,10 @@ func (c *Client) authenticateDirect() error {
 
 // Call makes a JSON-RPC 2.0 call.
 func (c *Client) Call(ctx context.Context, method string, params []interface{}, result interface{}) error {
+	// Start timing for metrics
+	timer := metrics.NewWSMessageTimer(method)
+	defer timer.Observe()
+
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -297,6 +308,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 		c.mu.Unlock()
 		return fmt.Errorf("failed to send request: %w", err)
 	}
+	metrics.RecordWSMessage("sent")
 	c.mu.Unlock()
 
 	// Wait for response
@@ -306,6 +318,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 			// Channel was closed, connection error occurred
 			return ErrConnectionClosed
 		}
+		metrics.RecordWSMessage("received")
 		if resp.Error != nil {
 			return resp.Error
 		}
@@ -433,7 +446,12 @@ func (c *Client) reconnect() bool {
 
 	klog.Warning("WebSocket connection lost, attempting to reconnect...")
 
+	// Update metrics - connection lost
+	metrics.SetWSConnectionStatus(false)
+
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
+		// Record reconnection attempt
+		metrics.RecordWSReconnection()
 		// Exponential backoff: 2^(attempt-1) * retryInterval, max 60s
 		//nolint:gosec // Integer conversion is safe here - attempt is small positive int
 		backoff := time.Duration(1<<uint(attempt-1)) * c.retryInterval
@@ -489,6 +507,11 @@ func (c *Client) pingLoop() {
 			if c.closed || c.conn == nil {
 				c.mu.Unlock()
 				return
+			}
+
+			// Update connection duration metric
+			if !c.connectedAt.IsZero() {
+				metrics.SetWSConnectionDuration(time.Since(c.connectedAt))
 			}
 
 			// Set write deadline for ping

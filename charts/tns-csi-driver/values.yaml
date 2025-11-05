@@ -37,6 +37,41 @@ controller:
   # Log verbosity level (0-5, higher = more verbose)
   logLevel: 5
   
+  # Metrics configuration
+  metrics:
+    # Enable Prometheus metrics endpoint
+    enabled: true
+    # Port to expose metrics on
+    port: 8080
+    # Create a Service for metrics
+    service:
+      enabled: true
+      type: ClusterIP
+      port: 8080
+      # Optional clusterIP to use (leave empty for automatic assignment)
+      clusterIP: ""
+      # Additional annotations for the Service
+      annotations: {}
+      # Additional labels for the Service
+      labels: {}
+    # Create a ServiceMonitor for Prometheus Operator
+    serviceMonitor:
+      enabled: false
+      # Namespace to create the ServiceMonitor in (defaults to release namespace)
+      namespace: ""
+      # Additional labels for ServiceMonitor (e.g., release: prometheus)
+      labels: {}
+      # Additional annotations for ServiceMonitor
+      annotations: {}
+      # Scrape interval
+      interval: 30s
+      # Scrape timeout
+      scrapeTimeout: 10s
+      # Relabelings to apply to samples before ingestion
+      relabelings: []
+      # MetricRelabelings to apply to samples before ingestion
+      metricRelabelings: []
+  
   # Resource requests and limits
   resources:
     requests:

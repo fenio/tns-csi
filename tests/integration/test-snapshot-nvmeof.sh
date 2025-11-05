@@ -111,6 +111,27 @@ test_block_io_with_pattern() {
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
         dd if=/dev/zero of="${mount_path}/testfile.dat" bs=1M count=100 2>&1 | tail -3
     test_success "Large data write successful"
+    
+    # Sync filesystem to ensure data is written to disk
+    echo ""
+    test_info "Syncing filesystem to disk..."
+    kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- sync
+    test_success "Filesystem synced"
+    
+    # Verify files exist before snapshot
+    echo ""
+    test_info "Verifying files exist before snapshot..."
+    kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- ls -lh "${mount_path}/"
+    
+    # Verify pattern can be read
+    local verify_pattern
+    verify_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>/dev/null || echo "")
+    if [[ "${verify_pattern}" == *"NVMeOF-CSI-TEST-PATTERN"* ]]; then
+        test_success "Pattern verified before snapshot"
+    else
+        test_error "Pattern verification failed before snapshot (got: '${verify_pattern}')"
+        return 1
+    fi
 }
 
 #######################################
@@ -198,6 +219,10 @@ EOF
     fi
     
     # Verify data pattern from snapshot
+    echo ""
+    test_info "Listing cloned volume contents..."
+    kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- ls -lah /data/ || test_warning "Failed to list /data"
+    
     echo ""
     verify_block_pattern "${pod_name}" "/data"
     

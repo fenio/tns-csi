@@ -251,6 +251,7 @@ create_test_pod "${MANIFEST_DIR}/pod-nfs.yaml" "${POD_NAME}"
 test_io_operations "${POD_NAME}" "/data" "filesystem"
 create_snapshot "${MANIFEST_DIR}/volumesnapshot-nfs.yaml" "${SNAPSHOT_NAME}"
 test_snapshot_restore "${MANIFEST_DIR}/pvc-from-snapshot-nfs.yaml" "${PVC_FROM_SNAPSHOT}" "${POD_FROM_SNAPSHOT}" "/data" "CSI Test Data"
+verify_metrics
 
 # Success
 cleanup_snapshot_test

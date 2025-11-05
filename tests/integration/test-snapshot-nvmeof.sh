@@ -257,7 +257,7 @@ cleanup_snapshot_test() {
 
 # Run test steps
 verify_cluster
-deploy_driver "nvmeof"
+deploy_driver "nvmeof" --set snapshots.enabled=true --set snapshots.volumeSnapshotClass.create=true
 wait_for_driver
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}"
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"

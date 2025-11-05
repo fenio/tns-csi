@@ -6,7 +6,9 @@ A Container Storage Interface (CSI) driver for TrueNAS that enables dynamic prov
 
 - **Dynamic Volume Provisioning**: Automatically create and delete storage volumes
 - **Multiple Protocols**: Support for NFS and NVMe-oF
-- **Volume Expansion**: Resize volumes without pod recreation
+- **Volume Snapshots**: Create, delete, and restore from snapshots (both NFS and NVMe-oF)
+- **Volume Cloning**: Create new volumes from existing snapshots
+- **Volume Expansion**: Resize volumes without pod recreation (NFS)
 - **WebSocket API**: Real-time communication with TrueNAS using WebSockets with automatic reconnection
 - **Production Ready**: Connection resilience, proper cleanup, comprehensive error handling
 

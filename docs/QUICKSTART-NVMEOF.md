@@ -202,8 +202,13 @@ helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --set truenas.host=10.10.20.100 \
   --set truenas.apiKey=<your-api-key> \
+  --set storageClasses.nvmeof.enabled=true \
+  --set storageClasses.nvmeof.pool=<your-pool-name> \
+  --set storageClasses.nvmeof.server=10.10.20.100 \
   --set storageClasses.nvmeof.subsystemNQN=nqn.2025-01.com.truenas:csi
 ```
+
+**Important:** Replace `nqn.2025-01.com.truenas:csi` with the actual subsystem NQN you created in Step 3 (line 99).
 
 ### Test NVMe-oF Volume
 

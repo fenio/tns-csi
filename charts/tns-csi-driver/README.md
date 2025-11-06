@@ -138,8 +138,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set truenas.apiKey="your-api-key" \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
 ```
+
+**Important:** The `subsystemNQN` parameter is required and must match a pre-configured NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems).
 
 From local chart:
 ```bash
@@ -148,7 +151,8 @@ helm install tns-csi ./charts/tns-csi-driver \
   --values charts/tns-csi-driver/values-nvmeof.yaml \
   --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
   --set truenas.apiKey="your-api-key" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
 ```
 
 ## Configuration
@@ -193,12 +197,15 @@ helm install tns-csi ./charts/tns-csi-driver \
 | `storageClasses.nvmeof.name` | Storage class name | `truenas-nvmeof` |
 | `storageClasses.nvmeof.pool` | ZFS pool name on TrueNAS | `""` (required) |
 | `storageClasses.nvmeof.server` | TrueNAS server IP | `""` (required) |
+| `storageClasses.nvmeof.subsystemNQN` | Pre-configured NVMe-oF subsystem NQN | `""` (required) |
 | `storageClasses.nvmeof.parentDataset` | Parent dataset (optional) | `""` |
 | `storageClasses.nvmeof.transport` | Transport protocol (tcp/rdma) | `tcp` |
 | `storageClasses.nvmeof.port` | NVMe-oF port | `4420` |
 | `storageClasses.nvmeof.reclaimPolicy` | Reclaim policy | `Delete` |
 | `storageClasses.nvmeof.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nvmeof.volumeBindingMode` | Binding mode | `Immediate` |
+
+**Important:** The `subsystemNQN` parameter is required for NVMe-oF volumes. You must pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) before provisioning volumes. The CSI driver creates namespaces within this shared subsystem.
 
 ### Controller Settings
 

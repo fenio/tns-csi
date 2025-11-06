@@ -400,13 +400,19 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
 ```
 
 **Requirements:**
+- TrueNAS Scale 25.10+ (NVMe-oF feature introduced in 25.10)
+- Pre-configured NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems)
+  - The `subsystemNQN` parameter must match the subsystem you created
 - Linux kernel with `nvme-tcp` module support
 - Load module: `sudo modprobe nvme-tcp`
 - TrueNAS NVMe-oF service configured and running
+
+See [QUICKSTART-NVMEOF.md](QUICKSTART-NVMEOF.md) for detailed NVMe-oF setup instructions.
 
 ## Performance Considerations
 

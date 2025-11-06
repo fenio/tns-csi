@@ -331,31 +331,10 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 			NFSShareID:  share.ID,
 		}
 
-		// Encode volume ID
-		volumeID, err := encodeVolumeID(meta)
-		if err != nil {
-			klog.Warningf("Failed to encode volume ID for dataset %s: %v", dataset.Name, err)
-			continue
+		entry := s.buildVolumeEntry(dataset, meta, "nfs")
+		if entry != nil {
+			entries = append(entries, entry)
 		}
-
-		// Determine capacity from dataset
-		var capacityBytes int64
-		if dataset.Available != nil {
-			if val, ok := dataset.Available["parsed"].(float64); ok {
-				capacityBytes = int64(val)
-			}
-		}
-
-		entries = append(entries, &csi.ListVolumesResponse_Entry{
-			Volume: &csi.Volume{
-				VolumeId:      volumeID,
-				CapacityBytes: capacityBytes,
-				VolumeContext: map[string]string{
-					"protocol":    "nfs",
-					"datasetName": dataset.Name,
-				},
-			},
-		})
 	}
 
 	klog.V(5).Infof("Found %d NFS volumes", len(entries))
@@ -393,35 +372,43 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 			NVMeOFNamespaceID: ns.ID,
 		}
 
-		// Encode volume ID
-		volumeID, err := encodeVolumeID(meta)
-		if err != nil {
-			klog.Warningf("Failed to encode volume ID for ZVOL %s: %v", zvol.Name, err)
-			continue
+		entry := s.buildVolumeEntry(zvol, meta, "nvmeof")
+		if entry != nil {
+			entries = append(entries, entry)
 		}
-
-		// Determine capacity from ZVOL
-		var capacityBytes int64
-		if zvol.Used != nil {
-			if val, ok := zvol.Used["parsed"].(float64); ok {
-				capacityBytes = int64(val)
-			}
-		}
-
-		entries = append(entries, &csi.ListVolumesResponse_Entry{
-			Volume: &csi.Volume{
-				VolumeId:      volumeID,
-				CapacityBytes: capacityBytes,
-				VolumeContext: map[string]string{
-					"protocol":    "nvmeof",
-					"datasetName": zvol.Name,
-				},
-			},
-		})
 	}
 
 	klog.V(5).Infof("Found %d NVMe-oF volumes", len(entries))
 	return entries, nil
+}
+
+// buildVolumeEntry constructs a ListVolumesResponse_Entry from dataset and metadata.
+func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta VolumeMetadata, protocol string) *csi.ListVolumesResponse_Entry {
+	// Encode volume ID
+	volumeID, err := encodeVolumeID(meta)
+	if err != nil {
+		klog.Warningf("Failed to encode volume ID for dataset %s: %v", dataset.Name, err)
+		return nil
+	}
+
+	// Determine capacity from dataset
+	var capacityBytes int64
+	if dataset.Available != nil {
+		if val, ok := dataset.Available["parsed"].(float64); ok {
+			capacityBytes = int64(val)
+		}
+	}
+
+	return &csi.ListVolumesResponse_Entry{
+		Volume: &csi.Volume{
+			VolumeId:      volumeID,
+			CapacityBytes: capacityBytes,
+			VolumeContext: map[string]string{
+				"protocol":    protocol,
+				"datasetName": dataset.Name,
+			},
+		},
+	}
 }
 
 // GetCapacity returns the capacity of the storage pool.

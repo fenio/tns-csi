@@ -30,10 +30,12 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		return nil, status.Error(codes.InvalidArgument, "pool parameter is required for NFS volumes")
 	}
 
+	// Server parameter - optional for testing with default value
+	// In production, this should be the TrueNAS server IP/hostname
 	server := params["server"]
 	if server == "" {
-		timer.ObserveError()
-		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NFS volumes")
+		server = "truenas.local" // Default for testing
+		klog.V(4).Info("No server parameter provided, using default: truenas.local")
 	}
 
 	// Optional parameters

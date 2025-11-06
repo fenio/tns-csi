@@ -1089,6 +1089,66 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	return &datasets[0], nil
 }
 
+// QueryAllDatasets queries all datasets with optional prefix filter.
+func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
+	klog.V(5).Infof("Querying all datasets with prefix: %s", prefix)
+
+	var result []Dataset
+	var filters []interface{}
+
+	// If prefix is specified, filter by it
+	if prefix != "" {
+		filters = []interface{}{
+			[]interface{}{"id", "^", prefix},
+		}
+	}
+
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
+	}
+
+	klog.V(5).Infof("Found %d datasets", len(result))
+	return result, nil
+}
+
+// QueryAllNFSShares queries all NFS shares with optional path prefix filter.
+func (c *Client) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]NFSShare, error) {
+	klog.V(5).Infof("Querying all NFS shares with path prefix: %s", pathPrefix)
+
+	var result []NFSShare
+	var filters []interface{}
+
+	// If path prefix is specified, filter by it
+	if pathPrefix != "" {
+		filters = []interface{}{
+			[]interface{}{"path", "^", pathPrefix},
+		}
+	}
+
+	err := c.Call(ctx, "sharing.nfs.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
+	}
+
+	klog.V(5).Infof("Found %d NFS shares", len(result))
+	return result, nil
+}
+
+// QueryAllNVMeOFNamespaces queries all NVMe-oF namespaces.
+func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespace, error) {
+	klog.V(5).Info("Querying all NVMe-oF namespaces")
+
+	var result []NVMeOFNamespace
+	err := c.Call(ctx, "nvmeof.namespace.query", []interface{}{[]interface{}{}}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
+	}
+
+	klog.V(5).Infof("Found %d NVMe-oF namespaces", len(result))
+	return result, nil
+}
+
 // queryDatasets queries datasets by name (internal helper).
 func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Dataset, error) {
 	klog.V(5).Infof("Querying datasets with name: %s", datasetName)

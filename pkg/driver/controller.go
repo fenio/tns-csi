@@ -41,6 +41,9 @@ type APIClient interface {
 	DeleteSnapshot(ctx context.Context, snapshotID string) error
 	QuerySnapshots(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
 	CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
+	QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
+	QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
+	QueryAllNVMeOFNamespaces(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
 }
 
 // VolumeMetadata contains information needed to manage a volume.
@@ -237,12 +240,188 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 }
 
 // ListVolumes lists all volumes.
-func (s *ControllerService) ListVolumes(_ context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
+func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	klog.V(4).Infof("ListVolumes called with request: %+v", req)
 
-	// Optional CSI capability - not required for basic functionality
-	// Kubernetes does not require this for normal PVC operations
-	return &csi.ListVolumesResponse{}, nil
+	// Collect all CSI-managed volumes (both NFS and NVMe-oF)
+	var entries []*csi.ListVolumesResponse_Entry
+
+	// Query NFS volumes
+	nfsEntries, err := s.listNFSVolumes(ctx)
+	if err != nil {
+		klog.Errorf("Failed to list NFS volumes: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list NFS volumes: %v", err)
+	}
+	entries = append(entries, nfsEntries...)
+
+	// Query NVMe-oF volumes
+	nvmeofEntries, err := s.listNVMeOFVolumes(ctx)
+	if err != nil {
+		klog.Errorf("Failed to list NVMe-oF volumes: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list NVMe-oF volumes: %v", err)
+	}
+	entries = append(entries, nvmeofEntries...)
+
+	// Handle pagination
+	maxEntries := int(req.GetMaxEntries())
+	startingToken := req.GetStartingToken()
+
+	// If starting token is provided, skip entries until we reach it
+	startIdx := 0
+	if startingToken != "" {
+		for i, entry := range entries {
+			if entry.Volume.VolumeId == startingToken {
+				startIdx = i + 1
+				break
+			}
+		}
+	}
+
+	// Limit the number of entries if maxEntries is specified
+	endIdx := len(entries)
+	var nextToken string
+	if maxEntries > 0 && startIdx+maxEntries < len(entries) {
+		endIdx = startIdx + maxEntries
+		// Set next token to the last entry's volume ID
+		if endIdx < len(entries) {
+			nextToken = entries[endIdx-1].Volume.VolumeId
+		}
+	}
+
+	// Return the paginated entries
+	paginatedEntries := entries[startIdx:endIdx]
+
+	klog.V(4).Infof("Returning %d volumes (total: %d, start: %d, end: %d)", 
+		len(paginatedEntries), len(entries), startIdx, endIdx)
+
+	return &csi.ListVolumesResponse{
+		Entries:   paginatedEntries,
+		NextToken: nextToken,
+	}, nil
+}
+
+// listNFSVolumes lists all NFS CSI volumes.
+func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolumesResponse_Entry, error) {
+	klog.V(5).Info("Listing NFS volumes")
+
+	// Query all NFS shares - they indicate CSI-managed NFS volumes
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
+	}
+
+	var entries []*csi.ListVolumesResponse_Entry
+	for _, share := range shares {
+		// Each NFS share path corresponds to a dataset
+		// Try to extract volume metadata from the dataset
+		datasets, err := s.apiClient.QueryAllDatasets(ctx, share.Path)
+		if err != nil || len(datasets) == 0 {
+			klog.V(5).Infof("Skipping NFS share with no matching dataset: %s", share.Path)
+			continue
+		}
+
+		dataset := datasets[0]
+
+		// Build volume metadata
+		meta := VolumeMetadata{
+			Name:        dataset.Name,
+			Protocol:    "nfs",
+			DatasetID:   dataset.ID,
+			DatasetName: dataset.Name,
+			NFSShareID:  share.ID,
+		}
+
+		// Encode volume ID
+		volumeID, err := encodeVolumeID(meta)
+		if err != nil {
+			klog.Warningf("Failed to encode volume ID for dataset %s: %v", dataset.Name, err)
+			continue
+		}
+
+		// Determine capacity from dataset
+		var capacityBytes int64
+		if dataset.Available != nil {
+			if val, ok := dataset.Available["parsed"].(float64); ok {
+				capacityBytes = int64(val)
+			}
+		}
+
+		entries = append(entries, &csi.ListVolumesResponse_Entry{
+			Volume: &csi.Volume{
+				VolumeId:      volumeID,
+				CapacityBytes: capacityBytes,
+				VolumeContext: map[string]string{
+					"protocol":    "nfs",
+					"datasetName": dataset.Name,
+				},
+			},
+		})
+	}
+
+	klog.V(5).Infof("Found %d NFS volumes", len(entries))
+	return entries, nil
+}
+
+// listNVMeOFVolumes lists all NVMe-oF CSI volumes.
+func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListVolumesResponse_Entry, error) {
+	klog.V(5).Info("Listing NVMe-oF volumes")
+
+	// Query all NVMe-oF namespaces - they indicate CSI-managed NVMe-oF volumes
+	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
+	}
+
+	var entries []*csi.ListVolumesResponse_Entry
+	for _, ns := range namespaces {
+		// Each namespace corresponds to a ZVOL
+		// The device path usually points to the ZVOL
+		datasets, err := s.apiClient.QueryAllDatasets(ctx, ns.Device)
+		if err != nil || len(datasets) == 0 {
+			klog.V(5).Infof("Skipping NVMe-oF namespace with no matching ZVOL: %s", ns.Device)
+			continue
+		}
+
+		zvol := datasets[0]
+
+		// Build volume metadata
+		meta := VolumeMetadata{
+			Name:              zvol.Name,
+			Protocol:          "nvmeof",
+			DatasetID:         zvol.ID,
+			DatasetName:       zvol.Name,
+			NVMeOFNamespaceID: ns.ID,
+		}
+
+		// Encode volume ID
+		volumeID, err := encodeVolumeID(meta)
+		if err != nil {
+			klog.Warningf("Failed to encode volume ID for ZVOL %s: %v", zvol.Name, err)
+			continue
+		}
+
+		// Determine capacity from ZVOL
+		var capacityBytes int64
+		if zvol.Used != nil {
+			if val, ok := zvol.Used["parsed"].(float64); ok {
+				capacityBytes = int64(val)
+			}
+		}
+
+		entries = append(entries, &csi.ListVolumesResponse_Entry{
+			Volume: &csi.Volume{
+				VolumeId:      volumeID,
+				CapacityBytes: capacityBytes,
+				VolumeContext: map[string]string{
+					"protocol":    "nvmeof",
+					"datasetName": zvol.Name,
+				},
+			},
+		})
+	}
+
+	klog.V(5).Infof("Found %d NVMe-oF volumes", len(entries))
+	return entries, nil
 }
 
 // GetCapacity returns the capacity of the storage pool.

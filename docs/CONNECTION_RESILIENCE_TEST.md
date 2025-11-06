@@ -44,14 +44,14 @@ From `pkg/tnsapi/client.go`:
 ### Test Environment
 - **Kubernetes Cluster:** kind (truenas-csi-test)
 - **CSI Controller Pod:** tns-csi-controller-0 (kube-system namespace)
-- **TrueNAS Server:** 10.10.20.100:1443
+- **TrueNAS Server:** 10.10.20.100:443
 - **Network Simulation:** iptables rules in kind worker node
 
 ### Test Steps
 
 #### 1. Initial Connection Verification ✅
 ```
-I1031 20:27:49.843424 Connecting to storage WebSocket at wss://10.10.20.100:1443/api/current
+I1031 20:27:49.843424 Connecting to storage WebSocket at wss://10.10.20.100:443/api/current
 I1031 20:27:49.881555 Authenticating with TrueNAS using auth.login_with_api_key
 I1031 20:27:50.579787 Successfully authenticated with TrueNAS
 ```
@@ -67,7 +67,7 @@ docker exec truenas-csi-test-worker iptables -A OUTPUT -d 10.10.20.100 -j DROP
 #### 3. Connection Timeout Detection ✅
 **Observed at:** 20:29:50 (approximately 120 seconds after last successful communication)
 ```
-E1031 20:29:50.574176 WebSocket read error: read tcp 10.244.1.17:50382->10.10.20.100:1443: i/o timeout
+E1031 20:29:50.574176 WebSocket read error: read tcp 10.244.1.17:50382->10.10.20.100:443: i/o timeout
 W1031 20:29:50.574591 WebSocket connection lost, attempting to reconnect...
 ```
 **Detection Time:** ~120 seconds (4x ping interval as configured)  
@@ -102,7 +102,7 @@ docker exec truenas-csi-test-worker iptables -D OUTPUT -d 10.10.20.100 -j DROP
 #### 6. Fresh Connection After Pod Restart ✅
 Since all reconnection attempts were exhausted, restarted the pod:
 ```
-I1031 20:33:14.198189 Connecting to storage WebSocket at wss://10.10.20.100:1443/api/current
+I1031 20:33:14.198189 Connecting to storage WebSocket at wss://10.10.20.100:443/api/current
 I1031 20:33:15.025823 Successfully authenticated with TrueNAS
 ```
 **Result:** New connection established successfully in ~800ms
@@ -213,7 +213,7 @@ The WebSocket client has a **proven, working implementation**:
 
 1. **Monitoring:** Watch for "Failed to reconnect" messages indicating persistent issues
 2. **Alerting:** Set up alerts for > 3 consecutive reconnection failures
-3. **Network:** Ensure WebSocket port (1443) is always accessible
+3. **Network:** Ensure WebSocket port (443) is always accessible
 4. **Logs:** Use `-v=6` flag to see detailed ping/pong activity if needed
 
 ### For Development

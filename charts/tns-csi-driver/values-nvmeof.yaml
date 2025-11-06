@@ -5,7 +5,7 @@
 truenas:
   # Your TrueNAS server configuration
   host: "YOUR-TRUENAS-IP"
-  port: 1443
+  port: 443
   apiKey: "your-api-key-here"
   allowInsecure: true
   

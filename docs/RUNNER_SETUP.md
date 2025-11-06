@@ -250,7 +250,7 @@ See [WIREGUARD_SETUP.md](WIREGUARD_SETUP.md) for configuring secure VPN access t
 **Network Requirements:**
 - Outbound HTTPS (443) to GitHub
 - Access to TrueNAS:
-  - Port 1443 (API/WebSocket)
+  - Port 443 (API/WebSocket)
   - Port 2049 (NFS)
   - Port 4420 (NVMe-oF)
 
@@ -355,7 +355,7 @@ sudo journalctl -u k3s -f
 curl -I https://github.com
 
 # Test TrueNAS API (via Wireguard)
-curl -k https://TRUENAS_IP:1443/api/v2.0/system/info
+curl -k https://TRUENAS_IP:443/api/v2.0/system/info
 
 # Check Wireguard status
 sudo wg show

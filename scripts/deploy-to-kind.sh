@@ -54,7 +54,7 @@ if [ -f "$CREDS_FILE" ]; then
     source "$CREDS_FILE"
 else
     warn "No .tns-credentials file found"
-    read -p "Enter TrueNAS WebSocket URL (e.g., wss://10.10.20.100:1443/api/current): " TRUENAS_URL
+    read -p "Enter TrueNAS WebSocket URL (e.g., wss://10.10.20.100:443/api/current): " TRUENAS_URL
     read -p "Enter TrueNAS API key: " TRUENAS_API_KEY
 fi
 

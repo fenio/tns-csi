@@ -4,7 +4,7 @@
 truenas:
   # WebSocket URL for TrueNAS API
   # Format: wss://<host>:<port>/api/current
-  url: "wss://YOUR-TRUENAS-IP:1443/api/current"
+  url: "wss://YOUR-TRUENAS-IP:443/api/current"
   
   # TrueNAS API key
   # Create this in TrueNAS UI: Settings > API Keys

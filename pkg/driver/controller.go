@@ -291,7 +291,7 @@ func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 	// Return the paginated entries
 	paginatedEntries := entries[startIdx:endIdx]
 
-	klog.V(4).Infof("Returning %d volumes (total: %d, start: %d, end: %d)", 
+	klog.V(4).Infof("Returning %d volumes (total: %d, start: %d, end: %d)",
 		len(paginatedEntries), len(entries), startIdx, endIdx)
 
 	return &csi.ListVolumesResponse{

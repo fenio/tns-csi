@@ -1089,23 +1089,32 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	return &datasets[0], nil
 }
 
-// QueryAllDatasets queries all datasets with optional prefix filter.
-func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
-	klog.V(5).Infof("Querying all datasets with prefix: %s", prefix)
+// queryWithOptionalFilter is a helper function to reduce duplication in query methods.
+func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, resourceType string, result interface{}) error {
+	klog.V(5).Infof("Querying all %s with filter: %s", resourceType, filterValue)
 
-	var result []Dataset
 	var filters []interface{}
 
-	// If prefix is specified, filter by it
-	if prefix != "" {
+	// If filter value is specified, apply the filter
+	if filterValue != "" {
 		filters = []interface{}{
-			[]interface{}{"id", "^", prefix},
+			[]interface{}{filterField, "^", filterValue},
 		}
 	}
 
-	err := c.Call(ctx, "pool.dataset.query", []interface{}{filters}, &result)
+	err := c.Call(ctx, method, []interface{}{filters}, result)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query datasets: %w", err)
+		return fmt.Errorf("failed to query %s: %w", resourceType, err)
+	}
+
+	return nil
+}
+
+// QueryAllDatasets queries all datasets with optional prefix filter.
+func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
+	var result []Dataset
+	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "datasets", &result); err != nil {
+		return nil, err
 	}
 
 	klog.V(5).Infof("Found %d datasets", len(result))
@@ -1114,21 +1123,9 @@ func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset
 
 // QueryAllNFSShares queries all NFS shares with optional path prefix filter.
 func (c *Client) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]NFSShare, error) {
-	klog.V(5).Infof("Querying all NFS shares with path prefix: %s", pathPrefix)
-
 	var result []NFSShare
-	var filters []interface{}
-
-	// If path prefix is specified, filter by it
-	if pathPrefix != "" {
-		filters = []interface{}{
-			[]interface{}{"path", "^", pathPrefix},
-		}
-	}
-
-	err := c.Call(ctx, "sharing.nfs.query", []interface{}{filters}, &result)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
+	if err := c.queryWithOptionalFilter(ctx, "sharing.nfs.query", "path", pathPrefix, "NFS shares", &result); err != nil {
+		return nil, err
 	}
 
 	klog.V(5).Infof("Found %d NFS shares", len(result))

@@ -13,7 +13,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-//nolint:gocognit,gocyclo // Complex NVMe-oF provisioning logic - refactoring would risk stability of working code
 func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Info("Creating NVMe-oF volume")
 
@@ -29,6 +28,14 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	server := params["server"]
 	if server == "" {
 		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NVMe-oF volumes")
+	}
+
+	subsystemNQN := params["subsystemNQN"]
+	if subsystemNQN == "" {
+		return nil, status.Error(codes.InvalidArgument,
+			"subsystemNQN parameter is required for NVMe-oF volumes. "+
+				"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
+				"and provide its NQN in the StorageClass parameters.")
 	}
 
 	// Optional parameters
@@ -49,7 +56,19 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	klog.Infof("Creating ZVOL: %s with size: %d bytes", zvolName, requestedCapacity)
 
-	// Step 1: Create ZVOL (block device)
+	// Step 1: Verify pre-configured subsystem exists
+	klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
+	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"Failed to find NVMe-oF subsystem with NQN '%s'. "+
+				"Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
+				"with ports attached before provisioning volumes. Error: %v", subsystemNQN, err)
+	}
+
+	klog.Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
+
+	// Step 2: Create ZVOL (block device)
 	zvol, err := s.apiClient.CreateZvol(ctx, tnsapi.ZvolCreateParams{
 		Name:         zvolName,
 		Type:         "VOLUME",
@@ -62,95 +81,22 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	klog.Infof("Created ZVOL: %s (ID: %s)", zvol.Name, zvol.ID)
 
-	klog.Infof("Creating NVMe-oF subsystem with name: %s", volumeName)
-
-	// Step 2: Create NVMe-oF subsystem with allow_any_host enabled
-	// Use volume name as the subsystem name (TrueNAS will auto-generate NQN)
-	subsystem, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
-		Name:         volumeName,
-		AllowAnyHost: true, // Allow any host to connect without explicit host NQN registration
-	})
-	if err != nil {
-		// Cleanup: delete the ZVOL if subsystem creation fails
-		klog.Errorf("Failed to create NVMe-oF subsystem, cleaning up ZVOL: %v", err)
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup ZVOL after subsystem creation failure: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF subsystem: %v", err)
-	}
-
-	klog.Infof("Created NVMe-oF subsystem with ID: %d", subsystem.ID)
-
-	// Step 2b: Query for available NVMe-oF ports and attach subsystem to the TCP port
-	ports, err := s.apiClient.QueryNVMeOFPorts(ctx)
-	if err != nil {
-		klog.Errorf("Failed to query NVMe-oF ports, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to query NVMe-oF ports: %v", err)
-	}
-
-	// Find the TCP port (typically port 4420)
-	var portID int
-	for _, port := range ports {
-		if port.Transport == "TCP" {
-			portID = port.ID
-			klog.Infof("Found NVMe-oF TCP port %d at %s:%d", port.ID, port.Address, port.Port)
-			break
-		}
-	}
-
-	if portID == 0 {
-		klog.Errorf("No TCP NVMe-oF port found on TrueNAS server. NVMe-oF ports must be pre-configured before provisioning volumes.")
-		klog.Infof("To configure NVMe-oF: In TrueNAS 25.10+ UI, go to Shares > NVMe-oF Subsystems, create or edit a subsystem, and add a TCP port (default: 4420)")
-		klog.Infof("Cleaning up subsystem and ZVOL...")
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
-		}
-		return nil, status.Error(codes.FailedPrecondition,
-			"No TCP NVMe-oF port configured on TrueNAS server. Please configure an NVMe-oF TCP port in TrueNAS 25.10+ (Shares > NVMe-oF Subsystems > Add Port) before provisioning volumes.")
-	}
-
-	// Attach subsystem to the port
-	klog.Infof("Attaching subsystem %d to port %d", subsystem.ID, portID)
-	if attachErr := s.apiClient.AddSubsystemToPort(ctx, subsystem.ID, portID); attachErr != nil {
-		klog.Errorf("Failed to attach subsystem to port, cleaning up: %v", attachErr)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to attach subsystem to port: %v", attachErr)
-	}
-
-	klog.Infof("Successfully attached subsystem %d to port %d", subsystem.ID, portID)
-
-	// Step 3: Create NVMe-oF namespace
+	// Step 3: Create NVMe-oF namespace within pre-configured subsystem
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
 	devicePath := "zvol/" + zvolName
 
-	klog.Infof("Creating NVMe-oF namespace for device: %s", devicePath)
+	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
 
+	// Note: NSID is not specified (omitted) - TrueNAS will auto-assign the next available namespace ID
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 		SubsysID:   subsystem.ID,
 		DevicePath: devicePath,
 		DeviceType: "ZVOL",
-		NSID:       1, // Start with namespace ID 1
+		// NSID is omitted - TrueNAS auto-assigns next available ID
 	})
 	if err != nil {
-		// Cleanup: delete subsystem and ZVOL
-		klog.Errorf("Failed to create NVMe-oF namespace, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
+		// Cleanup: delete the ZVOL
+		klog.Errorf("Failed to create NVMe-oF namespace, cleaning up ZVOL: %v", err)
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
@@ -172,13 +118,10 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	encodedVolumeID, err := encodeVolumeID(meta)
 	if err != nil {
-		// Cleanup: delete namespace, subsystem, and ZVOL
+		// Cleanup: delete namespace and ZVOL (do NOT delete subsystem)
 		klog.Errorf("Failed to encode volume ID, cleaning up: %v", err)
 		if delErr := s.apiClient.DeleteNVMeOFNamespace(ctx, namespace.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
@@ -209,9 +152,11 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 }
 
 // deleteNVMeOFVolume deletes an NVMe-oF volume.
+// NOTE: This function does NOT delete the NVMe-oF subsystem. Subsystems are pre-configured
+// infrastructure that serve multiple volumes (namespaces). Only the namespace and ZVOL are deleted.
 func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
-	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, subsystem ID: %d, namespace ID: %d)",
-		meta.Name, meta.DatasetName, meta.NVMeOFSubsystemID, meta.NVMeOFNamespaceID)
+	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d)",
+		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID)
 
 	// Step 1: Delete NVMe-oF namespace
 	if meta.NVMeOFNamespaceID > 0 {
@@ -224,18 +169,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		}
 	}
 
-	// Step 2: Delete NVMe-oF subsystem
-	if meta.NVMeOFSubsystemID > 0 {
-		klog.Infof("Deleting NVMe-oF subsystem with ID: %d", meta.NVMeOFSubsystemID)
-		if err := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID); err != nil {
-			// Log error but continue - the subsystem might already be deleted
-			klog.Warningf("Failed to delete NVMe-oF subsystem %d: %v (continuing anyway)", meta.NVMeOFSubsystemID, err)
-		} else {
-			klog.Infof("Successfully deleted NVMe-oF subsystem %d", meta.NVMeOFSubsystemID)
-		}
-	}
-
-	// Step 3: Delete ZVOL
+	// Step 2: Delete ZVOL
 	if meta.DatasetID != "" {
 		klog.Infof("Deleting ZVOL: %s", meta.DatasetID)
 		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
@@ -246,102 +180,54 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		}
 	}
 
-	klog.Infof("Successfully deleted NVMe-oF volume: %s", meta.Name)
+	// NOTE: Subsystem (ID: %d) is NOT deleted - it's pre-configured infrastructure
+	// serving multiple volumes. Administrator manages subsystem lifecycle independently.
+	if meta.NVMeOFSubsystemID > 0 {
+		klog.V(4).Infof("Subsystem ID %d is preserved (pre-configured infrastructure, not volume-specific)", meta.NVMeOFSubsystemID)
+	}
+
+	klog.Infof("Successfully deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-//nolint:gocognit,gocyclo // Complex NVMe-oF setup logic - refactoring would risk stability of working code
-func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server string) (*csi.CreateVolumeResponse, error) {
-	klog.V(4).Infof("Setting up NVMe-oF subsystem and namespace for cloned ZVOL: %s", zvol.Name)
+func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, subsystemNQN string) (*csi.CreateVolumeResponse, error) {
+	klog.V(4).Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s", zvol.Name)
 
 	volumeName := req.GetName()
 
-	// Step 1: Create NVMe-oF subsystem with allow_any_host enabled
-	klog.Infof("Creating NVMe-oF subsystem with name: %s", volumeName)
-
-	subsystem, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
-		Name:         volumeName,
-		AllowAnyHost: true, // Allow any host to connect without explicit host NQN registration
-	})
+	// Step 1: Verify pre-configured subsystem exists
+	klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
+	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
 	if err != nil {
-		// Cleanup: delete the cloned ZVOL if subsystem creation fails
-		klog.Errorf("Failed to create NVMe-oF subsystem for cloned volume, cleaning up ZVOL: %v", err)
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL after subsystem creation failure: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF subsystem for cloned volume: %v", err)
-	}
-
-	klog.Infof("Created NVMe-oF subsystem with ID: %d", subsystem.ID)
-
-	// Step 2: Query for available NVMe-oF ports and attach subsystem to the TCP port
-	ports, err := s.apiClient.QueryNVMeOFPorts(ctx)
-	if err != nil {
-		klog.Errorf("Failed to query NVMe-oF ports, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
+		// Cleanup: delete the cloned ZVOL if subsystem verification fails
+		klog.Errorf("Failed to find NVMe-oF subsystem, cleaning up cloned ZVOL: %v", err)
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to query NVMe-oF ports: %v", err)
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"Failed to find NVMe-oF subsystem with NQN '%s'. "+
+				"Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
+				"with ports attached before provisioning volumes. Error: %v", subsystemNQN, err)
 	}
 
-	// Find the TCP port (typically port 4420)
-	var portID int
-	for _, port := range ports {
-		if port.Transport == "TCP" {
-			portID = port.ID
-			klog.Infof("Found NVMe-oF TCP port %d at %s:%d", port.ID, port.Address, port.Port)
-			break
-		}
-	}
+	klog.Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
 
-	if portID == 0 {
-		klog.Errorf("No TCP NVMe-oF port found on TrueNAS server.")
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
-		}
-		return nil, status.Error(codes.FailedPrecondition,
-			"No TCP NVMe-oF port configured on TrueNAS server. Please configure an NVMe-oF TCP port in TrueNAS.")
-	}
-
-	// Attach subsystem to the port
-	klog.Infof("Attaching subsystem %d to port %d", subsystem.ID, portID)
-	if attachErr := s.apiClient.AddSubsystemToPort(ctx, subsystem.ID, portID); attachErr != nil {
-		klog.Errorf("Failed to attach subsystem to port, cleaning up: %v", attachErr)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to attach subsystem to port: %v", attachErr)
-	}
-
-	klog.Infof("Successfully attached subsystem %d to port %d", subsystem.ID, portID)
-
-	// Step 3: Create NVMe-oF namespace
+	// Step 2: Create NVMe-oF namespace within pre-configured subsystem
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
 	devicePath := "zvol/" + zvol.Name
 
-	klog.Infof("Creating NVMe-oF namespace for device: %s", devicePath)
+	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
 
+	// Note: NSID is not specified (omitted) - TrueNAS will auto-assign the next available namespace ID
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 		SubsysID:   subsystem.ID,
 		DevicePath: devicePath,
 		DeviceType: "ZVOL",
-		NSID:       1, // Start with namespace ID 1
+		// NSID is omitted - TrueNAS auto-assigns next available ID
 	})
 	if err != nil {
-		// Cleanup: delete subsystem and ZVOL
-		klog.Errorf("Failed to create NVMe-oF namespace, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
-		}
+		// Cleanup: delete cloned ZVOL
+		klog.Errorf("Failed to create NVMe-oF namespace, cleaning up cloned ZVOL: %v", err)
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
 		}
@@ -363,13 +249,10 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	encodedVolumeID, err := encodeVolumeID(meta)
 	if err != nil {
-		// Cleanup: delete namespace, subsystem, and ZVOL
+		// Cleanup: delete namespace and cloned ZVOL (do NOT delete subsystem)
 		klog.Errorf("Failed to encode volume ID for cloned volume, cleaning up: %v", err)
 		if delErr := s.apiClient.DeleteNVMeOFNamespace(ctx, namespace.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)

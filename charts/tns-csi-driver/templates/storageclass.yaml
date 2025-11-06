@@ -24,6 +24,9 @@ parameters:
   {{- if eq $name "nvmeof" }}
   transport: {{ $sc.transport | default "tcp" | quote }}
   port: {{ $sc.port | default "4420" | quote }}
+  {{- if $sc.subsystemNQN }}
+  subsystemNQN: {{ $sc.subsystemNQN | quote }}
+  {{- end }}
   {{- if $sc.fsType }}
   csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
   {{- end }}

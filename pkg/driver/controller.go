@@ -32,6 +32,7 @@ type APIClient interface {
 	CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
 	CreateNVMeOFSubsystem(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
 	DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error
+	GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
 	CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
 	DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error
 	QueryNVMeOFPorts(ctx context.Context) ([]tnsapi.NVMeOFPort, error)

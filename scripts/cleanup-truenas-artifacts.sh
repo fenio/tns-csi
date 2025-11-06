@@ -151,6 +151,11 @@ func main() {
 		}
 	}
 
+	// NOTE: NVMe-oF subsystems are NOT deleted by this script.
+	// Subsystems are pre-configured infrastructure that serve multiple volumes (namespaces).
+	// Administrators manage subsystem lifecycle independently.
+	// Only namespaces (automatically deleted when dataset is removed) are cleaned up.
+
 	// Delete datasets
 	fmt.Printf("\n=== Deleting %d dataset(s) ===\n", len(testDatasets))
 	for _, dsName := range testDatasets {

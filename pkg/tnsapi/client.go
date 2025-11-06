@@ -26,6 +26,8 @@ var (
 	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
 	ErrCloneFailed            = errors.New("clone operation returned false (unsuccessful)")
 	ErrClonedDatasetNotFound  = errors.New("cloned dataset not found after successful clone")
+	ErrSubsystemNotFound      = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
+	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -821,6 +823,28 @@ func (c *Client) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOF
 	}
 
 	return result, nil
+}
+
+// GetNVMeOFSubsystemByNQN retrieves a single NVMe-oF subsystem by NQN.
+// Returns error if subsystem is not found or if multiple subsystems match.
+func (c *Client) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error) {
+	klog.V(4).Infof("Getting NVMe-oF subsystem for NQN: %s", nqn)
+
+	subsystems, err := c.QueryNVMeOFSubsystem(ctx, nqn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query subsystem: %w", err)
+	}
+
+	if len(subsystems) == 0 {
+		return nil, fmt.Errorf("%w: NQN %s", ErrSubsystemNotFound, nqn)
+	}
+
+	if len(subsystems) > 1 {
+		return nil, fmt.Errorf("%w: NQN %s (expected 1, found %d)", ErrMultipleSubsystems, nqn, len(subsystems))
+	}
+
+	klog.V(4).Infof("Found NVMe-oF subsystem: ID=%d, NQN=%s", subsystems[0].ID, subsystems[0].NQN)
+	return &subsystems[0], nil
 }
 
 // AddSubsystemToPort associates an NVMe-oF subsystem with a port.

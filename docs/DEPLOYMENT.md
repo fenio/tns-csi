@@ -191,7 +191,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses.nvmeof.subsystemNQN="nqn.2005-03.org.truenas:csi"
 ```
 
-**Note:** Replace `nqn.2005-03.org.truenas:csi` with the actual subsystem NQN you configured in Step 1.4.
+**Note:** Replace `nqn.2005-03.org.truenas:csi` with the actual subsystem NQN you configured in Step 1.4 (line 99).
 
 This single command will:
 - Create the kube-system namespace if needed

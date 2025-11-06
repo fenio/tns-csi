@@ -90,9 +90,12 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
   --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi" \
   --set storageClasses.nvmeof.transport=tcp \
   --set storageClasses.nvmeof.port=4420
 ```
+
+**Note:** Replace `nqn.2025-01.com.truenas:csi` with your actual NVMe-oF subsystem NQN. You must pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) before provisioning volumes.
 
 See the [Helm chart README](charts/tns-csi-driver/README.md) for detailed configuration options.
 
@@ -159,9 +162,12 @@ parameters:
   protocol: nvmeof
   server: YOUR-TRUENAS-IP
   pool: tank
+  subsystemNQN: nqn.2025-01.com.truenas:csi  # REQUIRED: Pre-configured subsystem NQN
   path: /mnt/tank/k8s/nvmeof
   fsType: ext4  # or xfs
 ```
+
+**Important:** The `subsystemNQN` parameter is required and must match a pre-configured NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems). The CSI driver creates namespaces within this shared subsystem for each volume.
 
 ## Project Status and Limitations
 

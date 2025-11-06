@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,6 +16,8 @@ import (
 
 // createNFSVolume creates an NFS volume with a ZFS dataset and NFS share.
 func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nfs", "create")
+
 	klog.V(4).Info("Creating NFS volume")
 
 	// Get parameters from storage class
@@ -23,11 +26,13 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	// Required parameters
 	pool := params["pool"]
 	if pool == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "pool parameter is required for NFS volumes")
 	}
 
 	server := params["server"]
 	if server == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NFS volumes")
 	}
 
@@ -49,6 +54,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		Type: "FILESYSTEM",
 	})
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create dataset: %v", err)
 	}
 
@@ -68,6 +74,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup dataset after NFS share creation failure: %v", delErr)
 		}
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create NFS share: %v", err)
 	}
 
@@ -93,6 +100,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup dataset: %v", delErr)
 		}
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID: %v", err)
 	}
 
@@ -113,6 +121,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 	klog.Infof("Successfully created NFS volume with encoded ID: %s", encodedVolumeID)
 
+	timer.ObserveSuccess()
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      encodedVolumeID,
@@ -124,6 +133,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 // deleteNFSVolume deletes an NFS volume.
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nfs", "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
 
 	// Step 1: Delete NFS share
@@ -149,6 +159,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	}
 
 	klog.Infof("Successfully deleted NFS volume: %s", meta.Name)
+	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
@@ -236,9 +247,11 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 //
 //nolint:dupl // Similar to expandNVMeOFVolume but with different parameters (Quota vs Volsize, NodeExpansionRequired)
 func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMetadata, requiredBytes int64) (*csi.ControllerExpandVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nfs", "expand")
 	klog.V(4).Infof("Expanding NFS volume: %s (dataset: %s) to %d bytes", meta.Name, meta.DatasetName, requiredBytes)
 
 	if meta.DatasetID == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "dataset ID not found in volume metadata")
 	}
 
@@ -256,6 +269,7 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 	if err != nil {
 		// Provide detailed error information to help diagnose dataset issues
 		klog.Errorf("Failed to update dataset quota for %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal,
 			"Failed to update dataset quota for '%s' (Name: '%s'). "+
 				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
@@ -264,6 +278,7 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 
 	klog.Infof("Successfully expanded NFS volume %s to %d bytes", meta.Name, requiredBytes)
 
+	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         requiredBytes,
 		NodeExpansionRequired: false, // NFS volumes don't require node-side expansion

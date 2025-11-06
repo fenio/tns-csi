@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -52,14 +53,17 @@ func decodeSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 
 // CreateSnapshot creates a volume snapshot.
 func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("snapshot", "create")
 	klog.V(4).Infof("CreateSnapshot called with request: %+v", req)
 
 	// Validate request
 	if req.GetName() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Snapshot name is required")
 	}
 
 	if req.GetSourceVolumeId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Source volume ID is required")
 	}
 
@@ -69,6 +73,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	// Decode source volume metadata
 	volumeMeta, err := decodeVolumeID(sourceVolumeID)
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode source volume ID: %v", err)
 	}
 
@@ -98,9 +103,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 		if encodeErr != nil {
+			timer.ObserveError()
 			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 		}
 
+		timer.ObserveSuccess()
 		return &csi.CreateSnapshotResponse{
 			Snapshot: &csi.Snapshot{
 				SnapshotId:     snapshotID,
@@ -120,6 +127,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create snapshot: %v", err)
 	}
 
@@ -137,9 +145,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 	if encodeErr != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 	}
 
+	timer.ObserveSuccess()
 	return &csi.CreateSnapshotResponse{
 		Snapshot: &csi.Snapshot{
 			SnapshotId:     snapshotID,
@@ -152,9 +162,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 // DeleteSnapshot deletes a snapshot.
 func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("snapshot", "delete")
 	klog.V(4).Infof("DeleteSnapshot called with request: %+v", req)
 
 	if req.GetSnapshotId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Snapshot ID is required")
 	}
 
@@ -167,6 +179,7 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 		// If we can't decode the snapshot ID, log a warning but return success
 		// per CSI spec (DeleteSnapshot should be idempotent)
 		klog.Warningf("Failed to decode snapshot ID %s: %v. Assuming snapshot doesn't exist.", snapshotID, err)
+		timer.ObserveSuccess()
 		return &csi.DeleteSnapshotResponse{}, nil
 	}
 
@@ -177,12 +190,15 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 		// Check if error is because snapshot doesn't exist
 		if isNotFoundError(err) {
 			klog.Infof("Snapshot %s not found, assuming already deleted", snapshotMeta.SnapshotName)
+			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil
 		}
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to delete snapshot: %v", err)
 	}
 
 	klog.Infof("Successfully deleted snapshot: %s", snapshotMeta.SnapshotName)
+	timer.ObserveSuccess()
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 

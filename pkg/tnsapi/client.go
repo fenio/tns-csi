@@ -26,6 +26,9 @@ var (
 	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
 	ErrCloneFailed            = errors.New("clone operation returned false (unsuccessful)")
 	ErrClonedDatasetNotFound  = errors.New("cloned dataset not found after successful clone")
+	ErrSubsystemNotFound      = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
+	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
+	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -728,7 +731,8 @@ type NVMeOFSubsystemCreateParams struct {
 
 // NVMeOFSubsystem represents an NVMe-oF subsystem.
 type NVMeOFSubsystem struct {
-	NQN     string `json:"subnqn"`
+	Name    string `json:"name"`   // Short NQN without UUID prefix
+	NQN     string `json:"subnqn"` // Full NQN with UUID prefix
 	Serial  string `json:"serial"`
 	ID      int    `json:"id"`
 	Enabled bool   `json:"enabled"`
@@ -807,20 +811,106 @@ func (c *Client) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) err
 }
 
 // QueryNVMeOFSubsystem queries NVMe-oF subsystems by NQN.
+// This lists all subsystems and filters client-side by the 'name' field,
+// since TrueNAS uses 'name' for the short NQN and 'subnqn' for the full UUID-prefixed NQN.
 func (c *Client) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOFSubsystem, error) {
 	klog.V(4).Infof("Querying NVMe-oF subsystems for NQN: %s", nqn)
 
-	var result []NVMeOFSubsystem
-	err := c.Call(ctx, "nvmet.subsys.query", []interface{}{
-		[]interface{}{
-			[]interface{}{"nqn", "=", nqn},
-		},
-	}, &result)
+	// List all subsystems - server-side filtering doesn't work reliably
+	// because the NQN field name varies between TrueNAS versions
+	allSubsystems, err := c.ListAllNVMeOFSubsystems(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query NVMe-oF subsystems: %w", err)
+		return nil, fmt.Errorf("failed to list subsystems: %w", err)
 	}
 
+	// Filter client-side by matching the 'name' field (short NQN without UUID prefix)
+	// The API response has both:
+	// - 'name': short NQN (e.g., "nqn.2005-03.org.truenas:csi-test")
+	// - 'subnqn': full NQN with UUID prefix (e.g., "nqn.2011-06.com.truenas:uuid:<uuid>:nqn.2005-03.org.truenas:csi-test")
+	var result []NVMeOFSubsystem
+	for _, sub := range allSubsystems {
+		if sub.Name == nqn {
+			result = append(result, sub)
+		}
+	}
+
+	klog.V(4).Infof("Found %d subsystems matching NQN: %s", len(result), nqn)
 	return result, nil
+}
+
+// GetNVMeOFSubsystemByNQN retrieves a single NVMe-oF subsystem by NQN.
+// Returns error if subsystem is not found or if multiple subsystems match.
+func (c *Client) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error) {
+	klog.V(4).Infof("Getting NVMe-oF subsystem for NQN: %s", nqn)
+
+	subsystems, err := c.QueryNVMeOFSubsystem(ctx, nqn)
+	if err != nil {
+		klog.Errorf("Failed to query NVMe-oF subsystem: %v", err)
+
+		// Try to list all subsystems for debugging
+		klog.Infof("Attempting to list all NVMe-oF subsystems for debugging...")
+		allSubsystems, listErr := c.ListAllNVMeOFSubsystems(ctx)
+		if listErr != nil {
+			klog.Errorf("Failed to list all subsystems: %v", listErr)
+		} else {
+			klog.Infof("Found %d total NVMe-oF subsystems:", len(allSubsystems))
+			for _, sub := range allSubsystems {
+				klog.Infof("  - ID=%d, NQN=%s", sub.ID, sub.NQN)
+			}
+		}
+
+		return nil, fmt.Errorf("failed to query subsystem: %w", err)
+	}
+
+	if len(subsystems) == 0 {
+		// Try listing all subsystems to help with debugging
+		klog.Warningf("No subsystems found with NQN %s, listing all subsystems...", nqn)
+		allSubsystems, listErr := c.ListAllNVMeOFSubsystems(ctx)
+		if listErr == nil {
+			klog.Infof("Found %d total NVMe-oF subsystems:", len(allSubsystems))
+			for _, sub := range allSubsystems {
+				klog.Infof("  - ID=%d, Name=%s, FullNQN=%s", sub.ID, sub.Name, sub.NQN)
+			}
+		}
+		return nil, fmt.Errorf("%w: NQN %s", ErrSubsystemNotFound, nqn)
+	}
+
+	if len(subsystems) > 1 {
+		return nil, fmt.Errorf("%w: NQN %s (expected 1, found %d)", ErrMultipleSubsystems, nqn, len(subsystems))
+	}
+
+	klog.V(4).Infof("Found NVMe-oF subsystem: ID=%d, Name=%s, FullNQN=%s", subsystems[0].ID, subsystems[0].Name, subsystems[0].NQN)
+	return &subsystems[0], nil
+}
+
+// ListAllNVMeOFSubsystems lists all NVMe-oF subsystems (no filter).
+func (c *Client) ListAllNVMeOFSubsystems(ctx context.Context) ([]NVMeOFSubsystem, error) {
+	klog.V(4).Infof("Listing all NVMe-oF subsystems")
+
+	var result []NVMeOFSubsystem
+
+	// Try different API methods to find the correct one
+	apiMethods := []string{
+		"sharing.nvme.query",
+		"nvmet.subsystem.query",
+		"nvmet.subsys.query",
+		"iscsi.nvme.subsystem.query",
+	}
+
+	for _, method := range apiMethods {
+		klog.V(4).Infof("Trying API method: %s (no filter)", method)
+		// Empty filter to get all subsystems
+		err := c.Call(ctx, method, []interface{}{}, &result)
+
+		if err == nil {
+			klog.V(4).Infof("Successfully listed using method %s, found %d subsystems", method, len(result))
+			return result, nil
+		}
+
+		klog.V(4).Infof("Method %s failed: %v", method, err)
+	}
+
+	return nil, ErrListSubsystemsFailed
 }
 
 // AddSubsystemToPort associates an NVMe-oF subsystem with a port.

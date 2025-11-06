@@ -21,6 +21,17 @@ trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME
 
 # Run test steps
 verify_cluster
+
+# Pre-check: Verify NVMe-oF subsystem exists
+echo ""
+test_info "Verifying NVMe-oF subsystem configuration..."
+SUBSYSTEM_NQN="${NVMEOF_SUBSYSTEM_NQN:-nqn.2005-03.org.truenas:csi-test}"
+test_info "Expected subsystem NQN: ${SUBSYSTEM_NQN}"
+test_warning "IMPORTANT: The NVMe-oF subsystem with NQN '${SUBSYSTEM_NQN}' must be pre-configured"
+test_warning "in TrueNAS (Shares > NVMe-oF Subsystems) with at least one TCP port attached."
+test_warning "The CSI driver will use this shared subsystem for all test volumes."
+echo ""
+
 deploy_driver "nvmeof"
 wait_for_driver
 

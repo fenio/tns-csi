@@ -22,6 +22,9 @@ storageClasses:
     parameters:
       # NVMe-oF specific parameters
       transport: "tcp"
+      # REQUIRED: Pre-configured NVMe-oF subsystem NQN
+      # Create this in TrueNAS: Shares > NVMe-oF Subsystems before deploying
+      subsystemNQN: "nqn.2005-03.org.truenas:subsystem0"
       # Optional: specify portal IP if different from truenas.host
       # portal: "YOUR-TRUENAS-IP"
 

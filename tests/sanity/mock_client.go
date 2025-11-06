@@ -1,23 +1,36 @@
+// Package sanity provides mock implementations for CSI sanity testing.
 package sanity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 )
 
+var (
+	// ErrDatasetExists indicates a dataset already exists.
+	ErrDatasetExists = errors.New("dataset already exists")
+	// ErrDatasetNotFound indicates a dataset was not found.
+	ErrDatasetNotFound = errors.New("dataset not found")
+	// ErrNFSShareNotFound indicates an NFS share was not found.
+	ErrNFSShareNotFound = errors.New("NFS share not found")
+	// ErrNVMeOFTargetNotFound indicates an NVMe-oF target was not found.
+	ErrNVMeOFTargetNotFound = errors.New("NVMe-oF target not found")
+)
+
 // MockClient is a mock implementation of the TrueNAS API client for sanity testing.
 type MockClient struct {
-	mu            sync.Mutex
 	datasets      map[string]mockDataset
 	nfsShares     map[int]mockNFSShare
 	nvmeofTargets map[int]mockNVMeOFTarget
+	callLog       []string
 	nextDatasetID int
 	nextShareID   int
 	nextTargetID  int
-	callLog       []string // Track API calls for debugging
+	mu            sync.Mutex
 }
 
 type mockDataset struct {
@@ -30,18 +43,18 @@ type mockDataset struct {
 }
 
 type mockNFSShare struct {
-	ID      int
 	Path    string
 	Comment string
+	ID      int
 	Enabled bool
 }
 
 type mockNVMeOFTarget struct {
+	NQN         string
+	DevicePath  string
 	ID          int
 	SubsystemID int
 	NamespaceID int
-	NQN         string
-	DevicePath  string
 }
 
 // NewMockClient creates a new mock TrueNAS API client.
@@ -72,7 +85,7 @@ func (m *MockClient) CreateDataset(name string, params map[string]interface{}) (
 	defer m.mu.Unlock()
 
 	if _, exists := m.datasets[name]; exists {
-		return "", fmt.Errorf("dataset %s already exists", name)
+		return "", fmt.Errorf("dataset %s: %w", name, ErrDatasetExists)
 	}
 
 	datasetType := "FILESYSTEM"
@@ -110,7 +123,7 @@ func (m *MockClient) DeleteDataset(id string) error {
 		}
 	}
 
-	return fmt.Errorf("dataset %s not found", id)
+	return fmt.Errorf("dataset %s: %w", id, ErrDatasetNotFound)
 }
 
 // GetDataset mocks pool.dataset.query.
@@ -122,7 +135,7 @@ func (m *MockClient) GetDataset(name string) (*tnsapi.Dataset, error) {
 
 	ds, exists := m.datasets[name]
 	if !exists {
-		return nil, fmt.Errorf("dataset %s not found", name)
+		return nil, fmt.Errorf("dataset %s: %w", name, ErrDatasetNotFound)
 	}
 
 	return &tnsapi.Dataset{
@@ -136,7 +149,7 @@ func (m *MockClient) GetDataset(name string) (*tnsapi.Dataset, error) {
 }
 
 // CreateNFSShare mocks sharing.nfs.create.
-func (m *MockClient) CreateNFSShare(path string, comment string) (int, error) {
+func (m *MockClient) CreateNFSShare(path, comment string) (int, error) {
 	m.logCall("CreateNFSShare", path, comment)
 
 	m.mu.Lock()
@@ -163,7 +176,7 @@ func (m *MockClient) DeleteNFSShare(id int) error {
 	defer m.mu.Unlock()
 
 	if _, exists := m.nfsShares[id]; !exists {
-		return fmt.Errorf("NFS share %d not found", id)
+		return fmt.Errorf("NFS share %d: %w", id, ErrNFSShareNotFound)
 	}
 
 	delete(m.nfsShares, id)
@@ -206,7 +219,7 @@ func (m *MockClient) DeleteNVMeOFTarget(namespaceID int) error {
 		}
 	}
 
-	return fmt.Errorf("NVMe-oF target with namespace ID %d not found", namespaceID)
+	return fmt.Errorf("NVMe-oF target with namespace ID %d: %w", namespaceID, ErrNVMeOFTargetNotFound)
 }
 
 // SetDatasetQuota mocks pool.dataset.update quota setting.
@@ -225,7 +238,7 @@ func (m *MockClient) SetDatasetQuota(id string, quotaBytes int64) error {
 		}
 	}
 
-	return fmt.Errorf("dataset %s not found", id)
+	return fmt.Errorf("dataset %s: %w", id, ErrDatasetNotFound)
 }
 
 // QueryPool mocks pool.query for capacity information.

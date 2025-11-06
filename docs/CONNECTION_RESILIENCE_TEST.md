@@ -44,14 +44,14 @@ From `pkg/tnsapi/client.go`:
 ### Test Environment
 - **Kubernetes Cluster:** kind (truenas-csi-test)
 - **CSI Controller Pod:** tns-csi-controller-0 (kube-system namespace)
-- **TrueNAS Server:** 10.10.20.100:443
+- **TrueNAS Server:** YOUR-TRUENAS-IP:443
 - **Network Simulation:** iptables rules in kind worker node
 
 ### Test Steps
 
 #### 1. Initial Connection Verification ✅
 ```
-I1031 20:27:49.843424 Connecting to storage WebSocket at wss://10.10.20.100:443/api/current
+I1031 20:27:49.843424 Connecting to storage WebSocket at wss://YOUR-TRUENAS-IP:443/api/current
 I1031 20:27:49.881555 Authenticating with TrueNAS using auth.login_with_api_key
 I1031 20:27:50.579787 Successfully authenticated with TrueNAS
 ```
@@ -60,14 +60,14 @@ I1031 20:27:50.579787 Successfully authenticated with TrueNAS
 #### 2. Simulate Connection Breakage ✅
 **Method:** Blocked traffic to TrueNAS using iptables
 ```bash
-docker exec truenas-csi-test-worker iptables -A OUTPUT -d 10.10.20.100 -j DROP
+docker exec truenas-csi-test-worker iptables -A OUTPUT -d YOUR-TRUENAS-IP -j DROP
 ```
 **Time:** 20:29:45 (approximately)
 
 #### 3. Connection Timeout Detection ✅
 **Observed at:** 20:29:50 (approximately 120 seconds after last successful communication)
 ```
-E1031 20:29:50.574176 WebSocket read error: read tcp 10.244.1.17:50382->10.10.20.100:443: i/o timeout
+E1031 20:29:50.574176 WebSocket read error: read tcp 10.244.1.17:50382->YOUR-TRUENAS-IP:443: i/o timeout
 W1031 20:29:50.574591 WebSocket connection lost, attempting to reconnect...
 ```
 **Detection Time:** ~120 seconds (4x ping interval as configured)  
@@ -95,14 +95,14 @@ E1031 20:32:55.839694 Failed to reconnect to storage WebSocket after multiple at
 #### 5. Restore Connectivity ✅
 **Method:** Removed iptables block
 ```bash
-docker exec truenas-csi-test-worker iptables -D OUTPUT -d 10.10.20.100 -j DROP
+docker exec truenas-csi-test-worker iptables -D OUTPUT -d YOUR-TRUENAS-IP -j DROP
 ```
 **Time:** 20:32:50 (after all 5 attempts exhausted)
 
 #### 6. Fresh Connection After Pod Restart ✅
 Since all reconnection attempts were exhausted, restarted the pod:
 ```
-I1031 20:33:14.198189 Connecting to storage WebSocket at wss://10.10.20.100:443/api/current
+I1031 20:33:14.198189 Connecting to storage WebSocket at wss://YOUR-TRUENAS-IP:443/api/current
 I1031 20:33:15.025823 Successfully authenticated with TrueNAS
 ```
 **Result:** New connection established successfully in ~800ms
@@ -245,13 +245,13 @@ If connection issues occur, check:
 ### Manual Connection Break
 ```bash
 # Block traffic
-docker exec truenas-csi-test-worker iptables -A OUTPUT -d 10.10.20.100 -j DROP
+docker exec truenas-csi-test-worker iptables -A OUTPUT -d YOUR-TRUENAS-IP -j DROP
 
 # Watch reconnection
 kubectl logs -n kube-system tns-csi-controller-0 -c tns-csi-plugin -f | grep reconnect
 
 # Restore traffic
-docker exec truenas-csi-test-worker iptables -D OUTPUT -d 10.10.20.100 -j DROP
+docker exec truenas-csi-test-worker iptables -D OUTPUT -d YOUR-TRUENAS-IP -j DROP
 ```
 
 ### View Detailed Connection Activity

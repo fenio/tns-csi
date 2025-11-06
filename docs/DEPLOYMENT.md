@@ -88,7 +88,7 @@ If you plan to use NVMe-oF storage:
 3. Click **Edit**
 4. Configure static IP:
    - **DHCP:** Uncheck/disable
-   - **IP Address:** Enter your static IP (e.g., `10.10.20.100/24`)
+   - **IP Address:** Enter your static IP (e.g., `YOUR-TRUENAS-IP/24`)
    - **Gateway:** Enter your network gateway
    - **DNS Servers:** Add DNS servers (e.g., `8.8.8.8`)
 5. Click **Save** and **Test Changes**

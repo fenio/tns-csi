@@ -93,7 +93,7 @@ multipass exec truenas-nvme-test -- sudo kubectl get nodes
 multipass exec truenas-nvme-test -- lsmod | grep nvme
 
 # TrueNAS reachable?
-multipass exec truenas-nvme-test -- ping -c 3 10.10.20.100
+multipass exec truenas-nvme-test -- ping -c 3 YOUR-TRUENAS-IP
 ```
 
 ## Files

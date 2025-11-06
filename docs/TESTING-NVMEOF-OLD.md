@@ -101,7 +101,7 @@ Verify NVMe-oF functionality:
 
 ```bash
 # Test discovery (use your TrueNAS IP)
-sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+sudo nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420
 
 # Should show available NVMe-oF subsystems
 ```
@@ -170,7 +170,7 @@ kubectl create secret generic tns-csi-secret \
 # Deploy with Helm
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
-  --set truenas.host=10.10.20.100 \
+  --set truenas.host=YOUR-TRUENAS-IP \
   --set image.tag=latest \
   --set image.pullPolicy=Never
 
@@ -264,7 +264,7 @@ kubectl create secret generic tns-csi-secret \
 
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
-  --set truenas.host=10.10.20.100 \
+  --set truenas.host=YOUR-TRUENAS-IP \
   --set image.tag=latest \
   --set image.pullPolicy=Never
 
@@ -399,10 +399,10 @@ dmesg | grep -i nvme
 **Can't connect to TrueNAS:**
 ```bash
 # Test network connectivity
-ssh <username>@${VM_IP} 'ping -c 3 10.10.20.100'
+ssh <username>@${VM_IP} 'ping -c 3 YOUR-TRUENAS-IP'
 
 # Test NVMe-oF discovery
-ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a 10.10.20.100 -s 4420'
+ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420'
 
 # Verify TrueNAS NVMe-oF service is running
 # Check TrueNAS: System Settings → Services → NVMe-oF
@@ -450,7 +450,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugi
 ssh <username>@${VM_IP} 'sudo nvme list'
 
 # Manually test NVMe connection
-ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a 10.10.20.100 -s 4420'
+ssh <username>@${VM_IP} 'sudo nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420'
 ```
 
 ### Kind Cluster Issues
@@ -489,12 +489,12 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi
 ssh <username>@<vm-ip>
 
 # Discover targets
-sudo nvme discover -t tcp -a 10.10.20.100 -s 4420
+sudo nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420
 
 # Connect to subsystem (get NQN from discovery)
 sudo nvme connect -t tcp \
   -n nqn.2005-03.org.freenas.ctl:<subsystem-name> \
-  -a 10.10.20.100 \
+  -a YOUR-TRUENAS-IP \
   -s 4420
 
 # List connected devices

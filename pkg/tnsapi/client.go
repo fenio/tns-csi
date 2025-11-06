@@ -133,8 +133,9 @@ func NewClient(url, apiKey string) (*Client, error) {
 func (c *Client) connect() error {
 	klog.V(4).Infof("Connecting to storage WebSocket at %s", c.url)
 
-	dialer := websocket.DefaultDialer
-	dialer.HandshakeTimeout = 10 * time.Second
+	dialer := &websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
 
 	// For wss:// connections, skip TLS verification (common for self-signed certs)
 	// TODO: Add option to provide custom CA certificate
@@ -145,6 +146,7 @@ func (c *Client) connect() error {
 		}
 	}
 
+	//nolint:bodyclose // WebSocket connections don't return response bodies to close
 	conn, _, err := dialer.Dial(c.url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to dial: %w", err)
@@ -465,7 +467,13 @@ func (c *Client) reconnect() bool {
 		}
 
 		klog.Infof("Reconnection attempt %d/%d (waiting %v)...", attempt, c.maxRetries, backoff)
-		time.Sleep(backoff)
+		// Wait with cancellation support
+		select {
+		case <-time.After(backoff):
+		case <-c.closeCh:
+			klog.Info("Reconnection canceled - client is closing")
+			return false
+		}
 
 		// Close old connection
 		c.mu.Lock()

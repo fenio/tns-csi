@@ -162,13 +162,13 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	}
 
 	klog.Infof("Successfully deleted NFS volume: %s", meta.Name)
-	
+
 	// Remove volume capacity metric
 	// Note: We need to reconstruct the volumeID to delete the metric
 	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
 		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS)
 	}
-	
+
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }

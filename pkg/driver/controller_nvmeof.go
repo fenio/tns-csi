@@ -201,13 +201,13 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	klog.Infof("Successfully deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
-	
+
 	// Remove volume capacity metric
 	// Note: We need to reconstruct the volumeID to delete the metric
 	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
 		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF)
 	}
-	
+
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }

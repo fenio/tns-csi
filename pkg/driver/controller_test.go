@@ -257,6 +257,10 @@ func (m *mockAPIClient) DeleteDataset(ctx context.Context, datasetID string) err
 	return nil
 }
 
+func (m *mockAPIClient) GetDataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
+	return nil, errNotImplemented
+}
+
 func (m *mockAPIClient) UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 	return nil, errNotImplemented
 }
@@ -267,6 +271,10 @@ func (m *mockAPIClient) CreateNFSShare(ctx context.Context, params tnsapi.NFSSha
 
 func (m *mockAPIClient) DeleteNFSShare(ctx context.Context, shareID int) error {
 	return nil
+}
+
+func (m *mockAPIClient) QueryNFSShare(ctx context.Context, path string) ([]tnsapi.NFSShare, error) {
+	return nil, nil
 }
 
 func (m *mockAPIClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
@@ -283,6 +291,14 @@ func (m *mockAPIClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID i
 
 func (m *mockAPIClient) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 	return nil, errNotImplemented
+}
+
+func (m *mockAPIClient) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error) {
+	return nil, nil
+}
+
+func (m *mockAPIClient) ListAllNVMeOFSubsystems(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
+	return nil, nil
 }
 
 func (m *mockAPIClient) CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
@@ -334,6 +350,10 @@ func (m *mockAPIClient) QueryPool(ctx context.Context, poolName string) (*tnsapi
 		return m.queryPoolFunc(ctx, poolName)
 	}
 	return nil, errNotImplemented
+}
+
+func (m *mockAPIClient) Close() {
+	// Mock client doesn't need cleanup
 }
 
 func TestGetCapacity(t *testing.T) {

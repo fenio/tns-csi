@@ -20,32 +20,9 @@ var (
 	ErrVolumeIDNotEncoded = errors.New("volume ID is not in encoded format")
 )
 
-// APIClient defines the interface for TrueNAS API operations.
-//
-//nolint:interfacebloat // Interface represents cohesive TrueNAS storage API - splitting would reduce clarity
-type APIClient interface {
-	CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
-	DeleteDataset(ctx context.Context, datasetID string) error
-	UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
-	CreateNFSShare(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
-	DeleteNFSShare(ctx context.Context, shareID int) error
-	CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
-	CreateNVMeOFSubsystem(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
-	DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error
-	GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
-	CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
-	DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error
-	QueryNVMeOFPorts(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
-	AddSubsystemToPort(ctx context.Context, subsystemID, portID int) error
-	CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
-	DeleteSnapshot(ctx context.Context, snapshotID string) error
-	QuerySnapshots(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
-	CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
-	QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
-	QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
-	QueryAllNVMeOFNamespaces(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
-	QueryPool(ctx context.Context, poolName string) (*tnsapi.Pool, error)
-}
+// APIClient is an alias for the TrueNAS API client interface.
+// Kept for backwards compatibility with existing tests.
+type APIClient = tnsapi.ClientInterface
 
 // VolumeMetadata contains information needed to manage a volume.
 type VolumeMetadata struct {

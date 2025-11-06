@@ -33,12 +33,12 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient *tnsapi.Client
+	apiClient tnsapi.ClientInterface
 	nodeID    string
 }
 
 // NewNodeService creates a new node service.
-func NewNodeService(nodeID string, apiClient *tnsapi.Client) *NodeService {
+func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface) *NodeService {
 	return &NodeService{
 		nodeID:    nodeID,
 		apiClient: apiClient,

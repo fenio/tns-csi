@@ -64,3 +64,15 @@ docker-push:
 install:
 	@echo "Installing $(DRIVER_NAME)..."
 	$(GOBUILD) $(LDFLAGS) -o $(GOPATH)/bin/$(DRIVER_NAME) ./cmd/tns-csi-driver
+
+# Sanity tests
+test-sanity:
+	@echo "Running CSI sanity tests..."
+	./tests/sanity/test-sanity.sh
+
+test-unit:
+	@echo "Running unit tests..."
+	$(GOTEST) -v -short ./pkg/...
+
+test-all: test-unit test-sanity
+	@echo "All tests completed"

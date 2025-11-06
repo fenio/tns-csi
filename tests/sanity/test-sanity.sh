@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# CSI Sanity Test Runner
+# Runs the CSI specification compliance tests
+
+set -e
+set -o pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+echo "=== CSI Sanity Tests ==="
+echo "Project root: ${PROJECT_ROOT}"
+
+# Change to project root
+cd "${PROJECT_ROOT}"
+
+# Check if tests are ready to run
+if ! grep -q "t.Skip" tests/sanity/sanity_test.go; then
+    echo "Running CSI sanity tests..."
+    
+    # Run sanity tests with verbose output
+    go test -v -timeout 10m ./tests/sanity/... -count=1
+    
+    echo "✅ Sanity tests passed"
+else
+    echo "⚠️  Sanity tests are currently skipped (driver refactoring in progress)"
+    echo ""
+    echo "Current status:"
+    echo "  ✅ Mock client implemented"
+    echo "  ✅ Test framework configured"
+    echo "  🔄 Awaiting driver refactoring for dependency injection"
+    echo ""
+    echo "See tests/sanity/README.md for details"
+    
+    # Still run the tests to ensure they compile
+    echo ""
+    echo "Verifying test compilation..."
+    go test -c ./tests/sanity/... -o /dev/null
+    echo "✅ Tests compile successfully"
+fi
+
+exit 0

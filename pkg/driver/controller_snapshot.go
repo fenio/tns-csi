@@ -263,6 +263,8 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
+//
+//nolint:gocognit // Complexity from protocol-specific handling and error cleanup - splitting would hurt readability
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)
@@ -343,7 +345,20 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	case ProtocolNFS:
 		return s.setupNFSVolumeFromClone(ctx, req, clonedDataset, server)
 	case ProtocolNVMeOF:
-		return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server)
+		// For NVMe-oF, we need the subsystemNQN parameter from StorageClass
+		subsystemNQN := params["subsystemNQN"]
+		if subsystemNQN == "" {
+			// Cleanup the cloned dataset
+			klog.Errorf("subsystemNQN parameter is required for NVMe-oF volumes, cleaning up")
+			if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
+				klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+			}
+			return nil, status.Error(codes.InvalidArgument,
+				"subsystemNQN parameter is required for NVMe-oF volumes. "+
+					"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
+					"and provide its NQN in the StorageClass parameters.")
+		}
+		return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server, subsystemNQN)
 	default:
 		// Cleanup the cloned dataset if we can't determine protocol
 		klog.Errorf("Unknown protocol %s in snapshot metadata, cleaning up", snapshotMeta.Protocol)

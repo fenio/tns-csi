@@ -89,6 +89,8 @@ Subsystems require at least one namespace with a ZVOL:
 
 ##### Step 3: Create Subsystem with Namespace and Port (REQUIRED)
 
+**⚠️ IMPORTANT:** The CSI driver does NOT create or delete NVMe-oF subsystems. Subsystems are **pre-configured infrastructure** that serve multiple volumes. You must create the subsystem once before deploying the CSI driver.
+
 1. **Navigate to:** Shares → NVMe-oF Subsystems
 
 2. **Click "Add"** to create a new subsystem
@@ -112,20 +114,27 @@ Subsystems require at least one namespace with a ZVOL:
    - At least one namespace (your ZVOL)
    - At least one TCP port
 
+9. **Note the subsystem NQN** - you'll need this for your StorageClass configuration (e.g., `nqn.2025-01.com.truenas:csi`)
+
 **Why is this required?**
 
 - **Static IP:** TrueNAS only allows NVMe-oF on interfaces with static IPs (prevents storage outages from IP changes)
 - **Initial Namespace:** Empty subsystems are invalid - must have at least one ZVOL namespace
 - **Port:** CSI driver cannot create ports - must be pre-configured
+- **Shared Infrastructure:** One subsystem serves multiple volumes (namespaces). The CSI driver creates/deletes only namespaces, not subsystems.
 
-The CSI driver will create additional namespaces automatically for each PVC.
+**Architecture:**
+- **Subsystem:** Pre-configured infrastructure (created by administrator, never deleted by CSI driver)
+- **Namespaces:** Dynamically created/deleted by CSI driver for each PVC
+- **1 Subsystem → Many Namespaces (Volumes)**
 
 **What happens if not configured?**
 
 Volume provisioning will fail with:
 ```
-No TCP NVMe-oF port configured on TrueNAS server. 
-Please configure an NVMe-oF TCP port in TrueNAS before provisioning NVMe-oF volumes.
+Failed to find NVMe-oF subsystem with NQN '<your-nqn>'.
+Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems)
+with ports attached before provisioning volumes.
 ```
 
 ### VM Setup
@@ -192,7 +201,8 @@ export KUBECONFIG=~/.kube/utm-nvmeof-test
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --set truenas.host=10.10.20.100 \
-  --set truenas.apiKey=<your-api-key>
+  --set truenas.apiKey=<your-api-key> \
+  --set storageClasses.nvmeof.subsystemNQN=nqn.2025-01.com.truenas:csi
 ```
 
 ### Test NVMe-oF Volume

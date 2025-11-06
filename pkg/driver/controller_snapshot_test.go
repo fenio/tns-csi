@@ -13,6 +13,8 @@ import (
 )
 
 // MockAPIClientForSnapshots is a mock implementation of APIClient for snapshot tests.
+//
+//nolint:goimports // Struct field alignment is intentional for readability
 type MockAPIClientForSnapshots struct {
 	CreateSnapshotFunc        func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
 	DeleteSnapshotFunc        func(ctx context.Context, snapshotID string) error
@@ -23,13 +25,14 @@ type MockAPIClientForSnapshots struct {
 	UpdateDatasetFunc         func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
 	CreateNFSShareFunc        func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
 	DeleteNFSShareFunc        func(ctx context.Context, shareID int) error
-	CreateZvolFunc            func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
-	CreateNVMeOFSubsystemFunc func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
-	DeleteNVMeOFSubsystemFunc func(ctx context.Context, subsystemID int) error
-	CreateNVMeOFNamespaceFunc func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
-	DeleteNVMeOFNamespaceFunc func(ctx context.Context, namespaceID int) error
-	QueryNVMeOFPortsFunc      func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
-	AddSubsystemToPortFunc    func(ctx context.Context, subsystemID, portID int) error
+	CreateZvolFunc               func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
+	CreateNVMeOFSubsystemFunc    func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
+	DeleteNVMeOFSubsystemFunc    func(ctx context.Context, subsystemID int) error
+	CreateNVMeOFNamespaceFunc    func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
+	DeleteNVMeOFNamespaceFunc    func(ctx context.Context, namespaceID int) error
+	QueryNVMeOFPortsFunc         func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
+	AddSubsystemToPortFunc       func(ctx context.Context, subsystemID, portID int) error
+	GetNVMeOFSubsystemByNQNFunc  func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -142,6 +145,13 @@ func (m *MockAPIClientForSnapshots) AddSubsystemToPort(ctx context.Context, subs
 		return m.AddSubsystemToPortFunc(ctx, subsystemID, portID)
 	}
 	return errors.New("AddSubsystemToPortFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+	if m.GetNVMeOFSubsystemByNQNFunc != nil {
+		return m.GetNVMeOFSubsystemByNQNFunc(ctx, nqn)
+	}
+	return nil, errors.New("GetNVMeOFSubsystemByNQNFunc not implemented")
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {

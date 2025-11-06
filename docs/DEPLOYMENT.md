@@ -114,12 +114,18 @@ This creates the ZVOL needed for the initial namespace.
 
 #### Configure NVMe-oF Subsystem with Port and Namespace (REQUIRED)
 
+**⚠️ ARCHITECTURE NOTE:** The CSI driver uses a **shared subsystem model**:
+- **1 Subsystem → Many Namespaces** (one namespace per PVC)
+- The subsystem is **pre-configured infrastructure** (like a storage pool)
+- The CSI driver creates **namespaces** (not subsystems) for each volume
+
 **Now create the subsystem with namespace and port:**
 
 1. Navigate to **Shares** → **NVMe-oF Subsystems**
 2. Click **Add** to create a new subsystem
 3. Configure the subsystem:
-   - **Subsystem Name:** Enter a qualified name (e.g., `nqn.2025-01.com.truenas:csi`)
+   - **Subsystem Name:** Enter a qualified name (e.g., `nqn.2005-03.org.truenas:csi`)
+     - **IMPORTANT:** Remember this NQN - you'll need it for the StorageClass configuration
    - **Namespace:** Select the ZVOL you just created (e.g., `pool1/nvmeof-init`)
 4. Click **Save**
 5. After creating the subsystem, click **Add Port**
@@ -137,8 +143,9 @@ This creates the ZVOL needed for the initial namespace.
 - **Static IP:** TrueNAS only allows binding NVMe-oF to interfaces with static IPs
 - **Initial Namespace/ZVOL:** Empty subsystems are not valid - you need at least one namespace
 - **Port:** The CSI driver cannot create ports - they must be pre-configured
+- **Shared Subsystem:** All CSI-provisioned volumes share this subsystem as separate namespaces
 
-The CSI driver will create additional namespaces automatically for each PVC, but needs this initial setup first.
+The CSI driver will create additional namespaces automatically for each PVC within this shared subsystem.
 
 Without proper configuration, volume provisioning will fail with:
 
@@ -147,10 +154,17 @@ No TCP NVMe-oF port configured on TrueNAS server.
 Please configure an NVMe-oF TCP port in TrueNAS before provisioning NVMe-oF volumes.
 ```
 
+Or if the `subsystemNQN` parameter is missing:
+
+```
+Parameter 'subsystemNQN' is required for nvmeof protocol
+```
+
 ## Step 2: Install Using Helm (Recommended)
 
 The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub:
 
+**For NFS:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
@@ -162,6 +176,22 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
   --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
 ```
+
+**For NVMe-oF:**
+```bash
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.0.1 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nvmeof.enabled=true \
+  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2005-03.org.truenas:csi"
+```
+
+**Note:** Replace `nqn.2005-03.org.truenas:csi` with the actual subsystem NQN you configured in Step 1.4.
 
 This single command will:
 - Create the kube-system namespace if needed
@@ -244,14 +274,18 @@ parameters:
 ```yaml
 parameters:
   protocol: "nvmeof"
-  pool: "storage"            # Your TrueNAS pool name
-  server: "YOUR-TRUENAS-IP"     # Your TrueNAS IP/hostname
+  pool: "storage"                                          # Your TrueNAS pool name
+  server: "YOUR-TRUENAS-IP"                                # Your TrueNAS IP/hostname
+  subsystemNQN: "nqn.2005-03.org.truenas:csi"              # REQUIRED: The subsystem NQN from Step 1.4
   # Optional parameters:
-  # filesystem: "ext4"       # Filesystem type: ext4 (default), ext3, or xfs
-  # blocksize: "16K"         # Block size for ZVOL (default: 16K)
+  # filesystem: "ext4"                                     # Filesystem type: ext4 (default), ext3, or xfs
+  # blocksize: "16K"                                       # Block size for ZVOL (default: 16K)
 ```
 
-Note: NVMe-oF volumes use `ReadWriteOnce` access mode (block storage), while NFS uses `ReadWriteMany` (shared filesystem).
+**Important Notes:**
+- `subsystemNQN` is **REQUIRED** for NVMe-oF - it must match the subsystem you created in Step 1.4
+- The CSI driver creates **namespaces** within this shared subsystem (not new subsystems per volume)
+- NVMe-oF volumes use `ReadWriteOnce` access mode (block storage), while NFS uses `ReadWriteMany` (shared filesystem)
 
 ## Step 4: Deploy to Kubernetes (Manual Deployment Only)
 
@@ -362,9 +396,11 @@ kubectl get pvc test-pvc
 1. Log in to TrueNAS web interface
 2. Navigate to **Datasets**
 3. You should see a new ZVOL (block device): `pool1/test-nvmeof-pvc`
-4. Navigate to **Sharing** > **Block Shares (NVMe-oF)**
-5. Click the **NVMe-oF** tab
-6. You should see a new subsystem and namespace for the volume
+4. Navigate to **Shares** > **NVMe-oF Subsystems**
+5. Click on your subsystem (e.g., `nqn.2005-03.org.truenas:csi`)
+6. You should see a **new namespace** added to the subsystem for the PVC
+   - The subsystem itself remains the same (shared infrastructure)
+   - Each PVC gets its own namespace within the subsystem
 7. On the Kubernetes node, verify the NVMe device is connected:
    ```bash
    # List NVMe devices

@@ -151,6 +151,9 @@ deploy_driver() {
             )
             ;;
         nvmeof)
+            # NVMe-oF subsystem NQN - use env var or default
+            # The subsystem must be pre-configured in TrueNAS before running tests
+            local subsystem_nqn="${NVMEOF_SUBSYSTEM_NQN:-nqn.2005-03.org.truenas:csi-test}"
             base_args+=(
                 --set storageClasses.nfs.enabled=false
                 --set storageClasses.nvmeof.enabled=true
@@ -159,6 +162,7 @@ deploy_driver() {
                 --set storageClasses.nvmeof.server="${TRUENAS_HOST}"
                 --set storageClasses.nvmeof.transport=tcp
                 --set storageClasses.nvmeof.port=4420
+                --set storageClasses.nvmeof.subsystemNQN="${subsystem_nqn}"
             )
             ;;
         iscsi)

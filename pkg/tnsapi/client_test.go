@@ -704,3 +704,180 @@ func TestConcurrentCalls(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestQueryPool(t *testing.T) {
+	//nolint:govet // Test struct field alignment not critical for performance
+	tests := []struct {
+		name         string
+		poolName     string
+		setupServer  func(*mockWSServer)
+		wantErr      bool
+		wantPoolName string
+		wantSize     int64
+		wantFree     int64
+	}{
+		{
+			name:     "successful pool query",
+			poolName: "tank",
+			setupServer: func(m *mockWSServer) {
+				m.handler = func(conn *websocket.Conn) {
+					// Handle auth
+					_, message, _ := conn.ReadMessage()
+					var req Request
+					_ = json.Unmarshal(message, &req)
+					if req.Method == "auth.login_with_api_key" {
+						resp := Response{
+							ID:     req.ID,
+							Result: json.RawMessage(`true`),
+						}
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							return
+						}
+						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
+					}
+
+					// Handle pool.query
+					_, message, _ = conn.ReadMessage()
+					_ = json.Unmarshal(message, &req)
+					if req.Method == "pool.query" {
+						poolData := []Pool{{
+							ID:   1,
+							Name: "tank",
+							Properties: struct {
+								Size struct {
+									Parsed int64 `json:"parsed"`
+								} `json:"size"`
+								Allocated struct {
+									Parsed int64 `json:"parsed"`
+								} `json:"allocated"`
+								Free struct {
+									Parsed int64 `json:"parsed"`
+								} `json:"free"`
+								Capacity struct {
+									Parsed int64 `json:"parsed"`
+								} `json:"capacity"`
+							}{
+								Size: struct {
+									Parsed int64 `json:"parsed"`
+								}{Parsed: 1000000000000}, // 1TB
+								Allocated: struct {
+									Parsed int64 `json:"parsed"`
+								}{Parsed: 400000000000}, // 400GB
+								Free: struct {
+									Parsed int64 `json:"parsed"`
+								}{Parsed: 600000000000}, // 600GB
+								Capacity: struct {
+									Parsed int64 `json:"parsed"`
+								}{Parsed: 40}, // 40%
+							},
+						}}
+						result, err := json.Marshal(poolData)
+						if err != nil {
+							return
+						}
+						resp := Response{
+							ID:     req.ID,
+							Result: result,
+						}
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							return
+						}
+						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
+					}
+				}
+			},
+			wantErr:      false,
+			wantPoolName: "tank",
+			wantSize:     1000000000000,
+			wantFree:     600000000000,
+		},
+		{
+			name:     "pool not found",
+			poolName: "nonexistent",
+			setupServer: func(m *mockWSServer) {
+				m.handler = func(conn *websocket.Conn) {
+					// Handle auth
+					_, message, _ := conn.ReadMessage()
+					var req Request
+					json.Unmarshal(message, &req)
+					if req.Method == "auth.login_with_api_key" {
+						resp := Response{
+							ID:     req.ID,
+							Result: json.RawMessage(`true`),
+						}
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							t.Errorf("failed to marshal response: %v", err)
+							return
+						}
+						conn.WriteMessage(websocket.TextMessage, respBytes)
+					}
+
+					// Handle pool.query - return empty array
+					_, message, _ = conn.ReadMessage()
+					json.Unmarshal(message, &req)
+					if req.Method == "pool.query" {
+						resp := Response{
+							ID:     req.ID,
+							Result: json.RawMessage(`[]`),
+						}
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							t.Errorf("failed to marshal response: %v", err)
+							return
+						}
+						conn.WriteMessage(websocket.TextMessage, respBytes)
+					}
+				}
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newMockWSServer()
+			if tt.setupServer != nil {
+				tt.setupServer(server)
+			}
+			defer server.Close()
+
+			client, err := NewClient(server.URL(), "test-api-key")
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
+			}
+			defer cleanupClient(client)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			pool, err := client.QueryPool(ctx, tt.poolName)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error but got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error: %v", err)
+				return
+			}
+
+			if pool.Name != tt.wantPoolName {
+				t.Errorf("Pool name = %s, want %s", pool.Name, tt.wantPoolName)
+			}
+
+			if pool.Properties.Size.Parsed != tt.wantSize {
+				t.Errorf("Pool size = %d, want %d", pool.Properties.Size.Parsed, tt.wantSize)
+			}
+
+			if pool.Properties.Free.Parsed != tt.wantFree {
+				t.Errorf("Pool free = %d, want %d", pool.Properties.Free.Parsed, tt.wantFree)
+			}
+		})
+	}
+}

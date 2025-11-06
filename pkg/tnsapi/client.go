@@ -577,6 +577,68 @@ func (c *Client) Close() {
 	}
 }
 
+// Pool API methods
+
+var (
+	// ErrPoolNotFound is returned when a requested pool is not found.
+	ErrPoolNotFound = errors.New("pool not found")
+)
+
+// Pool represents a ZFS storage pool.
+//
+//nolint:govet // Field alignment optimized for JSON unmarshaling performance
+type Pool struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Topology struct {
+		Data []interface{} `json:"data"`
+	} `json:"topology"`
+	Status string `json:"status"`
+	Path   string `json:"path"`
+	// Capacity fields from the TrueNAS pool.query API
+	Properties struct {
+		Size struct {
+			Parsed int64 `json:"parsed"` // Total pool size in bytes
+		} `json:"size"`
+		Allocated struct {
+			Parsed int64 `json:"parsed"` // Used space in bytes
+		} `json:"allocated"`
+		Free struct {
+			Parsed int64 `json:"parsed"` // Available space in bytes
+		} `json:"free"`
+		Capacity struct {
+			Parsed int64 `json:"parsed"` // Capacity percentage (0-100)
+		} `json:"capacity"`
+	} `json:"properties"`
+}
+
+// QueryPool retrieves information about a specific ZFS pool.
+func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) {
+	klog.V(4).Infof("Querying pool: %s", poolName)
+
+	var result []Pool
+	err := c.Call(ctx, "pool.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"name", "=", poolName},
+		},
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pool: %w", err)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
+	}
+
+	klog.V(4).Infof("Successfully queried pool %s: size=%d bytes, free=%d bytes, used=%d bytes",
+		result[0].Name,
+		result[0].Properties.Size.Parsed,
+		result[0].Properties.Free.Parsed,
+		result[0].Properties.Allocated.Parsed)
+
+	return &result[0], nil
+}
+
 // Dataset API methods
 
 // DatasetCreateParams represents parameters for dataset creation.

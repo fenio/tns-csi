@@ -44,6 +44,7 @@ type APIClient interface {
 	QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
 	QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
 	QueryAllNVMeOFNamespaces(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
+	QueryPool(ctx context.Context, poolName string) (*tnsapi.Pool, error)
 }
 
 // VolumeMetadata contains information needed to manage a volume.
@@ -412,12 +413,40 @@ func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta Volume
 }
 
 // GetCapacity returns the capacity of the storage pool.
-func (s *ControllerService) GetCapacity(_ context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
+func (s *ControllerService) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	klog.V(4).Infof("GetCapacity called with request: %+v", req)
 
-	// Optional CSI capability - not required for basic functionality
-	// Could query TrueNAS pool capacity in the future if needed
-	return &csi.GetCapacityResponse{}, nil
+	// Extract pool name from StorageClass parameters
+	params := req.GetParameters()
+	if params == nil {
+		klog.Warning("GetCapacity called without parameters, cannot determine pool")
+		return &csi.GetCapacityResponse{}, nil
+	}
+
+	poolName := params["pool"]
+	if poolName == "" {
+		klog.Warning("GetCapacity called without pool parameter")
+		return &csi.GetCapacityResponse{}, nil
+	}
+
+	// Query pool capacity from TrueNAS
+	pool, err := s.apiClient.QueryPool(ctx, poolName)
+	if err != nil {
+		klog.Errorf("Failed to query pool %s: %v", poolName, err)
+		return nil, status.Errorf(codes.Internal, "Failed to query pool capacity: %v", err)
+	}
+
+	// Return available capacity in bytes
+	availableCapacity := pool.Properties.Free.Parsed
+	klog.V(4).Infof("Pool %s capacity: total=%d bytes, available=%d bytes, used=%d bytes",
+		poolName,
+		pool.Properties.Size.Parsed,
+		availableCapacity,
+		pool.Properties.Allocated.Parsed)
+
+	return &csi.GetCapacityResponse{
+		AvailableCapacity: availableCapacity,
+	}, nil
 }
 
 // ControllerGetCapabilities returns controller capabilities.

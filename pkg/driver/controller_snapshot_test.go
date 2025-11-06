@@ -16,18 +16,22 @@ import (
 //
 //nolint:goimports // Struct field alignment is intentional for readability
 type MockAPIClientForSnapshots struct {
-	CreateSnapshotFunc        func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
-	DeleteSnapshotFunc        func(ctx context.Context, snapshotID string) error
-	QuerySnapshotsFunc        func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
-	CloneSnapshotFunc         func(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
-	CreateDatasetFunc         func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
-	DeleteDatasetFunc         func(ctx context.Context, datasetID string) error
-	UpdateDatasetFunc         func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
-	CreateNFSShareFunc        func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
-	DeleteNFSShareFunc        func(ctx context.Context, shareID int) error
+	CreateSnapshotFunc           func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
+	DeleteSnapshotFunc           func(ctx context.Context, snapshotID string) error
+	QuerySnapshotsFunc           func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
+	CloneSnapshotFunc            func(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
+	CreateDatasetFunc            func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
+	DeleteDatasetFunc            func(ctx context.Context, datasetID string) error
+	GetDatasetFunc               func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error)
+	UpdateDatasetFunc            func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
+	CreateNFSShareFunc           func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
+	DeleteNFSShareFunc           func(ctx context.Context, shareID int) error
+	QueryNFSShareFunc            func(ctx context.Context, path string) ([]tnsapi.NFSShare, error)
 	CreateZvolFunc               func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
 	CreateNVMeOFSubsystemFunc    func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
 	DeleteNVMeOFSubsystemFunc    func(ctx context.Context, subsystemID int) error
+	QueryNVMeOFSubsystemFunc     func(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error)
+	ListAllNVMeOFSubsystemsFunc  func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error)
 	CreateNVMeOFNamespaceFunc    func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
 	DeleteNVMeOFNamespaceFunc    func(ctx context.Context, namespaceID int) error
 	QueryNVMeOFPortsFunc         func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
@@ -81,6 +85,13 @@ func (m *MockAPIClientForSnapshots) DeleteDataset(ctx context.Context, datasetID
 	return errors.New("DeleteDatasetFunc not implemented")
 }
 
+func (m *MockAPIClientForSnapshots) GetDataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
+	if m.GetDatasetFunc != nil {
+		return m.GetDatasetFunc(ctx, datasetID)
+	}
+	return nil, errors.New("GetDatasetFunc not implemented")
+}
+
 func (m *MockAPIClientForSnapshots) UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 	if m.UpdateDatasetFunc != nil {
 		return m.UpdateDatasetFunc(ctx, datasetID, params)
@@ -100,6 +111,13 @@ func (m *MockAPIClientForSnapshots) DeleteNFSShare(ctx context.Context, shareID 
 		return m.DeleteNFSShareFunc(ctx, shareID)
 	}
 	return errors.New("DeleteNFSShareFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryNFSShare(ctx context.Context, path string) ([]tnsapi.NFSShare, error) {
+	if m.QueryNFSShareFunc != nil {
+		return m.QueryNFSShareFunc(ctx, path)
+	}
+	return nil, errors.New("QueryNFSShareFunc not implemented")
 }
 
 func (m *MockAPIClientForSnapshots) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
@@ -158,6 +176,20 @@ func (m *MockAPIClientForSnapshots) GetNVMeOFSubsystemByNQN(ctx context.Context,
 	return nil, errors.New("GetNVMeOFSubsystemByNQNFunc not implemented")
 }
 
+func (m *MockAPIClientForSnapshots) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error) {
+	if m.QueryNVMeOFSubsystemFunc != nil {
+		return m.QueryNVMeOFSubsystemFunc(ctx, nqn)
+	}
+	return nil, errors.New("QueryNVMeOFSubsystemFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) ListAllNVMeOFSubsystems(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
+	if m.ListAllNVMeOFSubsystemsFunc != nil {
+		return m.ListAllNVMeOFSubsystemsFunc(ctx)
+	}
+	return nil, errors.New("ListAllNVMeOFSubsystemsFunc not implemented")
+}
+
 func (m *MockAPIClientForSnapshots) QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
 	if m.QueryAllDatasetsFunc != nil {
 		return m.QueryAllDatasetsFunc(ctx, prefix)
@@ -184,6 +216,10 @@ func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName stri
 		return m.QueryPoolFunc(ctx, poolName)
 	}
 	return nil, errors.New("QueryPoolFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) Close() {
+	// Mock client doesn't need cleanup
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {

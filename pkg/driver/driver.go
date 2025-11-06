@@ -33,7 +33,7 @@ type Config struct {
 type Driver struct {
 	srv        *grpc.Server
 	metricsSrv *http.Server
-	apiClient  *tnsapi.Client
+	apiClient  tnsapi.ClientInterface
 	controller *ControllerService
 	node       *NodeService
 	identity   *IdentityService
@@ -50,15 +50,23 @@ func NewDriver(cfg Config) (*Driver, error) {
 		return nil, err
 	}
 
+	return NewDriverWithClient(cfg, apiClient)
+}
+
+// NewDriverWithClient creates a new driver instance with a custom client.
+// This is primarily used for testing with mock clients.
+func NewDriverWithClient(cfg Config, client tnsapi.ClientInterface) (*Driver, error) {
+	klog.V(4).Infof("Creating new driver with custom client")
+
 	d := &Driver{
 		config:    cfg,
-		apiClient: apiClient,
+		apiClient: client,
 	}
 
 	// Initialize CSI services
 	d.identity = NewIdentityService(cfg.DriverName, cfg.Version)
-	d.controller = NewControllerService(apiClient)
-	d.node = NewNodeService(cfg.NodeID, apiClient)
+	d.controller = NewControllerService(client)
+	d.node = NewNodeService(cfg.NodeID, client)
 
 	return d, nil
 }

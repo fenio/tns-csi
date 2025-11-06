@@ -2,7 +2,7 @@ name: CSI Sanity Tests
 
 on:
   push:
-    branches: [ main, 'feature/add-csi-sanity-tests' ]
+    branches: [ main, 'feature/enable-sanity-tests' ]
     paths:
       - 'pkg/**'
       - 'cmd/**'
@@ -27,18 +27,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.3'
           cache: true
-      
+
       - name: Download dependencies
         run: go mod download
-      
+
       - name: Run CSI sanity tests
         run: make test-sanity
-      
+
       - name: Run unit tests
         run: make test-unit

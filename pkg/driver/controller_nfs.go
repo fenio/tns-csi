@@ -121,6 +121,9 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 	klog.Infof("Successfully created NFS volume with encoded ID: %s", encodedVolumeID)
 
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requestedCapacity)
+
 	timer.ObserveSuccess()
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -159,6 +162,13 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	}
 
 	klog.Infof("Successfully deleted NFS volume: %s", meta.Name)
+	
+	// Remove volume capacity metric
+	// Note: We need to reconstruct the volumeID to delete the metric
+	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
+		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS)
+	}
+	
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }
@@ -227,6 +237,9 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 
 	klog.Infof("Successfully created NFS volume from snapshot with encoded ID: %s", encodedVolumeID)
 
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requestedCapacity)
+
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      encodedVolumeID,
@@ -277,6 +290,12 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 	}
 
 	klog.Infof("Successfully expanded NFS volume %s to %d bytes", meta.Name, requiredBytes)
+
+	// Update volume capacity metric
+	// Note: We need to reconstruct the volumeID to update the metric
+	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
+		metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requiredBytes)
+	}
 
 	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{

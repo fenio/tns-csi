@@ -24,7 +24,7 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-TRUENAS_IP="10.10.20.100"
+TRUENAS_IP="${TRUENAS_IP:-YOUR-TRUENAS-IP}"
 NAMESPACE="kube-system"
 POD="tns-csi-controller-0"
 CONTAINER="tns-csi-plugin"

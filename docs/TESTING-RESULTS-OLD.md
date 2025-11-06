@@ -5,7 +5,7 @@ October 31, 2024
 
 ## Environment
 - **Kubernetes Cluster**: kind (truenas-csi-test)
-- **TrueNAS Server**: 10.10.20.100:443
+- **TrueNAS Server**: YOUR-TRUENAS-IP:443
 - **Storage Pool**: storage
 - **CSI Driver Image**: tns-csi-driver:test
 - **Deployment Namespace**: kube-system
@@ -15,7 +15,7 @@ October 31, 2024
 ### 1. WebSocket Connection Test ✅
 **Status**: PASSED
 
-- Successfully connected to TrueNAS WebSocket API at `wss://10.10.20.100:443/api/current`
+- Successfully connected to TrueNAS WebSocket API at `wss://YOUR-TRUENAS-IP:443/api/current`
 - API key authentication working correctly
 - Ping/pong mechanism functioning as expected
 - Connection remains stable with automatic reconnection on timeout
@@ -70,7 +70,7 @@ Successfully mounted NFS volume in test pod:
 - **Pod Name**: test-nfs-pod
 - **Container**: busybox
 - **Mount Path**: /data
-- **NFS Server**: 10.10.20.100
+- **NFS Server**: YOUR-TRUENAS-IP
 - **NFS Export**: /mnt/storage/pvc-c6ff2bc5-6075-4279-a778-f0e2ef491425
 - **Mount Options**: vers=4.2,nolock
 
@@ -99,7 +99,7 @@ kubectl exec test-nfs-pod -- cat /data/test.txt
 **Volume Statistics**:
 ```bash
 kubectl exec test-nfs-pod -- df -h /data/
-# Filesystem: 10.10.20.100:/mnt/storage/pvc-c6ff2bc5-6075-4279-a778-f0e2ef491425
+# Filesystem: YOUR-TRUENAS-IP:/mnt/storage/pvc-c6ff2bc5-6075-4279-a778-f0e2ef491425
 # Size: 2.1T
 # Used: 0
 # Available: 2.1T

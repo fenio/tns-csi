@@ -70,7 +70,7 @@ TrueNAS requires a static IP - DHCP interfaces won't appear in NVMe-oF configura
 2. **Edit** your active network interface
 3. **Configure:**
    - **DHCP:** Disable
-   - **IP Address:** Your static IP (e.g., `10.10.20.100/24`)
+   - **IP Address:** Your static IP (e.g., `YOUR-TRUENAS-IP/24`)
    - **Gateway:** Your network gateway
    - **DNS:** DNS servers (e.g., `8.8.8.8`)
 4. **Test Changes** and **Save Changes**
@@ -200,11 +200,11 @@ ssh <user>@<vm-ip> 'sudo k3s ctr images import tns-csi-driver.tar.gz'
 export KUBECONFIG=~/.kube/utm-nvmeof-test
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
-  --set truenas.host=10.10.20.100 \
+  --set truenas.host=YOUR-TRUENAS-IP \
   --set truenas.apiKey=<your-api-key> \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool=<your-pool-name> \
-  --set storageClasses.nvmeof.server=10.10.20.100 \
+  --set storageClasses.nvmeof.server=YOUR-TRUENAS-IP \
   --set storageClasses.nvmeof.subsystemNQN=nqn.2025-01.com.truenas:csi
 ```
 
@@ -270,7 +270,7 @@ kind load docker-image tns-csi-driver:latest --name tns-csi-test
 # Deploy CSI driver
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
-  --set truenas.host=10.10.20.100 \
+  --set truenas.host=YOUR-TRUENAS-IP \
   --set truenas.apiKey=<your-api-key>
 
 # Test NFS volume
@@ -368,7 +368,7 @@ kubectl apply -f deploy/example-pvc.yaml
 
 ### UTM VM Issues
 - Ensure bridged networking is configured
-- Verify VM can reach TrueNAS: `ping 10.10.20.100`
+- Verify VM can reach TrueNAS: `ping YOUR-TRUENAS-IP`
 - Check NVMe modules: `lsmod | grep nvme`
 
 ### Kind Cluster Issues

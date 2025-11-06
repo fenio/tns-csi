@@ -40,7 +40,7 @@ parameters:
   pool: "storage"
   # NVMe-oF server IP/hostname (should match your storage server)
   # Replace with your TrueNAS server IP or hostname
-  server: "10.10.20.100"
+  server: "YOUR-TRUENAS-IP"
   # REQUIRED: Pre-configured NVMe-oF subsystem NQN
   # Must be created in TrueNAS under Shares > NVMe-oF Subsystems
   # Example: nqn.2025-01.com.truenas:csi

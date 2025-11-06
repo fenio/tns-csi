@@ -706,6 +706,7 @@ func TestConcurrentCalls(t *testing.T) {
 }
 
 func TestQueryPool(t *testing.T) {
+	//nolint:govet // Test struct field alignment not critical for performance
 	tests := []struct {
 		name         string
 		poolName     string
@@ -723,19 +724,22 @@ func TestQueryPool(t *testing.T) {
 					// Handle auth
 					_, message, _ := conn.ReadMessage()
 					var req Request
-					json.Unmarshal(message, &req)
+					_ = json.Unmarshal(message, &req)
 					if req.Method == "auth.login_with_api_key" {
 						resp := Response{
 							ID:     req.ID,
 							Result: json.RawMessage(`true`),
 						}
-						respBytes, _ := json.Marshal(resp)
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							return
+						}
+						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
 					}
 
 					// Handle pool.query
 					_, message, _ = conn.ReadMessage()
-					json.Unmarshal(message, &req)
+					_ = json.Unmarshal(message, &req)
 					if req.Method == "pool.query" {
 						poolData := []Pool{{
 							ID:   1,
@@ -768,13 +772,19 @@ func TestQueryPool(t *testing.T) {
 								}{Parsed: 40}, // 40%
 							},
 						}}
-						result, _ := json.Marshal(poolData)
+						result, err := json.Marshal(poolData)
+						if err != nil {
+							return
+						}
 						resp := Response{
 							ID:     req.ID,
 							Result: result,
 						}
-						respBytes, _ := json.Marshal(resp)
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							return
+						}
+						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
 					}
 				}
 			},
@@ -797,7 +807,11 @@ func TestQueryPool(t *testing.T) {
 							ID:     req.ID,
 							Result: json.RawMessage(`true`),
 						}
-						respBytes, _ := json.Marshal(resp)
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							t.Errorf("failed to marshal response: %v", err)
+							return
+						}
 						conn.WriteMessage(websocket.TextMessage, respBytes)
 					}
 
@@ -809,7 +823,11 @@ func TestQueryPool(t *testing.T) {
 							ID:     req.ID,
 							Result: json.RawMessage(`[]`),
 						}
-						respBytes, _ := json.Marshal(resp)
+						respBytes, err := json.Marshal(resp)
+						if err != nil {
+							t.Errorf("failed to marshal response: %v", err)
+							return
+						}
 						conn.WriteMessage(websocket.TextMessage, respBytes)
 					}
 				}

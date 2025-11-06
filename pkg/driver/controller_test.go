@@ -247,8 +247,10 @@ type mockAPIClient struct {
 	queryPoolFunc func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
 }
 
+var errNotImplemented = errors.New("mock method not implemented")
+
 func (m *mockAPIClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) DeleteDataset(ctx context.Context, datasetID string) error {
@@ -256,11 +258,11 @@ func (m *mockAPIClient) DeleteDataset(ctx context.Context, datasetID string) err
 }
 
 func (m *mockAPIClient) UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) CreateNFSShare(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) DeleteNFSShare(ctx context.Context, shareID int) error {
@@ -268,11 +270,11 @@ func (m *mockAPIClient) DeleteNFSShare(ctx context.Context, shareID int) error {
 }
 
 func (m *mockAPIClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) CreateNVMeOFSubsystem(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error {
@@ -280,11 +282,11 @@ func (m *mockAPIClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID i
 }
 
 func (m *mockAPIClient) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) error {
@@ -300,7 +302,7 @@ func (m *mockAPIClient) AddSubsystemToPort(ctx context.Context, subsystemID, por
 }
 
 func (m *mockAPIClient) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
@@ -312,7 +314,7 @@ func (m *mockAPIClient) QuerySnapshots(ctx context.Context, filters []interface{
 }
 
 func (m *mockAPIClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error) {
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func (m *mockAPIClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
@@ -331,10 +333,11 @@ func (m *mockAPIClient) QueryPool(ctx context.Context, poolName string) (*tnsapi
 	if m.queryPoolFunc != nil {
 		return m.queryPoolFunc(ctx, poolName)
 	}
-	return nil, nil
+	return nil, errNotImplemented
 }
 
 func TestGetCapacity(t *testing.T) {
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name              string
 		params            map[string]string

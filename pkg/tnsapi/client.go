@@ -579,7 +579,14 @@ func (c *Client) Close() {
 
 // Pool API methods
 
+var (
+	// ErrPoolNotFound is returned when a requested pool is not found.
+	ErrPoolNotFound = errors.New("pool not found")
+)
+
 // Pool represents a ZFS storage pool.
+//
+//nolint:govet // Field alignment optimized for JSON unmarshaling performance
 type Pool struct {
 	ID       int    `json:"id"`
 	Name     string `json:"name"`
@@ -620,7 +627,7 @@ func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) 
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("pool not found: %s", poolName)
+		return nil, fmt.Errorf("%w: %s", ErrPoolNotFound, poolName)
 	}
 
 	klog.V(4).Infof("Successfully queried pool %s: size=%d bytes, free=%d bytes, used=%d bytes",

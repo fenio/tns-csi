@@ -5,7 +5,7 @@ October 31, 2024
 
 ## Environment
 - **Kubernetes Cluster**: kind (truenas-csi-test)
-- **TrueNAS Server**: 10.10.20.100:1443
+- **TrueNAS Server**: 10.10.20.100:443
 - **Storage Pool**: storage
 - **CSI Driver Image**: tns-csi-driver:test
 - **Deployment Namespace**: kube-system
@@ -15,7 +15,7 @@ October 31, 2024
 ### 1. WebSocket Connection Test ✅
 **Status**: PASSED
 
-- Successfully connected to TrueNAS WebSocket API at `wss://10.10.20.100:1443/api/current`
+- Successfully connected to TrueNAS WebSocket API at `wss://10.10.20.100:443/api/current`
 - API key authentication working correctly
 - Ping/pong mechanism functioning as expected
 - Connection remains stable with automatic reconnection on timeout

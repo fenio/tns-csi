@@ -33,7 +33,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -98,7 +98,7 @@ Create or edit `.tns-credentials` in the project root:
 
 ```bash
 # TrueNAS API Credentials
-TRUENAS_URL=wss://YOUR-TRUENAS-IP:1443/api/current
+TRUENAS_URL=wss://YOUR-TRUENAS-IP:443/api/current
 TRUENAS_API_KEY=your-api-key-here
 ```
 

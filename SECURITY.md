@@ -73,7 +73,7 @@ We will acknowledge your report within 48 hours and provide a timeline for a fix
 # Create secret with proper permissions
 kubectl create secret generic truenas-csi-secret \
   --from-literal=api-key=YOUR_API_KEY \
-  --from-literal=api-url=wss://YOUR-TRUENAS-IP:1443/api/current \
+  --from-literal=api-url=wss://YOUR-TRUENAS-IP:443/api/current \
   --namespace kube-system
 
 # Restrict access

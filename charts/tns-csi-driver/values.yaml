@@ -6,7 +6,7 @@
 truenas:
   # TrueNAS API URL (WebSocket endpoint)
   # Format: wss://YOUR-TRUENAS-IP:PORT/api/current
-  # Example: wss://truenas.example.com:1443/api/current
+  # Example: wss://truenas.example.com:443/api/current
   url: ""
   
   # TrueNAS API key

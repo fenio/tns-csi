@@ -23,7 +23,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -57,7 +57,7 @@ If you've cloned the repository:
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -91,7 +91,7 @@ metadata:
 type: Opaque
 stringData:
   server: "YOUR-TRUENAS-IP"
-  port: "1443"
+  port: "443"
   apiKey: "your-api-key-here"
 ```
 
@@ -284,7 +284,7 @@ kubectl get storageclass
 ### Common Issues
 
 #### Connection Failed
-- Verify TrueNAS URL format: `wss://YOUR-IP:1443/api/current`
+- Verify TrueNAS URL format: `wss://YOUR-IP:443/api/current`
 - Check API key has proper permissions (Settings > API Keys in TrueNAS UI)
 - Verify network connectivity from cluster to TrueNAS
 - Check TrueNAS API service is running
@@ -349,7 +349,7 @@ For more complex configurations, create a `my-values.yaml` file:
 
 ```yaml
 truenas:
-  url: "wss://YOUR-TRUENAS-IP:1443/api/current"
+  url: "wss://YOUR-TRUENAS-IP:443/api/current"
   apiKey: "1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 storageClasses:
@@ -396,7 +396,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \

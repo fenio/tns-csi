@@ -30,7 +30,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -48,7 +48,7 @@ If you've cloned the repository, you can install from the local chart:
 
 ```bash
 helm install tns-csi ./charts/tns-csi-driver -n kube-system \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -62,7 +62,7 @@ Create a `my-values.yaml` file:
 ```yaml
 truenas:
   # WebSocket URL format: wss://<host>:<port>/api/current
-  url: "wss://YOUR-TRUENAS-IP:1443/api/current"
+  url: "wss://YOUR-TRUENAS-IP:443/api/current"
   # API key from TrueNAS UI
   apiKey: "1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
@@ -109,7 +109,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
   --set storageClasses.nfs.enabled=true \
   --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
@@ -121,7 +121,7 @@ From local chart:
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --values charts/tns-csi-driver/values-nfs.yaml \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
   --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
 ```
@@ -134,7 +134,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.0.1 \
   --namespace kube-system \
   --create-namespace \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
@@ -149,7 +149,7 @@ From local chart:
 helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --values charts/tns-csi-driver/values-nvmeof.yaml \
-  --set truenas.url="wss://YOUR-TRUENAS-IP:1443/api/current" \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
   --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
   --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"

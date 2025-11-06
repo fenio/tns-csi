@@ -36,6 +36,7 @@ type MockAPIClientForSnapshots struct {
 	QueryAllDatasetsFunc         func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
 	QueryAllNFSSharesFunc        func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
 	QueryAllNVMeOFNamespacesFunc func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
+	QueryPoolFunc                func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -176,6 +177,13 @@ func (m *MockAPIClientForSnapshots) QueryAllNVMeOFNamespaces(ctx context.Context
 		return m.QueryAllNVMeOFNamespacesFunc(ctx)
 	}
 	return nil, errors.New("QueryAllNVMeOFNamespacesFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName string) (*tnsapi.Pool, error) {
+	if m.QueryPoolFunc != nil {
+		return m.QueryPoolFunc(ctx, poolName)
+	}
+	return nil, errors.New("QueryPoolFunc not implemented")
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {

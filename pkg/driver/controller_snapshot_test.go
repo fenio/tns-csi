@@ -33,6 +33,9 @@ type MockAPIClientForSnapshots struct {
 	QueryNVMeOFPortsFunc         func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
 	AddSubsystemToPortFunc       func(ctx context.Context, subsystemID, portID int) error
 	GetNVMeOFSubsystemByNQNFunc  func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
+	QueryAllDatasetsFunc         func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
+	QueryAllNFSSharesFunc        func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
+	QueryAllNVMeOFNamespacesFunc func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -152,6 +155,27 @@ func (m *MockAPIClientForSnapshots) GetNVMeOFSubsystemByNQN(ctx context.Context,
 		return m.GetNVMeOFSubsystemByNQNFunc(ctx, nqn)
 	}
 	return nil, errors.New("GetNVMeOFSubsystemByNQNFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+	if m.QueryAllDatasetsFunc != nil {
+		return m.QueryAllDatasetsFunc(ctx, prefix)
+	}
+	return nil, errors.New("QueryAllDatasetsFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+	if m.QueryAllNFSSharesFunc != nil {
+		return m.QueryAllNFSSharesFunc(ctx, pathPrefix)
+	}
+	return nil, errors.New("QueryAllNFSSharesFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryAllNVMeOFNamespaces(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+	if m.QueryAllNVMeOFNamespacesFunc != nil {
+		return m.QueryAllNVMeOFNamespacesFunc(ctx)
+	}
+	return nil, errors.New("QueryAllNVMeOFNamespacesFunc not implemented")
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {

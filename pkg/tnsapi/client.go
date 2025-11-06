@@ -1089,6 +1089,63 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	return &datasets[0], nil
 }
 
+// queryWithOptionalFilter is a helper function to reduce duplication in query methods.
+func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, resourceType string, result interface{}) error {
+	klog.V(5).Infof("Querying all %s with filter: %s", resourceType, filterValue)
+
+	var filters []interface{}
+
+	// If filter value is specified, apply the filter
+	if filterValue != "" {
+		filters = []interface{}{
+			[]interface{}{filterField, "^", filterValue},
+		}
+	}
+
+	err := c.Call(ctx, method, []interface{}{filters}, result)
+	if err != nil {
+		return fmt.Errorf("failed to query %s: %w", resourceType, err)
+	}
+
+	return nil
+}
+
+// QueryAllDatasets queries all datasets with optional prefix filter.
+func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
+	var result []Dataset
+	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "datasets", &result); err != nil {
+		return nil, err
+	}
+
+	klog.V(5).Infof("Found %d datasets", len(result))
+	return result, nil
+}
+
+// QueryAllNFSShares queries all NFS shares with optional path prefix filter.
+func (c *Client) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]NFSShare, error) {
+	var result []NFSShare
+	if err := c.queryWithOptionalFilter(ctx, "sharing.nfs.query", "path", pathPrefix, "NFS shares", &result); err != nil {
+		return nil, err
+	}
+
+	klog.V(5).Infof("Found %d NFS shares", len(result))
+	return result, nil
+}
+
+// QueryAllNVMeOFNamespaces queries all NVMe-oF namespaces.
+func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespace, error) {
+	klog.V(5).Info("Querying all NVMe-oF namespaces")
+
+	var result []NVMeOFNamespace
+	err := c.Call(ctx, "nvmeof.namespace.query", []interface{}{[]interface{}{}}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
+	}
+
+	klog.V(5).Infof("Found %d NVMe-oF namespaces", len(result))
+	return result, nil
+}
+
 // queryDatasets queries datasets by name (internal helper).
 func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Dataset, error) {
 	klog.V(5).Infof("Querying datasets with name: %s", datasetName)

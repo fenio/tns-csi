@@ -151,6 +151,9 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	klog.Infof("Successfully created NVMe-oF volume with encoded ID: %s", encodedVolumeID)
 
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requestedCapacity)
+
 	timer.ObserveSuccess()
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -198,6 +201,13 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	klog.Infof("Successfully deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
+	
+	// Remove volume capacity metric
+	// Note: We need to reconstruct the volumeID to delete the metric
+	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
+		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF)
+	}
+	
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }
@@ -291,6 +301,9 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	klog.Infof("Successfully created NVMe-oF volume from snapshot with encoded ID: %s", encodedVolumeID)
 
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requestedCapacity)
+
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      encodedVolumeID,
@@ -339,6 +352,12 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	klog.Infof("Successfully expanded NVMe-oF volume %s to %d bytes", meta.Name, requiredBytes)
+
+	// Update volume capacity metric
+	// Note: We need to reconstruct the volumeID to update the metric
+	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
+		metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requiredBytes)
+	}
 
 	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{

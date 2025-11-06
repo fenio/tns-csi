@@ -76,11 +76,7 @@ func main() {
 	// List all datasets in the pool
 	fmt.Println("\n=== Listing datasets ===")
 	var datasets []map[string]interface{}
-	if err := client.Call(ctx, "pool.dataset.query", []interface{}{
-		[]map[string]interface{}{
-			{"name": "~", pool},
-		},
-	}, &datasets); err != nil {
+	if err := client.Call(ctx, "pool.dataset.query", []interface{}{}, &datasets); err != nil {
 		fmt.Printf("Failed to query datasets: %v\n", err)
 		os.Exit(1)
 	}
@@ -89,6 +85,11 @@ func main() {
 	for _, ds := range datasets {
 		name, ok := ds["name"].(string)
 		if !ok {
+			continue
+		}
+		
+		// Only include datasets in the specified pool
+		if !strings.HasPrefix(name, pool+"/") && name != pool {
 			continue
 		}
 		

@@ -213,17 +213,31 @@ cleanup_snapshot_test() {
     
     # Delete pods first
     test_info "Deleting pods..."
-    kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
-    kubectl delete pod "${POD_FROM_SNAPSHOT}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+    kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "Pod ${POD_NAME} deletion timed out or failed"
+    }
+    kubectl delete pod "${POD_FROM_SNAPSHOT}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "Pod ${POD_FROM_SNAPSHOT} deletion timed out or failed"
+    }
     
     # Delete PVCs (this should trigger PV deletion)
     test_info "Deleting PVCs..."
-    kubectl delete pvc "${PVC_FROM_SNAPSHOT}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
-    kubectl delete pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+    kubectl delete pvc "${PVC_FROM_SNAPSHOT}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "PVC ${PVC_FROM_SNAPSHOT} deletion timed out after 60s - continuing anyway"
+    }
+    kubectl delete pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "PVC ${PVC_NAME} deletion timed out after 60s - continuing anyway"
+    }
+    
+    # Give CSI driver time to process DeleteVolume
+    test_info "Waiting 10 seconds for CSI DeleteVolume to process..."
+    sleep 10
     
     # Delete snapshot (this should trigger snapshot content deletion)
     test_info "Deleting VolumeSnapshot..."
-    kubectl delete volumesnapshot "${SNAPSHOT_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+    kubectl delete volumesnapshot "${SNAPSHOT_NAME}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "VolumeSnapshot ${SNAPSHOT_NAME} deletion timed out or failed"
+    }
     
     # Delete VolumeSnapshotClass
     test_info "Deleting VolumeSnapshotClass..."
@@ -237,8 +251,20 @@ cleanup_snapshot_test() {
     }
     
     # Wait for TrueNAS backend cleanup
-    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
-    sleep 30
+    test_info "Waiting for TrueNAS backend cleanup (60 seconds)..."
+    sleep 60
+    
+    # Verify PVs are actually deleted
+    test_info "Verifying PVs are deleted..."
+    local remaining_pvs
+    remaining_pvs=$(kubectl get pv --no-headers 2>/dev/null | grep -E "${PVC_NAME}|${PVC_FROM_SNAPSHOT}" | wc -l || echo "0")
+    if [[ "${remaining_pvs}" -eq 0 ]]; then
+        test_success "All test PVs deleted"
+    else
+        test_warning "${remaining_pvs} PVs still present - may indicate cleanup issue"
+        kubectl get pv | grep -E "${PVC_NAME}|${PVC_FROM_SNAPSHOT}" || true
+    fi
+    
     test_success "Cleanup complete"
 }
 

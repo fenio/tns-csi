@@ -626,8 +626,8 @@ cleanup_test() {
     # Wait for TrueNAS backend cleanup to complete
     # The CSI driver's DeleteVolume removes datasets, NFS shares, and NVMe-oF subsystems
     # This wait ensures TrueNAS cleanup finishes before the test completes
-    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
-    sleep 30
+    test_info "Waiting for TrueNAS backend cleanup (60 seconds)..."
+    sleep 60
     test_success "Cleanup complete"
 }
 

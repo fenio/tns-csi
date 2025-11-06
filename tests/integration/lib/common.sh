@@ -539,7 +539,7 @@ verify_metrics() {
         "tns_csi_operation_duration_seconds"
         "tns_csi_volume_operations_total"
         "tns_csi_volume_operation_duration_seconds"
-        "tns_csi_websocket_connected"
+        "tns_csi_websocket_connection_status"
         "tns_csi_websocket_reconnections_total"
         "tns_csi_websocket_connection_duration_seconds"
         "tns_csi_websocket_messages_total"
@@ -587,7 +587,7 @@ verify_metrics() {
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
-    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_connected" >/dev/null; then
+    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_connection_status" >/dev/null; then
         test_success "WebSocket connection status is tracked"
         metrics_with_data=$((metrics_with_data + 1))
     fi

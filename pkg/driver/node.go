@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/mount"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
@@ -46,17 +47,21 @@ func NewNodeService(nodeID string, apiClient *tnsapi.Client) *NodeService {
 
 // NodeStageVolume stages a volume to a staging path.
 func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("node", "stage")
 	klog.V(4).Infof("NodeStageVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
 	if req.GetStagingTargetPath() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Staging target path is required")
 	}
 
 	if req.GetVolumeCapability() == nil {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
 	}
 
@@ -71,10 +76,17 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		// Try to determine protocol from volume context if metadata decode fails
 		// This handles backwards compatibility
 		if nqn := volumeContext["nqn"]; nqn != "" {
-			return s.stageNVMeOFVolume(ctx, req, volumeContext)
+			resp, err := s.stageNVMeOFVolume(ctx, req, volumeContext)
+			if err != nil {
+				timer.ObserveError()
+				return nil, err
+			}
+			timer.ObserveSuccess()
+			return resp, nil
 		}
 		// Default to NFS for backwards compatibility
 		klog.V(4).Infof("Volume appears to be NFS (no staging required)")
+		timer.ObserveSuccess()
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
@@ -85,25 +97,36 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	case ProtocolNFS:
 		// NFS volumes don't need staging - mounting happens in NodePublishVolume
 		klog.V(4).Infof("NFS volume, no staging required")
+		timer.ObserveSuccess()
 		return &csi.NodeStageVolumeResponse{}, nil
 
 	case ProtocolNVMeOF:
-		return s.stageNVMeOFVolume(ctx, req, volumeContext)
+		resp, err := s.stageNVMeOFVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 
 	default:
+		timer.ObserveError()
 		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
 	}
 }
 
 // NodeUnstageVolume unstages a volume from a staging path.
 func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("node", "unstage")
 	klog.V(4).Infof("NodeUnstageVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
 	if req.GetStagingTargetPath() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Staging target path is required")
 	}
 
@@ -124,6 +147,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 				klog.Warningf("Failed to unmount staging path: %v", err)
 			}
 		}
+		timer.ObserveSuccess()
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
@@ -134,6 +158,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	case ProtocolNFS:
 		// NFS volumes don't need unstaging
 		klog.V(4).Infof("NFS volume, no unstaging required")
+		timer.ObserveSuccess()
 		return &csi.NodeUnstageVolumeResponse{}, nil
 
 	case ProtocolNVMeOF:
@@ -142,26 +167,37 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		volumeContext := map[string]string{
 			"nqn": meta.NVMeOFNQN,
 		}
-		return s.unstageNVMeOFVolume(ctx, req, volumeContext)
+		resp, err := s.unstageNVMeOFVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 
 	default:
+		timer.ObserveError()
 		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
 	}
 }
 
 // NodePublishVolume mounts the volume to the target path.
 func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("node", "publish")
 	klog.V(4).Infof("NodePublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
 	if req.GetTargetPath() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Target path is required")
 	}
 
 	if req.GetVolumeCapability() == nil {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
 	}
 
@@ -173,7 +209,13 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	if err != nil {
 		klog.Warningf("Failed to decode volume ID %s: %v, assuming NFS", volumeID, err)
 		// Fall back to NFS behavior for backwards compatibility
-		return s.publishNFSVolume(ctx, req)
+		resp, respErr := s.publishNFSVolume(ctx, req)
+		if respErr != nil {
+			timer.ObserveError()
+			return nil, respErr
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 	}
 
 	klog.Infof("Publishing volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, targetPath)
@@ -181,37 +223,56 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	// Publish volume based on protocol
 	switch meta.Protocol {
 	case ProtocolNFS:
-		return s.publishNFSVolume(ctx, req)
+		resp, respErr := s.publishNFSVolume(ctx, req)
+		if respErr != nil {
+			timer.ObserveError()
+			return nil, respErr
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 
 	case ProtocolNVMeOF:
 		// NVMe-oF supports both block and filesystem volume modes
 		stagingTargetPath := req.GetStagingTargetPath()
 		if stagingTargetPath == "" {
+			timer.ObserveError()
 			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for NVMe-oF volumes")
 		}
 
 		// Check volume capability to determine how to publish
+		var resp *csi.NodePublishVolumeResponse
 		if req.GetVolumeCapability().GetBlock() != nil {
 			// Block volume: staging path is a device file, bind mount it
-			return s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+			resp, err = s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+		} else {
+			// Filesystem volume: staging path is a mounted directory, bind mount the directory
+			resp, err = s.publishFilesystemVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
 		}
-		// Filesystem volume: staging path is a mounted directory, bind mount the directory
-		return s.publishFilesystemVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 
 	default:
+		timer.ObserveError()
 		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)
 	}
 }
 
 // NodeUnpublishVolume unmounts the volume from the target path.
 func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("node", "unpublish")
 	klog.V(4).Infof("NodeUnpublishVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
 	if req.GetTargetPath() == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "Target path is required")
 	}
 
@@ -223,21 +284,25 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	// Check if mounted
 	mounted, err := mount.IsMounted(ctx, targetPath)
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
 
 	if !mounted {
 		klog.V(4).Infof("Path %s is not mounted, nothing to do", targetPath)
+		timer.ObserveSuccess()
 		return &csi.NodeUnpublishVolumeResponse{}, nil
 	}
 
 	// Unmount
 	klog.V(4).Infof("Executing umount command for: %s", targetPath)
 	if err := mount.Unmount(ctx, targetPath); err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
 	}
 
 	klog.Infof("Successfully unmounted volume %s from %s", volumeID, targetPath)
+	timer.ObserveSuccess()
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 

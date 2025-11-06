@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,6 +15,7 @@ import (
 )
 
 func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nvmeof", "create")
 	klog.V(4).Info("Creating NVMe-oF volume")
 
 	// Get parameters from storage class
@@ -22,16 +24,19 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	// Required parameters
 	pool := params["pool"]
 	if pool == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "pool parameter is required for NVMe-oF volumes")
 	}
 
 	server := params["server"]
 	if server == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NVMe-oF volumes")
 	}
 
 	subsystemNQN := params["subsystemNQN"]
 	if subsystemNQN == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument,
 			"subsystemNQN parameter is required for NVMe-oF volumes. "+
 				"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
@@ -60,6 +65,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
 	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"Failed to find NVMe-oF subsystem with NQN '%s'. "+
 				"Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
@@ -76,6 +82,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		Volblocksize: "16K", // Default block size for NVMe-oF
 	})
 	if err != nil {
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create ZVOL: %v", err)
 	}
 
@@ -100,6 +107,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
 
@@ -126,6 +134,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID: %v", err)
 	}
 
@@ -142,6 +151,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	klog.Infof("Successfully created NVMe-oF volume with encoded ID: %s", encodedVolumeID)
 
+	timer.ObserveSuccess()
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      encodedVolumeID,
@@ -155,6 +165,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 // NOTE: This function does NOT delete the NVMe-oF subsystem. Subsystems are pre-configured
 // infrastructure that serve multiple volumes (namespaces). Only the namespace and ZVOL are deleted.
 func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nvmeof", "delete")
 	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d)",
 		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID)
 
@@ -187,6 +198,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	klog.Infof("Successfully deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
+	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
@@ -299,9 +311,11 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 //
 //nolint:dupl // Similar to expandNFSVolume but with different parameters (Volsize vs Quota, NodeExpansionRequired)
 func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *VolumeMetadata, requiredBytes int64) (*csi.ControllerExpandVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer("nvmeof", "expand")
 	klog.V(4).Infof("Expanding NVMe-oF volume: %s (ZVOL: %s) to %d bytes", meta.Name, meta.DatasetName, requiredBytes)
 
 	if meta.DatasetID == "" {
+		timer.ObserveError()
 		return nil, status.Error(codes.InvalidArgument, "dataset ID not found in volume metadata")
 	}
 
@@ -317,6 +331,7 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 	if err != nil {
 		// Provide detailed error information to help diagnose dataset issues
 		klog.Errorf("Failed to update ZVOL %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal,
 			"Failed to update ZVOL size for dataset '%s' (Name: '%s'). "+
 				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
@@ -325,6 +340,7 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 
 	klog.Infof("Successfully expanded NVMe-oF volume %s to %d bytes", meta.Name, requiredBytes)
 
+	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes:         requiredBytes,
 		NodeExpansionRequired: true, // NVMe-oF volumes require node-side filesystem expansion

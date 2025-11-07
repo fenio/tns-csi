@@ -84,7 +84,7 @@ spec:
   resources:
     requests:
       storage: 1Gi
-  storageClassName: tns-nvmeof
+   storageClassName: tns-csi-nvmeof
 ---
 apiVersion: v1
 kind: Pod

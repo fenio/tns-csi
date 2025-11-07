@@ -5,7 +5,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
-  storageClassName: tns-nfs
+   storageClassName: tns-csi-nfs
   resources:
     requests:
       storage: 1Gi

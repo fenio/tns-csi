@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -49,6 +50,21 @@ func decodeSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 	}
 
 	return &meta, nil
+}
+
+// encodeSnapshotToken encodes an offset as a pagination token.
+func encodeSnapshotToken(offset int) string {
+	return strconv.Itoa(offset)
+}
+
+// parseSnapshotToken parses a pagination token to extract the offset.
+func parseSnapshotToken(token string) (int, error) {
+	var offset int
+	_, err := fmt.Sscanf(token, "%d", &offset)
+	if err != nil {
+		return 0, fmt.Errorf("invalid token format: %w", err)
+	}
+	return offset, nil
 }
 
 // CreateSnapshot creates a volume snapshot.
@@ -246,9 +262,38 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 
 	klog.V(4).Infof("Found %d snapshots", len(snapshots))
 
+	// Handle pagination
+	maxEntries := int(req.GetMaxEntries())
+	if maxEntries <= 0 {
+		maxEntries = len(snapshots) // Return all if not specified
+	}
+
+	// Parse starting token (offset index)
+	startIndex := 0
+	if req.GetStartingToken() != "" {
+		var err error
+		startIndex, err = parseSnapshotToken(req.GetStartingToken())
+		if err != nil {
+			return nil, status.Errorf(codes.Aborted, "Invalid starting token: %v", err)
+		}
+		if startIndex < 0 || startIndex >= len(snapshots) {
+			// Starting token is out of range, return empty list
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
+		}
+	}
+
+	// Calculate end index
+	endIndex := startIndex + maxEntries
+	if endIndex > len(snapshots) {
+		endIndex = len(snapshots)
+	}
+
 	// Convert to CSI format
-	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(snapshots))
-	for _, snapshot := range snapshots {
+	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, endIndex-startIndex)
+	for i := startIndex; i < endIndex; i++ {
+		snapshot := snapshots[i]
 		// For each snapshot, we need to determine the source volume
 		// Snapshot ID format is "dataset@snapname", dataset is the volume's dataset
 
@@ -279,10 +324,15 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		entries = append(entries, entry)
 	}
 
-	// Handle pagination (simplified - return all results)
-	// TODO: Implement proper pagination if needed
+	// Generate next token if there are more results
+	var nextToken string
+	if endIndex < len(snapshots) {
+		nextToken = encodeSnapshotToken(endIndex)
+	}
+
 	return &csi.ListSnapshotsResponse{
-		Entries: entries,
+		Entries:   entries,
+		NextToken: nextToken,
 	}, nil
 }
 

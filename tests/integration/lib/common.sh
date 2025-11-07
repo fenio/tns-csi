@@ -63,7 +63,56 @@ record_test_result() {
     local status=$2
     local duration=${3:-0}
     
-    TEST_RESULTS+=("${test_name}:${status}")
+    TEST_RESULTS+=("${test_name}:${status}:${duration}")
+    TEST_DURATIONS["${test_name}"]=${duration}
+}
+
+#######################################
+# Start timing a test step
+# Arguments:
+#   Test name
+#######################################
+start_test_timer() {
+    local test_name=$1
+    export "TEST_TIMER_${test_name}=$(date +%s%N)"
+}
+
+#######################################
+# Stop timing a test step and record result
+# Arguments:
+#   Test name
+#   Status (PASSED/FAILED)
+#######################################
+stop_test_timer() {
+    local test_name=$1
+    local status=$2
+    local start_var="TEST_TIMER_${test_name}"
+    local start_time=${!start_var}
+    
+    if [[ -n "${start_time}" ]]; then
+        local end_time=$(date +%s%N)
+        local duration_ns=$((end_time - start_time))
+        local duration_ms=$((duration_ns / 1000000))
+        record_test_result "${test_name}" "${status}" "${duration_ms}"
+        unset "${start_var}"
+    else
+        record_test_result "${test_name}" "${status}"
+    fi
+}
+
+#######################################
+# Record test result
+# Arguments:
+#   Test name
+#   Status (PASSED/FAILED)
+#   Duration (optional)
+#######################################
+record_test_result() {
+    local test_name=$1
+    local status=$2
+    local duration=${3:-0}
+    
+    TEST_RESULTS+=("${test_name}:${status}:${duration}")
     TEST_DURATIONS["${test_name}"]=${duration}
 }
 

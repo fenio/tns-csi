@@ -56,6 +56,19 @@ should_skip_test() {
 # Arguments:
 #   Test name
 #   Status (PASSED/FAILED)
+#######################################
+record_test_result() {
+    local test_name=$1
+    local status=$2
+    
+    TEST_RESULTS+=("${test_name}:${status}")
+}
+
+#######################################
+# Record test result
+# Arguments:
+#   Test name
+#   Status (PASSED/FAILED)
 #   Duration (optional)
 #######################################
 record_test_result() {
@@ -98,32 +111,6 @@ stop_test_timer() {
     else
         record_test_result "${test_name}" "${status}"
     fi
-}
-
-#######################################
-# Record test result
-# Arguments:
-#   Test name
-#   Status (PASSED/FAILED)
-#   Duration (optional)
-#######################################
-record_test_result() {
-    local test_name=$1
-    local status=$2
-    local duration=${3:-0}
-    
-    TEST_RESULTS+=("${test_name}:${status}:${duration}")
-    TEST_DURATIONS["${test_name}"]=${duration}
-}
-
-#######################################
-# Start timing a test step
-# Arguments:
-#   Test name
-#######################################
-start_test_timer() {
-    local test_name=$1
-    export "TEST_TIMER_${test_name}=$(date +%s%N)"
 }
 
 #######################################
@@ -872,8 +859,18 @@ report_test_results() {
     echo "========================================"
     echo ""
     
+    # Debug: show raw array contents
+    echo "DEBUG: TEST_RESULTS array has ${total_tests} elements:"
+    for i in "${!TEST_RESULTS[@]}"; do
+        echo "  [$i]: '${TEST_RESULTS[$i]}'"
+    done
+    echo ""
+    
     for result in "${TEST_RESULTS[@]}"; do
+        echo "DEBUG: Processing result: '$result'"
         IFS=':' read -r test_name status duration <<< "${result}"
+        echo "DEBUG: Parsed - name:'$test_name' status:'$status' duration:'$duration'"
+        
         if [[ "${status}" == "PASSED" ]]; then
             echo -e "${GREEN}✓${NC} ${test_name}"
             ((passed++))

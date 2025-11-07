@@ -573,7 +573,7 @@ func TestSetupNFSVolumeFromClone(t *testing.T) {
 			tt.mockSetup(mockClient)
 
 			controller := NewControllerService(mockClient)
-			resp, err := controller.setupNFSVolumeFromClone(ctx, tt.req, tt.dataset, tt.server)
+			resp, err := controller.setupNFSVolumeFromClone(ctx, tt.req, tt.dataset, tt.server, "snapshot-id")
 
 			if tt.wantErr {
 				if err == nil {

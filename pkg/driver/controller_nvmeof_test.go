@@ -782,7 +782,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			tt.mockSetup(mockClient)
 
 			controller := NewControllerService(mockClient)
-			resp, err := controller.setupNVMeOFVolumeFromClone(ctx, tt.req, tt.zvol, tt.server, tt.subsystemNQN)
+			resp, err := controller.setupNVMeOFVolumeFromClone(ctx, tt.req, tt.zvol, tt.server, tt.subsystemNQN, "snapshot-id")
 
 			if tt.wantErr {
 				if err == nil {

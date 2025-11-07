@@ -30,7 +30,9 @@ type VolumeMetadata struct {
 	Protocol          string `json:"protocol"`
 	DatasetID         string `json:"datasetID,omitempty"`
 	DatasetName       string `json:"datasetName,omitempty"`
-	NVMeOFNQN         string `json:"nvmeofNQN,omitempty"`
+	Server            string `json:"server,omitempty"`       // TrueNAS server address
+	NVMeOFNQN         string `json:"nvmeofNQN,omitempty"`    // NVMe-oF subsystem NQN
+	SubsystemNQN      string `json:"subsystemNQN,omitempty"` // Alias for NVMeOFNQN (for compatibility)
 	NFSShareID        int    `json:"nfsShareID,omitempty"`
 	NVMeOFSubsystemID int    `json:"nvmeofSubsystemID,omitempty"`
 	NVMeOFNamespaceID int    `json:"nvmeofNamespaceID,omitempty"`

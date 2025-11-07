@@ -286,7 +286,7 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				return
 			}
 
-			// Verify decoded metadata matches original
+			// Verify decoded metadata matches original (except CreatedAt which is excluded from encoding)
 			if decoded.SnapshotName != tt.meta.SnapshotName {
 				t.Errorf("SnapshotName = %v, want %v", decoded.SnapshotName, tt.meta.SnapshotName)
 			}
@@ -299,8 +299,10 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 			if decoded.Protocol != tt.meta.Protocol {
 				t.Errorf("Protocol = %v, want %v", decoded.Protocol, tt.meta.Protocol)
 			}
-			if decoded.CreatedAt != tt.meta.CreatedAt {
-				t.Errorf("CreatedAt = %v, want %v", decoded.CreatedAt, tt.meta.CreatedAt)
+			// CreatedAt is intentionally excluded from encoding (json:"-" tag) to ensure deterministic snapshot IDs
+			// It should always be 0 after decoding
+			if decoded.CreatedAt != 0 {
+				t.Errorf("CreatedAt = %v, want 0 (CreatedAt is excluded from snapshot ID encoding)", decoded.CreatedAt)
 			}
 		})
 	}

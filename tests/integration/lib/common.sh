@@ -849,9 +849,9 @@ show_diagnostic_logs() {
 #######################################
 report_test_results() {
     local total_tests=${#TEST_RESULTS[@]}
-    local passed=0
-    local failed=0
-    local total_duration=0
+    declare -i passed=0
+    declare -i failed=0
+    declare -i total_duration=0
     
     echo ""
     echo "========================================"
@@ -859,24 +859,15 @@ report_test_results() {
     echo "========================================"
     echo ""
     
-    # Debug: show raw array contents
-    echo "DEBUG: TEST_RESULTS array has ${total_tests} elements:"
-    for i in "${!TEST_RESULTS[@]}"; do
-        echo "  [$i]: '${TEST_RESULTS[$i]}'"
-    done
-    echo ""
-    
     for result in "${TEST_RESULTS[@]}"; do
-        echo "DEBUG: Processing result: '$result'"
         IFS=':' read -r test_name status duration <<< "${result}"
-        echo "DEBUG: Parsed - name:'$test_name' status:'$status' duration:'$duration'"
         
         if [[ "${status}" == "PASSED" ]]; then
             echo -e "${GREEN}✓${NC} ${test_name}"
-            ((passed++))
+            passed=$((passed + 1))
         else
             echo -e "${RED}✗${NC} ${test_name}"
-            ((failed++))
+            failed=$((failed + 1))
         fi
         
         if [[ -n "${duration}" && "${duration}" != "0" ]]; then

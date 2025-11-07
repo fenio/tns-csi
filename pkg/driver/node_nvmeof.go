@@ -24,49 +24,36 @@ var (
 	ErrNVMeDeviceTimeout  = errors.New("timeout waiting for NVMe device to appear")
 )
 
+// nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
+type nvmeOFConnectionParams struct {
+	nqn       string
+	server    string
+	transport string
+	port      string
+	nsid      string
+}
+
 // stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.
 func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 	volumeCapability := req.GetVolumeCapability()
 
-	// Get NVMe-oF parameters from volume context
-	nqn := volumeContext["nqn"]
-	server := volumeContext["server"]
-	transport := volumeContext["transport"]
-	port := volumeContext["port"]
-	nsid := volumeContext["nsid"] // Namespace ID within the subsystem
-
-	if nqn == "" || server == "" {
-		return nil, status.Error(codes.InvalidArgument, "nqn and server must be provided in volume context for NVMe-oF volumes")
+	// Validate and extract connection parameters
+	params, err := s.validateNVMeOFParams(volumeContext)
+	if err != nil {
+		return nil, err
 	}
 
-	if nsid == "" {
-		return nil, status.Error(codes.InvalidArgument, "nsid (namespace ID) must be provided in volume context for NVMe-oF volumes")
-	}
-
-	// Default values
-	if transport == "" {
-		transport = "tcp"
-	}
-	if port == "" {
-		port = "4420"
-	}
-
-	// Check if this is a block volume or filesystem volume
 	isBlockVolume := volumeCapability.GetBlock() != nil
-
-	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s, NSID: %s)", volumeID, isBlockVolume, server, port, nqn, nsid)
+	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s, NSID: %s)",
+		volumeID, isBlockVolume, params.server, params.port, params.nqn, params.nsid)
 
 	// Check if already connected
-	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, nqn, nsid)
+	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		// Device already connected, proceed based on volume type
-		if isBlockVolume {
-			return s.stageBlockDevice(devicePath, stagingTargetPath)
-		}
-		return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
+		return s.stageNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
 	}
 
 	// Check if nvme-cli is installed
@@ -74,45 +61,87 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
 
-	// Discover the NVMe-oF target
-	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", server, port)
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer discoverCancel()
-	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
-	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", transport, "-a", server, "-s", port)
-	if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
-		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
+	// Connect to NVMe-oF target
+	if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
+		return nil, connectErr
 	}
 
-	// Connect to the NVMe-oF target
-	klog.Infof("Connecting to NVMe-oF target: %s", nqn)
-	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer connectCancel()
-	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
-	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", transport, "-n", nqn, "-a", server, "-s", port)
-	output, err := connectCmd.CombinedOutput()
-	if err != nil {
-		// Check if already connected
-		if strings.Contains(string(output), "already connected") {
-			klog.V(4).Infof("NVMe device already connected (output: %s)", string(output))
-		} else {
-			return nil, status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target: %v, output: %s", err, string(output))
-		}
-	}
-
-	// Wait for device to appear and find the device path
-	devicePath, err = s.waitForNVMeDevice(ctx, nqn, nsid, 30*time.Second)
+	// Wait for device to appear
+	devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
 	if err != nil {
 		// Cleanup: disconnect on failure
-		if disconnectErr := s.disconnectNVMeOF(ctx, nqn); disconnectErr != nil {
+		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF after device wait failure: %v", disconnectErr)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to find NVMe device after connection: %v", err)
 	}
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
+	return s.stageNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+}
 
-	// Stage based on volume type
+// validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
+func (s *NodeService) validateNVMeOFParams(volumeContext map[string]string) (*nvmeOFConnectionParams, error) {
+	params := &nvmeOFConnectionParams{
+		nqn:       volumeContext["nqn"],
+		server:    volumeContext["server"],
+		transport: volumeContext["transport"],
+		port:      volumeContext["port"],
+		nsid:      volumeContext["nsid"],
+	}
+
+	if params.nqn == "" || params.server == "" {
+		return nil, status.Error(codes.InvalidArgument, "nqn and server must be provided in volume context for NVMe-oF volumes")
+	}
+
+	if params.nsid == "" {
+		return nil, status.Error(codes.InvalidArgument, "nsid (namespace ID) must be provided in volume context for NVMe-oF volumes")
+	}
+
+	// Default values
+	if params.transport == "" {
+		params.transport = "tcp"
+	}
+	if params.port == "" {
+		params.port = "4420"
+	}
+
+	return params, nil
+}
+
+// connectNVMeOFTarget discovers and connects to an NVMe-oF target.
+func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFConnectionParams) error {
+	// Discover the NVMe-oF target
+	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", params.server, params.port)
+	discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer discoverCancel()
+	//nolint:gosec // nvme discover with volume context variables is expected for CSI driver
+	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", params.transport, "-a", params.server, "-s", params.port)
+	if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
+		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
+	}
+
+	// Connect to the NVMe-oF target
+	klog.Infof("Connecting to NVMe-oF target: %s", params.nqn)
+	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer connectCancel()
+	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
+	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", params.transport, "-n", params.nqn, "-a", params.server, "-s", params.port)
+	output, err := connectCmd.CombinedOutput()
+	if err != nil {
+		// Check if already connected
+		if strings.Contains(string(output), "already connected") {
+			klog.V(4).Infof("NVMe device already connected (output: %s)", string(output))
+			return nil
+		}
+		return status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target: %v, output: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// stageNVMeDevice stages an NVMe device as either block or filesystem volume.
+func (s *NodeService) stageNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}

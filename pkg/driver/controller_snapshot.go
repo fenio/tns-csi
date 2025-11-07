@@ -213,7 +213,11 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	if req.GetSnapshotId() != "" {
 		snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid snapshot ID: %v", err)
+			// CSI spec: return empty list for non-existent or invalid snapshot IDs
+			klog.V(4).Infof("Invalid snapshot ID %q, returning empty list: %v", req.GetSnapshotId(), err)
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
 		}
 		filters = []interface{}{
 			[]interface{}{"id", "=", snapshotMeta.SnapshotName},
@@ -222,7 +226,11 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		// Filter by source volume - need to decode volume to get dataset name
 		volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid source volume ID: %v", err)
+			// CSI spec: return empty list for non-existent or invalid volume IDs
+			klog.V(4).Infof("Invalid source volume ID %q, returning empty list: %v", req.GetSourceVolumeId(), err)
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
 		}
 		// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 		filters = []interface{}{
@@ -288,7 +296,9 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	// Decode snapshot metadata
 	snapshotMeta, err := decodeSnapshotID(snapshotID)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode snapshot ID: %v", err)
+		// Per CSI spec: if snapshot ID is invalid/malformed, treat it as not found
+		klog.Warningf("Failed to decode snapshot ID %s: %v. Treating as not found.", snapshotID, err)
+		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
 	}
 
 	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s",
@@ -345,24 +355,18 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 
 	klog.Infof("Successfully cloned snapshot to dataset: %s", clonedDataset.Name)
 
-	// Get server parameter for volume context
-	server := params["server"]
-	if server == "" {
-		// Cleanup the cloned dataset
-		klog.Errorf("server parameter is required, cleaning up")
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-		}
-		return nil, status.Error(codes.InvalidArgument, "server parameter is required")
+	// Get server and subsystemNQN parameters from StorageClass or source volume
+	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset)
+	if err != nil {
+		return nil, err
 	}
 
 	// Route to protocol-specific volume setup based on snapshot protocol
 	switch snapshotMeta.Protocol {
 	case ProtocolNFS:
-		return s.setupNFSVolumeFromClone(ctx, req, clonedDataset, server)
+		return s.setupNFSVolumeFromClone(ctx, req, clonedDataset, server, snapshotID)
 	case ProtocolNVMeOF:
-		// For NVMe-oF, we need the subsystemNQN parameter from StorageClass
-		subsystemNQN := params["subsystemNQN"]
+		// Validate subsystemNQN is available for NVMe-oF
 		if subsystemNQN == "" {
 			// Cleanup the cloned dataset
 			klog.Errorf("subsystemNQN parameter is required for NVMe-oF volumes, cleaning up")
@@ -374,7 +378,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 					"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
 					"and provide its NQN in the StorageClass parameters.")
 		}
-		return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server, subsystemNQN)
+		return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server, subsystemNQN, snapshotID)
 	default:
 		// Cleanup the cloned dataset if we can't determine protocol
 		klog.Errorf("Unknown protocol %s in snapshot metadata, cleaning up", snapshotMeta.Protocol)
@@ -383,6 +387,71 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		}
 		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol in snapshot: %s", snapshotMeta.Protocol)
 	}
+}
+
+// getVolumeParametersForSnapshot extracts server and subsystemNQN parameters
+// from either the request parameters (StorageClass) or the source volume metadata.
+func (s *ControllerService) getVolumeParametersForSnapshot(
+	ctx context.Context,
+	params map[string]string,
+	snapshotMeta *SnapshotMetadata,
+	clonedDataset *tnsapi.Dataset,
+) (server, subsystemNQN string, err error) {
+	// First try to get from request parameters (StorageClass)
+	server = params["server"]
+	subsystemNQN = params["subsystemNQN"]
+
+	// If not provided in parameters, extract from source volume metadata
+	needsSourceExtraction := server == "" || (snapshotMeta.Protocol == ProtocolNVMeOF && subsystemNQN == "")
+	if !needsSourceExtraction {
+		// All required parameters are available
+		return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)
+	}
+
+	klog.V(4).Infof("Server or subsystemNQN not in parameters, extracting from source volume: %s", snapshotMeta.SourceVolume)
+
+	// Decode source volume metadata
+	sourceVolumeMeta, decodeErr := decodeVolumeID(snapshotMeta.SourceVolume)
+	if decodeErr != nil {
+		// Cleanup the cloned dataset
+		klog.Errorf("Failed to decode source volume ID from snapshot, cleaning up: %v", decodeErr)
+		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+		}
+		return "", "", status.Errorf(codes.Internal, "Failed to decode source volume metadata: %v", decodeErr)
+	}
+
+	// Use server from source volume if not provided
+	if server == "" {
+		server = sourceVolumeMeta.Server
+		klog.V(4).Infof("Using server from source volume: %s", server)
+	}
+
+	// Use subsystem NQN from source volume if not provided (for NVMe-oF)
+	if subsystemNQN == "" && snapshotMeta.Protocol == ProtocolNVMeOF {
+		// Try SubsystemNQN first, fallback to NVMeOFNQN
+		if sourceVolumeMeta.SubsystemNQN != "" {
+			subsystemNQN = sourceVolumeMeta.SubsystemNQN
+		} else {
+			subsystemNQN = sourceVolumeMeta.NVMeOFNQN
+		}
+		klog.V(4).Infof("Using subsystemNQN from source volume: %s", subsystemNQN)
+	}
+
+	return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)
+}
+
+// validateServerParameter validates that the server parameter is not empty.
+func (s *ControllerService) validateServerParameter(ctx context.Context, server string, clonedDataset *tnsapi.Dataset) error {
+	if server == "" {
+		// Cleanup the cloned dataset
+		klog.Errorf("server parameter is required, cleaning up")
+		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+		}
+		return status.Error(codes.InvalidArgument, "server parameter is required")
+	}
+	return nil
 }
 
 // isNotFoundError checks if an error indicates a resource was not found.

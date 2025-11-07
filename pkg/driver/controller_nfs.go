@@ -89,6 +89,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		Protocol:    ProtocolNFS,
 		DatasetID:   dataset.ID,
 		DatasetName: dataset.Name,
+		Server:      server,
 		NFSShareID:  nfsShare.ID,
 	}
 
@@ -176,7 +177,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 }
 
 // setupNFSVolumeFromClone sets up an NFS share for a cloned dataset.
-func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.Dataset, server string) (*csi.CreateVolumeResponse, error) {
+func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.Dataset, server, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("Setting up NFS share for cloned dataset: %s", dataset.Name)
 
 	volumeName := req.GetName()
@@ -206,6 +207,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		Protocol:    ProtocolNFS,
 		DatasetID:   dataset.ID,
 		DatasetName: dataset.Name,
+		Server:      server,
 		NFSShareID:  nfsShare.ID,
 	}
 
@@ -250,7 +252,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 			ContentSource: &csi.VolumeContentSource{
 				Type: &csi.VolumeContentSource_Snapshot{
 					Snapshot: &csi.VolumeContentSource_SnapshotSource{
-						SnapshotId: req.GetVolumeContentSource().GetSnapshot().GetSnapshotId(),
+						SnapshotId: snapshotID,
 					},
 				},
 			},

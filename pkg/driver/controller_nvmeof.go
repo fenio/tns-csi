@@ -119,9 +119,11 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		Protocol:          "nvmeof",
 		DatasetID:         zvol.ID,
 		DatasetName:       zvol.Name,
+		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
+		SubsystemNQN:      subsystem.NQN,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -212,7 +214,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, subsystemNQN string) (*csi.CreateVolumeResponse, error) {
+func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, subsystemNQN, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s", zvol.Name)
 
 	volumeName := req.GetName()
@@ -264,9 +266,11 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		Protocol:          "nvmeof",
 		DatasetID:         zvol.ID,
 		DatasetName:       zvol.Name,
+		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
+		SubsystemNQN:      subsystemNQN,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -312,7 +316,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 			ContentSource: &csi.VolumeContentSource{
 				Type: &csi.VolumeContentSource_Snapshot{
 					Snapshot: &csi.VolumeContentSource_SnapshotSource{
-						SnapshotId: req.GetVolumeContentSource().GetSnapshot().GetSnapshotId(),
+						SnapshotId: snapshotID,
 					},
 				},
 			},

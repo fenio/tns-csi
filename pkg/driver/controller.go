@@ -303,7 +303,9 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 }
 
 // parseNFSShareCapacity extracts capacity from NFS share comment.
-// Comment format: "CSI Volume: <name> | Capacity: <bytes>".
+// Supports multiple formats:
+// - "CSI Volume: <name>, Capacity: <bytes>"
+// - "CSI Volume: <name> | Capacity: <bytes>".
 func parseNFSShareCapacity(comment string) int64 {
 	if comment == "" {
 		klog.V(4).Infof("DEBUG: Comment is empty")
@@ -311,11 +313,16 @@ func parseNFSShareCapacity(comment string) int64 {
 	}
 
 	klog.V(4).Infof("DEBUG: Parsing comment: %s", comment)
-	// Use strings.Split to parse since the volume name can contain spaces
+
+	// Try pipe separator first (preferred format)
 	parts := strings.Split(comment, " | Capacity: ")
 	if len(parts) != 2 {
-		klog.V(4).Infof("Comment does not match expected format: %s", comment)
-		return 0
+		// Try comma separator (legacy format)
+		parts = strings.Split(comment, ", Capacity: ")
+		if len(parts) != 2 {
+			klog.V(4).Infof("Comment does not match expected format: %s", comment)
+			return 0
+		}
 	}
 
 	parsed, err := strconv.ParseInt(parts[1], 10, 64)

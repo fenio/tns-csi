@@ -5,7 +5,7 @@
 This driver is in early development phase. Use only for testing and evaluation environments. Use at your own risk.
 
 ## Prerequisites
-- Kubernetes cluster (1.20+)
+- Kubernetes cluster (1.27+) (earlier versions may work but are not tested)
 - Helm 3.0+
 - TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
 - TrueNAS API key (create in TrueNAS UI: Settings > API Keys)

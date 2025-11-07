@@ -7,7 +7,7 @@ This driver is in early development phase. Use only for testing and evaluation e
 ## Prerequisites
 - Kubernetes cluster (1.27+) (earlier versions may work but are not tested)
 - Helm 3.0+
-- TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+- **TrueNAS Scale 25.10 or later** (required for full feature support including NVMe-oF)
 - TrueNAS API key (create in TrueNAS UI: Settings > API Keys)
 - Storage pool available on TrueNAS
 - For NFS: `nfs-common` package on all nodes (Debian/Ubuntu)

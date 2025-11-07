@@ -1,6 +1,6 @@
 apiVersion: v2
 name: tns-csi-driver
-description: A Helm chart for TrueNAS CSI Driver - providing NFS and NVMe-oF storage for Kubernetes
+description: A Helm chart for TrueNAS Scale CSI Driver - providing NFS and NVMe-oF storage for Kubernetes (requires TrueNAS Scale 25.10+)
 
 # A chart can be either an 'application' or a 'library' chart.
 type: application

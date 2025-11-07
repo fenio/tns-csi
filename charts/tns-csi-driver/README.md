@@ -1,6 +1,6 @@
-# TrueNAS CSI Driver Helm Chart
+# TrueNAS Scale CSI Driver Helm Chart
 
-A Container Storage Interface (CSI) driver for TrueNAS that enables dynamic provisioning of storage volumes in Kubernetes clusters.
+A Container Storage Interface (CSI) driver for TrueNAS Scale 25.10+ that enables dynamic provisioning of storage volumes in Kubernetes clusters.
 
 ## Features
 
@@ -16,7 +16,7 @@ A Container Storage Interface (CSI) driver for TrueNAS that enables dynamic prov
 
 - Kubernetes 1.20+
 - Helm 3.0+
-- TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+- **TrueNAS Scale 25.10 or later** (required for full feature support including NVMe-oF)
 - TrueNAS API key with appropriate permissions (create in TrueNAS UI: Settings > API Keys)
 - For NFS: NFS client utilities on all nodes (`nfs-common` on Debian/Ubuntu)
 - For NVMe-oF: Linux kernel with nvme-tcp module support

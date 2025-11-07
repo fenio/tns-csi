@@ -91,7 +91,7 @@ The following sections are for advanced users who want to:
 ### 1. TrueNAS Scale Setup
 
 **Requirements:**
-- TrueNAS Scale 22.02 or later
+- TrueNAS Scale 25.10+
 - At least one ZFS pool created
 - API access enabled
 - Network connectivity from Kubernetes cluster

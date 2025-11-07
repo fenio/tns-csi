@@ -16,7 +16,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 - **Use Case**: Shared filesystem storage, multi-pod access
 - **Mount Protocol**: NFSv4.2 with nolock option
 - **TrueNAS Requirements**: 
-  - TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+  - TrueNAS Scale 25.10+
   - NFS service enabled
   - Accessible NFS ports (111, 2049)
 
@@ -355,7 +355,7 @@ spec:
 ## TrueNAS Version Support
 
 ### Minimum Versions
-- **NFS Support**: TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+- **NFS Support**: TrueNAS Scale 25.10+
 - **NVMe-oF Support**: TrueNAS Scale 25.10+ (feature introduced in this version)
 
 ### API Compatibility
@@ -463,7 +463,7 @@ spec:
 
 ### Minimum Requirements
 1. Kubernetes cluster 1.27+
-2. TrueNAS Scale 22.12+ (25.10+ for NVMe-oF)
+2. TrueNAS Scale 25.10+
 3. TrueNAS API key
 4. Helm 3.0+
 5. NFS client tools (NFS) or nvme-cli (NVMe-oF) on nodes

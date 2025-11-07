@@ -8,7 +8,7 @@
 [![Docker Hub](https://img.shields.io/docker/pulls/bfenski/tns-csi?logo=docker)](https://hub.docker.com/r/bfenski/tns-csi)
 [![Release](https://img.shields.io/github/v/release/fenio/tns-csi?logo=github)](https://github.com/fenio/tns-csi/releases/latest)
 
-A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems with TNS-compatible APIs.
+A Kubernetes CSI (Container Storage Interface) driver for TrueNAS Scale 25.10+.
 
 ## Important Disclaimer
 
@@ -18,7 +18,7 @@ A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems wi
 
 ## Overview
 
-This CSI driver enables Kubernetes to provision and manage persistent volumes on TrueNAS and systems with TNS-compatible APIs. It currently supports:
+This CSI driver enables Kubernetes to provision and manage persistent volumes on TrueNAS Scale 25.10+. It currently supports:
 
 - **NFS** - Network File System for file-based storage
 - **NVMe-oF** - NVMe over Fabrics for high-performance block storage
@@ -47,8 +47,7 @@ The driver intentionally focuses on these two production-ready protocols rather 
 ## Prerequisites
 
 - Kubernetes 1.27+ (earlier versions may work but are not tested)
-- TrueNAS or compatible system with TNS-compatible API (v2.0 WebSocket API)
-  - **For NVMe-oF support: TrueNAS Scale 25.10 or later required** (NVMe-oF feature introduced in 25.10)
+- **TrueNAS Scale 25.10 or later** (required for full feature support including NVMe-oF)
 - For NFS: NFS client utilities on all nodes (`nfs-common` on Debian/Ubuntu, `nfs-utils` on RHEL/CentOS)
 - For NVMe-oF: 
   - TrueNAS Scale 25.10+
@@ -272,4 +271,4 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0) - s
 
 ## Acknowledgments
 
-This driver is designed to work with TrueNAS and systems that provide TrueNAS-compatible APIs.
+This driver is designed to work with TrueNAS Scale 25.10+.

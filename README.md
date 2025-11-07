@@ -3,6 +3,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go Version](https://img.shields.io/badge/Go-1.25.3-00ADD8?logo=go)](https://go.dev/)
 [![CI](https://github.com/bfenski/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/bfenski/tns-csi/actions/workflows/ci.yml)
+[![Integration Tests](https://github.com/bfenski/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/bfenski/tns-csi/actions/workflows/integration.yml)
+[![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://bfenski.github.io/tns-csi/dashboard/)
 [![Docker Hub](https://img.shields.io/docker/pulls/bfenski/tns-csi?logo=docker)](https://hub.docker.com/r/bfenski/tns-csi)
 [![Release](https://img.shields.io/github/v/release/bfenski/tns-csi?logo=github)](https://github.com/bfenski/tns-csi/releases/latest)
 

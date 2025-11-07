@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "tns-csi-dashboard",
+  "version": "1.0.0",
+  "description": "Test Results Dashboard for TrueNAS CSI Driver",
+  "main": "generate-dashboard.js",
+  "scripts": {
+    "build": "node generate-dashboard.js",
+    "dev": "http-server dist -p 3000",
+    "test": "node test-dashboard.js"
+  },
+  "dependencies": {
+    "@octokit/rest": "^20.0.2",
+    "chart.js": "^4.4.0",
+    "date-fns": "^3.0.6"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bfenski/tns-csi.git",
+    "directory": "dashboard"
+  },
+  "keywords": [
+    "csi",
+    "truenas",
+    "testing",
+    "dashboard",
+    "kubernetes"
+  ],
+  "author": "TrueNAS CSI Team",
+  "license": "MIT"
+}

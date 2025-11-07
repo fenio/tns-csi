@@ -1,0 +1,2 @@
+# Disable Jekyll processing for GitHub Pages
+# This ensures Chart.js and other assets load properly

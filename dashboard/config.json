@@ -1,0 +1,24 @@
+{
+  "repository": {
+    "owner": "bfenski",
+    "name": "tns-csi"
+  },
+  "workflows": {
+    "integration": "integration.yml"
+  },
+  "dashboard": {
+    "title": "TrueNAS CSI - Test Results Dashboard",
+    "description": "Real-time test results and metrics for the TrueNAS CSI driver",
+    "refreshInterval": 3600000,
+    "dataRetentionDays": 30,
+    "maxWorkflowRuns": 50
+  },
+  "charts": {
+    "defaultColors": {
+      "success": "#28a745",
+      "failure": "#dc3545",
+      "warning": "#ffc107",
+      "info": "#17a2b8"
+    }
+  }
+}

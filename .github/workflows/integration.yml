@@ -29,9 +29,10 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-integration-env
+      - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
+      - uses: ./.github/actions/setup-k3s
       - name: Run NFS Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -45,9 +46,10 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-integration-env
+      - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
       - name: Run NVMe-oF Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -62,27 +64,11 @@ jobs:
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-integration-env
+      - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - name: Install Snapshot CRDs
-        run: |
-          echo "=== Installing Volume Snapshot CRDs ==="
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
-          echo "Waiting for CRDs to be established..."
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshotclasses.snapshot.storage.k8s.io
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshotcontents.snapshot.storage.k8s.io
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshots.snapshot.storage.k8s.io
-      - name: Install Snapshot Controller
-        run: |
-          echo "=== Installing Snapshot Controller ==="
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
-          echo "Waiting for snapshot-controller to be ready..."
-          kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true
-          kubectl get pods -n kube-system | grep snapshot-controller
+      - uses: ./.github/actions/setup-k3s
+      - uses: ./.github/actions/setup-snapshots
       - name: Run NFS Snapshot Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -97,27 +83,11 @@ jobs:
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-integration-env
+      - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - name: Install Snapshot CRDs
-        run: |
-          echo "=== Installing Volume Snapshot CRDs ==="
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
-          echo "Waiting for CRDs to be established..."
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshotclasses.snapshot.storage.k8s.io
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshotcontents.snapshot.storage.k8s.io
-          kubectl wait --for condition=established --timeout=60s crd/volumesnapshots.snapshot.storage.k8s.io
-      - name: Install Snapshot Controller
-        run: |
-          echo "=== Installing Snapshot Controller ==="
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
-          kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
-          echo "Waiting for snapshot-controller to be ready..."
-          kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true
-          kubectl get pods -n kube-system | grep snapshot-controller
+      - uses: ./.github/actions/setup-k3s
+      - uses: ./.github/actions/setup-snapshots
       - name: Run NVMe-oF Snapshot Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -132,9 +102,10 @@ jobs:
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-integration-env
+      - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
+      - uses: ./.github/actions/setup-k3s
       - name: Run NFS Concurrent Volume Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -149,78 +120,10 @@ jobs:
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nvme-cli
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-          echo "k3s cluster destroyed"
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          
-          echo "Waiting for k3s service to start..."
-          sleep 15
-          
-          echo "Waiting for cluster nodes to register and become ready..."
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              echo "Node registered, checking Ready condition..."
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                sudo k3s kubectl get nodes
-                exit 0
-              fi
-            fi
-            echo "Waiting for cluster... (attempt $((retries+1))/24)"
-            sleep 5
-            retries=$((retries + 1))
-          done
-          echo "ERROR: Cluster failed to become ready within 2 minutes"
-          sudo systemctl status k3s || true
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
       - name: Run NVMe-oF Concurrent Volume Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -235,67 +138,10 @@ jobs:
     needs: integration-concurrent-nfs
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nfs-common
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
       - name: Run NFS Data Persistence Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -310,68 +156,10 @@ jobs:
     needs: integration-concurrent-nvmeof
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nvme-cli
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
       - name: Run NVMe-oF Data Persistence Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -386,67 +174,10 @@ jobs:
     needs: integration-persistence-nfs
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nfs-common
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
       - name: Run NFS StatefulSet Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -461,68 +192,10 @@ jobs:
     needs: integration-persistence-nvmeof
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nvme-cli
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
       - name: Run NVMe-oF StatefulSet Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -537,67 +210,10 @@ jobs:
     needs: [integration-statefulset-nfs, integration-statefulset-nvmeof]
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nfs-common
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
       - name: Run Connection Resilience Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -612,68 +228,10 @@ jobs:
     needs: integration-connection-resilience
     steps:
       - uses: actions/checkout@v5
-      
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl wget git make nfs-common nvme-cli jq
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
-      
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: ./.github/actions/setup-dependencies
         with:
-          go-version: '1.25.3'
-          cache: false
-      
-      - name: Install Helm
-        run: |
-          if ! command -v helm &> /dev/null; then
-            echo "Installing Helm..."
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          else
-            echo "Helm already installed"
-          fi
-      
-      - name: Destroy existing k3s cluster
-        run: |
-          echo "=== Destroying existing k3s cluster for clean state ==="
-          if command -v k3s-uninstall.sh &> /dev/null; then
-            sudo k3s-uninstall.sh || true
-          fi
-          sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-      
-      - name: Install k3s (fresh cluster)
-        run: |
-          echo "=== Installing fresh k3s cluster ==="
-          curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb
-          sleep 15
-          retries=0
-          while [[ $retries -lt 24 ]]; do
-            if sudo k3s kubectl get nodes &>/dev/null; then
-              if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-                echo "Fresh k3s cluster ready"
-                exit 0
-              fi
-            fi
-            sleep 5
-            retries=$((retries + 1))
-          done
-          exit 1
-      
-      - name: Configure kubectl
-        run: |
-          mkdir -p ~/.kube
-          sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-          sudo chown $USER:$USER ~/.kube/config
-      
-      - name: Build CSI driver image
-        run: |
-          sudo -E make docker-build
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-      
+          protocol: both
+      - uses: ./.github/actions/setup-k3s
       - name: Run Orphaned Resource Detection Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

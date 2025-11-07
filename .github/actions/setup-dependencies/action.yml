@@ -1,0 +1,63 @@
+name: Setup Dependencies
+description: Install system dependencies, Go, Helm, and Docker (shared across tests)
+
+inputs:
+  protocol:
+    description: 'Protocol to test (nfs, nvmeof, or both)'
+    required: true
+  go-version:
+    description: 'Go version to use'
+    required: false
+    default: '1.25.3'
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl wget git make jq
+        
+        if [[ "${{ inputs.protocol }}" == "nfs" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+          sudo apt-get install -y nfs-common
+        fi
+        
+        if [[ "${{ inputs.protocol }}" == "nvmeof" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+          sudo apt-get install -y nvme-cli
+          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
+        fi
+
+    - name: Install Docker
+      shell: bash
+      run: |
+        if ! command -v docker &> /dev/null; then
+          echo "Installing Docker..."
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          rm get-docker.sh
+        else
+          echo "Docker already installed"
+        fi
+        sudo usermod -aG docker $USER
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+
+    - name: Install Helm
+      shell: bash
+      run: |
+        if ! command -v helm &> /dev/null; then
+          echo "Installing Helm..."
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        else
+          echo "Helm already installed"
+        fi
+
+    - name: Build CSI driver image
+      shell: bash
+      run: |
+        sudo -E make docker-build

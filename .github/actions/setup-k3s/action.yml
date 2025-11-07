@@ -1,58 +1,9 @@
-name: Setup Integration Environment
-
-inputs:
-  protocol:
-    description: 'Protocol to test (nfs or nvmeof)'
-    required: true
-  go-version:
-    description: 'Go version to use'
-    required: false
-    default: '1.25.3'
+name: Setup Fresh k3s Cluster
+description: Destroy existing k3s cluster and create a fresh one for testing
 
 runs:
   using: composite
   steps:
-    - name: Install system dependencies
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y curl wget git make
-        if [ "${{ inputs.protocol }}" = "nfs" ]; then
-          sudo apt-get install -y nfs-common
-        elif [ "${{ inputs.protocol }}" = "nvmeof" ]; then
-          sudo apt-get install -y nvme-cli
-          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
-        fi
-
-    - name: Install Docker
-      shell: bash
-      run: |
-        if ! command -v docker &> /dev/null; then
-          echo "Installing Docker..."
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
-          rm get-docker.sh
-        else
-          echo "Docker already installed"
-        fi
-        sudo usermod -aG docker $USER
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: ${{ inputs.go-version }}
-        cache: false
-
-    - name: Install Helm
-      shell: bash
-      run: |
-        if ! command -v helm &> /dev/null; then
-          echo "Installing Helm..."
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-        else
-          echo "Helm already installed"
-        fi
-
     - name: Destroy existing k3s cluster
       shell: bash
       run: |
@@ -60,7 +11,6 @@ runs:
         if command -v k3s-uninstall.sh &> /dev/null; then
           sudo k3s-uninstall.sh || true
         fi
-        # Clean up any remaining k3s artifacts
         sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
         echo "k3s cluster destroyed"
 
@@ -106,8 +56,8 @@ runs:
         echo "=== Cluster version ==="
         kubectl version
 
-    - name: Build CSI driver image
+    - name: Import CSI driver image to k3s
       shell: bash
       run: |
-        sudo -E make docker-build
+        echo "=== Importing CSI driver image to k3s ==="
         sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -

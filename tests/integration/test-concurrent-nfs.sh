@@ -59,8 +59,9 @@ done
 
 # Create all PVCs simultaneously
 test_info "Creating ${NUM_VOLUMES} PVCs concurrently..."
+declare -a BG_PIDS=()
 for i in $(seq 1 ${NUM_VOLUMES}); do
-    if ! cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
+    cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -73,17 +74,26 @@ spec:
       storage: 1Gi
   storageClassName: tns-csi-nfs
 EOF
-    then
-        test_error "Failed to submit PVC creation for ${PVC_NAMES[$i]}"
-        exit 1
-    fi
+    BG_PIDS+=($!)
     # Small delay to avoid overwhelming the API server
     sleep 0.5
 done
 
-# Wait for all background jobs to complete
-wait
-test_success "All PVC creation requests submitted"
+# Wait for all background jobs to complete and check exit status
+test_info "Waiting for all PVC creation jobs to complete..."
+FAILED=0
+for pid in "${BG_PIDS[@]}"; do
+    if ! wait $pid; then
+        FAILED=1
+    fi
+done
+
+if [[ $FAILED -eq 1 ]]; then
+    test_error "One or more PVC creation commands failed"
+    kubectl get pvc -n "${TEST_NAMESPACE}" || true
+    exit 1
+fi
+test_success "All PVC creation requests submitted successfully"
 
 # Give provisioner time to start processing
 sleep 10

@@ -71,9 +71,10 @@ done
 
 # Create all PVCs simultaneously (with pods, since WaitForFirstConsumer)
 test_info "Creating ${NUM_VOLUMES} PVC+Pod pairs concurrently..."
+declare -a BG_PIDS=()
 for i in $(seq 1 ${NUM_VOLUMES}); do
     # Create PVC and Pod together for WaitForFirstConsumer binding mode
-    if ! cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
+    cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -104,17 +105,27 @@ spec:
     persistentVolumeClaim:
       claimName: ${PVC_NAMES[$i]}
 EOF
-    then
-        test_error "Failed to submit PVC/Pod creation for ${PVC_NAMES[$i]}"
-        exit 1
-    fi
+    BG_PIDS+=($!)
     # Small delay to avoid overwhelming the API server
     sleep 0.5
 done
 
-# Wait for all background jobs to complete
-wait
-test_success "All PVC+Pod creation requests submitted"
+# Wait for all background jobs to complete and check exit status
+test_info "Waiting for all PVC+Pod creation jobs to complete..."
+FAILED=0
+for pid in "${BG_PIDS[@]}"; do
+    if ! wait $pid; then
+        FAILED=1
+    fi
+done
+
+if [[ $FAILED -eq 1 ]]; then
+    test_error "One or more PVC/Pod creation commands failed"
+    kubectl get pvc -n "${TEST_NAMESPACE}" || true
+    kubectl get pods -n "${TEST_NAMESPACE}" || true
+    exit 1
+fi
+test_success "All PVC+Pod creation requests submitted successfully"
 
 # Give provisioner time to start processing
 sleep 15

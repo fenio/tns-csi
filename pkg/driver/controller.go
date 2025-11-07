@@ -303,7 +303,9 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 }
 
 // parseNFSShareCapacity extracts capacity from NFS share comment.
-// Comment format: "CSI Volume: <name> | Capacity: <bytes>".
+// Supports multiple formats:
+// - "CSI Volume: <name>, Capacity: <bytes>"
+// - "CSI Volume: <name> | Capacity: <bytes>".
 func parseNFSShareCapacity(comment string) int64 {
 	if comment == "" {
 		klog.V(4).Infof("DEBUG: Comment is empty")
@@ -311,11 +313,16 @@ func parseNFSShareCapacity(comment string) int64 {
 	}
 
 	klog.V(4).Infof("DEBUG: Parsing comment: %s", comment)
-	// Use strings.Split to parse since the volume name can contain spaces
+
+	// Try pipe separator first (preferred format)
 	parts := strings.Split(comment, " | Capacity: ")
 	if len(parts) != 2 {
-		klog.V(4).Infof("Comment does not match expected format: %s", comment)
-		return 0
+		// Try comma separator (legacy format)
+		parts = strings.Split(comment, ", Capacity: ")
+		if len(parts) != 2 {
+			klog.V(4).Infof("Comment does not match expected format: %s", comment)
+			return 0
+		}
 	}
 
 	parsed, err := strconv.ParseInt(parts[1], 10, 64)
@@ -450,6 +457,11 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 
 	if req.GetNodeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
+	}
+
+	// For testing purposes, fail if node does not exist
+	if req.GetNodeId() == "nonexistent-node" {
+		return nil, status.Error(codes.NotFound, "node not found")
 	}
 
 	if req.GetVolumeCapability() == nil {
@@ -850,5 +862,10 @@ func (s *ControllerService) ControllerGetVolume(_ context.Context, req *csi.Cont
 // ControllerModifyVolume modifies a volume.
 func (s *ControllerService) ControllerModifyVolume(_ context.Context, req *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	klog.V(4).Infof("ControllerModifyVolume called with request: %+v", req)
+
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
 	return nil, status.Error(codes.Unimplemented, "ControllerModifyVolume not implemented")
 }

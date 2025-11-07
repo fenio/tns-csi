@@ -10,7 +10,7 @@ The TNS CSI Driver is tested comprehensively using **real infrastructure** - not
 
 **Self-hosted GitHub Actions Runner:**
 - Dedicated Linux server running GitHub Actions runner
-- Located at: Linode cloud infrastructure
+- Hosted on: Akamai/Linode cloud infrastructure
 - Runs real k3s Kubernetes clusters for each test
 - No Kind clusters, no mocks - actual Kubernetes distribution
 

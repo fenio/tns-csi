@@ -174,7 +174,7 @@ parameters:
 
 This driver is tested extensively using **real hardware and software** - not mocks or simulators:
 
-- **Self-hosted GitHub Actions runner** on dedicated hardware
+- **Self-hosted GitHub Actions runner** on dedicated Akamai/Linode infrastructure
 - **Real Kubernetes cluster** (k3s) provisioned for each test run
 - **Real TrueNAS Scale server** with actual storage pools and network services
 - **Full protocol stack testing** - NFS mounts, NVMe-oF connections, actual I/O operations

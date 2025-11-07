@@ -467,7 +467,7 @@ spec:
 All features are tested on **real infrastructure** - not mocks or simulators:
 
 **Test Environment:**
-- ✅ Self-hosted GitHub Actions runner (dedicated Linode server)
+- ✅ Self-hosted GitHub Actions runner (dedicated Akamai/Linode infrastructure)
 - ✅ Real Kubernetes clusters (k3s) provisioned for each test run
 - ✅ Real TrueNAS Scale 25.10+ server with actual storage pools
 - ✅ Real protocol operations (NFS mounts, NVMe-oF connections, actual I/O)

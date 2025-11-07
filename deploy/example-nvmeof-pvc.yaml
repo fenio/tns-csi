@@ -8,7 +8,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  storageClassName: tns-nvmeof
+   storageClassName: tns-csi-nvmeof
   resources:
     requests:
       storage: 10Gi

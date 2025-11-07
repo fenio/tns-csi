@@ -42,7 +42,7 @@ spec:
   resources:
     requests:
       storage: 1Gi
-  storageClassName: {{ if $firstSC }}{{ $firstSC }}{{ else }}tns-nfs{{ end }}
+   storageClassName: {{ if $firstSC }}{{ $firstSC }}{{ else }}tns-csi-nfs{{ end }}
 EOF
 
 To test the volume in a pod:

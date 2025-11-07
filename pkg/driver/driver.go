@@ -27,6 +27,7 @@ type Config struct {
 	APIURL      string
 	APIKey      string
 	MetricsAddr string // Address to expose Prometheus metrics (e.g., ":8080")
+	TestMode    bool   // Enable test mode for sanity tests (skips actual mounts)
 }
 
 // Driver is the TNS CSI driver.
@@ -38,6 +39,7 @@ type Driver struct {
 	node       *NodeService
 	identity   *IdentityService
 	config     Config
+	testMode   bool // Test mode flag for sanity tests
 }
 
 // NewDriver creates a new driver instance.
@@ -61,12 +63,16 @@ func NewDriverWithClient(cfg Config, client tnsapi.ClientInterface) (*Driver, er
 	d := &Driver{
 		config:    cfg,
 		apiClient: client,
+		testMode:  cfg.TestMode,
 	}
+
+	// Create shared node registry for both controller and node services
+	nodeRegistry := NewNodeRegistry()
 
 	// Initialize CSI services
 	d.identity = NewIdentityService(cfg.DriverName, cfg.Version)
-	d.controller = NewControllerService(client)
-	d.node = NewNodeService(cfg.NodeID, client)
+	d.controller = NewControllerService(client, nodeRegistry)
+	d.node = NewNodeService(cfg.NodeID, client, cfg.TestMode, nodeRegistry)
 
 	return d, nil
 }

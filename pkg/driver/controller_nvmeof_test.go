@@ -352,7 +352,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.createNVMeOFVolume(ctx, tt.req)
 
 			if tt.wantErr {
@@ -514,7 +514,7 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			_, err := controller.deleteNVMeOFVolume(ctx, tt.meta)
 
 			if tt.wantErr && err == nil {
@@ -616,7 +616,7 @@ func TestExpandNVMeOFVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.expandNVMeOFVolume(ctx, tt.meta, tt.requiredBytes)
 
 			if tt.wantErr {
@@ -793,7 +793,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.setupNVMeOFVolumeFromClone(ctx, tt.req, tt.zvol, tt.server, tt.subsystemNQN, "snapshot-id")
 
 			if tt.wantErr {

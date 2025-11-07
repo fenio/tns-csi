@@ -449,7 +449,7 @@ func TestCreateSnapshot(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.CreateSnapshot(ctx, tt.req)
 
 			if tt.wantErr {
@@ -561,7 +561,7 @@ func TestDeleteSnapshot(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			_, err := controller.DeleteSnapshot(ctx, tt.req)
 
 			if tt.wantErr {
@@ -726,7 +726,7 @@ func TestListSnapshots(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.ListSnapshots(ctx, tt.req)
 
 			if tt.wantErr {

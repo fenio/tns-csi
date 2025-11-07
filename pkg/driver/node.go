@@ -33,15 +33,19 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient tnsapi.ClientInterface
-	nodeID    string
+	apiClient    tnsapi.ClientInterface
+	nodeID       string
+	testMode     bool // Test mode flag to skip actual mounts
+	nodeRegistry *NodeRegistry
 }
 
 // NewNodeService creates a new node service.
-func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface) *NodeService {
+func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bool, nodeRegistry *NodeRegistry) *NodeService {
 	return &NodeService{
-		nodeID:    nodeID,
-		apiClient: apiClient,
+		nodeID:       nodeID,
+		apiClient:    apiClient,
+		testMode:     testMode,
+		nodeRegistry: nodeRegistry,
 	}
 }
 
@@ -281,6 +285,17 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	klog.Infof("Unmounting volume %s from %s", volumeID, targetPath)
 
+	// In test mode, skip actual unmount operations
+	if s.testMode {
+		klog.V(4).Infof("Test mode: skipping actual unmount for %s", targetPath)
+		// Still try to remove the directory in test mode
+		if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
+			klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
+		}
+		timer.ObserveSuccess()
+		return &csi.NodeUnpublishVolumeResponse{}, nil
+	}
+
 	// Check if mounted
 	mounted, err := mount.IsMounted(ctx, targetPath)
 	if err != nil {
@@ -288,21 +303,19 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
 
-	if !mounted {
-		klog.V(4).Infof("Path %s is not mounted, nothing to do", targetPath)
-		timer.ObserveSuccess()
-		return &csi.NodeUnpublishVolumeResponse{}, nil
+	if mounted {
+		// Unmount
+		klog.V(4).Infof("Executing umount command for: %s", targetPath)
+		if err := mount.Unmount(ctx, targetPath); err != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
+		}
+	} else {
+		klog.V(4).Infof("Path %s is not mounted, skipping unmount", targetPath)
 	}
 
-	// Unmount
-	klog.V(4).Infof("Executing umount command for: %s", targetPath)
-	if err := mount.Unmount(ctx, targetPath); err != nil {
-		timer.ObserveError()
-		return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
-	}
-
-	// Remove the target path
-	if err := os.Remove(targetPath); err != nil {
+	// Always attempt to remove the target path (best effort)
+	if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
 		klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
 	}
 
@@ -328,9 +341,24 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	pathInfo, err := os.Stat(volumePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, status.Errorf(codes.InvalidArgument, "Volume path %s does not exist", volumePath)
+			return nil, status.Errorf(codes.NotFound, "Volume path %s does not exist", volumePath)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to stat volume path: %v", err)
+	}
+
+	// In test mode, skip mount check and return mock stats
+	if s.testMode {
+		klog.V(4).Infof("Test mode: returning mock stats for %s", volumePath)
+		return &csi.NodeGetVolumeStatsResponse{
+			Usage: []*csi.VolumeUsage{
+				{
+					Unit:      csi.VolumeUsage_BYTES,
+					Total:     1073741824, // 1GB
+					Used:      104857600,  // 100MB
+					Available: 968884224,  // ~924MB
+				},
+			},
+		}, nil
 	}
 
 	// Check if the path is mounted
@@ -410,23 +438,29 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	volumePath := req.GetVolumePath()
 
 	// Parse volume metadata using decodeVolumeID helper
+	// Per CSI spec: return NotFound if volume doesn't exist
 	volMeta, err := decodeVolumeID(volumeID)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
+		return nil, status.Errorf(codes.NotFound, "volume %s not found", volumeID)
 	}
 
 	// Check if volume path exists
 	if _, statErr := os.Stat(volumePath); os.IsNotExist(statErr) {
-		return nil, status.Errorf(codes.InvalidArgument, "volume path %s does not exist", volumePath)
+		return nil, status.Errorf(codes.NotFound, "volume path %s does not exist", volumePath)
+	}
+
+	// In test mode, skip mount check and return success immediately
+	if s.testMode {
+		klog.V(4).Infof("Test mode: skipping volume expansion for %s", volumePath)
+		return &csi.NodeExpandVolumeResponse{
+			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
+		}, nil
 	}
 
 	// Check if the path is mounted
 	mounted, err := mount.IsMounted(ctx, volumePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
-	}
-	if !mounted {
-		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 	if !mounted {
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
@@ -509,6 +543,12 @@ func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapab
 // NodeGetInfo returns node information.
 func (s *NodeService) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	klog.V(4).Info("NodeGetInfo called")
+
+	// Register this node with the node registry
+	if s.nodeRegistry != nil {
+		s.nodeRegistry.Register(s.nodeID)
+		klog.V(4).Infof("Registered node %s with node registry", s.nodeID)
+	}
 
 	return &csi.NodeGetInfoResponse{
 		NodeId: s.nodeID,

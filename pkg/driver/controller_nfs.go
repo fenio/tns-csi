@@ -246,25 +246,15 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	timer := metrics.NewVolumeOperationTimer("nfs", "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
 
-	// Step 1: Delete NFS share
-	if meta.NFSShareID > 0 {
-		klog.Infof("Deleting NFS share with ID: %d", meta.NFSShareID)
-		if err := s.apiClient.DeleteNFSShare(ctx, meta.NFSShareID); err != nil {
-			// Log error but continue - the share might already be deleted
-			klog.Warningf("Failed to delete NFS share %d: %v (continuing anyway)", meta.NFSShareID, err)
-		} else {
-			klog.Infof("Successfully deleted NFS share %d", meta.NFSShareID)
-		}
-	}
-
-	// Step 2: Delete ZFS dataset
+	// Delete ZFS dataset - TrueNAS automatically deletes associated NFS shares
+	// when the dataset is deleted, so we don't need to explicitly delete the share
 	if meta.DatasetID != "" {
-		klog.Infof("Deleting dataset: %s", meta.DatasetID)
+		klog.Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
 		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
 			// Check if dataset doesn't exist - this is OK (idempotency)
-			klog.Warningf("Failed to delete dataset %s: %v (continuing anyway)", meta.DatasetID, err)
+			klog.Warningf("Dataset deletion returned error for %s: %v (may already be deleted)", meta.DatasetID, err)
 		} else {
-			klog.Infof("Successfully deleted dataset %s", meta.DatasetID)
+			klog.Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
 		}
 	}
 

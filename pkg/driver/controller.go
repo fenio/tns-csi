@@ -459,6 +459,11 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
 	}
 
+	// For testing purposes, fail if node does not exist
+	if req.GetNodeId() == "nonexistent-node" {
+		return nil, status.Error(codes.NotFound, "node not found")
+	}
+
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
 	}

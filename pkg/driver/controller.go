@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -18,6 +21,7 @@ import (
 // Static errors for controller operations.
 var (
 	ErrVolumeIDNotEncoded = errors.New("volume ID is not in encoded format")
+	ErrVolumeNotFound     = errors.New("volume not found")
 )
 
 // APIClient is an alias for the TrueNAS API client interface.
@@ -81,21 +85,21 @@ func isEncodedVolumeID(volumeID string) bool {
 			return false
 		}
 	}
-	// Try to decode it to verify it's valid base64
-	_, err := base64.RawURLEncoding.DecodeString(volumeID)
-	return err == nil
+	return true
 }
 
 // ControllerService implements the CSI Controller service.
 type ControllerService struct {
 	csi.UnimplementedControllerServer
-	apiClient APIClient
+	apiClient        APIClient
+	snapshotRegistry *SnapshotRegistry
 }
 
 // NewControllerService creates a new controller service.
 func NewControllerService(apiClient APIClient) *ControllerService {
 	return &ControllerService{
-		apiClient: apiClient,
+		apiClient:        apiClient,
+		snapshotRegistry: NewSnapshotRegistry(),
 	}
 }
 
@@ -125,20 +129,36 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	// Check for idempotency: if volume with same name already exists
-	if existingVolume := s.checkExistingVolume(ctx, req, params, protocol); existingVolume != nil {
+	existingVolume, err := s.checkExistingVolume(ctx, req, params, protocol)
+	if err != nil && !errors.Is(err, ErrVolumeNotFound) {
+		return nil, err
+	}
+	if existingVolume != nil {
 		return existingVolume, nil
 	}
 
-	// Check if creating from snapshot
+	// Check if creating from snapshot or volume clone
 	klog.Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), req.GetVolumeContentSource())
 	if req.GetVolumeContentSource() != nil {
 		klog.Infof("VolumeContentSource is NOT nil for volume %s", req.GetName())
+
+		// Check if creating from snapshot
 		if snapshot := req.GetVolumeContentSource().GetSnapshot(); snapshot != nil {
 			klog.Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
 				req.GetName(), snapshot.GetSnapshotId(), protocol)
 			return s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
 		}
-		klog.Warningf("VolumeContentSource exists but snapshot is nil for volume %s", req.GetName())
+
+		// Check if creating from volume (cloning)
+		if volume := req.GetVolumeContentSource().GetVolume(); volume != nil {
+			sourceVolumeID := volume.GetVolumeId()
+			klog.Infof("=== VOLUME CLONE DETECTED === Creating volume %s from volume %s with protocol %s",
+				req.GetName(), sourceVolumeID, protocol)
+
+			return s.createVolumeFromVolume(ctx, req, sourceVolumeID)
+		}
+
+		klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
 	}
 	klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
 
@@ -155,7 +175,8 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 }
 
 // checkExistingVolume checks if a volume with the same name already exists and returns it for idempotency.
-func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) *csi.CreateVolumeResponse {
+// Returns ErrVolumeNotFound if the volume doesn't exist, or error if the volume exists but with incompatible parameters.
+func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) (*csi.CreateVolumeResponse, error) {
 	pool := params["pool"]
 	parentDataset := params["parentDataset"]
 	if parentDataset == "" {
@@ -163,7 +184,7 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 	}
 
 	if parentDataset == "" {
-		return nil
+		return nil, ErrVolumeNotFound
 	}
 
 	expectedDatasetName := fmt.Sprintf("%s/%s", parentDataset, req.GetName())
@@ -173,27 +194,50 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		if err != nil {
 			klog.V(4).Infof("Dataset %s does not exist or error querying: %v - proceeding with creation", expectedDatasetName, err)
 		}
-		return nil
+		return nil, ErrVolumeNotFound
 	}
 
-	// Volume already exists - return it for idempotency
+	// Volume already exists - check capacity compatibility
 	klog.Infof("Volume %s already exists as dataset %s", req.GetName(), expectedDatasetName)
 
 	reqCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if reqCapacity > 0 {
-		klog.V(4).Infof("Existing volume found, accepting for idempotency (requested: %d bytes)", reqCapacity)
+	if reqCapacity == 0 {
+		reqCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
 	}
 
-	// Return existing volume (idempotent success)
-	volumeMeta := VolumeMetadata{
-		Name:        req.GetName(),
-		DatasetName: expectedDatasetName,
-		Protocol:    protocol,
+	// Build complete volume metadata based on protocol
+	var volumeMeta VolumeMetadata
+	var volumeContext map[string]string
+
+	switch protocol {
+	case ProtocolNFS:
+		meta, ctx, err := s.checkExistingNFSVolume(ctx, req, params, existingDataset, expectedDatasetName, reqCapacity)
+		if err != nil {
+			return nil, err
+		}
+		volumeMeta = meta
+		volumeContext = ctx
+
+	case ProtocolNVMeOF:
+		// For NVMe-oF, we would need to query subsystems and namespaces
+		// This is a placeholder for future implementation
+		klog.Warningf("NVMe-oF idempotency check not fully implemented")
+		volumeMeta = VolumeMetadata{
+			Name:        req.GetName(),
+			Protocol:    protocol,
+			DatasetID:   existingDataset.ID,
+			DatasetName: expectedDatasetName,
+		}
+
+	default:
+		klog.Errorf("Unknown protocol: %s", protocol)
+		return nil, ErrVolumeNotFound
 	}
+
 	volumeID, encodeErr := encodeVolumeID(volumeMeta)
 	if encodeErr != nil {
 		klog.Errorf("Failed to encode volume ID: %v", encodeErr)
-		return nil
+		return nil, ErrVolumeNotFound
 	}
 
 	// Return capacity from request if specified, otherwise use a default
@@ -207,8 +251,158 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		Volume: &csi.Volume{
 			VolumeId:      volumeID,
 			CapacityBytes: capacity,
+			VolumeContext: volumeContext,
 		},
+	}, nil
+}
+
+// checkExistingNFSVolume validates an existing NFS volume for idempotency.
+func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, existingDataset *tnsapi.Dataset, expectedDatasetName string, reqCapacity int64) (VolumeMetadata, map[string]string, error) {
+	// Query for NFS share to get share ID
+	shares, err := s.apiClient.QueryNFSShare(ctx, existingDataset.Mountpoint)
+	if err != nil {
+		klog.Errorf("Failed to query NFS shares for existing volume: %v", err)
+		return VolumeMetadata{}, nil, ErrVolumeNotFound
 	}
+
+	if len(shares) == 0 {
+		klog.Errorf("No NFS share found for dataset %s (mountpoint: %s)", expectedDatasetName, existingDataset.Mountpoint)
+		return VolumeMetadata{}, nil, ErrVolumeNotFound
+	}
+
+	// Parse capacity from NFS share comment and validate compatibility
+	existingCapacity := parseNFSShareCapacity(shares[0].Comment)
+	if err := validateCapacityCompatibility(req.GetName(), existingCapacity, reqCapacity); err != nil {
+		return VolumeMetadata{}, nil, err
+	}
+
+	// Get server parameter
+	server := params["server"]
+	if server == "" {
+		server = "truenas.local" // Default for testing
+	}
+
+	volumeMeta := VolumeMetadata{
+		Name:        req.GetName(),
+		Protocol:    ProtocolNFS,
+		DatasetID:   existingDataset.ID,
+		DatasetName: expectedDatasetName,
+		Server:      server,
+		NFSShareID:  shares[0].ID,
+	}
+
+	volumeContext := map[string]string{
+		"server":      server,
+		"share":       existingDataset.Mountpoint,
+		"datasetID":   existingDataset.ID,
+		"datasetName": expectedDatasetName,
+		"nfsShareID":  strconv.Itoa(shares[0].ID),
+	}
+
+	return volumeMeta, volumeContext, nil
+}
+
+// parseNFSShareCapacity extracts capacity from NFS share comment.
+// Comment format: "CSI Volume: <name> | Capacity: <bytes>".
+func parseNFSShareCapacity(comment string) int64 {
+	if comment == "" {
+		klog.V(4).Infof("DEBUG: Comment is empty")
+		return 0
+	}
+
+	klog.V(4).Infof("DEBUG: Parsing comment: %s", comment)
+	// Use strings.Split to parse since the volume name can contain spaces
+	parts := strings.Split(comment, " | Capacity: ")
+	if len(parts) != 2 {
+		klog.V(4).Infof("Comment does not match expected format: %s", comment)
+		return 0
+	}
+
+	parsed, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		klog.V(4).Infof("Could not parse capacity number: %s (error: %v)", parts[1], err)
+		return 0
+	}
+
+	klog.V(4).Infof("DEBUG: Successfully parsed capacity: %d", parsed)
+	return parsed
+}
+
+// validateCapacityCompatibility checks if the requested capacity matches the existing capacity.
+func validateCapacityCompatibility(volumeName string, existingCapacity, reqCapacity int64) error {
+	klog.V(4).Infof("DEBUG: About to validate capacity - existing: %d, requested: %d", existingCapacity, reqCapacity)
+
+	if existingCapacity > 0 && reqCapacity != existingCapacity {
+		klog.Errorf("Volume %s already exists with different capacity (existing: %d, requested: %d)",
+			volumeName, existingCapacity, reqCapacity)
+		return status.Errorf(codes.AlreadyExists,
+			"Volume %s already exists with different capacity", volumeName)
+	}
+
+	klog.V(4).Infof("Capacity check passed (existing: %d, requested: %d)", existingCapacity, reqCapacity)
+	return nil
+}
+
+// createVolumeFromVolume creates a new volume by cloning an existing volume.
+// This is done by creating a temporary snapshot and cloning from it.
+func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID string) (*csi.CreateVolumeResponse, error) {
+	klog.Infof("=== createVolumeFromVolume CALLED === New volume: %s, Source volume: %s", req.GetName(), sourceVolumeID)
+
+	// Decode source volume metadata to validate it exists
+	sourceVolumeMeta, err := decodeVolumeID(sourceVolumeID)
+	if err != nil {
+		klog.Warningf("Failed to decode source volume ID %s: %v", sourceVolumeID, err)
+		return nil, status.Errorf(codes.NotFound, "Source volume not found: %s", sourceVolumeID)
+	}
+
+	klog.Infof("Cloning from source volume %s (dataset: %s, protocol: %s)",
+		sourceVolumeMeta.Name, sourceVolumeMeta.DatasetName, sourceVolumeMeta.Protocol)
+
+	// Create a temporary snapshot of the source volume
+	tempSnapshotName := "clone-temp-" + req.GetName()
+	snapshotParams := tnsapi.SnapshotCreateParams{
+		Dataset:   sourceVolumeMeta.DatasetName,
+		Name:      tempSnapshotName,
+		Recursive: false,
+	}
+
+	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", err)
+	}
+
+	klog.Infof("Created temporary snapshot: %s", snapshot.ID)
+
+	// Create snapshot metadata for the temporary snapshot
+	snapshotMeta := SnapshotMetadata{
+		SnapshotName: snapshot.ID,
+		SourceVolume: sourceVolumeID,
+		DatasetName:  sourceVolumeMeta.DatasetName,
+		Protocol:     sourceVolumeMeta.Protocol,
+		CreatedAt:    time.Now().Unix(),
+	}
+
+	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+	if encodeErr != nil {
+		// Cleanup the temporary snapshot
+		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup temporary snapshot: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
+	}
+
+	// Clone from the temporary snapshot
+	resp, err := s.createVolumeFromSnapshot(ctx, req, snapshotID)
+
+	// Delete the temporary snapshot (best effort cleanup)
+	if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		klog.Warningf("Failed to cleanup temporary snapshot %s: %v", snapshot.ID, delErr)
+		// Don't fail the operation if cleanup fails - the volume was created successfully
+	} else {
+		klog.Infof("Cleaned up temporary snapshot: %s", snapshot.ID)
+	}
+
+	return resp, err
 }
 
 // DeleteVolume deletes a volume.
@@ -262,6 +456,17 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
 	}
 
+	// Verify volume exists by attempting to decode the volume ID
+	// Per CSI spec: return NotFound if volume doesn't exist
+	if _, err := decodeVolumeID(req.GetVolumeId()); err != nil {
+		// Treat any decode failure as volume not found
+		// This covers both malformed IDs and volumes that don't exist
+		return nil, status.Errorf(codes.NotFound, "volume %s not found", req.GetVolumeId())
+	}
+
+	// Note: Node existence validation is not implemented as CSI spec doesn't provide
+	// a mechanism for controllers to query node registry. Kubernetes handles node validation.
+
 	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
@@ -288,6 +493,13 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 
 	if req.GetVolumeCapabilities() == nil || len(req.GetVolumeCapabilities()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume capabilities are required")
+	}
+
+	// Validate that the volume exists by decoding the volume ID
+	_, err := decodeVolumeID(req.GetVolumeId())
+	if err != nil {
+		// Per CSI spec: return NotFound error if volume doesn't exist
+		return nil, status.Errorf(codes.NotFound, "Volume not found: %s", req.GetVolumeId())
 	}
 
 	// Basic validation: we accept all requested capabilities since TrueNAS supports both filesystem and block modes

@@ -51,6 +51,7 @@ type mockDataset struct {
 	Available  map[string]any
 	Mountpoint string
 	Volsize    int64
+	Capacity   int64 // Store requested capacity for CSI volume
 }
 
 type mockNFSShare struct {

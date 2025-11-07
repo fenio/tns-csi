@@ -62,10 +62,18 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 	klog.Infof("Created dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
 
+	// Get requested capacity
+	capacity := req.GetCapacityRange().GetRequiredBytes()
+	if capacity == 0 {
+		capacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
 	// Step 2: Create NFS share for the dataset
+	// Store capacity in comment field for idempotency checks
+	comment := fmt.Sprintf("CSI Volume: %s | Capacity: %d", volumeID, capacity)
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 		Path:         dataset.Mountpoint,
-		Comment:      "CSI Volume: " + volumeID,
+		Comment:      comment,
 		MaprootUser:  "root",
 		MaprootGroup: "wheel",
 		Enabled:      true,

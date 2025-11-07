@@ -51,6 +51,7 @@ type mockDataset struct {
 	Available  map[string]any
 	Mountpoint string
 	Volsize    int64
+	Capacity   int64 // Store requested capacity for CSI volume
 }
 
 type mockNFSShare struct {
@@ -619,11 +620,39 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 
 	result := make([]tnsapi.Snapshot, 0, len(m.snapshots))
 	for _, snap := range m.snapshots {
-		result = append(result, tnsapi.Snapshot{
-			ID:      snap.ID,
-			Name:    snap.Name,
-			Dataset: snap.Dataset,
-		})
+		// Apply filters
+		match := true
+		if len(filters) > 0 {
+			for _, f := range filters {
+				filter, ok := f.([]interface{})
+				if !ok || len(filter) < 3 {
+					continue
+				}
+
+				field := filter[0].(string)
+				op := filter[1].(string)
+				value := filter[2].(string)
+
+				switch field {
+				case "id":
+					if op == "=" && snap.ID != value {
+						match = false
+					}
+				case "dataset":
+					if op == "=" && snap.Dataset != value {
+						match = false
+					}
+				}
+			}
+		}
+
+		if match {
+			result = append(result, tnsapi.Snapshot{
+				ID:      snap.ID,
+				Name:    snap.Name,
+				Dataset: snap.Dataset,
+			})
+		}
 	}
 
 	return result, nil

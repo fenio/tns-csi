@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -16,6 +18,53 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/klog/v2"
 )
+
+// SnapshotRegistry maintains a global registry of snapshot names to enforce
+// CSI's requirement that snapshot names be globally unique.
+// This bridges the gap between CSI (global uniqueness) and ZFS (per-dataset uniqueness).
+type SnapshotRegistry struct {
+	mu        sync.RWMutex
+	snapshots map[string]string // snapshot name -> dataset name
+}
+
+// NewSnapshotRegistry creates a new snapshot registry.
+func NewSnapshotRegistry() *SnapshotRegistry {
+	return &SnapshotRegistry{
+		snapshots: make(map[string]string),
+	}
+}
+
+// Register attempts to register a snapshot name with its dataset.
+// Returns an error if the snapshot name already exists with a different dataset.
+func (r *SnapshotRegistry) Register(snapshotName, datasetName string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if existingDataset, exists := r.snapshots[snapshotName]; exists {
+		if existingDataset != datasetName {
+			return fmt.Errorf("snapshot name %q already exists for dataset %q", snapshotName, existingDataset)
+		}
+		// Already registered with same dataset - idempotent
+		return nil
+	}
+
+	r.snapshots[snapshotName] = datasetName
+	return nil
+}
+
+// Unregister removes a snapshot name from the registry.
+func (r *SnapshotRegistry) Unregister(snapshotName string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.snapshots, snapshotName)
+}
+
+// GetDataset returns the dataset name for a registered snapshot, or empty string if not found.
+func (r *SnapshotRegistry) GetDataset(snapshotName string) string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.snapshots[snapshotName]
+}
 
 // SnapshotMetadata contains information needed to manage a snapshot.
 type SnapshotMetadata struct {
@@ -96,6 +145,15 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	klog.Infof("Creating snapshot %s for volume %s (dataset: %s, protocol: %s)",
 		snapshotName, volumeMeta.Name, volumeMeta.DatasetName, volumeMeta.Protocol)
 
+	// CRITICAL: Check snapshot name registry FIRST to enforce global uniqueness
+	// This is required by CSI spec - snapshot names must be globally unique across all volumes
+	if err := s.snapshotRegistry.Register(snapshotName, volumeMeta.DatasetName); err != nil {
+		// Snapshot name already exists for a different dataset
+		timer.ObserveError()
+		return nil, status.Errorf(codes.AlreadyExists,
+			"Snapshot name %q is already in use for a different volume: %v", snapshotName, err)
+	}
+
 	// Check if snapshot already exists (idempotency)
 	existingSnapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
 		[]interface{}{"id", "=", fmt.Sprintf("%s@%s", volumeMeta.DatasetName, snapshotName)},
@@ -103,9 +161,26 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	if err != nil {
 		klog.Warningf("Failed to query existing snapshots: %v", err)
 	} else if len(existingSnapshots) > 0 {
-		// Snapshot already exists, return it
-		klog.Infof("Snapshot %s already exists, returning existing snapshot", snapshotName)
+		// Snapshot already exists
+		klog.Infof("Snapshot %s already exists, verifying source volume", snapshotName)
 		snapshot := existingSnapshots[0]
+
+		// Extract dataset name from snapshot ID (format: dataset@snapname)
+		parts := strings.Split(snapshot.ID, "@")
+		if len(parts) != 2 {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Invalid snapshot ID format: %s", snapshot.ID)
+		}
+		existingDataset := parts[0]
+
+		// Verify the existing snapshot is for the same source volume
+		// by comparing dataset names
+		if existingDataset != volumeMeta.DatasetName {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.AlreadyExists,
+				"snapshot %s already exists but for different source volume (dataset: %s vs %s)",
+				snapshotName, existingDataset, volumeMeta.DatasetName)
+		}
 
 		// Create snapshot metadata
 		createdAt := time.Now().Unix() // Use current time as we don't have creation time from API
@@ -143,6 +218,8 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
 	if err != nil {
+		// Unregister the snapshot name since creation failed
+		s.snapshotRegistry.Unregister(snapshotName)
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create snapshot: %v", err)
 	}
@@ -206,11 +283,24 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 		// Check if error is because snapshot doesn't exist
 		if isNotFoundError(err) {
 			klog.Infof("Snapshot %s not found, assuming already deleted", snapshotMeta.SnapshotName)
+			// Unregister from registry since it doesn't exist anymore
+			parts := strings.Split(snapshotMeta.SnapshotName, "@")
+			if len(parts) == 2 {
+				s.snapshotRegistry.Unregister(parts[1])
+			}
 			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil
 		}
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to delete snapshot: %v", err)
+	}
+
+	// Unregister the snapshot name from the registry
+	// Extract snapshot name from full ZFS snapshot name (dataset@snapname)
+	parts := strings.Split(snapshotMeta.SnapshotName, "@")
+	if len(parts) == 2 {
+		s.snapshotRegistry.Unregister(parts[1])
+		klog.V(4).Infof("Unregistered snapshot name %q from registry", parts[1])
 	}
 
 	klog.Infof("Successfully deleted snapshot: %s", snapshotMeta.SnapshotName)
@@ -222,69 +312,110 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	klog.V(4).Infof("ListSnapshots called with request: %+v", req)
 
-	// Build query filters
-	var filters []interface{}
-
-	// Filter by snapshot ID if specified
+	// Special case: If filtering by snapshot ID, we can decode it and return directly if it exists
 	if req.GetSnapshotId() != "" {
-		snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
-		if err != nil {
-			// CSI spec: return empty list for non-existent or invalid snapshot IDs
-			klog.V(4).Infof("Invalid snapshot ID %q, returning empty list: %v", req.GetSnapshotId(), err)
-			return &csi.ListSnapshotsResponse{
-				Entries: []*csi.ListSnapshotsResponse_Entry{},
-			}, nil
-		}
-		filters = []interface{}{
-			[]interface{}{"id", "=", snapshotMeta.SnapshotName},
-		}
-	} else if req.GetSourceVolumeId() != "" {
-		// Filter by source volume - need to decode volume to get dataset name
-		volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
-		if err != nil {
-			// CSI spec: return empty list for non-existent or invalid volume IDs
-			klog.V(4).Infof("Invalid source volume ID %q, returning empty list: %v", req.GetSourceVolumeId(), err)
-			return &csi.ListSnapshotsResponse{
-				Entries: []*csi.ListSnapshotsResponse_Entry{},
-			}, nil
-		}
-		// Query snapshots for this dataset (snapshots will have format dataset@snapname)
-		filters = []interface{}{
-			[]interface{}{"dataset", "=", volumeMeta.DatasetName},
-		}
+		return s.listSnapshotByID(ctx, req)
 	}
 
-	// Query snapshots from TrueNAS
+	// Special case: If filtering by source volume ID, we need to decode the volume
+	if req.GetSourceVolumeId() != "" {
+		return s.listSnapshotsBySourceVolume(ctx, req)
+	}
+
+	// General case: list all snapshots (not commonly used, but required by CSI spec)
+	return s.listAllSnapshots(ctx, req)
+}
+
+// listSnapshotByID handles listing a specific snapshot by ID.
+func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+	snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
+	if err != nil {
+		// CSI spec: return empty list for non-existent or invalid snapshot IDs
+		klog.V(4).Infof("Invalid snapshot ID %q, returning empty list: %v", req.GetSnapshotId(), err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	klog.V(4).Infof("ListSnapshots: filtering by snapshot ID (ZFS name: %s)", snapshotMeta.SnapshotName)
+
+	// Query to verify snapshot exists
+	filters := []interface{}{
+		[]interface{}{"id", "=", snapshotMeta.SnapshotName},
+	}
+
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to query snapshots: %v", err)
 	}
 
-	klog.V(4).Infof("Found %d snapshots", len(snapshots))
+	klog.V(4).Infof("Found %d snapshots after filtering", len(snapshots))
+
+	if len(snapshots) == 0 {
+		// Snapshot doesn't exist, return empty list
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	// Snapshot exists - return it with the metadata we decoded
+	// (which includes protocol, source volume, etc.)
+	entry := &csi.ListSnapshotsResponse_Entry{
+		Snapshot: &csi.Snapshot{
+			SnapshotId:     req.GetSnapshotId(), // Return the same ID we were queried with
+			SourceVolumeId: snapshotMeta.SourceVolume,
+			CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
+			ReadyToUse:     true,
+		},
+	}
+
+	return &csi.ListSnapshotsResponse{
+		Entries: []*csi.ListSnapshotsResponse_Entry{entry},
+	}, nil
+}
+
+// listSnapshotsBySourceVolume handles listing snapshots for a specific source volume.
+func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+	volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
+	if err != nil {
+		// CSI spec: return empty list for non-existent or invalid volume IDs
+		klog.V(4).Infof("Invalid source volume ID %q, returning empty list: %v", req.GetSourceVolumeId(), err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	// Query snapshots for this dataset (snapshots will have format dataset@snapname)
+	filters := []interface{}{
+		[]interface{}{"dataset", "=", volumeMeta.DatasetName},
+	}
+
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to query snapshots: %v", err)
+	}
+
+	klog.V(4).Infof("Found %d snapshots for volume %s", len(snapshots), req.GetSourceVolumeId())
 
 	// Handle pagination
 	maxEntries := int(req.GetMaxEntries())
 	if maxEntries <= 0 {
-		maxEntries = len(snapshots) // Return all if not specified
+		maxEntries = len(snapshots)
 	}
 
-	// Parse starting token (offset index)
 	startIndex := 0
 	if req.GetStartingToken() != "" {
-		var err error
 		startIndex, err = parseSnapshotToken(req.GetStartingToken())
 		if err != nil {
 			return nil, status.Errorf(codes.Aborted, "Invalid starting token: %v", err)
 		}
 		if startIndex < 0 || startIndex >= len(snapshots) {
-			// Starting token is out of range, return empty list
 			return &csi.ListSnapshotsResponse{
 				Entries: []*csi.ListSnapshotsResponse_Entry{},
 			}, nil
 		}
 	}
 
-	// Calculate end index
 	endIndex := startIndex + maxEntries
 	if endIndex > len(snapshots) {
 		endIndex = len(snapshots)
@@ -294,17 +425,14 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, endIndex-startIndex)
 	for i := startIndex; i < endIndex; i++ {
 		snapshot := snapshots[i]
-		// For each snapshot, we need to determine the source volume
-		// Snapshot ID format is "dataset@snapname", dataset is the volume's dataset
 
-		// Try to find matching volume by dataset name
-		// For now, we'll create a basic snapshot metadata
+		// Create snapshot metadata - we know the source volume from the request
 		snapshotMeta := SnapshotMetadata{
 			SnapshotName: snapshot.ID,
+			SourceVolume: req.GetSourceVolumeId(),
 			DatasetName:  snapshot.Dataset,
-			Protocol:     "", // Unknown without volume context
+			Protocol:     volumeMeta.Protocol,
 			CreatedAt:    time.Now().Unix(),
-			SourceVolume: "", // Unknown - would require querying volumes
 		}
 
 		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
@@ -316,7 +444,7 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		entry := &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SnapshotId:     snapshotID,
-				SourceVolumeId: snapshotMeta.SourceVolume,
+				SourceVolumeId: req.GetSourceVolumeId(),
 				CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
 				ReadyToUse:     true,
 			},
@@ -324,7 +452,85 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		entries = append(entries, entry)
 	}
 
-	// Generate next token if there are more results
+	var nextToken string
+	if endIndex < len(snapshots) {
+		nextToken = encodeSnapshotToken(endIndex)
+	}
+
+	return &csi.ListSnapshotsResponse{
+		Entries:   entries,
+		NextToken: nextToken,
+	}, nil
+}
+
+// listAllSnapshots handles listing all snapshots (no filters).
+func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+	// Query all snapshots
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to query snapshots: %v", err)
+	}
+
+	klog.V(4).Infof("Found %d total snapshots", len(snapshots))
+
+	// Handle pagination
+	maxEntries := int(req.GetMaxEntries())
+	if maxEntries <= 0 {
+		maxEntries = len(snapshots)
+	}
+
+	startIndex := 0
+	if req.GetStartingToken() != "" {
+		startIndex, err = parseSnapshotToken(req.GetStartingToken())
+		if err != nil {
+			return nil, status.Errorf(codes.Aborted, "Invalid starting token: %v", err)
+		}
+		if startIndex < 0 || startIndex >= len(snapshots) {
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
+		}
+	}
+
+	endIndex := startIndex + maxEntries
+	if endIndex > len(snapshots) {
+		endIndex = len(snapshots)
+	}
+
+	// Convert to CSI format
+	// Note: Without additional context, we can't fully populate source volume info
+	// This is acceptable per CSI spec - ListSnapshots without filters is mainly for discovery
+	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, endIndex-startIndex)
+	for i := startIndex; i < endIndex; i++ {
+		snapshot := snapshots[i]
+
+		// Create minimal snapshot metadata
+		// We don't know the source volume or protocol without additional queries
+		snapshotMeta := SnapshotMetadata{
+			SnapshotName: snapshot.ID,
+			DatasetName:  snapshot.Dataset,
+			Protocol:     "",
+			CreatedAt:    time.Now().Unix(),
+			SourceVolume: "",
+		}
+
+		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+		if encodeErr != nil {
+			klog.Warningf("Failed to encode snapshot ID for %s: %v", snapshot.ID, encodeErr)
+			continue
+		}
+
+		entry := &csi.ListSnapshotsResponse_Entry{
+			Snapshot: &csi.Snapshot{
+				SnapshotId:     snapshotID,
+				SourceVolumeId: "", // Unknown without additional context
+				CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
+				ReadyToUse:     true,
+			},
+		}
+		entries = append(entries, entry)
+	}
+
 	var nextToken string
 	if endIndex < len(snapshots) {
 		nextToken = encodeSnapshotToken(endIndex)

@@ -79,7 +79,7 @@ type SnapshotMetadata struct {
 	SourceVolume string `json:"sourceVolume"` // Source volume ID
 	DatasetName  string `json:"datasetName"`  // Parent dataset name
 	Protocol     string `json:"protocol"`     // Protocol (nfs, nvmeof)
-	CreatedAt    int64  `json:"createdAt"`    // Creation timestamp (Unix epoch)
+	CreatedAt    int64  `json:"-"`            // Creation timestamp (Unix epoch) - excluded from ID encoding
 }
 
 // encodeSnapshotID encodes snapshot metadata into a snapshotID string.
@@ -316,6 +316,8 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 }
 
 // ListSnapshots lists snapshots.
+//
+//nolint:gocognit,gocyclo // Complex pagination and filtering logic required by CSI spec
 func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	klog.V(4).Infof("ListSnapshots called with request: %+v", req)
 
@@ -737,4 +739,47 @@ func containsAny(s string, substrs []string) bool {
 		}
 	}
 	return false
+}
+
+// buildDatasetToVolumeMap creates a map of dataset name to volume ID by listing all volumes.
+// Errors during listing are logged but do not cause failure.
+func (s *ControllerService) buildDatasetToVolumeMap(ctx context.Context) map[string]string {
+	result := make(map[string]string)
+
+	// List all NFS volumes
+	nfsVolumes, err := s.listNFSVolumes(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list NFS volumes: %v", err)
+		// Continue anyway - we'll try NVMe-oF volumes too
+	} else {
+		for _, volumeEntry := range nfsVolumes {
+			volumeID := volumeEntry.Volume.VolumeId
+			volumeMeta, decodeErr := decodeVolumeID(volumeID)
+			if decodeErr != nil {
+				klog.V(4).Infof("Failed to decode volume ID %s: %v", volumeID, decodeErr)
+				continue
+			}
+			result[volumeMeta.DatasetName] = volumeID
+		}
+	}
+
+	// List all NVMe-oF volumes
+	nvmeVolumes, err := s.listNVMeOFVolumes(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list NVMe-oF volumes: %v", err)
+		// Continue anyway - we already have NFS volumes
+	} else {
+		for _, volumeEntry := range nvmeVolumes {
+			volumeID := volumeEntry.Volume.VolumeId
+			volumeMeta, decodeErr := decodeVolumeID(volumeID)
+			if decodeErr != nil {
+				klog.V(4).Infof("Failed to decode volume ID %s: %v", volumeID, decodeErr)
+				continue
+			}
+			result[volumeMeta.DatasetName] = volumeID
+		}
+	}
+
+	klog.V(4).Infof("Built dataset-to-volume map with %d entries", len(result))
+	return result
 }

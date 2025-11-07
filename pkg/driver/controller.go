@@ -84,9 +84,7 @@ func isEncodedVolumeID(volumeID string) bool {
 			return false
 		}
 	}
-	// Try to decode it to verify it's valid base64
-	_, err := base64.RawURLEncoding.DecodeString(volumeID)
-	return err == nil
+	return true
 }
 
 // ControllerService implements the CSI Controller service.
@@ -454,18 +452,6 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
 	}
 
-	if req.GetNodeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
-	}
-
-	// Verify volume exists by attempting to decode the volume ID
-	// Per CSI spec: return NotFound if volume doesn't exist
-	if _, err := decodeVolumeID(req.GetVolumeId()); err != nil {
-		// Treat any decode failure as volume not found
-		return nil, status.Errorf(codes.NotFound, "volume %s not found", req.GetVolumeId())
-	}
-
-	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 
@@ -534,7 +520,7 @@ func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 				break
 			}
 		}
-		// Return error if token is not found
+		// CSI spec requires returning Aborted error for invalid starting token
 		if !found {
 			return nil, status.Errorf(codes.Aborted, "invalid starting_token: %s", startingToken)
 		}
@@ -573,19 +559,26 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
 	}
 
+	// Query all datasets to match with shares
+	allDatasets, err := s.apiClient.QueryAllDatasets(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
+	}
+
+	// Build a map of mountpoint -> dataset for quick lookup
+	datasetsByMountpoint := make(map[string]tnsapi.Dataset)
+	for _, ds := range allDatasets {
+		if ds.Mountpoint != "" {
+			datasetsByMountpoint[ds.Mountpoint] = ds
+		}
+	}
+
 	var entries []*csi.ListVolumesResponse_Entry
 	for _, share := range shares {
-		// Each NFS share path corresponds to a dataset mountpoint
-		// Convert mountpoint to dataset name (e.g., /mnt/tank/dataset -> tank/dataset)
-		datasetName := share.Path
-		if len(datasetName) > 5 && datasetName[:5] == "/mnt/" {
-			datasetName = datasetName[5:] // Remove "/mnt/" prefix
-		}
-
-		// Query the dataset by name to get its metadata
-		dataset, err := s.apiClient.GetDataset(ctx, datasetName)
-		if err != nil {
-			klog.V(5).Infof("Skipping NFS share with no matching dataset: %s (derived name: %s)", share.Path, datasetName)
+		// Find the dataset that matches this share's path (mountpoint)
+		dataset, found := datasetsByMountpoint[share.Path]
+		if !found {
+			klog.V(5).Infof("Skipping NFS share with no matching dataset mountpoint: %s", share.Path)
 			continue
 		}
 
@@ -598,7 +591,7 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 			NFSShareID:  share.ID,
 		}
 
-		entry := s.buildVolumeEntry(*dataset, meta, "nfs")
+		entry := s.buildVolumeEntry(dataset, meta, "nfs")
 		if entry != nil {
 			entries = append(entries, entry)
 		}

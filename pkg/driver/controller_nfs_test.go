@@ -47,6 +47,10 @@ func TestCreateNFSVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					// No existing datasets - allow creation
+					return []tnsapi.Dataset{}, nil
+				}
 				m.CreateDatasetFunc = func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
 						ID:         "tank/csi/test-nfs-volume",
@@ -107,6 +111,10 @@ func TestCreateNFSVolume(t *testing.T) {
 				// No capacity specified - should default to 1GB
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					// No existing datasets - allow creation
+					return []tnsapi.Dataset{}, nil
+				}
 				m.CreateDatasetFunc = func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
 						ID:         "tank/test-nfs-volume-default",

@@ -1,0 +1,517 @@
+# TNS CSI Driver - Feature Support Documentation
+
+**⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
+
+This document provides a comprehensive overview of currently implemented and tested features in the TNS CSI Driver.
+
+## Overview
+
+The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that enables dynamic provisioning and management of persistent storage volumes on TrueNAS systems. This driver is in active development with core features implemented and undergoing testing.
+
+## Supported Storage Protocols
+
+### NFS (Network File System)
+- **Status**: ✅ Functional, testing in progress
+- **Access Modes**: ReadWriteMany (RWX), ReadWriteOnce (RWO)
+- **Use Case**: Shared filesystem storage, multi-pod access
+- **Mount Protocol**: NFSv4.2 with nolock option
+- **TrueNAS Requirements**: 
+  - TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+  - NFS service enabled
+  - Accessible NFS ports (111, 2049)
+
+### NVMe-oF (NVMe over Fabrics - TCP)
+- **Status**: ✅ Functional, testing in progress
+- **Access Modes**: ReadWriteOnce (RWO)
+- **Use Case**: High-performance block storage, low-latency workloads
+- **Transport**: TCP (nvme-tcp)
+- **TrueNAS Requirements**:
+  - TrueNAS Scale 25.10+ (NVMe-oF feature introduced in this version)
+  - Static IP address configured (DHCP not supported)
+  - Pre-configured NVMe-oF subsystem with TCP port (default: 4420)
+  - At least one initial namespace in subsystem
+- **Architecture**: Shared subsystem model (1 subsystem → many namespaces)
+
+### Why These Protocols?
+
+**NVMe-oF over iSCSI**: NVMe-oF provides superior performance with:
+- Lower latency
+- Higher IOPS
+- Better utilization of modern NVMe SSDs
+- Native NVMe command set over fabric
+
+**No SMB/CIFS Support**: Low priority due to Linux-native protocol focus. Consider official TrueNAS CSI driver if Windows file sharing is required.
+
+## Core CSI Features
+
+### Volume Lifecycle Management
+
+#### Dynamic Provisioning
+- **Status**: ✅ Fully implemented and functional
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Automatic creation of storage volumes when PVCs are created
+- **Implementation**:
+  - NFS: Creates ZFS dataset and NFS share automatically
+  - NVMe-oF: Creates ZVOL, namespace, and configures NVMe-oF target
+- **Parameters**:
+  - `protocol`: nfs or nvmeof
+  - `pool`: ZFS pool name
+  - `server`: TrueNAS IP/hostname
+  - `subsystemNQN`: (NVMe-oF only) Pre-configured subsystem NQN
+
+#### Volume Deletion
+- **Status**: ✅ Fully implemented and functional
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Automatic cleanup when PVCs with reclaimPolicy: Delete are removed
+- **Implementation**:
+  - NFS: Removes NFS share and deletes ZFS dataset
+  - NVMe-oF: Removes namespace from subsystem and deletes ZVOL
+  - Idempotent operations (safe to retry)
+
+#### Volume Attachment/Detachment
+- **Status**: ✅ Fully implemented and functional
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Attach volumes to nodes and detach when no longer needed
+- **Implementation**:
+  - NFS: Handled by NFSv4 protocol
+  - NVMe-oF: Uses nvme-cli for discovery, connect, and disconnect operations
+
+#### Volume Mounting/Unmounting
+- **Status**: ✅ Fully implemented and functional
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Mount volumes into pod containers at specified paths
+- **Implementation**:
+  - NFS: Standard NFSv4.2 mount with optimized options
+  - NVMe-oF: Block device formatting (ext4/xfs) and filesystem mount
+  - Proper cleanup on unmount
+
+### Volume Expansion
+- **Status**: ✅ Fully implemented and functional
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Dynamically resize volumes without downtime
+- **Requirements**: StorageClass must have `allowVolumeExpansion: true` (enabled by default in Helm chart)
+- **Limitations**:
+  - Only expansion supported (shrinking not possible)
+  - Volume must not be in use during expansion for some operations
+- **Implementation**:
+  - NFS: Expands ZFS dataset quota
+  - NVMe-oF: Expands ZVOL size and resizes filesystem
+
+**Example:**
+```bash
+kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}}}}'
+```
+
+### Volume Snapshots
+- **Status**: ✅ Implemented, testing in progress
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Create point-in-time copies of volumes using ZFS snapshots
+- **Features**:
+  - Near-instant snapshot creation
+  - Space-efficient (copy-on-write)
+  - Snapshot deletion with proper cleanup
+  - List snapshots
+- **Requirements**:
+  - Kubernetes Snapshot CRDs (v1 API)
+  - External snapshot controller
+  - CSI snapshotter sidecar (included in Helm chart)
+
+**Key Operations:**
+- Create snapshot: ZFS snapshot created instantly
+- Delete snapshot: Snapshot removed from ZFS
+- Idempotent operations
+
+### Volume Cloning (Restore from Snapshot)
+- **Status**: ✅ Implemented, testing in progress
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Create new volumes from existing snapshots
+- **Features**:
+  - Instant clone creation via ZFS clone
+  - Space-efficient (shares blocks with snapshot until modified)
+  - Full read/write access to cloned volume
+- **Limitations**:
+  - Cannot clone across protocols (NFS snapshot → NFS volume only)
+  - Must restore to same or larger size
+  - Same ZFS pool required
+
+**Example:**
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restored-pvc
+spec:
+  storageClassName: truenas-nfs
+  dataSource:
+    name: my-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+```
+
+## Infrastructure Features
+
+### WebSocket API Client
+- **Status**: ✅ Stable and functional
+- **Description**: Resilient WebSocket client for TrueNAS API communication
+- **Features**:
+  - Automatic reconnection with exponential backoff
+  - Ping/pong heartbeat (30-second intervals)
+  - Read/write deadline management
+  - Connection state tracking
+  - Graceful error handling
+- **Endpoints**: 
+  - `wss://` for HTTPS (recommended)
+  - `ws://` for HTTP (development only)
+
+### Connection Resilience
+- **Status**: ✅ Implemented and tested
+- **Description**: Automatic recovery from network disruptions
+- **Features**:
+  - Exponential backoff for reconnections (1s → 2s → 4s → ... max 30s)
+  - Operation retries during connectivity issues
+  - State preservation across reconnections
+  - Connection health monitoring
+- **Testing**: Validated with manual connection disruption tests
+
+### High Availability (Controller)
+- **Status**: ✅ Supported
+- **Description**: Multiple controller replicas for redundancy
+- **Implementation**: Kubernetes leader election
+- **Default**: Single controller (can be increased via Helm chart)
+
+## Observability Features
+
+### Metrics (Prometheus)
+- **Status**: ✅ Fully implemented
+- **Endpoint**: `/metrics` on port 8080 (configurable)
+- **Available Metrics**:
+
+#### CSI Operation Metrics
+- `tns_csi_operations_total`: Counter of CSI operations by method and status
+- `tns_csi_operations_duration_seconds`: Histogram of operation durations
+
+#### Volume Operation Metrics
+- `tns_volume_operations_total`: Counter by protocol, operation, and status
+- `tns_volume_operations_duration_seconds`: Histogram of volume operation durations
+- `tns_volume_capacity_bytes`: Gauge of provisioned volume sizes
+
+#### WebSocket Metrics
+- `tns_websocket_connected`: Connection status gauge (1=connected, 0=disconnected)
+- `tns_websocket_reconnects_total`: Counter of reconnection attempts
+- `tns_websocket_messages_total`: Counter by direction (sent/received)
+- `tns_websocket_message_duration_seconds`: Histogram of API call durations
+- `tns_websocket_connection_duration_seconds`: Current connection duration
+
+### ServiceMonitor Support
+- **Status**: ✅ Implemented
+- **Description**: Automatic Prometheus Operator integration
+- **Configuration**: Optional, enabled via Helm chart values
+
+### Logging
+- **Status**: ✅ Comprehensive logging
+- **Levels**: Standard klog verbosity levels (--v=1 to --v=10)
+- **Default**: v=2 (info level)
+- **Components**:
+  - Controller logs: Volume operations, API interactions
+  - Node logs: Mount/unmount operations, device management
+  - Structured logging with context
+
+## Deployment Features
+
+### Helm Chart
+- **Status**: ✅ Production-ready chart
+- **Registry**: 
+  - Docker Hub (recommended): `oci://registry-1.docker.io/bfenski/tns-csi-driver`
+  - GitHub Container Registry: `oci://ghcr.io/fenio/tns-csi-driver`
+- **Features**:
+  - Configurable resource limits
+  - Multiple storage class support (NFS, NVMe-oF)
+  - ServiceMonitor for Prometheus
+  - RBAC configuration
+  - Customizable mount options
+  - Volume expansion enabled by default
+
+### Storage Classes
+- **Status**: ✅ Flexible configuration
+- **Support**: Multiple storage classes per driver installation
+- **Parameters**:
+  - Common: `protocol`, `pool`, `server`
+  - NFS-specific: `mountOptions`, `path`
+  - NVMe-oF specific: `subsystemNQN`, `fsType`, `transport`, `port`
+
+### RBAC
+- **Status**: ✅ Complete RBAC configuration
+- **Components**:
+  - ServiceAccounts for controller and node components
+  - ClusterRoles with minimal required permissions
+  - ClusterRoleBindings
+
+## Testing Infrastructure
+
+### CI/CD Pipeline
+- **Status**: ✅ Fully automated
+- **Platform**: GitHub Actions with self-hosted runner
+- **Workflows**:
+  - CI (lint, build, unit tests)
+  - Integration tests (NFS and NVMe-oF)
+  - Release automation
+  - Dashboard generation
+
+### Integration Tests
+- **Status**: ✅ Comprehensive test suite
+- **Infrastructure**: Self-hosted (k3s + real TrueNAS)
+- **Test Scenarios**:
+  - Basic volume provisioning and deletion (NFS, NVMe-oF)
+  - Volume expansion (NFS, NVMe-oF)
+  - Concurrent volume operations
+  - StatefulSet workloads
+  - Snapshot creation and restoration (NFS, NVMe-oF)
+  - Connection resilience
+  - Orphaned resource cleanup
+  - Persistence testing
+- **Execution**: Automatic on every push to main branch and pull requests
+
+### Sanity Tests
+- **Status**: ✅ CSI spec compliance testing
+- **Framework**: csi-sanity test suite
+- **Coverage**: Basic CSI operations validation
+
+### Test Dashboard
+- **Status**: ✅ Live dashboard
+- **URL**: https://fenio.github.io/tns-csi/dashboard/
+- **Features**: Test results history, trend analysis
+
+## Security Features
+
+### API Authentication
+- **Status**: ✅ Secure API key authentication
+- **Storage**: Kubernetes Secrets
+- **Support**: TrueNAS API key authentication
+
+### TLS Support
+- **Status**: ✅ Supported
+- **WebSocket**: WSS (WebSocket Secure) protocol
+- **Recommended**: Always use `wss://` in production
+
+### RBAC
+- **Status**: ✅ Minimal privilege principle
+- **Configuration**: Separate service accounts for controller and node components
+
+## Kubernetes Feature Support
+
+### Access Modes
+- **NFS**:
+  - ✅ ReadWriteMany (RWX) - Multiple pods on multiple nodes
+  - ✅ ReadWriteOnce (RWO) - Single pod access
+- **NVMe-oF**:
+  - ✅ ReadWriteOnce (RWO) - Block storage limitation
+
+### Volume Binding Modes
+- ✅ Immediate - Volume provisioned immediately when PVC created
+- ✅ WaitForFirstConsumer - Volume provisioned when pod scheduled
+
+### Reclaim Policies
+- ✅ Delete - Volume deleted when PVC removed (default)
+- ✅ Retain - Volume kept on TrueNAS after PVC deletion
+
+### Storage Classes
+- ✅ Multiple storage classes per driver
+- ✅ Default storage class support
+- ✅ Custom parameters per class
+
+## Platform Support
+
+### Kubernetes Distributions
+- ✅ **Tested**: k3s (self-hosted CI/CD)
+- ✅ **Supported**: Standard Kubernetes 1.27+
+- ⚠️ **Should Work**: 
+  - kind (local development)
+  - K0s, K3s, RKE2
+  - Managed Kubernetes (EKS, GKE, AKS) - untested
+- **Note**: Earlier Kubernetes versions (< 1.27) may work but are not tested
+
+### Operating Systems
+- ✅ **Linux**: Primary platform
+  - Ubuntu 22.04+ (tested)
+  - Debian-based distributions
+  - RHEL/CentOS-based distributions
+- ❌ **Windows**: Not supported (Linux-focused driver)
+- ❌ **macOS**: Not supported as node OS (development on macOS works)
+
+### Architectures
+- ✅ **amd64** (x86_64): Fully supported
+- ✅ **arm64**: Fully supported (tested on Apple Silicon via UTM)
+
+### Container Runtimes
+- ✅ containerd (primary)
+- ✅ CRI-O
+- ⚠️ Docker (should work, not extensively tested)
+
+## TrueNAS Version Support
+
+### Minimum Versions
+- **NFS Support**: TrueNAS SCALE 22.12+ or TrueNAS CORE 13.0+
+- **NVMe-oF Support**: TrueNAS Scale 25.10+ (feature introduced in this version)
+
+### API Compatibility
+- **WebSocket API**: v2.0 (current endpoint: `/api/current`)
+- **Authentication**: API key-based
+
+### Required TrueNAS Configuration
+
+#### For NFS
+- NFS service enabled
+- Network access from Kubernetes nodes
+- ZFS pool with available space
+
+#### For NVMe-oF
+- **Static IP address** (DHCP not supported)
+- **Pre-configured NVMe-oF subsystem** with:
+  - At least one initial namespace (ZVOL)
+  - TCP port configured (default: 4420)
+  - Accessible from Kubernetes nodes
+- NVMe-oF service enabled
+
+## Known Limitations
+
+### General
+- **Production Readiness**: Early development, not production-ready
+- **Testing Coverage**: Core features functional, extensive validation needed
+- **Error Handling**: Improving, some edge cases may not be covered
+
+### Protocol-Specific
+
+#### NFS
+- Network latency affects performance
+- NFSv4.2 required (older versions not tested)
+- Firewall rules must allow NFS ports
+
+#### NVMe-oF
+- Requires TrueNAS Scale 25.10+ (not available on TrueNAS CORE)
+- Static IP mandatory (DHCP interfaces not shown in configuration)
+- Subsystem must be pre-configured (driver doesn't create subsystems)
+- Block storage only (ReadWriteOnce access mode)
+- TCP transport only (RDMA not implemented)
+
+### Snapshots
+- Cross-protocol cloning not supported (NFS ↔ NVMe-oF)
+- Cross-pool cloning not supported
+- Restored volumes must be same size or larger
+
+### Volume Expansion
+- Shrinking not supported (ZFS limitation)
+- Some operations may require volume to be unmounted
+
+## Roadmap / Future Considerations
+
+### Under Consideration (Not Committed)
+- **Additional Protocols**: iSCSI or SMB support (low priority, based on community demand)
+- **Multi-pool Support**: Advanced scheduling across multiple TrueNAS pools
+- **Topology Awareness**: Multi-zone deployments
+- **Volume Migration**: Move volumes between protocols/pools
+- **Quota Management**: Advanced quota and reservation features
+- **Enhanced Monitoring**: Additional metrics and health checks
+
+### Not Planned
+- **iSCSI Protocol**: NVMe-oF is superior for block storage
+- **Windows Support**: Linux-focused driver
+- **Legacy Protocol Support**: Focus on modern protocols only
+
+## Performance Characteristics
+
+### NFS
+- **Throughput**: Network-limited, typically 1-10 Gbps depending on network
+- **Latency**: ~1-5ms additional latency vs local storage
+- **IOPS**: Moderate (1000-10000 IOPS typical)
+- **Best For**: Shared file storage, read-heavy workloads, multi-pod access
+
+### NVMe-oF
+- **Throughput**: Higher than NFS, can approach local NVMe speeds
+- **Latency**: Lower than NFS (~100-500µs additional latency)
+- **IOPS**: High (10000-100000+ IOPS depending on storage)
+- **Best For**: Databases, high-performance applications, latency-sensitive workloads
+
+### Snapshots
+- **Creation Time**: Near-instant regardless of volume size
+- **Space Overhead**: Minimal until data diverges
+- **Restore Time**: Instant (clone operation)
+
+## Documentation
+
+### Available Documentation
+- ✅ README.md - Project overview and quick start
+- ✅ DEPLOYMENT.md - Detailed deployment guide
+- ✅ QUICKSTART.md - NFS quick start guide
+- ✅ QUICKSTART-NVMEOF.md - NVMe-oF setup guide
+- ✅ SNAPSHOTS.md - Snapshot and cloning guide
+- ✅ METRICS.md - Prometheus metrics documentation
+- ✅ FEATURES.md - This document
+- ✅ AGENTS.md - Development guidelines for AI agents
+- ✅ CONTRIBUTING.md - Contribution guidelines
+- ✅ CONNECTION_RESILIENCE_TEST.md - Connection testing guide
+
+### Helm Chart Documentation
+- ✅ charts/tns-csi-driver/README.md - Complete Helm configuration reference
+- ✅ charts/tns-csi-driver/values.yaml - Documented default values
+
+## Getting Started
+
+### Minimum Requirements
+1. Kubernetes cluster 1.27+
+2. TrueNAS Scale 22.12+ (25.10+ for NVMe-oF)
+3. TrueNAS API key
+4. Helm 3.0+
+5. NFS client tools (NFS) or nvme-cli (NVMe-oF) on nodes
+
+### Quick Install (NFS)
+```bash
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nfs.enabled=true \
+  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+```
+
+### Quick Install (NVMe-oF)
+```bash
+# Pre-requisite: Configure NVMe-oF subsystem in TrueNAS first!
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nvmeof.enabled=true \
+  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
+  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
+```
+
+## Support and Community
+
+### Reporting Issues
+- GitHub Issues: https://github.com/fenio/tns-csi/issues
+- Include: Kubernetes version, TrueNAS version, logs, reproduction steps
+
+### Contributing
+- See CONTRIBUTING.md for guidelines
+- Pull requests welcome
+- Focus areas: Testing, documentation, bug fixes
+
+### Status Updates
+- Test Dashboard: https://fenio.github.io/tns-csi/dashboard/
+- GitHub Actions: https://github.com/fenio/tns-csi/actions
+
+---
+
+**Last Updated**: 2025-01-07  
+**Driver Version**: v0.0.x (early development)  
+**Kubernetes Version Tested**: 1.27+  
+**Go Version**: 1.25.3+

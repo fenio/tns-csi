@@ -8,7 +8,7 @@ This guide explains how to deploy the TrueNAS Scale CSI driver on a Kubernetes c
 
 ## Prerequisites
 
-1. **Kubernetes Cluster**: Version 1.20 or later
+1. **Kubernetes Cluster**: Version 1.27 or later (earlier versions may work but are not tested)
 2. **TrueNAS Scale**: Version 25.10 or later with API access (NVMe-oF support requires 25.10+)
 3. **Network Access**: Kubernetes nodes must be able to reach TrueNAS server
 4. **Storage Protocol Requirements**:

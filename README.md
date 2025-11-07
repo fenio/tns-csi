@@ -12,11 +12,9 @@ A Kubernetes CSI (Container Storage Interface) driver for TrueNAS and systems wi
 
 ## Important Disclaimer
 
-**This is an independent, community-developed project and is NOT affiliated with, endorsed by, or supported by iXsystems Inc. or the TrueNAS project.**
-
-- TrueNAS is a registered trademark of iXsystems Inc.
-- **This project is in early development phase and is NOT production-ready**
+**This project is in early development phase and is NOT production-ready**
 - Use of this software is entirely at your own risk
+- Extensive testing and validation required before production use
 
 ## Overview
 
@@ -48,7 +46,7 @@ The driver intentionally focuses on these two production-ready protocols rather 
 
 ## Prerequisites
 
-- Kubernetes 1.20+
+- Kubernetes 1.27+ (earlier versions may work but are not tested)
 - TrueNAS or compatible system with TNS-compatible API (v2.0 WebSocket API)
   - **For NVMe-oF support: TrueNAS Scale 25.10 or later required** (NVMe-oF feature introduced in 25.10)
 - For NFS: NFS client utilities on all nodes (`nfs-common` on Debian/Ubuntu, `nfs-utils` on RHEL/CentOS)
@@ -222,9 +220,12 @@ kubectl logs -n kube-system -l app=tns-csi,component=node
 
 ## Documentation
 
+- [Features Documentation](docs/FEATURES.md) - Comprehensive feature support reference
 - [Deployment Guide](docs/DEPLOYMENT.md) - Detailed installation and configuration
 - [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
 - [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
+- [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning
+- [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind
 - [Security](docs/SECURITY-SANITIZATION.md) - Security considerations
 
@@ -271,4 +272,4 @@ This project is licensed under the GNU General Public License v3.0 (GPL-3.0) - s
 
 ## Acknowledgments
 
-This driver is designed to work with TrueNAS and systems that provide TrueNAS-compatible APIs. TrueNAS is a trademark of iXsystems Inc.
+This driver is designed to work with TrueNAS and systems that provide TrueNAS-compatible APIs.

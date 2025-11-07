@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -19,12 +20,17 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// Static errors for snapshot operations.
+var (
+	ErrSnapshotNameExists = errors.New("snapshot name already exists for different dataset")
+)
+
 // SnapshotRegistry maintains a global registry of snapshot names to enforce
 // CSI's requirement that snapshot names be globally unique.
 // This bridges the gap between CSI (global uniqueness) and ZFS (per-dataset uniqueness).
 type SnapshotRegistry struct {
-	mu        sync.RWMutex
 	snapshots map[string]string // snapshot name -> dataset name
+	mu        sync.RWMutex
 }
 
 // NewSnapshotRegistry creates a new snapshot registry.
@@ -42,7 +48,8 @@ func (r *SnapshotRegistry) Register(snapshotName, datasetName string) error {
 
 	if existingDataset, exists := r.snapshots[snapshotName]; exists {
 		if existingDataset != datasetName {
-			return fmt.Errorf("snapshot name %q already exists for dataset %q", snapshotName, existingDataset)
+			return fmt.Errorf("%w: snapshot name %q already exists for dataset %q",
+				ErrSnapshotNameExists, snapshotName, existingDataset)
 		}
 		// Already registered with same dataset - idempotent
 		return nil
@@ -147,11 +154,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	// CRITICAL: Check snapshot name registry FIRST to enforce global uniqueness
 	// This is required by CSI spec - snapshot names must be globally unique across all volumes
-	if err := s.snapshotRegistry.Register(snapshotName, volumeMeta.DatasetName); err != nil {
+	if regErr := s.snapshotRegistry.Register(snapshotName, volumeMeta.DatasetName); regErr != nil {
 		// Snapshot name already exists for a different dataset
 		timer.ObserveError()
 		return nil, status.Errorf(codes.AlreadyExists,
-			"Snapshot name %q is already in use for a different volume: %v", snapshotName, err)
+			"Snapshot name %q is already in use for a different volume: %v", snapshotName, regErr)
 	}
 
 	// Check if snapshot already exists (idempotency)
@@ -543,8 +550,6 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
-//
-//nolint:gocognit // Complexity from protocol-specific handling and error cleanup - splitting would hurt readability
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)

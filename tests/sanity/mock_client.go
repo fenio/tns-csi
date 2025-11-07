@@ -629,9 +629,13 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 					continue
 				}
 
-				field := filter[0].(string)
-				op := filter[1].(string)
-				value := filter[2].(string)
+				field, fieldOK := filter[0].(string)
+				op, opOK := filter[1].(string)
+				value, valueOK := filter[2].(string)
+
+				if !fieldOK || !opOK || !valueOK {
+					continue
+				}
 
 				switch field {
 				case "id":

@@ -142,23 +142,23 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	klog.Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), req.GetVolumeContentSource())
 	if req.GetVolumeContentSource() != nil {
 		klog.Infof("VolumeContentSource is NOT nil for volume %s", req.GetName())
-		
+
 		// Check if creating from snapshot
 		if snapshot := req.GetVolumeContentSource().GetSnapshot(); snapshot != nil {
 			klog.Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
 				req.GetName(), snapshot.GetSnapshotId(), protocol)
 			return s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
 		}
-		
+
 		// Check if creating from volume (cloning)
 		if volume := req.GetVolumeContentSource().GetVolume(); volume != nil {
 			sourceVolumeID := volume.GetVolumeId()
 			klog.Infof("=== VOLUME CLONE DETECTED === Creating volume %s from volume %s with protocol %s",
 				req.GetName(), sourceVolumeID, protocol)
-			
+
 			return s.createVolumeFromVolume(ctx, req, sourceVolumeID)
 		}
-		
+
 		klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
 	}
 	klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
@@ -276,7 +276,7 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 			"share":       existingDataset.Mountpoint,
 			"datasetID":   existingDataset.ID,
 			"datasetName": expectedDatasetName,
-			"nfsShareID":  fmt.Sprintf("%d", shares[0].ID),
+			"nfsShareID":  strconv.Itoa(shares[0].ID),
 		}
 
 	case ProtocolNVMeOF:
@@ -321,32 +321,32 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 // This is done by creating a temporary snapshot and cloning from it.
 func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromVolume CALLED === New volume: %s, Source volume: %s", req.GetName(), sourceVolumeID)
-	
+
 	// Decode source volume metadata to validate it exists
 	sourceVolumeMeta, err := decodeVolumeID(sourceVolumeID)
 	if err != nil {
 		klog.Warningf("Failed to decode source volume ID %s: %v", sourceVolumeID, err)
 		return nil, status.Errorf(codes.NotFound, "Source volume not found: %s", sourceVolumeID)
 	}
-	
+
 	klog.Infof("Cloning from source volume %s (dataset: %s, protocol: %s)",
 		sourceVolumeMeta.Name, sourceVolumeMeta.DatasetName, sourceVolumeMeta.Protocol)
-	
+
 	// Create a temporary snapshot of the source volume
-	tempSnapshotName := fmt.Sprintf("clone-temp-%s", req.GetName())
+	tempSnapshotName := "clone-temp-" + req.GetName()
 	snapshotParams := tnsapi.SnapshotCreateParams{
 		Dataset:   sourceVolumeMeta.DatasetName,
 		Name:      tempSnapshotName,
 		Recursive: false,
 	}
-	
+
 	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", err)
 	}
-	
+
 	klog.Infof("Created temporary snapshot: %s", snapshot.ID)
-	
+
 	// Create snapshot metadata for the temporary snapshot
 	snapshotMeta := SnapshotMetadata{
 		SnapshotName: snapshot.ID,
@@ -355,7 +355,7 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 		Protocol:     sourceVolumeMeta.Protocol,
 		CreatedAt:    time.Now().Unix(),
 	}
-	
+
 	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 	if encodeErr != nil {
 		// Cleanup the temporary snapshot
@@ -364,10 +364,10 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 	}
-	
+
 	// Clone from the temporary snapshot
 	resp, err := s.createVolumeFromSnapshot(ctx, req, snapshotID)
-	
+
 	// Delete the temporary snapshot (best effort cleanup)
 	if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
 		klog.Warningf("Failed to cleanup temporary snapshot %s: %v", snapshot.ID, delErr)
@@ -375,7 +375,7 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	} else {
 		klog.Infof("Cleaned up temporary snapshot: %s", snapshot.ID)
 	}
-	
+
 	return resp, err
 }
 

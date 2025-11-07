@@ -274,7 +274,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name: "successful NFS volume deletion",
+			name: "successful deletion",
 			meta: &VolumeMetadata{
 				Name:        "test-nfs-volume",
 				Protocol:    ProtocolNFS,
@@ -283,12 +283,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  1,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
-					if shareID != 1 {
-						t.Errorf("Expected share ID 1, got %d", shareID)
-					}
-					return nil
-				}
+				// Only DeleteDataset should be called - TrueNAS automatically deletes the NFS share
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					if datasetID != "tank/test-nfs-volume" {
 						t.Errorf("Expected dataset ID tank/test-nfs-volume, got %s", datasetID)
@@ -299,7 +294,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "idempotent deletion - NFS share not found",
+			name: "idempotent deletion - dataset already deleted",
 			meta: &VolumeMetadata{
 				Name:        "test-nfs-volume",
 				Protocol:    ProtocolNFS,
@@ -308,33 +303,28 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  1,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
-					return errors.New("share not found")
-				}
-				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
-					return nil
-				}
-			},
-			wantErr: false, // Should succeed due to idempotency
-		},
-		{
-			name: "idempotent deletion - dataset not found",
-			meta: &VolumeMetadata{
-				Name:        "test-nfs-volume",
-				Protocol:    ProtocolNFS,
-				DatasetID:   "tank/test-nfs-volume",
-				DatasetName: "tank/test-nfs-volume",
-				NFSShareID:  1,
-			},
-			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
-					return nil
-				}
+				// Dataset already deleted (share was automatically removed with it)
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return errors.New("dataset does not exist")
 				}
 			},
 			wantErr: false, // Should succeed due to idempotency
+		},
+		{
+			name: "deletion with dataset error (continues anyway)",
+			meta: &VolumeMetadata{
+				Name:        "test-nfs-volume",
+				Protocol:    ProtocolNFS,
+				DatasetID:   "tank/test-nfs-volume",
+				DatasetName: "tank/test-nfs-volume",
+				NFSShareID:  1,
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					return errors.New("some backend error")
+				}
+			},
+			wantErr: false, // Should succeed - errors are logged but don't fail the operation
 		},
 		{
 			name: "deletion with missing share ID",

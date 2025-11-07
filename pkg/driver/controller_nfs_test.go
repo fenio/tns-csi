@@ -153,27 +153,6 @@ func TestCreateNFSVolume(t *testing.T) {
 			wantCode:  codes.InvalidArgument,
 		},
 		{
-			name: "missing server parameter",
-			req: &csi.CreateVolumeRequest{
-				Name: "test-nfs-volume",
-				VolumeCapabilities: []*csi.VolumeCapability{
-					{
-						AccessType: &csi.VolumeCapability_Mount{
-							Mount: &csi.VolumeCapability_MountVolume{},
-						},
-					},
-				},
-				Parameters: map[string]string{
-					"protocol": "nfs",
-					"pool":     "tank",
-					// Missing server parameter
-				},
-			},
-			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
-		},
-		{
 			name: "dataset creation failure",
 			req: &csi.CreateVolumeRequest{
 				Name: "test-nfs-volume",

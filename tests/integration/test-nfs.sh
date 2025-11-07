@@ -11,10 +11,17 @@ PROTOCOL="NFS"
 PVC_NAME="test-pvc-nfs"
 POD_NAME="test-pod-nfs"
 MANIFEST_DIR="${SCRIPT_DIR}/manifests"
+TEST_TAGS="basic,expansion,metrics,nfs"
 
 echo "========================================"
 echo "TrueNAS CSI - NFS Integration Test"
 echo "========================================"
+
+# Check if test should be skipped
+if should_skip_test "${TEST_TAGS}"; then
+    echo "Skipping NFS test due to tag filter: ${TEST_SKIP_TAGS}"
+    exit 0
+fi
 
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR

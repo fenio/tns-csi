@@ -20,6 +20,86 @@ export TIMEOUT_PVC="${TIMEOUT_PVC:-120s}"
 export TIMEOUT_POD="${TIMEOUT_POD:-120s}"
 export TIMEOUT_DRIVER="${TIMEOUT_DRIVER:-120s}"
 
+# Test results tracking
+declare -a TEST_RESULTS=()
+declare -A TEST_DURATIONS=()
+export TEST_START_TIME=$(date +%s)
+
+# Test tags for selective execution
+#######################################
+# Check if test should be skipped based on tags
+# Arguments:
+#   Test tags (comma-separated)
+#######################################
+should_skip_test() {
+    local test_tags=$1
+    if [[ -z "${TEST_SKIP_TAGS}" ]]; then
+        return 1  # Don't skip
+    fi
+    
+    # Check if any test tag matches skip tags
+    IFS=',' read -ra SKIP_TAGS <<< "${TEST_SKIP_TAGS}"
+    IFS=',' read -ra TEST_TAG_ARRAY <<< "${test_tags}"
+    
+    for skip_tag in "${SKIP_TAGS[@]}"; do
+        for test_tag in "${TEST_TAG_ARRAY[@]}"; do
+            if [[ "${skip_tag}" == "${test_tag}" ]]; then
+                return 0  # Skip
+            fi
+        done
+    done
+    return 1  # Don't skip
+}
+
+#######################################
+# Record test result
+# Arguments:
+#   Test name
+#   Status (PASSED/FAILED)
+#   Duration (optional)
+#######################################
+record_test_result() {
+    local test_name=$1
+    local status=$2
+    local duration=${3:-0}
+    
+    TEST_RESULTS+=("${test_name}:${status}")
+    TEST_DURATIONS["${test_name}"]=${duration}
+}
+
+#######################################
+# Start timing a test step
+# Arguments:
+#   Test name
+#######################################
+start_test_timer() {
+    local test_name=$1
+    export "TEST_TIMER_${test_name}=$(date +%s%N)"
+}
+
+#######################################
+# Print test summary
+# Arguments:
+#   Protocol name
+#   Status (PASSED or FAILED)
+#######################################
+test_summary() {
+    local protocol=$1
+    local status=$2
+    
+    report_test_results
+    
+    echo ""
+    echo "========================================"
+    if [[ "${status}" == "PASSED" ]]; then
+        echo -e "${GREEN}${protocol} Integration Test: PASSED${NC}"
+    else
+        echo -e "${RED}${protocol} Integration Test: FAILED${NC}"
+    fi
+    echo "========================================"
+    echo ""
+}
+
 #######################################
 # Print a test step header
 # Arguments:
@@ -76,9 +156,11 @@ test_info() {
 # Verify cluster is accessible and create test namespace
 #######################################
 verify_cluster() {
+    start_test_timer "verify_cluster"
     test_step 1 9 "Verifying cluster access"
     
     if ! kubectl cluster-info &>/dev/null; then
+        stop_test_timer "verify_cluster" "FAILED"
         test_error "Cannot access cluster"
         return 1
     fi
@@ -93,6 +175,7 @@ verify_cluster() {
     # Label namespace for easy cleanup of orphaned test namespaces
     kubectl label namespace "${TEST_NAMESPACE}" test-csi=true --overwrite
     test_success "Test namespace ready: ${TEST_NAMESPACE}"
+    stop_test_timer "verify_cluster" "PASSED"
 }
 
 #######################################
@@ -157,7 +240,7 @@ deploy_driver() {
             base_args+=(
                 --set storageClasses.nfs.enabled=false
                 --set storageClasses.nvmeof.enabled=true
-                --set storageClasses.nvmeof.name=tns-nvmeof
+                --set storageClasses.nvmeof.name=tns-csi-nvmeof
                 --set storageClasses.nvmeof.pool="${TRUENAS_POOL}"
                 --set storageClasses.nvmeof.server="${TRUENAS_HOST}"
                 --set storageClasses.nvmeof.transport=tcp
@@ -170,7 +253,7 @@ deploy_driver() {
                 --set storageClasses.nfs.enabled=false
                 --set storageClasses.nvmeof.enabled=false
                 --set storageClasses.iscsi.enabled=true
-                --set storageClasses.iscsi.name=tns-iscsi
+                --set storageClasses.iscsi.name=tns-csi-iscsi
                 --set storageClasses.iscsi.pool="${TRUENAS_POOL}"
                 --set storageClasses.iscsi.server="${TRUENAS_HOST}"
             )
@@ -686,22 +769,45 @@ show_diagnostic_logs() {
 }
 
 #######################################
-# Print test summary
-# Arguments:
-#   Protocol name
-#   Status (PASSED or FAILED)
+# Report test results summary
 #######################################
-test_summary() {
-    local protocol=$1
-    local status=$2
+report_test_results() {
+    local total_tests=${#TEST_RESULTS[@]}
+    local passed=0
+    local failed=0
+    local total_duration=0
     
     echo ""
     echo "========================================"
-    if [[ "${status}" == "PASSED" ]]; then
-        echo -e "${GREEN}${protocol} Integration Test: PASSED${NC}"
-    else
-        echo -e "${RED}${protocol} Integration Test: FAILED${NC}"
-    fi
+    echo "TEST RESULTS SUMMARY"
     echo "========================================"
     echo ""
+    
+    for result in "${TEST_RESULTS[@]}"; do
+        IFS=':' read -r test_name status duration <<< "${result}"
+        if [[ "${status}" == "PASSED" ]]; then
+            echo -e "${GREEN}✓${NC} ${test_name}"
+            ((passed++))
+        else
+            echo -e "${RED}✗${NC} ${test_name}"
+            ((failed++))
+        fi
+        
+        if [[ -n "${duration}" && "${duration}" != "0" ]]; then
+            echo -e "  Duration: ${duration}ms"
+            total_duration=$((total_duration + duration))
+        fi
+        echo ""
+    done
+    
+    local total_time=$(( $(date +%s) - TEST_START_TIME ))
+    echo "========================================"
+    echo "Total Tests: ${total_tests}"
+    echo -e "Passed: ${GREEN}${passed}${NC}"
+    echo -e "Failed: ${RED}${failed}${NC}"
+    echo "Total Test Time: ${total_time}s"
+    if [[ ${total_duration} -gt 0 ]]; then
+        echo "Total Operation Time: ${total_duration}ms"
+    fi
+    echo "========================================"
 }

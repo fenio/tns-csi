@@ -35,9 +35,14 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	server := volumeContext["server"]
 	transport := volumeContext["transport"]
 	port := volumeContext["port"]
+	nsid := volumeContext["nsid"] // Namespace ID within the subsystem
 
 	if nqn == "" || server == "" {
 		return nil, status.Error(codes.InvalidArgument, "nqn and server must be provided in volume context for NVMe-oF volumes")
+	}
+
+	if nsid == "" {
+		return nil, status.Error(codes.InvalidArgument, "nsid (namespace ID) must be provided in volume context for NVMe-oF volumes")
 	}
 
 	// Default values
@@ -51,10 +56,10 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	// Check if this is a block volume or filesystem volume
 	isBlockVolume := volumeCapability.GetBlock() != nil
 
-	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s)", volumeID, isBlockVolume, server, port, nqn)
+	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): connecting to %s:%s (NQN: %s, NSID: %s)", volumeID, isBlockVolume, server, port, nqn, nsid)
 
 	// Check if already connected
-	devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
+	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, nqn, nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
 		// Device already connected, proceed based on volume type
@@ -96,7 +101,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	}
 
 	// Wait for device to appear and find the device path
-	devicePath, err = s.waitForNVMeDevice(ctx, nqn, 30*time.Second)
+	devicePath, err = s.waitForNVMeDevice(ctx, nqn, nsid, 30*time.Second)
 	if err != nil {
 		// Cleanup: disconnect on failure
 		if disconnectErr := s.disconnectNVMeOF(ctx, nqn); disconnectErr != nil {
@@ -236,10 +241,10 @@ func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
 	return nil
 }
 
-// findNVMeDeviceByNQN finds the device path for a given NQN.
+// findNVMeDeviceByNQNAndNSID finds the device path for a given NQN and namespace ID.
 //
 //nolint:gocognit // Complex NVMe device discovery - refactoring would risk stability of working code
-func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (string, error) {
+func (s *NodeService) findNVMeDeviceByNQNAndNSID(ctx context.Context, nqn, nsid string) (string, error) {
 	// Use nvme list-subsys which shows NQN
 	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -248,12 +253,12 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 	if err != nil {
 		klog.V(4).Infof("nvme list-subsys failed: %v", err)
 		// Fall back to checking /sys/class/nvme
-		return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
+		return s.findNVMeDeviceByNQNAndNSIDFromSys(ctx, nqn, nsid)
 	}
 
 	// Parse output to find NQN and extract controller name
 	// The JSON format from nvme list-subsys has: "Name" : "nvmeX" under Paths
-	// We need to construct the device path as /dev/nvmeXn1
+	// We need to construct the device path as /dev/nvmeXn{nsid}
 	lines := strings.Split(string(subsysOutput), "\n")
 	foundNQN := false
 	for i, line := range lines {
@@ -268,8 +273,8 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 					for k := range len(parts) - 1 {
 						if parts[k] == "Name" && k+2 < len(parts) {
 							controllerName := strings.TrimSpace(parts[k+2])
-							// Construct device path - typically nvme0 -> /dev/nvme0n1
-							devicePath := fmt.Sprintf("/dev/%sn1", controllerName)
+							// Construct device path using provided nsid - typically nvme0 + nsid 2 -> /dev/nvme0n2
+							devicePath := fmt.Sprintf("/dev/%sn%s", controllerName, nsid)
 							return devicePath, nil
 						}
 					}
@@ -283,11 +288,11 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 	}
 
 	// Fall back to checking /sys/class/nvme if JSON parsing failed
-	return s.findNVMeDeviceByNQNFromSys(ctx, nqn)
+	return s.findNVMeDeviceByNQNAndNSIDFromSys(ctx, nqn, nsid)
 }
 
-// findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
-func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string) (string, error) {
+// findNVMeDeviceByNQNAndNSIDFromSys finds NVMe device by checking /sys/class/nvme.
+func (s *NodeService) findNVMeDeviceByNQNAndNSIDFromSys(ctx context.Context, nqn, nsid string) (string, error) {
 	_ = ctx // Reserved for future cancellation support
 	// Read /sys/class/nvme/nvmeX/subsysnqn for each device
 	nvmeDir := "/sys/class/nvme"
@@ -310,25 +315,25 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		}
 
 		if strings.TrimSpace(string(data)) == nqn {
-			// Found the device, now find the namespace
-			// Typically nvme0 -> /dev/nvme0n1
-			devicePath := fmt.Sprintf("/dev/%sn1", deviceName)
+			// Found the device, construct path with provided nsid
+			// Typically nvme0 + nsid 2 -> /dev/nvme0n2
+			devicePath := fmt.Sprintf("/dev/%sn%s", deviceName, nsid)
 			if _, err := os.Stat(devicePath); err == nil {
 				return devicePath, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("%w for NQN: %s", ErrNVMeDeviceNotFound, nqn)
+	return "", fmt.Errorf("%w for NQN: %s NSID: %s", ErrNVMeDeviceNotFound, nqn, nsid)
 }
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
-func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout time.Duration) (string, error) {
+func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn, nsid string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	attempt := 0
 	for time.Now().Before(deadline) {
 		attempt++
-		devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
+		devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, nqn, nsid)
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, err := os.Stat(devicePath); err == nil {

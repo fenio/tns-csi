@@ -221,6 +221,7 @@ func (m *MockClient) GetDataset(ctx context.Context, name string) (*tnsapi.Datas
 		Used:       ds.Used,
 		Available:  ds.Available,
 		Mountpoint: ds.Mountpoint,
+		Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
 	}, nil
 }
 
@@ -246,6 +247,7 @@ func (m *MockClient) UpdateDataset(ctx context.Context, datasetID string, params
 				Used:       ds.Used,
 				Available:  ds.Available,
 				Mountpoint: ds.Mountpoint,
+				Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
 			}, nil
 		}
 	}
@@ -270,6 +272,7 @@ func (m *MockClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tns
 				Used:       ds.Used,
 				Available:  ds.Available,
 				Mountpoint: ds.Mountpoint,
+				Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
 			})
 		}
 	}
@@ -383,9 +386,10 @@ func (m *MockClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreatePar
 	}
 
 	return &tnsapi.Dataset{
-		ID:   datasetID,
-		Name: params.Name,
-		Type: "VOLUME",
+		ID:      datasetID,
+		Name:    params.Name,
+		Type:    "VOLUME",
+		Volsize: map[string]interface{}{"parsed": float64(params.Volsize)},
 	}, nil
 }
 
@@ -619,6 +623,10 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 
 	result := make([]tnsapi.Snapshot, 0, len(m.snapshots))
 	for _, snap := range m.snapshots {
+		// Apply filters if provided
+		if !matchesSnapshotFilters(snap, filters) {
+			continue
+		}
 		result = append(result, tnsapi.Snapshot{
 			ID:      snap.ID,
 			Name:    snap.Name,
@@ -627,6 +635,47 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 	}
 
 	return result, nil
+}
+
+// matchesSnapshotFilters checks if a snapshot matches the provided filters.
+func matchesSnapshotFilters(snap mockSnapshot, filters []any) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	for _, filterAny := range filters {
+		filter, ok := filterAny.([]any)
+		if !ok || len(filter) < 3 {
+			continue
+		}
+
+		field, _ := filter[0].(string)
+		operator, _ := filter[1].(string)
+		value := filter[2]
+
+		switch field {
+		case "id":
+			if operator == "=" {
+				if valueStr, ok := value.(string); ok && snap.ID != valueStr {
+					return false
+				}
+			}
+		case "name":
+			if operator == "=" {
+				if valueStr, ok := value.(string); ok && snap.Name != valueStr {
+					return false
+				}
+			}
+		case "dataset":
+			if operator == "=" {
+				if valueStr, ok := value.(string); ok && snap.Dataset != valueStr {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 // CloneSnapshot mocks zfs.snapshot.clone.

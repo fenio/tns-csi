@@ -15,6 +15,8 @@ import (
 )
 
 // createNFSVolume creates an NFS volume with a ZFS dataset and NFS share.
+//
+//nolint:gocognit,gocyclo,nestif // Complexity from idempotency checks and error handling - architectural requirement
 func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer("nfs", "create")
 
@@ -48,24 +50,132 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	volumeID := req.GetName()
 	datasetName := fmt.Sprintf("%s/%s", parentDataset, volumeID)
 
-	klog.Infof("Creating dataset: %s", datasetName)
-
-	// Step 1: Create ZFS dataset
-	dataset, err := s.apiClient.CreateDataset(ctx, tnsapi.DatasetCreateParams{
-		Name: datasetName,
-		Type: "FILESYSTEM",
-	})
-	if err != nil {
-		timer.ObserveError()
-		return nil, status.Errorf(codes.Internal, "Failed to create dataset: %v", err)
+	// Get requested capacity (needed for both creation and idempotency)
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	klog.Infof("Created dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
+	klog.Infof("Creating dataset: %s with capacity: %d bytes", datasetName, requestedCapacity)
+
+	// Check if dataset already exists (idempotency)
+	existingDatasets, err := s.apiClient.QueryAllDatasets(ctx, datasetName)
+	if err != nil {
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to query existing datasets: %v", err)
+	}
+
+	// If dataset exists, check if it matches the request
+	if len(existingDatasets) > 0 {
+		existingDataset := existingDatasets[0]
+		klog.Infof("Dataset %s already exists (ID: %s), checking idempotency", datasetName, existingDataset.ID)
+
+		// Check if an NFS share exists for this dataset
+		existingShares, shareErr := s.apiClient.QueryAllNFSShares(ctx, existingDataset.Mountpoint)
+		if shareErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to query existing NFS shares: %v", shareErr)
+		}
+
+		if len(existingShares) > 0 {
+			// Volume already exists with NFS share - check if capacity matches
+			existingShare := existingShares[0]
+			klog.Infof("NFS volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
+
+			// Parse capacity from comment (format: "CSI Volume: name, Capacity: bytes")
+			// If comment doesn't contain capacity, assume it matches (backward compatibility)
+			var existingCapacity int64
+			if existingShare.Comment != "" {
+				var parsedCapacity int64
+				_, scanErr := fmt.Sscanf(existingShare.Comment, "CSI Volume: %s, Capacity: %d", new(string), &parsedCapacity)
+				if scanErr == nil {
+					existingCapacity = parsedCapacity
+				}
+			}
+
+			// CSI spec: return AlreadyExists if volume exists with incompatible capacity
+			if existingCapacity > 0 && existingCapacity != requestedCapacity {
+				klog.Warningf("Volume %s exists with different capacity (existing: %d, requested: %d)",
+					volumeID, existingCapacity, requestedCapacity)
+				timer.ObserveError()
+				return nil, status.Errorf(codes.AlreadyExists,
+					"Volume %s already exists with different capacity (existing: %d bytes, requested: %d bytes)",
+					volumeID, existingCapacity, requestedCapacity)
+			}
+
+			klog.Infof("Capacity is compatible, returning existing volume")
+
+			// Build volume metadata
+			meta := VolumeMetadata{
+				Name:        volumeID,
+				Protocol:    ProtocolNFS,
+				DatasetID:   existingDataset.ID,
+				DatasetName: existingDataset.Name,
+				Server:      server,
+				NFSShareID:  existingShare.ID,
+			}
+
+			encodedVolumeID, encodeErr := encodeVolumeID(meta)
+			if encodeErr != nil {
+				timer.ObserveError()
+				return nil, status.Errorf(codes.Internal, "Failed to encode existing volume ID: %v", encodeErr)
+			}
+
+			volumeContext := map[string]string{
+				"server":      server,
+				"share":       existingDataset.Mountpoint,
+				"datasetID":   existingDataset.ID,
+				"datasetName": existingDataset.Name,
+				"nfsShareID":  strconv.Itoa(existingShare.ID),
+			}
+
+			// Record volume capacity metric
+			// Use existingCapacity if available, otherwise use requestedCapacity (for backward compatibility)
+			capacityToReturn := requestedCapacity
+			if existingCapacity > 0 {
+				capacityToReturn = existingCapacity
+			}
+			metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, capacityToReturn)
+
+			timer.ObserveSuccess()
+			return &csi.CreateVolumeResponse{
+				Volume: &csi.Volume{
+					VolumeId:      encodedVolumeID,
+					CapacityBytes: capacityToReturn,
+					VolumeContext: volumeContext,
+				},
+			}, nil
+		}
+		// If dataset exists but no NFS share, we'll create the share below
+		// (This handles partial creation scenarios)
+	}
+
+	// Step 1: Create ZFS dataset (or use existing if already created)
+	var dataset *tnsapi.Dataset
+	if len(existingDatasets) > 0 {
+		// Dataset exists but no NFS share - use existing dataset
+		dataset = &existingDatasets[0]
+		klog.Infof("Using existing dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
+	} else {
+		// Create new dataset
+		newDataset, createErr := s.apiClient.CreateDataset(ctx, tnsapi.DatasetCreateParams{
+			Name: datasetName,
+			Type: "FILESYSTEM",
+		})
+		if createErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create dataset: %v", createErr)
+		}
+		dataset = newDataset
+		klog.Infof("Created dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
+	}
 
 	// Step 2: Create NFS share for the dataset
+	// Store capacity in comment for idempotency checks
+	comment := fmt.Sprintf("CSI Volume: %s, Capacity: %d", volumeID, requestedCapacity)
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 		Path:         dataset.Mountpoint,
-		Comment:      "CSI Volume: " + volumeID,
+		Comment:      comment,
 		MaprootUser:  "root",
 		MaprootGroup: "wheel",
 		Enabled:      true,
@@ -114,12 +224,6 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		"datasetID":   dataset.ID,
 		"datasetName": dataset.Name,
 		"nfsShareID":  strconv.Itoa(nfsShare.ID),
-	}
-
-	// Get requested capacity
-	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if requestedCapacity == 0 {
-		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
 	klog.Infof("Successfully created NFS volume with encoded ID: %s", encodedVolumeID)

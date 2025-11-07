@@ -857,5 +857,10 @@ func (s *ControllerService) ControllerGetVolume(_ context.Context, req *csi.Cont
 // ControllerModifyVolume modifies a volume.
 func (s *ControllerService) ControllerModifyVolume(_ context.Context, req *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	klog.V(4).Infof("ControllerModifyVolume called with request: %+v", req)
+
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
 	return nil, status.Error(codes.Unimplemented, "ControllerModifyVolume not implemented")
 }

@@ -333,6 +333,15 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 		return nil, status.Errorf(codes.Internal, "Failed to stat volume path: %v", err)
 	}
 
+	// Check if the path is mounted
+	mounted, err := mount.IsMounted(context.Background(), volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.NotFound, "Volume is not mounted at path %s", volumePath)
+	}
+
 	// Get filesystem statistics
 	var statfs syscall.Statfs_t
 	if err := syscall.Statfs(volumePath, &statfs); err != nil {
@@ -409,6 +418,15 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	// Check if volume path exists
 	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
 		return nil, status.Errorf(codes.NotFound, "volume path %s does not exist", volumePath)
+	}
+
+	// Check if the path is mounted
+	mounted, err := mount.IsMounted(context.Background(), volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.NotFound, "Volume is not mounted at path %s", volumePath)
 	}
 
 	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)

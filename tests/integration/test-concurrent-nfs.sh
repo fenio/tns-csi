@@ -34,9 +34,24 @@ cleanup_concurrent_test() {
         kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
     }
     
-    # Wait longer for TrueNAS backend cleanup of multiple volumes
-    test_info "Waiting for TrueNAS backend cleanup (120 seconds)..."
-    sleep 120
+    # Wait for PVs to be deleted (concurrent test creates 10 PVCs -> 10 PVs)
+    test_info "Waiting for PVs to be deleted..."
+    for i in {1..120}; do
+        REMAINING_PVS=$(kubectl get pv --no-headers 2>/dev/null | grep -c "${TEST_NAMESPACE}" || echo "0")
+        if [[ "${REMAINING_PVS}" == "0" ]]; then
+            test_success "All PVs deleted successfully"
+            break
+        fi
+        if [[ $i == 120 ]]; then
+            test_warning "Some PVs still exist after 120 seconds"
+            kubectl get pv | grep "${TEST_NAMESPACE}" || true
+        fi
+        sleep 1
+    done
+    
+    # Additional wait for TrueNAS backend cleanup
+    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
+    sleep 30
     
     test_success "Cleanup complete"
 }

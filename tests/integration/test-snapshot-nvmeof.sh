@@ -293,20 +293,24 @@ cleanup_snapshot_test() {
         kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
     }
     
-    # Wait for TrueNAS backend cleanup
-    test_info "Waiting for TrueNAS backend cleanup (60 seconds)..."
-    sleep 60
+    # Wait for PVs to be deleted (snapshot test creates 2 PVCs -> 2 PVs)
+    test_info "Waiting for PVs to be deleted..."
+    for i in {1..60}; do
+        REMAINING_PVS=$(kubectl get pv --no-headers 2>/dev/null | grep -c "${TEST_NAMESPACE}" || echo "0")
+        if [[ "${REMAINING_PVS}" == "0" ]]; then
+            test_success "All PVs deleted successfully"
+            break
+        fi
+        if [[ $i == 60 ]]; then
+            test_warning "Some PVs still exist after 60 seconds"
+            kubectl get pv | grep "${TEST_NAMESPACE}" || true
+        fi
+        sleep 1
+    done
     
-    # Verify PVs are actually deleted
-    test_info "Verifying PVs are deleted..."
-    local remaining_pvs
-    remaining_pvs=$(kubectl get pv --no-headers 2>/dev/null | grep -E "${PVC_NAME}|${PVC_FROM_SNAPSHOT}" | wc -l || echo "0")
-    if [[ "${remaining_pvs}" -eq 0 ]]; then
-        test_success "All test PVs deleted"
-    else
-        test_warning "${remaining_pvs} PVs still present - may indicate cleanup issue"
-        kubectl get pv | grep -E "${PVC_NAME}|${PVC_FROM_SNAPSHOT}" || true
-    fi
+    # Additional wait for TrueNAS backend cleanup
+    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
+    sleep 30
     
     test_success "Cleanup complete"
 }

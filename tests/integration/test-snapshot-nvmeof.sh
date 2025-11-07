@@ -309,8 +309,8 @@ cleanup_snapshot_test() {
     done
     
     # Additional wait for TrueNAS backend cleanup
-    test_info "Waiting for TrueNAS backend cleanup (30 seconds)..."
-    sleep 30
+    test_info "Waiting for TrueNAS backend cleanup (15 seconds)..."
+    sleep 15
     
     test_success "Cleanup complete"
 }

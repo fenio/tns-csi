@@ -649,13 +649,13 @@ type DatasetCreateParams struct {
 
 // Dataset represents a ZFS dataset.
 type Dataset struct {
+	Available  map[string]interface{} `json:"available,omitempty"`
+	Used       map[string]interface{} `json:"used,omitempty"`
+	Volsize    map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
 	ID         string                 `json:"id"`
 	Name       string                 `json:"name"`
 	Type       string                 `json:"type"`
-	Available  map[string]interface{} `json:"available,omitempty"`
-	Used       map[string]interface{} `json:"used,omitempty"`
 	Mountpoint string                 `json:"mountpoint,omitempty"`
-	Volsize    map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
 }
 
 // CreateDataset creates a new ZFS dataset.

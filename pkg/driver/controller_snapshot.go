@@ -337,11 +337,9 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
 	if err != nil {
-		// If snapshot ID is malformed, return empty list (snapshot doesn't exist)
-		klog.V(4).Infof("Invalid snapshot ID %q: %v - returning empty list", req.GetSnapshotId(), err)
-		return &csi.ListSnapshotsResponse{
-			Entries: []*csi.ListSnapshotsResponse_Entry{},
-		}, nil
+		// Return InvalidArgument for malformed snapshot IDs
+		klog.V(4).Infof("Invalid snapshot ID %q: %v", req.GetSnapshotId(), err)
+		return nil, status.Errorf(codes.InvalidArgument, "Invalid snapshot ID: %v", err)
 	}
 
 	klog.V(4).Infof("ListSnapshots: filtering by snapshot ID (ZFS name: %s)", snapshotMeta.SnapshotName)

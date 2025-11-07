@@ -238,20 +238,24 @@ deploy_driver() {
     shift
     local helm_args=("$@")
     
+    start_test_timer "deploy_driver"
     test_step 2 9 "Deploying CSI driver for ${protocol}"
     
     # Check required environment variables
     if [[ -z "${TRUENAS_HOST}" ]]; then
+        stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_HOST environment variable not set"
         return 1
     fi
     
     if [[ -z "${TRUENAS_API_KEY}" ]]; then
+        stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_API_KEY environment variable not set"
         return 1
     fi
     
     if [[ -z "${TRUENAS_POOL}" ]]; then
+        stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_POOL environment variable not set"
         return 1
     fi
@@ -308,6 +312,7 @@ deploy_driver() {
             )
             ;;
         *)
+            stop_test_timer "deploy_driver" "FAILED"
             test_error "Unknown protocol: ${protocol}"
             return 1
             ;;
@@ -329,12 +334,14 @@ deploy_driver() {
     echo ""
     echo "=== CSI driver pods ==="
     kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+    stop_test_timer "deploy_driver" "PASSED"
 }
 
 #######################################
 # Wait for CSI driver to be ready
 #######################################
 wait_for_driver() {
+    start_test_timer "wait_for_driver"
     test_step 3 9 "Waiting for CSI driver to be ready"
     
     kubectl wait --for=condition=Ready pod \
@@ -349,6 +356,7 @@ wait_for_driver() {
     echo "=== Driver image version ==="
     kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
         -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+    stop_test_timer "wait_for_driver" "PASSED"
 }
 
 #######################################
@@ -363,6 +371,7 @@ create_pvc() {
     local pvc_name=$2
     local wait_for_binding="${3:-true}"
     
+    start_test_timer "create_pvc"
     test_step 4 9 "Creating PersistentVolumeClaim: ${pvc_name}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
@@ -402,6 +411,7 @@ create_pvc() {
         test_info "Skipping PVC binding wait (volumeBindingMode: WaitForFirstConsumer)"
         test_success "PVC created (will bind when pod is scheduled)"
     fi
+    stop_test_timer "create_pvc" "PASSED"
 }
 
 #######################################
@@ -414,6 +424,7 @@ create_test_pod() {
     local manifest=$1
     local pod_name=$2
     
+    start_test_timer "create_test_pod"
     test_step 5 9 "Creating test pod: ${pod_name}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
@@ -426,6 +437,7 @@ create_test_pod() {
         -n "${TEST_NAMESPACE}" \
         --timeout="${TIMEOUT_POD}"; then
         
+        stop_test_timer "create_test_pod" "FAILED"
         test_error "Pod failed to become ready"
         
         echo ""
@@ -453,6 +465,7 @@ create_test_pod() {
     echo ""
     echo "=== Pod Logs ==="
     kubectl logs "${pod_name}" -n "${TEST_NAMESPACE}" || true
+    stop_test_timer "create_test_pod" "PASSED"
 }
 
 #######################################
@@ -467,6 +480,7 @@ test_io_operations() {
     local path=$2
     local test_type=${3:-filesystem}
     
+    start_test_timer "test_io_operations"
     test_step 6 9 "Testing I/O operations (${test_type})"
     
     if [[ "${test_type}" == "filesystem" ]]; then
@@ -483,6 +497,7 @@ test_io_operations() {
         if [[ "${content}" == "CSI Test Data" ]]; then
             test_success "Read operation successful: ${content}"
         else
+            stop_test_timer "test_io_operations" "FAILED"
             test_error "Read verification failed: expected 'CSI Test Data', got '${content}'"
             return 1
         fi
@@ -512,9 +527,11 @@ test_io_operations() {
             dd if="${path}" of=/dev/null bs=1M count=10 2>&1 | tail -3
         test_success "Block device read successful"
     else
+        stop_test_timer "test_io_operations" "FAILED"
         test_error "Unknown test type: ${test_type}"
         return 1
     fi
+    stop_test_timer "test_io_operations" "PASSED"
 }
 
 #######################################
@@ -531,6 +548,7 @@ test_volume_expansion() {
     local mount_path=$3
     local new_size=$4
     
+    start_test_timer "test_volume_expansion"
     test_step 7 9 "Testing volume expansion to ${new_size}"
     
     # Get current PVC size
@@ -574,6 +592,7 @@ test_volume_expansion() {
     done
     
     if [[ $retries -eq $max_retries ]]; then
+        stop_test_timer "test_volume_expansion" "FAILED"
         test_error "Timeout waiting for volume expansion"
         echo ""
         echo "=== PVC Status ==="
@@ -622,12 +641,14 @@ test_volume_expansion() {
         if [[ "${content}" == "Post-expansion test" ]]; then
             test_success "I/O operations work after expansion"
         else
+            stop_test_timer "test_volume_expansion" "FAILED"
             test_error "I/O verification failed after expansion"
             return 1
         fi
     fi
     
     test_success "Volume expansion completed successfully"
+    stop_test_timer "test_volume_expansion" "PASSED"
 }
 
 #######################################
@@ -636,6 +657,7 @@ test_volume_expansion() {
 # expected data after CSI operations have been performed
 #######################################
 verify_metrics() {
+    start_test_timer "verify_metrics"
     test_step 8 9 "Verifying Prometheus metrics collection"
     
     # Find the controller pod
@@ -646,6 +668,7 @@ verify_metrics() {
     
     if [[ -z "${controller_pod}" ]]; then
         test_warning "No controller pod found, skipping metrics check"
+        stop_test_timer "verify_metrics" "PASSED"
         return 0
     fi
     
@@ -656,6 +679,7 @@ verify_metrics() {
     if ! metrics_output=$(kubectl exec -n kube-system "${controller_pod}" -- \
         wget -q -O - http://localhost:8080/metrics 2>&1); then
         test_warning "Failed to fetch metrics: ${metrics_output}"
+        stop_test_timer "verify_metrics" "PASSED"
         return 0
     fi
     
@@ -696,6 +720,7 @@ verify_metrics() {
     test_info "Metrics found: ${found_count}/${#expected_metrics[@]}"
     
     if [[ ${found_count} -eq 0 ]]; then
+        stop_test_timer "verify_metrics" "FAILED"
         test_error "No custom metrics found - metrics collection may not be working"
         return 1
     fi
@@ -738,6 +763,7 @@ verify_metrics() {
     
     echo ""
     test_success "Metrics verification completed"
+    stop_test_timer "verify_metrics" "PASSED"
 }
 
 #######################################
@@ -750,6 +776,7 @@ cleanup_test() {
     local pod_name=$1
     local pvc_name=$2
     
+    start_test_timer "cleanup_test"
     test_step 9 9 "Cleaning up test resources"
     
     # Delete the entire namespace - this triggers CSI DeleteVolume
@@ -765,6 +792,7 @@ cleanup_test() {
     test_info "Waiting for TrueNAS backend cleanup (60 seconds)..."
     sleep 60
     test_success "Cleanup complete"
+    stop_test_timer "cleanup_test" "PASSED"
 }
 
 #######################################

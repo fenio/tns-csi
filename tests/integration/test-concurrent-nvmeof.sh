@@ -58,7 +58,7 @@ wait_for_driver
 
 # Check if NVMe-oF is configured on TrueNAS
 MANIFEST_DIR="${SCRIPT_DIR}/manifests"
-if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-nvmeof.yaml" "precheck-pvc-nvmeof" "${PROTOCOL}"; then
+if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-nvmeof.yaml" "test-pvc-nvmeof" "${PROTOCOL}"; then
     exit 0  # Gracefully skip test if not configured
 fi
 

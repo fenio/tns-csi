@@ -1,6 +1,7 @@
 package sanity
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -81,6 +82,11 @@ func TestSanity(t *testing.T) {
 		"protocol": "nfs",
 		"pool":     "tank",
 	}
+
+	// Configure custom cleanup functions to properly remove test directories
+	// The default cleanup uses os.Remove() which fails if directories are not empty
+	sanityCfg.RemoveTargetPath = os.RemoveAll
+	sanityCfg.RemoveStagingPath = os.RemoveAll
 
 	// Run sanity tests
 	sanity.Test(t, sanityCfg)

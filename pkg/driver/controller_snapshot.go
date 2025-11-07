@@ -213,7 +213,11 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	if req.GetSnapshotId() != "" {
 		snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid snapshot ID: %v", err)
+			// CSI spec: return empty list for non-existent or invalid snapshot IDs
+			klog.V(4).Infof("Invalid snapshot ID %q, returning empty list: %v", req.GetSnapshotId(), err)
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
 		}
 		filters = []interface{}{
 			[]interface{}{"id", "=", snapshotMeta.SnapshotName},
@@ -222,7 +226,11 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		// Filter by source volume - need to decode volume to get dataset name
 		volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "Invalid source volume ID: %v", err)
+			// CSI spec: return empty list for non-existent or invalid volume IDs
+			klog.V(4).Infof("Invalid source volume ID %q, returning empty list: %v", req.GetSourceVolumeId(), err)
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
 		}
 		// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 		filters = []interface{}{

@@ -159,11 +159,15 @@ test_summary() {
     echo "========================================"
     if [[ "${status}" == "PASSED" ]]; then
         echo -e "${GREEN}${protocol} Integration Test: PASSED${NC}"
+        echo "========================================"
+        echo ""
+        exit 0
     else
         echo -e "${RED}${protocol} Integration Test: FAILED${NC}"
+        echo "========================================"
+        echo ""
+        exit 1
     fi
-    echo "========================================"
-    echo ""
 }
 
 #######################################

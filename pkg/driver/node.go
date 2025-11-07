@@ -297,9 +297,8 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	// Unmount
 	klog.V(4).Infof("Executing umount command for: %s", targetPath)
 	if err := mount.Unmount(ctx, targetPath); err != nil {
-		klog.Warningf("Unmount failed: %v, continuing for test", err)
-		// timer.ObserveError()
-		// return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
 	}
 
 	// Remove the target path
@@ -334,24 +333,13 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 		return nil, status.Errorf(codes.Internal, "Failed to stat volume path: %v", err)
 	}
 
-	// For testing purposes, return dummy stats if path exists
-	if pathInfo.IsDir() {
-		return &csi.NodeGetVolumeStatsResponse{
-			Usage: []*csi.VolumeUsage{
-				{
-					Unit:      csi.VolumeUsage_BYTES,
-					Total:     1073741824, // 1GB
-					Used:      0,
-					Available: 1073741824,
-				},
-				{
-					Unit:      csi.VolumeUsage_INODES,
-					Total:     1000,
-					Used:      0,
-					Available: 1000,
-				},
-			},
-		}, nil
+	// Check if the path is mounted
+	mounted, err := mount.IsMounted(context.Background(), volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
 	// Get filesystem statistics
@@ -438,8 +426,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
 	if !mounted {
-		klog.Warningf("Volume is not mounted at path %s, continuing for test", volumePath)
-		// return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
+		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 	if !mounted {
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)

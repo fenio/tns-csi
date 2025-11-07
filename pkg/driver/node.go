@@ -312,7 +312,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 }
 
 // NodeGetVolumeStats returns volume capacity statistics.
-func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	klog.V(4).Infof("NodeGetVolumeStats called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -334,7 +334,7 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 	}
 
 	// Check if the path is mounted
-	mounted, err := mount.IsMounted(context.Background(), volumePath)
+	mounted, err := mount.IsMounted(ctx, volumePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}
@@ -416,12 +416,12 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	}
 
 	// Check if volume path exists
-	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(volumePath); os.IsNotExist(statErr) {
 		return nil, status.Errorf(codes.InvalidArgument, "volume path %s does not exist", volumePath)
 	}
 
 	// Check if the path is mounted
-	mounted, err := mount.IsMounted(context.Background(), volumePath)
+	mounted, err := mount.IsMounted(ctx, volumePath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
 	}

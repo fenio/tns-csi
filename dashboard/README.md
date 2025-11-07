@@ -53,19 +53,32 @@ npm run dev
 
 The dashboard is automatically deployed via GitHub Actions when integration tests complete. See `.github/workflows/dashboard.yml` for the deployment workflow.
 
+### Initial Setup
+
+**One-time GitHub Pages configuration required:**
+
+1. Go to repository Settings → Pages
+2. Under "Build and deployment":
+   - Source: Select **"GitHub Actions"**
+3. Save the settings
+
+This enables the workflow to deploy to GitHub Pages automatically. Without this manual step, the deployment will fail with "Not Found" errors.
+
+**Why manual setup?** GitHub's `GITHUB_TOKEN` doesn't have permission to enable Pages programmatically. The alternative would require creating a Personal Access Token with `repo` scope, which is less secure.
+
 ## Usage
 
 ### Viewing the Dashboard
 
-The dashboard is available at: `https://bfenski.github.io/tns-csi/dashboard/`
+The dashboard is available at: `https://fenio.github.io/tns-csi/dashboard/`
 
 ### Adding to README
 
 Include this badge in your main README:
 
 ```markdown
-[![Integration Tests](https://github.com/bfenski/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/bfenski/tns-csi/actions/workflows/integration.yml)
-[![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://bfenski.github.io/tns-csi/dashboard/)
+[![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml)
+[![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://fenio.github.io/tns-csi/dashboard/)
 ```
 
 ## Customization

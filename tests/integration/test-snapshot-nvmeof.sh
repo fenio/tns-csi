@@ -315,6 +315,12 @@ cleanup_snapshot_test() {
 verify_cluster
 deploy_driver "nvmeof" --set snapshots.enabled=true --set snapshots.volumeSnapshotClass.create=true
 wait_for_driver
+
+# Check if NVMe-oF is configured on TrueNAS
+if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-nvmeof.yaml" "precheck-pvc-nvmeof" "${PROTOCOL}"; then
+    exit 0  # Gracefully skip test if not configured
+fi
+
 create_pvc "${MANIFEST_DIR}/pvc-nvmeof.yaml" "${PVC_NAME}" false  # Don't wait for binding (WaitForFirstConsumer)
 create_test_pod "${MANIFEST_DIR}/pod-nvmeof.yaml" "${POD_NAME}"
 test_block_io_with_pattern "${POD_NAME}" "/data"

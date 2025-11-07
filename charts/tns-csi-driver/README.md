@@ -436,9 +436,9 @@ helm pull oci://registry-1.docker.io/bfenski/tns-csi-driver --version 0.0.1
 
 ## Support
 
-- **Issues**: https://github.com/bfenski/tns-csi/issues
-- **Discussions**: https://github.com/bfenski/tns-csi/discussions
-- **Documentation**: https://github.com/bfenski/tns-csi
+- **Issues**: https://github.com/fenio/tns-csi/issues
+- **Discussions**: https://github.com/fenio/tns-csi/discussions
+- **Documentation**: https://github.com/fenio/tns-csi
 
 ## License
 

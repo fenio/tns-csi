@@ -75,6 +75,7 @@ async function testDashboard() {
 
   } catch (error) {
     console.error('✗ Test failed:', error.message);
+    console.error('Stack trace:', error.stack);
     return false;
   }
 }

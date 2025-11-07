@@ -55,7 +55,7 @@ The release process is fully automated via GitHub Actions.
    ```
 
 4. **Monitor the release**
-   - Go to: https://github.com/bfenski/tns-csi/actions
+   - Go to: https://github.com/fenio/tns-csi/actions
    - Watch the "Release" workflow run
    - The workflow will:
      - Run tests and linters
@@ -68,8 +68,8 @@ The release process is fully automated via GitHub Actions.
 
 5. **Verify release artifacts**
    - Docker Hub: https://hub.docker.com/r/bfenski/tns-csi
-   - GitHub Releases: https://github.com/bfenski/tns-csi/releases
-   - GHCR: https://github.com/bfenski?tab=packages
+   - GitHub Releases: https://github.com/fenio/tns-csi/releases
+   - GHCR: https://github.com/fenio?tab=packages
 
 ## What Gets Published
 
@@ -77,12 +77,12 @@ Each release creates the following artifacts:
 
 ### Docker Images
 - **Docker Hub**: `bfenski/tns-csi:v1.0.0`, `bfenski/tns-csi:1.0`, `bfenski/tns-csi:1`, `bfenski/tns-csi:latest`
-- **GHCR**: `ghcr.io/bfenski/tns-csi:v1.0.0`, etc.
+- **GHCR**: `ghcr.io/fenio/tns-csi:v1.0.0`, etc.
 - **Architectures**: linux/amd64, linux/arm64
 
 ### Helm Charts
 - **Docker Hub OCI**: `oci://registry-1.docker.io/bfenski/tns-csi-driver`
-- **GHCR OCI**: `oci://ghcr.io/bfenski/charts/tns-csi-driver`
+- **GHCR OCI**: `oci://ghcr.io/fenio/charts/tns-csi-driver`
 - **GitHub Release**: `tns-csi-driver-1.0.0.tgz` attached to release
 
 ### GitHub Release
@@ -124,7 +124,7 @@ git push origin v2.0.0
 The CI workflow automatically builds and pushes development images on every push to `main`:
 
 - **Docker Hub**: `bfenski/tns-csi:latest`
-- **GHCR**: `ghcr.io/bfenski/tns-csi:latest`
+- **GHCR**: `ghcr.io/fenio/tns-csi:latest`
 
 These are useful for testing but should **not** be used in production.
 
@@ -221,7 +221,7 @@ echo $DOCKERHUB_TOKEN | helm registry login registry-1.docker.io -u $DOCKERHUB_U
 helm push tns-csi-driver-${VERSION#v}.tgz oci://registry-1.docker.io/bfenski
 
 # 5. Create GitHub release manually via web UI
-# https://github.com/bfenski/tns-csi/releases/new
+# https://github.com/fenio/tns-csi/releases/new
 ```
 
 ## References

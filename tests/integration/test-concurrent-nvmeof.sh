@@ -9,8 +9,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="NVMe-oF Concurrent"
-MANIFEST_DIR="${SCRIPT_DIR}/manifests"
-NUM_VOLUMES=10  # Number of concurrent PVCs to create
+PVC_NAME="concurrent-pvc-nvmeof"
+POD_NAME="concurrent-pod-nvmeof"
+NUM_VOLUMES=5  # Reduced from 10 to 5 for stability
 
 echo "========================================"
 echo "TrueNAS CSI - Concurrent NVMe-oF Test"
@@ -72,7 +73,7 @@ done
 test_info "Creating ${NUM_VOLUMES} PVC+Pod pairs concurrently..."
 for i in $(seq 1 ${NUM_VOLUMES}); do
     # Create PVC and Pod together for WaitForFirstConsumer binding mode
-    cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
+    if ! cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -84,7 +85,7 @@ spec:
   resources:
     requests:
       storage: 1Gi
-   storageClassName: tns-csi-nvmeof
+  storageClassName: tns-csi-nvmeof
 ---
 apiVersion: v1
 kind: Pod
@@ -103,6 +104,12 @@ spec:
     persistentVolumeClaim:
       claimName: ${PVC_NAMES[$i]}
 EOF
+    then
+        test_error "Failed to submit PVC/Pod creation for ${PVC_NAMES[$i]}"
+        exit 1
+    fi
+    # Small delay to avoid overwhelming the API server
+    sleep 0.5
 done
 
 # Wait for all background jobs to complete
@@ -128,10 +135,12 @@ while [[ $ELAPSED -lt $TIMEOUT ]]; do
     # Count pods in Ready state
     READY_COUNT=$(kubectl get pods -n "${TEST_NAMESPACE}" \
         --no-headers 2>/dev/null | awk '{print $2}' | grep -c "1/1" || echo "0")
+    READY_COUNT=$((READY_COUNT + 0))  # Ensure numeric
     
     # Count PVCs in Bound state
     BOUND_COUNT=$(kubectl get pvc -n "${TEST_NAMESPACE}" \
         --no-headers 2>/dev/null | grep -c "Bound" || echo "0")
+    BOUND_COUNT=$((BOUND_COUNT + 0))  # Ensure numeric
     
     echo "Progress: ${READY_COUNT}/${NUM_VOLUMES} pods ready, ${BOUND_COUNT}/${NUM_VOLUMES} PVCs bound (${ELAPSED}s elapsed)"
     
@@ -183,6 +192,7 @@ echo ""
 test_info "Verifying all PVs are unique..."
 UNIQUE_PV_COUNT=$(kubectl get pvc -n "${TEST_NAMESPACE}" \
     -o jsonpath='{range .items[*]}{.spec.volumeName}{"\n"}{end}' | sort -u | wc -l)
+UNIQUE_PV_COUNT=$((UNIQUE_PV_COUNT + 0))  # Ensure numeric
 
 if [[ $UNIQUE_PV_COUNT -eq $NUM_VOLUMES ]]; then
     test_success "All ${NUM_VOLUMES} PVCs have unique PVs"

@@ -337,9 +337,11 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
 	if err != nil {
-		// Return InvalidArgument for malformed snapshot IDs
-		klog.V(4).Infof("Invalid snapshot ID %q: %v", req.GetSnapshotId(), err)
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid snapshot ID: %v", err)
+		// If snapshot ID is malformed, return empty list (snapshot doesn't exist)
+		klog.V(4).Infof("Invalid snapshot ID %q: %v - returning empty list", req.GetSnapshotId(), err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
 	}
 
 	klog.V(4).Infof("ListSnapshots: filtering by snapshot ID (ZFS name: %s)", snapshotMeta.SnapshotName)
@@ -383,9 +385,11 @@ func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListS
 func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
 	if err != nil {
-		// Return InvalidArgument for malformed volume IDs
-		klog.V(4).Infof("Invalid source volume ID %q: %v", req.GetSourceVolumeId(), err)
-		return nil, status.Errorf(codes.InvalidArgument, "Invalid source volume ID: %v", err)
+		// If source volume ID is malformed, return empty list
+		klog.V(4).Infof("Invalid source volume ID %q: %v - returning empty list", req.GetSourceVolumeId(), err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
 	}
 
 	// Query snapshots for this dataset (snapshots will have format dataset@snapname)

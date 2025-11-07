@@ -301,6 +301,11 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
 	}
 
+	// Remove the target path
+	if err := os.Remove(targetPath); err != nil {
+		klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
+	}
+
 	klog.Infof("Successfully unmounted volume %s from %s", volumeID, targetPath)
 	timer.ObserveSuccess()
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -399,6 +404,11 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	volMeta, err := decodeVolumeID(volumeID)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
+	}
+
+	// Check if volume path exists
+	if _, err := os.Stat(volumePath); os.IsNotExist(err) {
+		return nil, status.Errorf(codes.NotFound, "volume path %s does not exist", volumePath)
 	}
 
 	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)

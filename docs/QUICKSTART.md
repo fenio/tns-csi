@@ -212,7 +212,7 @@ spec:
       name: data
     spec:
       accessModes: [ "ReadWriteOnce" ]
-      storageClassName: tns-nfs
+      storageClassName: tns-csi-nfs
       resources:
         requests:
           storage: 10Gi

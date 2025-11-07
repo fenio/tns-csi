@@ -1,0 +1,113 @@
+name: Setup Integration Environment
+
+inputs:
+  protocol:
+    description: 'Protocol to test (nfs or nvmeof)'
+    required: true
+  go-version:
+    description: 'Go version to use'
+    required: false
+    default: '1.25.3'
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl wget git make
+        if [ "${{ inputs.protocol }}" = "nfs" ]; then
+          sudo apt-get install -y nfs-common
+        elif [ "${{ inputs.protocol }}" = "nvmeof" ]; then
+          sudo apt-get install -y nvme-cli
+          sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
+        fi
+
+    - name: Install Docker
+      shell: bash
+      run: |
+        if ! command -v docker &> /dev/null; then
+          echo "Installing Docker..."
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          rm get-docker.sh
+        else
+          echo "Docker already installed"
+        fi
+        sudo usermod -aG docker $USER
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+
+    - name: Install Helm
+      shell: bash
+      run: |
+        if ! command -v helm &> /dev/null; then
+          echo "Installing Helm..."
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+        else
+          echo "Helm already installed"
+        fi
+
+    - name: Destroy existing k3s cluster
+      shell: bash
+      run: |
+        echo "=== Destroying existing k3s cluster for clean state ==="
+        if command -v k3s-uninstall.sh &> /dev/null; then
+          sudo k3s-uninstall.sh || true
+        fi
+        # Clean up any remaining k3s artifacts
+        sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
+        echo "k3s cluster destroyed"
+
+    - name: Install k3s (fresh cluster)
+      shell: bash
+      run: |
+        echo "=== Installing fresh k3s cluster ==="
+        curl -sfL https://get.k3s.io | sh -s - \
+          --write-kubeconfig-mode 644 \
+          --disable traefik \
+          --disable servicelb
+        
+        echo "Waiting for k3s service to start..."
+        sleep 15
+        
+        echo "Waiting for cluster nodes to register and become ready..."
+        retries=0
+        while [[ $retries -lt 24 ]]; do
+          if sudo k3s kubectl get nodes &>/dev/null; then
+            echo "Node registered, checking Ready condition..."
+            if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
+              echo "Fresh k3s cluster ready"
+              sudo k3s kubectl get nodes
+              exit 0
+            fi
+          fi
+          echo "Waiting for cluster... (attempt $((retries+1))/24)"
+          sleep 5
+          retries=$((retries + 1))
+        done
+        echo "ERROR: Cluster failed to become ready within 2 minutes"
+        sudo systemctl status k3s || true
+        exit 1
+
+    - name: Configure kubectl
+      shell: bash
+      run: |
+        mkdir -p ~/.kube
+        sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+        sudo chown $USER:$USER ~/.kube/config
+        echo "=== Cluster nodes ==="
+        kubectl get nodes
+        echo "=== Cluster version ==="
+        kubectl version
+
+    - name: Build CSI driver image
+      shell: bash
+      run: |
+        sudo -E make docker-build
+        sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -

@@ -191,7 +191,7 @@ storageClasses:
   # NFS storage class
   nfs:
     enabled: true
-    name: tns-nfs
+    name: tns-csi-nfs
     # Set as default storage class
     isDefault: false
     # Storage pool name on TrueNAS
@@ -215,7 +215,7 @@ storageClasses:
   # NVMe-oF storage class (UNTESTED - requires Linux with nvme-tcp kernel module)
   nvmeof:
     enabled: false
-    name: tns-nvmeof
+    name: tns-csi-nvmeof
     isDefault: false
     # Storage pool name on TrueNAS
     pool: "storage"

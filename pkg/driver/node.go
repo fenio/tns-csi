@@ -34,9 +34,9 @@ const (
 type NodeService struct {
 	csi.UnimplementedNodeServer
 	apiClient    tnsapi.ClientInterface
+	nodeRegistry *NodeRegistry
 	nodeID       string
 	testMode     bool // Test mode flag to skip actual mounts
-	nodeRegistry *NodeRegistry
 }
 
 // NewNodeService creates a new node service.

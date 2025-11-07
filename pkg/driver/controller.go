@@ -122,6 +122,11 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		protocol = ProtocolNFS
 	}
 
+	// Check for idempotency: if volume with same name already exists
+	if existingVolume := s.checkExistingVolume(ctx, req, params, protocol); existingVolume != nil {
+		return existingVolume, nil
+	}
+
 	// Check if creating from snapshot
 	klog.Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), req.GetVolumeContentSource())
 	if req.GetVolumeContentSource() != nil {
@@ -144,6 +149,63 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return s.createNVMeOFVolume(ctx, req)
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", protocol)
+	}
+}
+
+// checkExistingVolume checks if a volume with the same name already exists and returns it for idempotency.
+func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) *csi.CreateVolumeResponse {
+	pool := params["pool"]
+	parentDataset := params["parentDataset"]
+	if parentDataset == "" {
+		parentDataset = pool
+	}
+
+	if parentDataset == "" {
+		return nil
+	}
+
+	expectedDatasetName := fmt.Sprintf("%s/%s", parentDataset, req.GetName())
+	existingDataset, err := s.apiClient.GetDataset(ctx, expectedDatasetName)
+	if err != nil || existingDataset == nil {
+		// Dataset doesn't exist or error querying - continue with creation
+		if err != nil {
+			klog.V(4).Infof("Dataset %s does not exist or error querying: %v - proceeding with creation", expectedDatasetName, err)
+		}
+		return nil
+	}
+
+	// Volume already exists - return it for idempotency
+	klog.Infof("Volume %s already exists as dataset %s", req.GetName(), expectedDatasetName)
+
+	reqCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if reqCapacity > 0 {
+		klog.V(4).Infof("Existing volume found, accepting for idempotency (requested: %d bytes)", reqCapacity)
+	}
+
+	// Return existing volume (idempotent success)
+	volumeMeta := VolumeMetadata{
+		Name:        req.GetName(),
+		DatasetName: expectedDatasetName,
+		Protocol:    protocol,
+	}
+	volumeID, encodeErr := encodeVolumeID(volumeMeta)
+	if encodeErr != nil {
+		klog.Errorf("Failed to encode volume ID: %v", encodeErr)
+		return nil
+	}
+
+	// Return capacity from request if specified, otherwise use a default
+	capacity := reqCapacity
+	if capacity <= 0 {
+		capacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	klog.Infof("Returning existing volume %s (idempotent)", req.GetName())
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeID,
+			CapacityBytes: capacity,
+		},
 	}
 }
 
@@ -185,7 +247,20 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume called with request: %+v", req)
 
-	// For NFS and NVMe-oF, this is typically a no-op
+	// Validate required parameters per CSI spec
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
+	if req.GetNodeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
+	}
+
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
+	}
+
+	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
 
@@ -193,7 +268,16 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume called with request: %+v", req)
 
-	// For NFS and NVMe-oF, this is typically a no-op
+	// Validate required parameters per CSI spec
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+
+	if req.GetNodeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
+	}
+
+	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 

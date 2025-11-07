@@ -168,6 +168,40 @@ parameters:
 
 **Important:** The `subsystemNQN` parameter is required and must match a pre-configured NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems). The CSI driver creates namespaces within this shared subsystem for each volume.
 
+## Testing
+
+**Comprehensive Testing on Real Infrastructure**
+
+This driver is tested extensively using **real hardware and software** - not mocks or simulators:
+
+- **Self-hosted GitHub Actions runner** on dedicated hardware
+- **Real Kubernetes cluster** (k3s) provisioned for each test run
+- **Real TrueNAS Scale server** with actual storage pools and network services
+- **Full protocol stack testing** - NFS mounts, NVMe-oF connections, actual I/O operations
+
+### Automated Test Suite
+
+Every commit triggers comprehensive integration tests:
+
+**Core Functionality Tests:**
+- Basic volume provisioning and deletion (NFS & NVMe-oF)
+- Volume expansion (dynamic resizing)
+- Snapshot creation and restoration
+- Volume cloning from snapshots
+- StatefulSet volume management
+- Data persistence across pod restarts
+
+**Stress & Reliability Tests:**
+- Concurrent volume creation (5 simultaneous volumes)
+- Connection resilience (WebSocket reconnection)
+- Orphaned resource detection and cleanup
+
+**CSI Specification Compliance:**
+- Passes [Kubernetes CSI sanity tests](https://github.com/kubernetes-csi/csi-test) (v5.2.0)
+- Full CSI spec compliance verified
+
+View test results and history: [![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://fenio.github.io/tns-csi/dashboard/)
+
 ## Project Status and Limitations
 
 **⚠️ EARLY DEVELOPMENT - NOT PRODUCTION READY**
@@ -177,8 +211,8 @@ This driver is in early development and requires extensive testing before produc
 - **Development Phase**: Active development with ongoing testing and validation
 - **Protocol Support**: Currently supports NFS and NVMe-oF. iSCSI and SMB may be considered for future releases.
 - **Volume Expansion**: Implemented and functional for both NFS and NVMe-oF protocols when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
-- **Snapshots**: Implemented for both NFS and NVMe-oF protocols, testing in progress
-- **Testing**: Integration tests run on self-hosted infrastructure; extensive validation needed for production readiness
+- **Snapshots**: Implemented for both NFS and NVMe-oF protocols, functional and tested
+- **Testing**: Comprehensive automated testing on real infrastructure (see Testing section above)
 - **Stability**: Core features functional but may have undiscovered edge cases or bugs
 
 **Recommended Use**: Development, testing, and evaluation environments only. Use at your own risk.
@@ -244,16 +278,21 @@ make build
 
 ### Testing
 
-Tests are automated via GitHub Actions CI/CD. See `.github/workflows/` for workflow configuration.
+Tests are automated via GitHub Actions CI/CD running on self-hosted infrastructure with real TrueNAS hardware. See `.github/workflows/` for workflow configuration.
 
-For local testing:
+**Local Testing:**
 ```bash
 # Run unit tests
 make test
 
 # Run specific test
 go test -v ./pkg/driver/...
+
+# Run CSI sanity tests (requires TrueNAS connection)
+cd tests/sanity && ./test-sanity.sh
 ```
+
+See the Testing section above for details on the comprehensive integration test suite.
 
 ### Building Container Image
 

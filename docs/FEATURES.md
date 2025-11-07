@@ -450,6 +450,7 @@ spec:
 - ✅ QUICKSTART-NVMEOF.md - NVMe-oF setup guide
 - ✅ SNAPSHOTS.md - Snapshot and cloning guide
 - ✅ METRICS.md - Prometheus metrics documentation
+- ✅ TESTING.md - Comprehensive testing guide and infrastructure details
 - ✅ FEATURES.md - This document
 - ✅ AGENTS.md - Development guidelines for AI agents
 - ✅ CONTRIBUTING.md - Contribution guidelines
@@ -458,6 +459,38 @@ spec:
 ### Helm Chart Documentation
 - ✅ charts/tns-csi-driver/README.md - Complete Helm configuration reference
 - ✅ charts/tns-csi-driver/values.yaml - Documented default values
+
+## Testing Infrastructure
+
+### Real Hardware, Real Tests
+
+All features are tested on **real infrastructure** - not mocks or simulators:
+
+**Test Environment:**
+- ✅ Self-hosted GitHub Actions runner (dedicated Linode server)
+- ✅ Real Kubernetes clusters (k3s) provisioned for each test run
+- ✅ Real TrueNAS Scale 25.10+ server with actual storage pools
+- ✅ Real protocol operations (NFS mounts, NVMe-oF connections, actual I/O)
+
+**CSI Specification Compliance:**
+- ✅ Passes [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) v5.2.0 sanity tests
+- ✅ Full CSI specification compliance verified
+
+**Integration Test Coverage:**
+- ✅ Basic volume operations (NFS & NVMe-oF)
+- ✅ Volume expansion testing
+- ✅ Snapshot creation and restoration
+- ✅ StatefulSet volume management (3 replica testing)
+- ✅ Data persistence across pod restarts
+- ✅ Concurrent volume creation (5 simultaneous volumes)
+- ✅ Connection resilience (WebSocket reconnection)
+- ✅ Orphaned resource detection and cleanup
+
+**Test Results:**
+- View live dashboard: [Test Dashboard](https://fenio.github.io/tns-csi/dashboard/)
+- CI status: [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml)
+
+See [TESTING.md](TESTING.md) for comprehensive testing documentation.
 
 ## Getting Started
 

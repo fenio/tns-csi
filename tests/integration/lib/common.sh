@@ -319,10 +319,14 @@ deploy_driver() {
     esac
     
     # Deploy with Helm
-    helm upgrade --install tns-csi ./charts/tns-csi-driver \
+    if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
         "${base_args[@]}" \
         "${helm_args[@]}" \
-        --wait --timeout 5m
+        --wait --timeout 5m; then
+        stop_test_timer "deploy_driver" "FAILED"
+        test_error "Helm deployment failed"
+        return 1
+    fi
     
     test_success "CSI driver deployed"
     
@@ -344,10 +348,14 @@ wait_for_driver() {
     start_test_timer "wait_for_driver"
     test_step 3 9 "Waiting for CSI driver to be ready"
     
-    kubectl wait --for=condition=Ready pod \
+    if ! kubectl wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=tns-csi-driver \
         -n kube-system \
-        --timeout="${TIMEOUT_DRIVER}"
+        --timeout="${TIMEOUT_DRIVER}"; then
+        stop_test_timer "wait_for_driver" "FAILED"
+        test_error "CSI driver failed to become ready"
+        return 1
+    fi
     
     test_success "CSI driver is ready"
     
@@ -395,10 +403,14 @@ create_pvc() {
     if [[ "${wait_for_binding}" == "true" ]]; then
         echo ""
         test_info "Waiting for PVC to be bound (timeout: ${TIMEOUT_PVC})..."
-        kubectl wait --for=jsonpath='{.status.phase}'=Bound \
+        if ! kubectl wait --for=jsonpath='{.status.phase}'=Bound \
             pvc/"${pvc_name}" \
             -n "${TEST_NAMESPACE}" \
-            --timeout="${TIMEOUT_PVC}"
+            --timeout="${TIMEOUT_PVC}"; then
+            stop_test_timer "create_pvc" "FAILED"
+            test_error "PVC failed to bind"
+            return 1
+        fi
         
         test_success "PVC is bound"
         

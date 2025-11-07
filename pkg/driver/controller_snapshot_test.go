@@ -13,8 +13,6 @@ import (
 )
 
 // MockAPIClientForSnapshots is a mock implementation of APIClient for snapshot tests.
-//
-//nolint:goimports // Struct field alignment is intentional for readability
 type MockAPIClientForSnapshots struct {
 	CreateSnapshotFunc           func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
 	DeleteSnapshotFunc           func(ctx context.Context, snapshotID string) error

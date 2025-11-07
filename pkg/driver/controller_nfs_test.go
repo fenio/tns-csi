@@ -236,7 +236,7 @@ func TestCreateNFSVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.createNFSVolume(ctx, tt.req)
 
 			if tt.wantErr {
@@ -359,7 +359,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			_, err := controller.deleteNFSVolume(ctx, tt.meta)
 
 			if tt.wantErr && err == nil {
@@ -457,7 +457,7 @@ func TestExpandNFSVolume(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.expandNFSVolume(ctx, tt.meta, tt.requiredBytes)
 
 			if tt.wantErr {
@@ -580,7 +580,7 @@ func TestSetupNFSVolumeFromClone(t *testing.T) {
 			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 
-			controller := NewControllerService(mockClient)
+			controller := NewControllerService(mockClient, NewNodeRegistry())
 			resp, err := controller.setupNFSVolumeFromClone(ctx, tt.req, tt.dataset, tt.server, "snapshot-id")
 
 			if tt.wantErr {

@@ -93,13 +93,15 @@ type ControllerService struct {
 	csi.UnimplementedControllerServer
 	apiClient        APIClient
 	snapshotRegistry *SnapshotRegistry
+	nodeRegistry     *NodeRegistry
 }
 
 // NewControllerService creates a new controller service.
-func NewControllerService(apiClient APIClient) *ControllerService {
+func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *ControllerService {
 	return &ControllerService{
 		apiClient:        apiClient,
 		snapshotRegistry: NewSnapshotRegistry(),
+		nodeRegistry:     nodeRegistry,
 	}
 }
 
@@ -459,13 +461,16 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
 	}
 
-	// For testing purposes, fail if node does not exist
-	if req.GetNodeId() == "nonexistent-node" {
-		return nil, status.Error(codes.NotFound, "node not found")
-	}
+	nodeID := req.GetNodeId()
 
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
+	}
+
+	// Validate node exists in registry
+	// Per CSI spec: return NotFound if node doesn't exist
+	if s.nodeRegistry != nil && !s.nodeRegistry.IsRegistered(nodeID) {
+		return nil, status.Errorf(codes.NotFound, "node %s not found", nodeID)
 	}
 
 	// Verify volume exists by attempting to decode the volume ID
@@ -475,9 +480,6 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		// This covers both malformed IDs and volumes that don't exist
 		return nil, status.Errorf(codes.NotFound, "volume %s not found", req.GetVolumeId())
 	}
-
-	// Note: Node existence validation is not implemented as CSI spec doesn't provide
-	// a mechanism for controllers to query node registry. Kubernetes handles node validation.
 
 	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerPublishVolumeResponse{}, nil

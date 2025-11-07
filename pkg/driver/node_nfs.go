@@ -38,6 +38,12 @@ func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublish
 		}
 	}
 
+	// In test mode, skip actual mount operations
+	if s.testMode {
+		klog.V(4).Infof("Test mode: skipping actual mount for %s", targetPath)
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
 	// Check if already mounted
 	mounted, err := mount.IsMounted(ctx, targetPath)
 	if err != nil {
@@ -51,7 +57,7 @@ func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublish
 
 	// Mount NFS share
 	nfsSource := fmt.Sprintf("%s:%s", server, share)
-	mountOptions := []string{"vers=4.2", "nolock"}
+	mountOptions := getNFSMountOptions()
 
 	// Add read-only flag if requested
 	if req.GetReadonly() {

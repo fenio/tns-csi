@@ -197,7 +197,7 @@ func TestIsEncodedVolumeID(t *testing.T) {
 }
 
 func TestControllerGetCapabilities(t *testing.T) {
-	service := NewControllerService(nil)
+	service := NewControllerService(nil, NewNodeRegistry())
 
 	resp, err := service.ControllerGetCapabilities(context.Background(), nil)
 	if err != nil {
@@ -438,7 +438,7 @@ func TestGetCapacity(t *testing.T) {
 			}
 
 			// Create controller service
-			service := NewControllerService(mockClient)
+			service := NewControllerService(mockClient, NewNodeRegistry())
 
 			// Create request
 			req := &csi.GetCapacityRequest{

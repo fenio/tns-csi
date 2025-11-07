@@ -37,6 +37,7 @@ func TestSanity(t *testing.T) {
 		Version:    driverVersion,
 		NodeID:     nodeID,
 		Endpoint:   endpoint,
+		TestMode:   true, // Enable test mode to skip actual mounts
 	}
 
 	// Create driver with mock client

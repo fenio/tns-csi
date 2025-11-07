@@ -68,7 +68,20 @@ check_nvmeof_configured() {
     
     # Create a pre-check PVC to see if provisioning works
     kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}" || true
-    sleep 10
+    
+    # Wait for PVC to be processed and logs to be generated
+    local timeout=10
+    local elapsed=0
+    local interval=2
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
+            sleep 2  # Give controller a moment to process and log
+            break
+        fi
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
     
     # Check controller logs for port configuration error
     local logs=$(kubectl logs -n kube-system \
@@ -89,7 +102,11 @@ check_nvmeof_configured() {
     
     # Delete pre-check PVC before running actual test
     kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
-    sleep 5
+    
+    # Wait for PVC to be actually deleted
+    if ! wait_for_resource_deleted "pvc" "${pvc_name}" "${TEST_NAMESPACE}" 10; then
+        test_warning "Pre-check PVC deletion took longer than expected"
+    fi
     
     return 0
 }
@@ -363,6 +380,39 @@ deploy_driver() {
 }
 
 #######################################
+# Wait for resource to be deleted
+# Arguments:
+#   Resource type (e.g., pvc, pod, namespace)
+#   Resource name
+#   Namespace (optional, omit for cluster-scoped resources)
+#   Timeout in seconds (default: 30)
+#######################################
+wait_for_resource_deleted() {
+    local resource_type=$1
+    local resource_name=$2
+    local namespace=${3:-}
+    local timeout=${4:-30}
+    
+    local namespace_arg=""
+    if [[ -n "${namespace}" ]]; then
+        namespace_arg="-n ${namespace}"
+    fi
+    
+    local elapsed=0
+    local interval=2
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if ! kubectl get "${resource_type}" "${resource_name}" ${namespace_arg} &>/dev/null; then
+            return 0  # Resource is deleted
+        fi
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+    
+    return 1  # Timeout
+}
+
+#######################################
 # Wait for CSI driver to be ready
 #######################################
 wait_for_driver() {
@@ -405,8 +455,22 @@ create_pvc() {
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
-    # Give it a moment to start provisioning
-    sleep 5
+    # Wait for PVC to be created and start provisioning (poll until it exists)
+    local timeout=10
+    local elapsed=0
+    local interval=1
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        if kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
+            break
+        fi
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+    
+    if [[ $elapsed -ge $timeout ]]; then
+        test_warning "PVC took longer than expected to appear in API server"
+    fi
     
     # Check PVC status
     echo ""
@@ -657,7 +721,29 @@ test_volume_expansion() {
     if [[ -n "${mount_path}" ]]; then
         echo ""
         test_info "Verifying filesystem expansion..."
-        sleep 5  # Give filesystem time to expand
+        
+        # Poll for filesystem to reflect new size (some filesystems need time to expand)
+        local timeout=15
+        local elapsed=0
+        local interval=2
+        local fs_expanded=false
+        
+        while [[ $elapsed -lt $timeout ]]; do
+            # Try to write a file - if filesystem is still expanding, this gives it time
+            if kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
+                sh -c "echo 'expansion-test' > ${mount_path}/.expansion-test 2>/dev/null"; then
+                fs_expanded=true
+                break
+            fi
+            sleep "${interval}"
+            elapsed=$((elapsed + interval))
+        done
+        
+        if [[ "${fs_expanded}" == "true" ]]; then
+            test_success "Filesystem is accessible after expansion (${elapsed}s)"
+        else
+            test_warning "Filesystem expansion took longer than expected, but continuing"
+        fi
         
         echo ""
         echo "=== New filesystem usage ==="
@@ -819,12 +905,41 @@ cleanup_test() {
         kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
     }
     
-    # Wait for TrueNAS backend cleanup to complete
+    # Wait for TrueNAS backend cleanup to complete by monitoring PV deletion
     # The CSI driver's DeleteVolume removes datasets, NFS shares, and NVMe-oF subsystems
-    # This wait ensures TrueNAS cleanup finishes before the test completes
-    test_info "Waiting for TrueNAS backend cleanup (60 seconds)..."
-    sleep 60
-    test_success "Cleanup complete"
+    # PVs are deleted after successful backend cleanup, so we poll for their deletion
+    test_info "Waiting for TrueNAS backend cleanup (monitoring PV deletion)..."
+    
+    # Get list of PVs that were in this namespace before deletion
+    local pv_list=$(kubectl get pv -o json | jq -r ".items[] | select(.spec.claimRef.namespace==\"${TEST_NAMESPACE}\") | .metadata.name" 2>/dev/null || echo "")
+    
+    if [[ -n "${pv_list}" ]]; then
+        local timeout=60
+        local elapsed=0
+        local interval=2
+        local all_deleted=false
+        
+        while [[ $elapsed -lt $timeout ]]; do
+            local remaining_pvs=$(kubectl get pv -o json | jq -r ".items[] | select(.spec.claimRef.namespace==\"${TEST_NAMESPACE}\") | .metadata.name" 2>/dev/null || echo "")
+            
+            if [[ -z "${remaining_pvs}" ]]; then
+                all_deleted=true
+                break
+            fi
+            
+            test_info "Waiting for PVs to be deleted (${elapsed}s elapsed)..."
+            sleep "${interval}"
+            elapsed=$((elapsed + interval))
+        done
+        
+        if [[ "${all_deleted}" == "true" ]]; then
+            test_success "TrueNAS backend cleanup complete (PVs deleted in ${elapsed}s)"
+        else
+            test_warning "Some PVs still exist after ${timeout}s, but continuing (may indicate slow cleanup)"
+        fi
+    else
+        test_success "No PVs found for cleanup"
+    fi
     stop_test_timer "cleanup_test" "PASSED"
 }
 

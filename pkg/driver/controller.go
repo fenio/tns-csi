@@ -187,7 +187,19 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume called with request: %+v", req)
 
+	// Validate required parameters per CSI spec
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+	if req.GetNodeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
+	}
+	if req.GetVolumeCapability() == nil {
+		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
+	}
+
 	// For NFS and NVMe-oF, this is typically a no-op
+	// Actual attachment happens at node stage/publish
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
 
@@ -195,7 +207,16 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume called with request: %+v", req)
 
+	// Validate required parameters per CSI spec
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+	}
+	if req.GetNodeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
+	}
+
 	// For NFS and NVMe-oF, this is typically a no-op
+	// Actual detachment happens at node unpublish/unstage
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
 
@@ -249,11 +270,17 @@ func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 	// If starting token is provided, skip entries until we reach it
 	startIdx := 0
 	if startingToken != "" {
+		found := false
 		for i, entry := range entries {
 			if entry.Volume.VolumeId == startingToken {
 				startIdx = i + 1
+				found = true
 				break
 			}
+		}
+		// CSI spec requires returning Aborted error for invalid starting token
+		if !found {
+			return nil, status.Errorf(codes.Aborted, "invalid starting_token: %s", startingToken)
 		}
 	}
 
@@ -290,17 +317,28 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
 	}
 
+	// Query all datasets to match with shares
+	allDatasets, err := s.apiClient.QueryAllDatasets(ctx, "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
+	}
+
+	// Build a map of mountpoint -> dataset for quick lookup
+	datasetsByMountpoint := make(map[string]tnsapi.Dataset)
+	for _, ds := range allDatasets {
+		if ds.Mountpoint != "" {
+			datasetsByMountpoint[ds.Mountpoint] = ds
+		}
+	}
+
 	var entries []*csi.ListVolumesResponse_Entry
 	for _, share := range shares {
-		// Each NFS share path corresponds to a dataset
-		// Try to extract volume metadata from the dataset
-		datasets, err := s.apiClient.QueryAllDatasets(ctx, share.Path)
-		if err != nil || len(datasets) == 0 {
-			klog.V(5).Infof("Skipping NFS share with no matching dataset: %s", share.Path)
+		// Find the dataset that matches this share's path (mountpoint)
+		dataset, found := datasetsByMountpoint[share.Path]
+		if !found {
+			klog.V(5).Infof("Skipping NFS share with no matching dataset mountpoint: %s", share.Path)
 			continue
 		}
-
-		dataset := datasets[0]
 
 		// Build volume metadata
 		meta := VolumeMetadata{

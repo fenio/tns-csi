@@ -22,7 +22,7 @@ type SnapshotMetadata struct {
 	SourceVolume string `json:"sourceVolume"` // Source volume ID
 	DatasetName  string `json:"datasetName"`  // Parent dataset name
 	Protocol     string `json:"protocol"`     // Protocol (nfs, nvmeof)
-	CreatedAt    int64  `json:"createdAt"`    // Creation timestamp (Unix epoch)
+	CreatedAt    int64  `json:"-"`            // Creation timestamp (Unix epoch) - excluded from ID encoding
 }
 
 // encodeSnapshotID encodes snapshot metadata into a snapshotID string.
@@ -80,7 +80,26 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	klog.Infof("Creating snapshot %s for volume %s (dataset: %s, protocol: %s)",
 		snapshotName, volumeMeta.Name, volumeMeta.DatasetName, volumeMeta.Protocol)
 
-	// Check if snapshot already exists (idempotency)
+	// Check if snapshot name is already in use (with any dataset)
+	// CSI spec: if snapshot name exists for different source, return error
+	allSnapshotsWithName, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{"name", "=", snapshotName},
+	})
+	if err != nil {
+		klog.Warningf("Failed to query snapshots by name: %v", err)
+	} else {
+		for _, snap := range allSnapshotsWithName {
+			// Check if snapshot exists for a different dataset
+			if snap.Dataset != volumeMeta.DatasetName {
+				timer.ObserveError()
+				return nil, status.Errorf(codes.AlreadyExists,
+					"Snapshot name %s already exists for a different volume (dataset: %s)",
+					snapshotName, snap.Dataset)
+			}
+		}
+	}
+
+	// Check if snapshot already exists for this volume (idempotency)
 	existingSnapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
 		[]interface{}{"id", "=", fmt.Sprintf("%s@%s", volumeMeta.DatasetName, snapshotName)},
 	})
@@ -213,11 +232,9 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	if req.GetSnapshotId() != "" {
 		snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())
 		if err != nil {
-			// CSI spec: return empty list for non-existent or invalid snapshot IDs
-			klog.V(4).Infof("Invalid snapshot ID %q, returning empty list: %v", req.GetSnapshotId(), err)
-			return &csi.ListSnapshotsResponse{
-				Entries: []*csi.ListSnapshotsResponse_Entry{},
-			}, nil
+			// CSI spec: return InvalidArgument for malformed snapshot IDs
+			klog.V(4).Infof("Malformed snapshot ID %q: %v", req.GetSnapshotId(), err)
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid snapshot ID format: %v", err)
 		}
 		filters = []interface{}{
 			[]interface{}{"id", "=", snapshotMeta.SnapshotName},
@@ -226,11 +243,9 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 		// Filter by source volume - need to decode volume to get dataset name
 		volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
 		if err != nil {
-			// CSI spec: return empty list for non-existent or invalid volume IDs
-			klog.V(4).Infof("Invalid source volume ID %q, returning empty list: %v", req.GetSourceVolumeId(), err)
-			return &csi.ListSnapshotsResponse{
-				Entries: []*csi.ListSnapshotsResponse_Entry{},
-			}, nil
+			// CSI spec: return InvalidArgument for malformed source volume IDs
+			klog.V(4).Infof("Malformed source volume ID %q: %v", req.GetSourceVolumeId(), err)
+			return nil, status.Errorf(codes.InvalidArgument, "Invalid source volume ID format: %v", err)
 		}
 		// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 		filters = []interface{}{
@@ -246,20 +261,35 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 
 	klog.V(4).Infof("Found %d snapshots", len(snapshots))
 
+	// Build a map of dataset name -> volume ID by querying all volumes
+	datasetToVolumeID := s.buildDatasetToVolumeMap(ctx)
+
 	// Convert to CSI format
 	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		// For each snapshot, we need to determine the source volume
 		// Snapshot ID format is "dataset@snapname", dataset is the volume's dataset
 
-		// Try to find matching volume by dataset name
-		// For now, we'll create a basic snapshot metadata
+		// Find the source volume ID by dataset name
+		sourceVolumeID := datasetToVolumeID[snapshot.Dataset]
+		if sourceVolumeID == "" {
+			klog.V(4).Infof("No volume found for snapshot %s (dataset: %s)", snapshot.ID, snapshot.Dataset)
+		}
+
+		// Determine protocol from source volume if available
+		protocol := ""
+		if sourceVolumeID != "" {
+			if volumeMeta, decodeErr := decodeVolumeID(sourceVolumeID); decodeErr == nil {
+				protocol = volumeMeta.Protocol
+			}
+		}
+
 		snapshotMeta := SnapshotMetadata{
 			SnapshotName: snapshot.ID,
 			DatasetName:  snapshot.Dataset,
-			Protocol:     "", // Unknown without volume context
+			Protocol:     protocol,
 			CreatedAt:    time.Now().Unix(),
-			SourceVolume: "", // Unknown - would require querying volumes
+			SourceVolume: sourceVolumeID,
 		}
 
 		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
@@ -287,8 +317,6 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
-//
-//nolint:gocognit // Complexity from protocol-specific handling and error cleanup - splitting would hurt readability
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)
@@ -476,4 +504,47 @@ func containsAny(s string, substrs []string) bool {
 		}
 	}
 	return false
+}
+
+// buildDatasetToVolumeMap creates a map of dataset name to volume ID by listing all volumes.
+// Errors during listing are logged but do not cause failure.
+func (s *ControllerService) buildDatasetToVolumeMap(ctx context.Context) map[string]string {
+	result := make(map[string]string)
+
+	// List all NFS volumes
+	nfsVolumes, err := s.listNFSVolumes(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list NFS volumes: %v", err)
+		// Continue anyway - we'll try NVMe-oF volumes too
+	} else {
+		for _, volumeEntry := range nfsVolumes {
+			volumeID := volumeEntry.Volume.VolumeId
+			volumeMeta, decodeErr := decodeVolumeID(volumeID)
+			if decodeErr != nil {
+				klog.V(4).Infof("Failed to decode volume ID %s: %v", volumeID, decodeErr)
+				continue
+			}
+			result[volumeMeta.DatasetName] = volumeID
+		}
+	}
+
+	// List all NVMe-oF volumes
+	nvmeVolumes, err := s.listNVMeOFVolumes(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list NVMe-oF volumes: %v", err)
+		// Continue anyway - we already have NFS volumes
+	} else {
+		for _, volumeEntry := range nvmeVolumes {
+			volumeID := volumeEntry.Volume.VolumeId
+			volumeMeta, decodeErr := decodeVolumeID(volumeID)
+			if decodeErr != nil {
+				klog.V(4).Infof("Failed to decode volume ID %s: %v", volumeID, decodeErr)
+				continue
+			}
+			result[volumeMeta.DatasetName] = volumeID
+		}
+	}
+
+	klog.V(4).Infof("Built dataset-to-volume map with %d entries", len(result))
+	return result
 }

@@ -48,6 +48,10 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					// No existing ZVOLs - allow creation
+					return []tnsapi.Dataset{}, nil
+				}
 				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					if nqn != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
 						t.Errorf("Expected NQN nqn.2024-11.ai.truenas:nvme:test-subsystem, got %s", nqn)
@@ -140,6 +144,10 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				// No capacity specified - should default to 1GB
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					// No existing ZVOLs - allow creation
+					return []tnsapi.Dataset{}, nil
+				}
 				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
@@ -250,6 +258,10 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					// No existing ZVOLs - will proceed to subsystem check
+					return []tnsapi.Dataset{}, nil
+				}
 				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return nil, errors.New("subsystem not found")
 				}

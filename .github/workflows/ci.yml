@@ -76,7 +76,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # Only build amd64 for faster CI (ARM64 builds via QEMU take 10+ minutes)
+          # Multi-arch builds happen in release workflow for tagged versions
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi:latest

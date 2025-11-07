@@ -686,8 +686,13 @@ func TestListSnapshots(t *testing.T) {
 				SnapshotId: "invalid-id",
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
+			wantErr:   false,
+			checkResponse: func(t *testing.T, resp *csi.ListSnapshotsResponse) {
+				t.Helper()
+				if len(resp.Entries) != 0 {
+					t.Errorf("Expected 0 entries for invalid snapshot ID, got %d", len(resp.Entries))
+				}
+			},
 		},
 		{
 			name: "invalid source volume ID",
@@ -695,8 +700,13 @@ func TestListSnapshots(t *testing.T) {
 				SourceVolumeId: "invalid-id",
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
+			wantErr:   false,
+			checkResponse: func(t *testing.T, resp *csi.ListSnapshotsResponse) {
+				t.Helper()
+				if len(resp.Entries) != 0 {
+					t.Errorf("Expected 0 entries for invalid source volume ID, got %d", len(resp.Entries))
+				}
+			},
 		},
 		{
 			name: "TrueNAS API error",

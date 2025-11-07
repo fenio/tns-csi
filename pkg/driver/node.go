@@ -301,13 +301,18 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		return nil, status.Errorf(codes.Internal, "Failed to unmount: %v", err)
 	}
 
+	// Remove the target path
+	if err := os.Remove(targetPath); err != nil {
+		klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
+	}
+
 	klog.Infof("Successfully unmounted volume %s from %s", volumeID, targetPath)
 	timer.ObserveSuccess()
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
 // NodeGetVolumeStats returns volume capacity statistics.
-func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 	klog.V(4).Infof("NodeGetVolumeStats called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -323,9 +328,18 @@ func (s *NodeService) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolu
 	pathInfo, err := os.Stat(volumePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, status.Errorf(codes.NotFound, "Volume path %s does not exist", volumePath)
+			return nil, status.Errorf(codes.InvalidArgument, "Volume path %s does not exist", volumePath)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to stat volume path: %v", err)
+	}
+
+	// Check if the path is mounted
+	mounted, err := mount.IsMounted(ctx, volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
 	// Get filesystem statistics
@@ -399,6 +413,23 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	volMeta, err := decodeVolumeID(volumeID)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
+	}
+
+	// Check if volume path exists
+	if _, statErr := os.Stat(volumePath); os.IsNotExist(statErr) {
+		return nil, status.Errorf(codes.InvalidArgument, "volume path %s does not exist", volumePath)
+	}
+
+	// Check if the path is mounted
+	mounted, err := mount.IsMounted(ctx, volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to check if path is mounted: %v", err)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
+	}
+	if !mounted {
+		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
 	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)

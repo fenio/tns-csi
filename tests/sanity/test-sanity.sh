@@ -8,9 +8,9 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Phase 2 baseline: 33 tests passing (Identity service fully functional)
+# Phase 2 baseline: 67 tests passing (Identity service fully functional, volume validation and snapshot listing fixed)
 # This will be improved in Phase 3 with enhanced mock state management
-BASELINE_PASS_COUNT=33
+BASELINE_PASS_COUNT=67
 
 echo "=== CSI Sanity Tests ==="
 echo "Project root: ${PROJECT_ROOT}"

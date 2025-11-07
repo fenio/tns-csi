@@ -21,12 +21,12 @@ keywords:
   - nfs
   - nvmeof
 
-home: https://github.com/bfenski/tns-csi
+home: https://github.com/fenio/tns-csi
 sources:
-  - https://github.com/bfenski/tns-csi
+  - https://github.com/fenio/tns-csi
 
 maintainers:
   - name: TrueNAS CSI Driver Contributors
-    url: https://github.com/bfenski/tns-csi
+    url: https://github.com/fenio/tns-csi
 
 icon: https://www.truenas.com/wp-content/uploads/2023/01/TrueNAS_Open_Storage.png

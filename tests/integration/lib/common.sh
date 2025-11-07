@@ -52,16 +52,46 @@ should_skip_test() {
 }
 
 #######################################
-# Record test result
+# Check if NVMe-oF is configured on TrueNAS
+# Returns: 0 if configured, 1 if not configured (should skip)
 # Arguments:
-#   Test name
-#   Status (PASSED/FAILED)
+#   PVC manifest path
+#   PVC name
+#   Protocol name (for messaging)
 #######################################
-record_test_result() {
-    local test_name=$1
-    local status=$2
+check_nvmeof_configured() {
+    local pvc_manifest=$1
+    local pvc_name=$2
+    local protocol_name=${3:-"NVMe-oF"}
     
-    TEST_RESULTS+=("${test_name}:${status}")
+    test_info "Checking if NVMe-oF is configured on TrueNAS..."
+    
+    # Create a pre-check PVC to see if provisioning works
+    kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}" || true
+    sleep 10
+    
+    # Check controller logs for port configuration error
+    local logs=$(kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        --tail=20 2>/dev/null || true)
+    
+    if echo "$logs" | grep -q "No TCP NVMe-oF port"; then
+        test_warning "NVMe-oF ports not configured on TrueNAS server"
+        test_warning "Skipping ${protocol_name} tests - this is expected if NVMe-oF is not set up"
+        test_info "To enable NVMe-oF: Configure an NVMe-oF TCP portal in TrueNAS UI"
+        kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+        kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+        test_summary "${protocol_name}" "SKIPPED"
+        return 1
+    fi
+    
+    test_success "NVMe-oF is configured, proceeding with tests"
+    
+    # Delete pre-check PVC before running actual test
+    kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+    sleep 5
+    
+    return 0
 }
 
 #######################################

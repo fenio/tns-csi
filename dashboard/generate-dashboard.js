@@ -35,7 +35,13 @@ async function getWorkflowRuns(days = 30) {
       page++;
     }
   } catch (error) {
-    console.error('Error fetching workflow runs:', error);
+    console.error('Error fetching workflow runs:', error.message);
+    if (error.status === 401) {
+      console.error('Authentication failed. Please check your GITHUB_TOKEN.');
+    } else if (error.status === 404) {
+      console.error('Workflow not found. Check OWNER, REPO, and WORKFLOW_ID.');
+    }
+    throw error;
   }
 
   return runs;
@@ -62,9 +68,10 @@ function parseTestResults(jobs) {
     passed: 0,
     failed: 0,
     cancelled: 0,
+    skipped: 0,
     byProtocol: {
-      nfs: { total: 0, passed: 0, failed: 0, cancelled: 0 },
-      nvmeof: { total: 0, passed: 0, failed: 0, cancelled: 0 }
+      nfs: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 },
+      nvmeof: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 }
     },
     byTestType: {},
     durations: [],
@@ -78,30 +85,56 @@ function parseTestResults(jobs) {
 
     // Parse job status
     const status = job.conclusion || job.status;
-    if (status === 'success') results.passed++;
-    else if (status === 'failure') results.failed++;
-    else if (status === 'cancelled') results.cancelled++;
+    
+    // Check if job was skipped (success but very short duration could indicate skip)
+    // Or check job logs for "SKIPPED" status if available
+    let isSkipped = false;
+    if (status === 'success' && job.started_at && job.completed_at) {
+      const duration = (new Date(job.completed_at) - new Date(job.started_at)) / 1000;
+      // If test completed in less than 30 seconds, it might have been skipped
+      if (duration < 30) {
+        isSkipped = true;
+      }
+    }
+    
+    if (isSkipped) {
+      results.skipped++;
+    } else if (status === 'success') {
+      results.passed++;
+    } else if (status === 'failure') {
+      results.failed++;
+    } else if (status === 'cancelled') {
+      results.cancelled++;
+    }
 
     // Parse protocol from job name
     if (job.name.includes('NFS')) {
       results.byProtocol.nfs.total++;
-      if (status === 'success') results.byProtocol.nfs.passed++;
+      if (isSkipped) results.byProtocol.nfs.skipped++;
+      else if (status === 'success') results.byProtocol.nfs.passed++;
       else if (status === 'failure') results.byProtocol.nfs.failed++;
       else if (status === 'cancelled') results.byProtocol.nfs.cancelled++;
     } else if (job.name.includes('NVMe-oF')) {
       results.byProtocol.nvmeof.total++;
-      if (status === 'success') results.byProtocol.nvmeof.passed++;
+      if (isSkipped) results.byProtocol.nvmeof.skipped++;
+      else if (status === 'success') results.byProtocol.nvmeof.passed++;
       else if (status === 'failure') results.byProtocol.nvmeof.failed++;
       else if (status === 'cancelled') results.byProtocol.nvmeof.cancelled++;
     }
 
     // Track test types
-    const testType = job.name.toLowerCase().replace(/integration tests?/, '').trim();
+    const testType = job.name
+      .replace(/Integration Tests?/i, '')  // Remove "Integration Test(s)"
+      .replace(/\b(NFS|NVMe-oF)\b/i, '')   // Remove protocol names
+      .trim()
+      .toLowerCase() || 'basic';            // Default to 'basic' if empty
+    
     if (!results.byTestType[testType]) {
-      results.byTestType[testType] = { total: 0, passed: 0, failed: 0, cancelled: 0 };
+      results.byTestType[testType] = { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 };
     }
     results.byTestType[testType].total++;
-    if (status === 'success') results.byTestType[testType].passed++;
+    if (isSkipped) results.byTestType[testType].skipped++;
+    else if (status === 'success') results.byTestType[testType].passed++;
     else if (status === 'failure') results.byTestType[testType].failed++;
     else if (status === 'cancelled') results.byTestType[testType].cancelled++;
 
@@ -111,7 +144,7 @@ function parseTestResults(jobs) {
       results.durations.push({
         name: job.name,
         duration: duration,
-        status: status
+        status: isSkipped ? 'skipped' : status
       });
     }
 
@@ -120,7 +153,7 @@ function parseTestResults(jobs) {
       results.recentFailures.push({
         name: job.name,
         runId: job.run_id,
-        created: job.created_at,
+        created: job.created_at || job.started_at,
         htmlUrl: job.html_url
       });
     }
@@ -213,6 +246,11 @@ function generateHTML(results, runs) {
 
         .failure-rate {
             color: #dc3545;
+            font-weight: bold;
+        }
+
+        .skipped-rate {
+            color: #ffc107;
             font-weight: bold;
         }
 
@@ -309,6 +347,12 @@ function generateHTML(results, runs) {
                 <h3 class="failure-rate">${results.failed}</h3>
                 <p>Failed</p>
             </div>
+            ${results.skipped > 0 ? `
+            <div class="stat-card">
+                <h3 class="skipped-rate">${results.skipped}</h3>
+                <p>Skipped</p>
+            </div>
+            ` : ''}
             <div class="stat-card">
                 <h3 class="${successRate >= 95 ? 'success-rate' : 'failure-rate'}">${successRate}%</h3>
                 <p>Success Rate</p>
@@ -359,7 +403,11 @@ function generateHTML(results, runs) {
                     label: 'Failed',
                     data: [${results.byProtocol.nfs.failed}, ${results.byProtocol.nvmeof.failed}],
                     backgroundColor: '#dc3545'
-                }]
+                }${results.skipped > 0 ? `, {
+                    label: 'Skipped',
+                    data: [${results.byProtocol.nfs.skipped}, ${results.byProtocol.nvmeof.skipped}],
+                    backgroundColor: '#ffc107'
+                }` : ''}]
             },
             options: {
                 responsive: true,
@@ -372,23 +420,27 @@ function generateHTML(results, runs) {
 
         // Test Type Chart
         const testTypeCtx = document.getElementById('testTypeChart').getContext('2d');
-        const testTypes = ${JSON.stringify(Object.keys(results.byTestType))};
-        const testTypeData = {
-            labels: testTypes,
-            datasets: [{
-                label: 'Passed',
-                data: testTypes.map(type => ${JSON.stringify(results.byTestType)}.type.passed),
-                backgroundColor: '#28a745'
-            }, {
-                label: 'Failed',
-                data: testTypes.map(type => ${JSON.stringify(results.byTestType)}.type.failed),
-                backgroundColor: '#dc3545'
-            }]
-        };
-
+        const testTypeData = ${JSON.stringify(results.byTestType)};
+        const testTypes = Object.keys(testTypeData);
+        
         new Chart(testTypeCtx, {
             type: 'bar',
-            data: testTypeData,
+            data: {
+                labels: testTypes,
+                datasets: [{
+                    label: 'Passed',
+                    data: testTypes.map(type => testTypeData[type].passed),
+                    backgroundColor: '#28a745'
+                }, {
+                    label: 'Failed',
+                    data: testTypes.map(type => testTypeData[type].failed),
+                    backgroundColor: '#dc3545'
+                }${results.skipped > 0 ? `, {
+                    label: 'Skipped',
+                    data: testTypes.map(type => testTypeData[type].skipped || 0),
+                    backgroundColor: '#ffc107'
+                }` : ''}]
+            },
             options: {
                 responsive: true,
                 scales: {
@@ -404,9 +456,20 @@ function generateHTML(results, runs) {
 
 async function main() {
   console.log('Fetching workflow runs...');
+  
+  if (!process.env.GITHUB_TOKEN) {
+    console.error('ERROR: GITHUB_TOKEN environment variable is required');
+    process.exit(1);
+  }
+  
   const runs = await getWorkflowRuns(30);
 
-  console.log(`Found ${runs.length} workflow runs`);
+  if (runs.length === 0) {
+    console.warn('WARNING: No workflow runs found in the last 30 days');
+    console.log('Generating empty dashboard...');
+  } else {
+    console.log(`Found ${runs.length} workflow runs`);
+  }
 
   const allJobs = [];
   for (const run of runs.slice(0, 10)) { // Limit to recent runs for performance

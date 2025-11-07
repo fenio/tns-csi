@@ -42,7 +42,7 @@ The configuration is in `renovate.json` and includes:
 ### Option 1: GitHub App (Recommended)
 
 1. Install the [Renovate GitHub App](https://github.com/apps/renovate) on your repository
-2. Grant it access to `bfenski/tns-csi` (or your fork)
+2. Grant it access to `fenio/tns-csi` (or your fork)
 3. Renovate will automatically detect `renovate.json` and start creating PRs
 
 ### Option 2: Self-Hosted Renovate
@@ -53,12 +53,12 @@ If you prefer to run Renovate on your self-hosted infrastructure:
 # Using Docker
 docker run --rm \
   -e RENOVATE_TOKEN="${GITHUB_TOKEN}" \
-  -e RENOVATE_REPOSITORIES="bfenski/tns-csi" \
+  -e RENOVATE_REPOSITORIES="fenio/tns-csi" \
   renovate/renovate:latest
 
 # Or using npm
 npm install -g renovate
-renovate --token="${GITHUB_TOKEN}" bfenski/tns-csi
+renovate --token="${GITHUB_TOKEN}" fenio/tns-csi
 ```
 
 ## How It Works
@@ -87,7 +87,7 @@ Renovate creates a "Dependency Dashboard" issue that shows:
 - Rate-limited updates
 - Any errors encountered
 
-Check: https://github.com/bfenski/tns-csi/issues (look for "Dependency Dashboard")
+Check: https://github.com/fenio/tns-csi/issues (look for "Dependency Dashboard")
 
 ## Customizing Renovate
 

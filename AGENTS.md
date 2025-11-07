@@ -33,7 +33,7 @@ This project uses **self-hosted infrastructure** for all testing:
 **ALWAYS:**
 - Use GitHub Actions workflows for testing (never suggest manual test scripts)
 - Verify changes with both NFS and NVMe-oF integration tests
-- Check workflow runs at: https://github.com/bfenski/tns-csi/actions
+- Check workflow runs at: https://github.com/fenio/tns-csi/actions
 - Tests run on every push to main and on pull requests
 
 **NEVER:**

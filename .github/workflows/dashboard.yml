@@ -1,5 +1,13 @@
 name: Test Results Dashboard
 
+# IMPORTANT: Before this workflow can run successfully, GitHub Pages must be enabled:
+# 1. Go to repository Settings → Pages
+# 2. Under "Build and deployment", set Source to "GitHub Actions"
+# 3. Save the settings
+#
+# This one-time manual step is required because GITHUB_TOKEN doesn't have
+# permission to enable Pages programmatically.
+
 on:
   workflow_run:
     workflows: ["Integration Tests"]

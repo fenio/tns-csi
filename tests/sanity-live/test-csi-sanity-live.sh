@@ -38,17 +38,17 @@ fi
 echo "✅ CSI driver is deployed"
 
 # Get the CSI socket path from the node DaemonSet
-# The CSI socket is mounted at /csi in the container, which maps to /var/lib/kubelet/plugins/tns.csi.truenas.com/csi.sock on the host
-CSI_SOCKET="/var/lib/kubelet/plugins/tns.csi.truenas.com/csi.sock"
+# The CSI socket is mounted at /csi in the container, which maps to /var/lib/kubelet/plugins/tns.csi.io/csi.sock on the host
+CSI_SOCKET="/var/lib/kubelet/plugins/tns.csi.io/csi.sock"
 
 echo "CSI socket path: ${CSI_SOCKET}"
 
-# Verify the socket exists
-if [ ! -S "${CSI_SOCKET}" ]; then
+# Verify the socket exists (needs sudo to access kubelet directory)
+if ! sudo test -S "${CSI_SOCKET}"; then
     echo "❌ CSI socket not found at ${CSI_SOCKET}"
     echo "Checking kubelet plugins directory:"
-    ls -la /var/lib/kubelet/plugins/ || true
-    ls -la /var/lib/kubelet/plugins/tns.csi.truenas.com/ || true
+    sudo ls -la /var/lib/kubelet/plugins/ || true
+    sudo ls -la /var/lib/kubelet/plugins/tns.csi.io/ || true
     exit 1
 fi
 
@@ -81,7 +81,8 @@ fi
 
 # Run csi-sanity with appropriate flags
 # Note: Some tests may be skipped based on driver capabilities
-"${CSI_SANITY}" \
+# Run with sudo to access the CSI socket in kubelet directory
+sudo -E "${CSI_SANITY}" \
     --csi.endpoint="unix://${CSI_SOCKET}" \
     --csi.stagingdir="${STAGING_DIR}" \
     --csi.mountdir="${TARGET_DIR}" \

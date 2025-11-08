@@ -54,13 +54,12 @@ fi
 
 echo "✅ CSI socket found"
 
-# Create staging and target directories for csi-sanity
+# Define staging and target directories for csi-sanity
 STAGING_DIR="/tmp/csi-sanity-staging-${PROTOCOL}"
 TARGET_DIR="/tmp/csi-sanity-target-${PROTOCOL}"
 
-# Clean up any previous test directories and create fresh ones with sudo
+# Clean up any previous test directories (csi-sanity will create them)
 sudo rm -rf "${STAGING_DIR}" "${TARGET_DIR}" || true
-sudo mkdir -p "${STAGING_DIR}" "${TARGET_DIR}"
 
 echo "Staging directory: ${STAGING_DIR}"
 echo "Target directory: ${TARGET_DIR}"

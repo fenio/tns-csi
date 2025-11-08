@@ -56,21 +56,21 @@ jobs:
         run: |
           echo "=== Deploying tns-csi-driver with NFS protocol ==="
 
-          # Create namespace
-          kubectl create namespace tns-csi || true
-
-          # Create secret with TrueNAS credentials
-          kubectl create secret generic truenas-csi-secret \
-            --from-literal=apikey="${TRUENAS_API_KEY}" \
-            --namespace=tns-csi || true
+          # Construct TrueNAS WebSocket URL
+          TRUENAS_URL="wss://${TRUENAS_HOST}/api/current"
+          echo "TrueNAS URL: ${TRUENAS_URL}"
 
           # Install using Helm
           helm upgrade --install tns-csi-driver ./charts/tns-csi-driver \
-            --namespace tns-csi \
-            --set truenas.host="${TRUENAS_HOST}" \
-            --set truenas.pool="${TRUENAS_POOL}" \
-            --set truenas.protocol="nfs" \
-            --set truenas.allowInsecure=true \
+            --namespace kube-system \
+            --create-namespace \
+            --set truenas.url="${TRUENAS_URL}" \
+            --set truenas.apiKey="${TRUENAS_API_KEY}" \
+            --set storageClasses.nfs.enabled=true \
+            --set storageClasses.nfs.name=tns-csi-nfs \
+            --set storageClasses.nfs.pool="${TRUENAS_POOL}" \
+            --set storageClasses.nfs.server="${TRUENAS_HOST}" \
+            --set storageClasses.nvmeof.enabled=false \
             --set image.repository=bfenski/tns-csi \
             --set image.tag=latest \
             --set image.pullPolicy=Never \
@@ -78,12 +78,11 @@ jobs:
 
           echo "=== Waiting for CSI driver pods to be ready ==="
           kubectl wait --for=condition=ready pod \
-            -l app=tns-csi-controller -n tns-csi --timeout=300s
-          kubectl wait --for=condition=ready pod \
-            -l app=tns-csi-node -n tns-csi --timeout=300s
+            -l app.kubernetes.io/name=tns-csi-driver \
+            -n kube-system --timeout=300s
 
           echo "=== CSI Driver Status ==="
-          kubectl get pods -n tns-csi
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
           kubectl get csidrivers
 
       - name: Run csi-sanity tests (NFS)
@@ -94,9 +93,13 @@ jobs:
         if: failure()
         run: |
           echo "=== Controller logs ==="
-          kubectl logs -n tns-csi -l app=tns-csi-controller --tail=100 || true
+          kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=100 || true
           echo "=== Node logs ==="
-          kubectl logs -n tns-csi -l app=tns-csi-node --tail=100 || true
+          kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+            --tail=100 || true
 
   sanity-live-nvmeof:
     name: CSI Sanity Live Tests (NVMe-oF)
@@ -125,21 +128,27 @@ jobs:
         run: |
           echo "=== Deploying tns-csi-driver with NVMe-oF protocol ==="
 
-          # Create namespace
-          kubectl create namespace tns-csi || true
+          # Construct TrueNAS WebSocket URL
+          TRUENAS_URL="wss://${TRUENAS_HOST}/api/current"
+          echo "TrueNAS URL: ${TRUENAS_URL}"
 
-          # Create secret with TrueNAS credentials
-          kubectl create secret generic truenas-csi-secret \
-            --from-literal=apikey="${TRUENAS_API_KEY}" \
-            --namespace=tns-csi || true
+          # NVMe-oF subsystem NQN - use env var or default
+          SUBSYSTEM_NQN="${NVMEOF_SUBSYSTEM_NQN:-nqn.2005-03.org.truenas:csi-test}"
 
           # Install using Helm
           helm upgrade --install tns-csi-driver ./charts/tns-csi-driver \
-            --namespace tns-csi \
-            --set truenas.host="${TRUENAS_HOST}" \
-            --set truenas.pool="${TRUENAS_POOL}" \
-            --set truenas.protocol="nvmeof" \
-            --set truenas.allowInsecure=true \
+            --namespace kube-system \
+            --create-namespace \
+            --set truenas.url="${TRUENAS_URL}" \
+            --set truenas.apiKey="${TRUENAS_API_KEY}" \
+            --set storageClasses.nfs.enabled=false \
+            --set storageClasses.nvmeof.enabled=true \
+            --set storageClasses.nvmeof.name=tns-csi-nvmeof \
+            --set storageClasses.nvmeof.pool="${TRUENAS_POOL}" \
+            --set storageClasses.nvmeof.server="${TRUENAS_HOST}" \
+            --set storageClasses.nvmeof.transport=tcp \
+            --set storageClasses.nvmeof.port=4420 \
+            --set storageClasses.nvmeof.subsystemNQN="${SUBSYSTEM_NQN}" \
             --set image.repository=bfenski/tns-csi \
             --set image.tag=latest \
             --set image.pullPolicy=Never \
@@ -147,12 +156,11 @@ jobs:
 
           echo "=== Waiting for CSI driver pods to be ready ==="
           kubectl wait --for=condition=ready pod \
-            -l app=tns-csi-controller -n tns-csi --timeout=300s
-          kubectl wait --for=condition=ready pod \
-            -l app=tns-csi-node -n tns-csi --timeout=300s
+            -l app.kubernetes.io/name=tns-csi-driver \
+            -n kube-system --timeout=300s
 
           echo "=== CSI Driver Status ==="
-          kubectl get pods -n tns-csi
+          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
           kubectl get csidrivers
 
       - name: Run csi-sanity tests (NVMe-oF)
@@ -163,9 +171,13 @@ jobs:
         if: failure()
         run: |
           echo "=== Controller logs ==="
-          kubectl logs -n tns-csi -l app=tns-csi-controller --tail=100 || true
+          kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=100 || true
           echo "=== Node logs ==="
-          kubectl logs -n tns-csi -l app=tns-csi-node --tail=100 || true
+          kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+            --tail=100 || true
 
   cleanup:
     name: Cleanup After Sanity Tests

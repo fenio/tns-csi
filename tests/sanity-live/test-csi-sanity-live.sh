@@ -21,14 +21,17 @@ if ! kubectl get nodes &>/dev/null; then
     exit 1
 fi
 
+# Namespace where CSI driver is deployed (default: kube-system)
+CSI_NAMESPACE="${CSI_NAMESPACE:-kube-system}"
+
 # Verify CSI driver is deployed
-if ! kubectl get pods -n tns-csi | grep -q "tns-csi-controller"; then
-    echo "❌ CSI driver controller not found in tns-csi namespace"
+if ! kubectl get pods -n "${CSI_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller | grep -q "tns-csi"; then
+    echo "❌ CSI driver controller not found in ${CSI_NAMESPACE} namespace"
     exit 1
 fi
 
-if ! kubectl get pods -n tns-csi | grep -q "tns-csi-node"; then
-    echo "❌ CSI driver node not found in tns-csi namespace"
+if ! kubectl get pods -n "${CSI_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node | grep -q "tns-csi"; then
+    echo "❌ CSI driver node not found in ${CSI_NAMESPACE} namespace"
     exit 1
 fi
 
@@ -104,9 +107,9 @@ else
     echo "Collecting driver logs..."
     echo ""
     echo "=== Controller logs ==="
-    kubectl logs -n tns-csi -l app=tns-csi-controller --tail=50 || true
+    kubectl logs -n "${CSI_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --tail=50 || true
     echo ""
     echo "=== Node logs ==="
-    kubectl logs -n tns-csi -l app=tns-csi-node --tail=50 || true
+    kubectl logs -n "${CSI_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --tail=50 || true
     exit ${EXIT_CODE}
 fi

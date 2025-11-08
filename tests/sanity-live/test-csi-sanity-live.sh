@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# CSI Sanity Live Test Runner
+# Runs csi-sanity binary against a live k3s cluster with deployed tns-csi driver
+
+set -e
+set -o pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# Protocol to test (nfs or nvmeof)
+PROTOCOL="${1:-nfs}"
+
+echo "=== CSI Sanity Live Tests (${PROTOCOL}) ==="
+echo "Project root: ${PROJECT_ROOT}"
+
+# Verify kubectl is working
+if ! kubectl get nodes &>/dev/null; then
+    echo "❌ kubectl is not configured or cluster is not accessible"
+    exit 1
+fi
+
+# Verify CSI driver is deployed
+if ! kubectl get pods -n tns-csi | grep -q "tns-csi-controller"; then
+    echo "❌ CSI driver controller not found in tns-csi namespace"
+    exit 1
+fi
+
+if ! kubectl get pods -n tns-csi | grep -q "tns-csi-node"; then
+    echo "❌ CSI driver node not found in tns-csi namespace"
+    exit 1
+fi
+
+echo "✅ CSI driver is deployed"
+
+# Get the CSI socket path from the node DaemonSet
+# The CSI socket is mounted at /csi in the container, which maps to /var/lib/kubelet/plugins/tns.csi.truenas.com/csi.sock on the host
+CSI_SOCKET="/var/lib/kubelet/plugins/tns.csi.truenas.com/csi.sock"
+
+echo "CSI socket path: ${CSI_SOCKET}"
+
+# Verify the socket exists
+if [ ! -S "${CSI_SOCKET}" ]; then
+    echo "❌ CSI socket not found at ${CSI_SOCKET}"
+    echo "Checking kubelet plugins directory:"
+    ls -la /var/lib/kubelet/plugins/ || true
+    ls -la /var/lib/kubelet/plugins/tns.csi.truenas.com/ || true
+    exit 1
+fi
+
+echo "✅ CSI socket found"
+
+# Create staging and target directories for csi-sanity
+STAGING_DIR="/tmp/csi-sanity-staging-${PROTOCOL}"
+TARGET_DIR="/tmp/csi-sanity-target-${PROTOCOL}"
+
+# Clean up any previous test directories
+sudo rm -rf "${STAGING_DIR}" "${TARGET_DIR}" || true
+mkdir -p "${STAGING_DIR}" "${TARGET_DIR}"
+
+echo "Staging directory: ${STAGING_DIR}"
+echo "Target directory: ${TARGET_DIR}"
+
+# Run csi-sanity
+echo ""
+echo "=== Running csi-sanity ==="
+echo ""
+
+# Path to csi-sanity binary
+CSI_SANITY="${HOME}/go/bin/csi-sanity"
+
+if [ ! -x "${CSI_SANITY}" ]; then
+    echo "❌ csi-sanity binary not found at ${CSI_SANITY}"
+    echo "Please install it with: go install github.com/kubernetes-csi/csi-test/v5/cmd/csi-sanity@latest"
+    exit 1
+fi
+
+# Run csi-sanity with appropriate flags
+# Note: Some tests may be skipped based on driver capabilities
+"${CSI_SANITY}" \
+    --csi.endpoint="unix://${CSI_SOCKET}" \
+    --csi.stagingdir="${STAGING_DIR}" \
+    --csi.mountdir="${TARGET_DIR}" \
+    --ginkgo.v \
+    --ginkgo.progress \
+    --ginkgo.failFast=false
+
+EXIT_CODE=$?
+
+# Clean up test directories
+echo ""
+echo "=== Cleaning up test directories ==="
+sudo rm -rf "${STAGING_DIR}" "${TARGET_DIR}" || true
+
+if [ ${EXIT_CODE} -eq 0 ]; then
+    echo ""
+    echo "✅ CSI Sanity Live Tests (${PROTOCOL}) PASSED"
+    exit 0
+else
+    echo ""
+    echo "❌ CSI Sanity Live Tests (${PROTOCOL}) FAILED"
+    echo ""
+    echo "Collecting driver logs..."
+    echo ""
+    echo "=== Controller logs ==="
+    kubectl logs -n tns-csi -l app=tns-csi-controller --tail=50 || true
+    echo ""
+    echo "=== Node logs ==="
+    kubectl logs -n tns-csi -l app=tns-csi-node --tail=50 || true
+    exit ${EXIT_CODE}
+fi

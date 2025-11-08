@@ -58,9 +58,9 @@ echo "✅ CSI socket found"
 STAGING_DIR="/tmp/csi-sanity-staging-${PROTOCOL}"
 TARGET_DIR="/tmp/csi-sanity-target-${PROTOCOL}"
 
-# Clean up any previous test directories
+# Clean up any previous test directories and create fresh ones with sudo
 sudo rm -rf "${STAGING_DIR}" "${TARGET_DIR}" || true
-mkdir -p "${STAGING_DIR}" "${TARGET_DIR}"
+sudo mkdir -p "${STAGING_DIR}" "${TARGET_DIR}"
 
 echo "Staging directory: ${STAGING_DIR}"
 echo "Target directory: ${TARGET_DIR}"

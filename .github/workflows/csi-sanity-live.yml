@@ -1,8 +1,10 @@
 name: CSI Sanity Live Tests
 
-on:
+'on':
   push:
-    branches: [ main, 'feature/csi-sanity-live' ]
+    branches:
+      - main
+      - 'feature/csi-sanity-live'
     paths:
       - 'pkg/**'
       - 'cmd/**'
@@ -13,7 +15,8 @@ on:
       - 'Dockerfile'
       - '.github/workflows/csi-sanity-live.yml'
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
     paths:
       - 'pkg/**'
       - 'cmd/**'
@@ -52,15 +55,15 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
           echo "=== Deploying tns-csi-driver with NFS protocol ==="
-          
+
           # Create namespace
           kubectl create namespace tns-csi || true
-          
+
           # Create secret with TrueNAS credentials
           kubectl create secret generic truenas-csi-secret \
             --from-literal=apikey="${TRUENAS_API_KEY}" \
             --namespace=tns-csi || true
-          
+
           # Install using Helm
           helm upgrade --install tns-csi-driver ./charts/tns-csi-driver \
             --namespace tns-csi \
@@ -72,11 +75,13 @@ jobs:
             --set image.tag=latest \
             --set image.pullPolicy=Never \
             --wait --timeout=5m
-          
+
           echo "=== Waiting for CSI driver pods to be ready ==="
-          kubectl wait --for=condition=ready pod -l app=tns-csi-controller -n tns-csi --timeout=300s
-          kubectl wait --for=condition=ready pod -l app=tns-csi-node -n tns-csi --timeout=300s
-          
+          kubectl wait --for=condition=ready pod \
+            -l app=tns-csi-controller -n tns-csi --timeout=300s
+          kubectl wait --for=condition=ready pod \
+            -l app=tns-csi-node -n tns-csi --timeout=300s
+
           echo "=== CSI Driver Status ==="
           kubectl get pods -n tns-csi
           kubectl get csidrivers
@@ -119,15 +124,15 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
         run: |
           echo "=== Deploying tns-csi-driver with NVMe-oF protocol ==="
-          
+
           # Create namespace
           kubectl create namespace tns-csi || true
-          
+
           # Create secret with TrueNAS credentials
           kubectl create secret generic truenas-csi-secret \
             --from-literal=apikey="${TRUENAS_API_KEY}" \
             --namespace=tns-csi || true
-          
+
           # Install using Helm
           helm upgrade --install tns-csi-driver ./charts/tns-csi-driver \
             --namespace tns-csi \
@@ -139,11 +144,13 @@ jobs:
             --set image.tag=latest \
             --set image.pullPolicy=Never \
             --wait --timeout=5m
-          
+
           echo "=== Waiting for CSI driver pods to be ready ==="
-          kubectl wait --for=condition=ready pod -l app=tns-csi-controller -n tns-csi --timeout=300s
-          kubectl wait --for=condition=ready pod -l app=tns-csi-node -n tns-csi --timeout=300s
-          
+          kubectl wait --for=condition=ready pod \
+            -l app=tns-csi-controller -n tns-csi --timeout=300s
+          kubectl wait --for=condition=ready pod \
+            -l app=tns-csi-node -n tns-csi --timeout=300s
+
           echo "=== CSI Driver Status ==="
           kubectl get pods -n tns-csi
           kubectl get csidrivers
@@ -167,13 +174,13 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@v5
-      
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: '1.25.3'
           cache: false
-      
+
       - name: Run TrueNAS cleanup
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

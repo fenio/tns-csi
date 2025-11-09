@@ -18,7 +18,7 @@ jobs:
 
 
       - name: Setup KubeSolo
-        uses: fenio/setup-kubesolo@v3
+        uses: fenio/setup-kubesolo@main
         with:
           timeout: 300
 
@@ -73,7 +73,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup K3s
-        uses: fenio/setup-k3s@v1
+        uses: fenio/setup-k3s@main
         with:
           timeout: 300
 
@@ -124,7 +124,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup k0s
-        uses: fenio/setup-k0s@v1
+        uses: fenio/setup-k0s@main
         with:
           timeout: 300
 
@@ -175,7 +175,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Minikube
-        uses: fenio/setup-minikube@v1
+        uses: fenio/setup-minikube@main
         with:
           driver: none
           timeout: 300

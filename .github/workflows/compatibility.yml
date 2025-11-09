@@ -62,48 +62,11 @@ jobs:
         run: |
           ./tests/compatibility/test-basic-nvmeof.sh
 
-  # k0s compatibility tests
-  compat-k0s-nfs:
-    name: k0s - NFS Basic Operations
-    runs-on: self-hosted
-    needs: compat-k3s-nfs
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-dependencies
-        with:
-          protocol: nfs
-      - uses: ./.github/actions/setup-k0s
-      - name: Run k0s NFS Compatibility Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          ./tests/compatibility/test-basic-nfs.sh
-
-  compat-k0s-nvmeof:
-    name: k0s - NVMe-oF Basic Operations
-    runs-on: self-hosted
-    needs: compat-k3s-nvmeof
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-dependencies
-        with:
-          protocol: nvmeof
-      - uses: ./.github/actions/setup-k0s
-      - name: Run k0s NVMe-oF Compatibility Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          ./tests/compatibility/test-basic-nvmeof.sh
-
-  # minikube compatibility tests
+  # minikube compatibility tests (run before k0s to avoid Docker containerd corruption)
   compat-minikube-nfs:
     name: minikube - NFS Basic Operations
     runs-on: self-hosted
-    needs: compat-k0s-nfs
+    needs: compat-k3s-nfs
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -121,7 +84,44 @@ jobs:
   compat-minikube-nvmeof:
     name: minikube - NVMe-oF Basic Operations
     runs-on: self-hosted
-    needs: compat-k0s-nvmeof
+    needs: compat-k3s-nvmeof
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-minikube
+      - name: Run minikube NVMe-oF Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nvmeof.sh
+
+  # k0s compatibility tests (run after minikube to avoid corrupting Docker's containerd)
+  compat-k0s-nfs:
+    name: k0s - NFS Basic Operations
+    runs-on: self-hosted
+    needs: compat-minikube-nfs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k0s
+      - name: Run k0s NFS Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nfs.sh
+
+  compat-k0s-nvmeof:
+    name: k0s - NVMe-oF Basic Operations
+    runs-on: self-hosted
+    needs: compat-minikube-nvmeof
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -140,7 +140,7 @@ jobs:
   compat-kubesolo-nfs:
     name: kubesolo - NFS Basic Operations
     runs-on: self-hosted
-    needs: compat-minikube-nfs
+    needs: compat-k0s-nfs
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -158,7 +158,7 @@ jobs:
   compat-kubesolo-nvmeof:
     name: kubesolo - NVMe-oF Basic Operations
     runs-on: self-hosted
-    needs: compat-minikube-nvmeof
+    needs: compat-k0s-nvmeof
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies

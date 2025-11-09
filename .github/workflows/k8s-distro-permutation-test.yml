@@ -150,13 +150,13 @@ jobs:
 
       # Distribution 1
       - name: Setup ${{ matrix.d1 }} (non-Minikube)
-        if: matrix.d1 != 'minikube'
+        if: ${{ matrix.d1 != 'minikube' }}
         uses: fenio/setup-${{ matrix.d1 }}@main
         with:
           timeout: 60
       
       - name: Setup ${{ matrix.d1 }} (Minikube)
-        if: matrix.d1 == 'minikube'
+        if: ${{ matrix.d1 == 'minikube' }}
         uses: fenio/setup-${{ matrix.d1 }}@main
         with:
           timeout: 60
@@ -203,13 +203,13 @@ jobs:
 
       # Distribution 2
       - name: Setup ${{ matrix.d2 }} (non-Minikube)
-        if: matrix.d2 != 'minikube'
+        if: ${{ matrix.d2 != 'minikube' }}
         uses: fenio/setup-${{ matrix.d2 }}@main
         with:
           timeout: 60
       
       - name: Setup ${{ matrix.d2 }} (Minikube)
-        if: matrix.d2 == 'minikube'
+        if: ${{ matrix.d2 == 'minikube' }}
         uses: fenio/setup-${{ matrix.d2 }}@main
         with:
           timeout: 60
@@ -256,13 +256,13 @@ jobs:
 
       # Distribution 3
       - name: Setup ${{ matrix.d3 }} (non-Minikube)
-        if: matrix.d3 != 'minikube'
+        if: ${{ matrix.d3 != 'minikube' }}
         uses: fenio/setup-${{ matrix.d3 }}@main
         with:
           timeout: 60
       
       - name: Setup ${{ matrix.d3 }} (Minikube)
-        if: matrix.d3 == 'minikube'
+        if: ${{ matrix.d3 == 'minikube' }}
         uses: fenio/setup-${{ matrix.d3 }}@main
         with:
           timeout: 60
@@ -309,13 +309,13 @@ jobs:
 
       # Distribution 4
       - name: Setup ${{ matrix.d4 }} (non-Minikube)
-        if: matrix.d4 != 'minikube'
+        if: ${{ matrix.d4 != 'minikube' }}
         uses: fenio/setup-${{ matrix.d4 }}@main
         with:
           timeout: 60
       
       - name: Setup ${{ matrix.d4 }} (Minikube)
-        if: matrix.d4 == 'minikube'
+        if: ${{ matrix.d4 == 'minikube' }}
         uses: fenio/setup-${{ matrix.d4 }}@main
         with:
           timeout: 60

@@ -1,10 +1,6 @@
 name: Kubernetes Distribution Permutation Testing
 
 on:
-  push:
-    branches: [ k8s-test ]
-  pull_request:
-    branches: [ k8s-test, main ]
   workflow_dispatch:
 
 jobs:

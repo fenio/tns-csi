@@ -15,16 +15,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Check runner environment
+      - name: Clean up existing Kubernetes clusters
         run: |
+          echo "=== Cleaning up existing clusters ==="
+          # Stop k0s if running
+          if sudo systemctl is-active --quiet k0scontroller; then
+            echo "Stopping k0s..."
+            sudo systemctl stop k0scontroller
+            sudo systemctl disable k0scontroller
+          fi
+          
+          # Kill any remaining k8s processes
+          sudo pkill -9 k0s || true
+          sudo pkill -9 k3s || true
+          sudo pkill -9 kubelet || true
+          sudo pkill -9 kube-apiserver || true
+          
+          # Clean up directories
+          sudo rm -rf /var/lib/k0s
+          sudo rm -rf /var/lib/k3s
+          sudo rm -rf /run/k0s
+          
+          # Wait for port 6443 to be released
+          echo "Waiting for port 6443 to be released..."
+          for i in {1..30}; do
+            if ! ss -tlnp 2>/dev/null | grep -q 6443; then
+              echo "Port 6443 is now free"
+              break
+            fi
+            echo "Port 6443 still in use, waiting... ($i/30)"
+            sleep 1
+          done
+          
           echo "=== System Info ==="
           uname -a
-          echo ""
-          echo "=== Available commands ==="
-          which systemctl || echo "systemctl not found"
-          which journalctl || echo "journalctl not found"
-          which ss || echo "ss not found"
-          which kubectl || echo "kubectl not found"
           echo ""
           echo "=== Port 6443 status ==="
           ss -tlnp 2>/dev/null | grep 6443 || echo "Port 6443 not in use"
@@ -57,6 +81,16 @@ jobs:
         env:
           KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
         run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
           echo "Creating test pod..."
           kubectl run test-pod --image=nginx:latest --restart=Never
           
@@ -76,6 +110,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Clean up previous cluster
+        run: |
+          echo "Cleaning up KubeSolo..."
+          sudo systemctl stop kubesolo || true
+          sudo pkill -9 kubesolo || true
+          sudo rm -rf /var/lib/kubesolo
+          sleep 5
 
       - name: Setup K3s
         uses: fenio/setup-k3s@v1
@@ -98,6 +140,16 @@ jobs:
 
       - name: Test basic workload
         run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
           echo "Creating test pod..."
           kubectl run test-pod --image=nginx:latest --restart=Never
           
@@ -117,6 +169,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Clean up previous cluster
+        run: |
+          echo "Cleaning up K3s..."
+          sudo systemctl stop k3s || true
+          sudo pkill -9 k3s || true
+          sudo rm -rf /var/lib/k3s
+          sleep 5
 
       - name: Setup k0s
         uses: fenio/setup-k0s@v1
@@ -139,6 +199,16 @@ jobs:
 
       - name: Test basic workload
         run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
           echo "Creating test pod..."
           kubectl run test-pod --image=nginx:latest --restart=Never
           
@@ -181,6 +251,16 @@ jobs:
 
       - name: Test basic workload
         run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
           echo "Creating test pod..."
           kubectl run test-pod --image=nginx:latest --restart=Never
           

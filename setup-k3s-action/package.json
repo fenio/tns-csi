@@ -1,0 +1,34 @@
+{
+  "name": "setup-k3s",
+  "version": "1.0.0",
+  "description": "GitHub Action to install and configure k3s with automatic cleanup",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --source-map --license licenses.txt",
+    "format": "prettier --write 'src/**/*.ts'",
+    "lint": "eslint src/**/*.ts",
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fenio/setup-k3s.git"
+  },
+  "keywords": [
+    "actions",
+    "kubernetes",
+    "k3s",
+    "ci",
+    "cd"
+  ],
+  "author": "fenio",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/exec": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "^5.3.3"
+  }
+}

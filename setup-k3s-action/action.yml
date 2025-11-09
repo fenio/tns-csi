@@ -1,0 +1,37 @@
+name: 'Setup k3s'
+description: 'Install and configure k3s - Lightweight certified Kubernetes distribution for CI/CD'
+author: 'fenio'
+
+branding:
+  icon: 'box'
+  color: 'blue'
+
+inputs:
+  version:
+    description: 'k3s version to install (e.g., v1.28.5+k3s1, latest, stable, or channel like stable)'
+    required: false
+    default: 'stable'
+  
+  k3s-args:
+    description: 'Additional arguments to pass to k3s installer (e.g., "--disable=traefik --disable=servicelb")'
+    required: false
+    default: '--write-kubeconfig-mode 644'
+  
+  wait-for-ready:
+    description: 'Wait for k3s cluster to be ready before completing'
+    required: false
+    default: 'true'
+  
+  timeout:
+    description: 'Timeout in seconds to wait for cluster readiness'
+    required: false
+    default: '120'
+
+outputs:
+  kubeconfig:
+    description: 'Path to the kubeconfig file'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+  post: 'dist/index.js'

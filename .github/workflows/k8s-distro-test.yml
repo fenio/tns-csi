@@ -19,6 +19,8 @@ jobs:
         uses: fenio/setup-kubesolo@v3
 
       - name: Verify KubeSolo cluster
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
         run: |
           echo "Checking cluster info..."
           kubectl cluster-info
@@ -33,6 +35,8 @@ jobs:
           kubectl version
 
       - name: Test basic workload
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
         run: |
           echo "Creating test pod..."
           kubectl run test-pod --image=nginx:latest --restart=Never

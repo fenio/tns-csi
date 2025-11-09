@@ -4,15 +4,55 @@ description: Destroy existing k3s cluster and create a fresh one for testing
 runs:
   using: composite
   steps:
-    - name: Destroy existing k3s cluster
+    - name: Destroy all existing Kubernetes clusters
       shell: bash
       run: |
-        echo "=== Destroying existing k3s cluster for clean state ==="
+        echo "=== Destroying ALL existing Kubernetes clusters for clean state ==="
+        
+        # Stop k3s if running
         if command -v k3s-uninstall.sh &> /dev/null; then
+          echo "Uninstalling k3s..."
           sudo k3s-uninstall.sh || true
         fi
-        sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-        echo "k3s cluster destroyed"
+        sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s || true
+        
+        # Stop k0s if running
+        if command -v k0s &> /dev/null; then
+          echo "Stopping k0s..."
+          sudo k0s stop || true
+          sudo k0s reset || true
+        fi
+        sudo systemctl stop k0scontroller.service || true
+        sudo systemctl stop k0sworker.service || true
+        sudo systemctl disable k0scontroller.service || true
+        sudo systemctl disable k0sworker.service || true
+        sudo rm -rf /etc/k0s /var/lib/k0s || true
+        
+        # Stop minikube if running
+        if command -v minikube &> /dev/null; then
+          echo "Stopping minikube..."
+          minikube delete || true
+        fi
+        
+        # Clean up kubeconfig
+        sudo rm -rf ~/.kube/config || true
+        
+        # Wait for port 6443 to be free
+        echo "Waiting for port 6443 to be free..."
+        for i in {1..30}; do
+          if ! sudo lsof -i :6443 &>/dev/null; then
+            echo "Port 6443 is free"
+            break
+          fi
+          echo "Port 6443 still in use, waiting... (attempt $i/30)"
+          sleep 2
+        done
+        
+        # Kill any remaining processes on port 6443
+        sudo lsof -ti :6443 | xargs -r sudo kill -9 || true
+        sleep 2
+        
+        echo "All clusters destroyed"
 
     - name: Install k3s (fresh cluster)
       shell: bash

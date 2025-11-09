@@ -63,7 +63,10 @@ runs:
         else
           echo "Docker already installed"
         fi
-        sudo usermod -aG docker $USER
+        # Add user to docker group if USER is set (not in Docker-based runners)
+        if [ -n "$USER" ]; then
+          sudo usermod -aG docker $USER || true
+        fi
 
     - name: Set up Go
       uses: actions/setup-go@v6

@@ -28,43 +28,13 @@ runs:
         sudo systemctl disable k0sworker.service || true
         sudo rm -rf /etc/k0s /var/lib/k0s || true
         
-        # Clean up containerd sockets and directories from both k3s and k0s
-        echo "Cleaning up k3s and k0s containerd sockets and directories..."
+        # Clean up containerd sockets and directories from k3s and k0s
+        # Note: With containerd 2.x upgrade, shim version compatibility is now resolved
+        echo "Cleaning up k3s and k0s containerd state..."
         sudo rm -rf /run/k0s/containerd.sock || true
         sudo rm -rf /var/lib/k0s/containerd || true
         sudo rm -rf /run/k3s/containerd/containerd.sock || true
         sudo rm -rf /var/lib/rancher/k3s/agent/containerd || true
-        
-        # After k3s/k0s cleanup, completely restart Docker's containerd
-        # Both k3s and k0s run their own containerd which can corrupt Docker's containerd shim state
-        echo "Completely resetting Docker and containerd to clear corrupted state..."
-        sudo systemctl stop docker
-        
-        # Stop containerd service if it's running independently
-        sudo systemctl stop containerd || true
-        
-        # NUCLEAR OPTION: Remove ALL containerd state to clear shim version mismatch
-        # This includes the metadata database that tracks shim versions
-        echo "Removing all containerd state databases..."
-        sudo rm -rf /var/lib/docker/containerd/* || true
-        sudo rm -rf /var/lib/containerd/* || true
-        sudo rm -rf /run/containerd/* || true
-        
-        # Restart containerd first, then Docker
-        echo "Starting containerd and Docker with clean state..."
-        sudo systemctl start containerd || true
-        sudo systemctl start docker
-        
-        # Wait for Docker to be ready
-        echo "Waiting for Docker to be ready..."
-        for i in {1..30}; do
-          if docker ps &>/dev/null; then
-            echo "Docker is ready"
-            break
-          fi
-          echo "Docker not ready yet, waiting... (attempt $i/30)"
-          sleep 2
-        done
         
         # Stop minikube if running
         if command -v minikube &> /dev/null; then

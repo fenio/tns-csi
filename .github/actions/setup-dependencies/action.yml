@@ -52,7 +52,7 @@ runs:
           echo "All required packages already installed, skipping apt-get update"
         fi
 
-    - name: Install Docker
+    - name: Install Docker and upgrade containerd
       shell: bash
       run: |
         if ! command -v docker &> /dev/null; then
@@ -63,6 +63,30 @@ runs:
         else
           echo "Docker already installed"
         fi
+        
+        # Upgrade containerd to 2.x to be compatible with k3s/k0s
+        # k3s ships with containerd 2.x (v3 shims), but Docker installs containerd 1.x (v2 shims)
+        # This causes "unsupported shim version (3)" errors when running k3s then minikube
+        echo "Upgrading containerd to 2.x for compatibility..."
+        CONTAINERD_VERSION=$(containerd --version 2>/dev/null | awk '{print $3}' | cut -d. -f1 || echo "0")
+        if [ "$CONTAINERD_VERSION" -lt 2 ]; then
+          echo "Current containerd version is 1.x, upgrading to 2.x..."
+          sudo systemctl stop docker
+          sudo systemctl stop containerd || true
+          
+          # Install containerd 2.x from official releases
+          CONTAINERD_VERSION="2.0.0"
+          wget -q https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz
+          sudo tar Cxzf /usr containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz
+          rm containerd-${CONTAINERD_VERSION}-linux-amd64.tar.gz
+          
+          sudo systemctl start containerd
+          sudo systemctl start docker
+          echo "Upgraded to containerd $(containerd --version)"
+        else
+          echo "containerd is already 2.x: $(containerd --version)"
+        fi
+        
         # Add user to docker group if USER is set (not in Docker-based runners)
         if [ -n "$USER" ]; then
           sudo usermod -aG docker $USER || true

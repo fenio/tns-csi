@@ -30,7 +30,7 @@ jobs:
           kubectl get pods -A
           
           echo "Checking Kubernetes version..."
-          kubectl version --short
+          kubectl version
 
       - name: Test basic workload
         run: |
@@ -68,7 +68,7 @@ jobs:
           kubectl get pods -A
           
           echo "Checking Kubernetes version..."
-          kubectl version --short
+          kubectl version
 
       - name: Test basic workload
         run: |

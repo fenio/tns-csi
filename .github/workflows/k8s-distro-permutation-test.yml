@@ -149,15 +149,27 @@ jobs:
           rm kubectl
 
       # Distribution 1
-      - name: Setup ${{ matrix.d1 }} (non-Minikube)
-        if: ${{ matrix.d1 != 'minikube' }}
-        uses: fenio/setup-${{ matrix.d1 }}@main
+      - name: Setup KubeSolo (d1)
+        if: ${{ matrix.d1 == 'kubesolo' }}
+        uses: fenio/setup-kubesolo@main
         with:
           timeout: 60
       
-      - name: Setup ${{ matrix.d1 }} (Minikube)
+      - name: Setup K3s (d1)
+        if: ${{ matrix.d1 == 'k3s' }}
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+      
+      - name: Setup k0s (d1)
+        if: ${{ matrix.d1 == 'k0s' }}
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+      
+      - name: Setup Minikube (d1)
         if: ${{ matrix.d1 == 'minikube' }}
-        uses: fenio/setup-${{ matrix.d1 }}@main
+        uses: fenio/setup-minikube@main
         with:
           timeout: 60
           driver: docker
@@ -202,15 +214,27 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 2
-      - name: Setup ${{ matrix.d2 }} (non-Minikube)
-        if: ${{ matrix.d2 != 'minikube' }}
-        uses: fenio/setup-${{ matrix.d2 }}@main
+      - name: Setup KubeSolo (d2)
+        if: ${{ matrix.d2 == 'kubesolo' }}
+        uses: fenio/setup-kubesolo@main
         with:
           timeout: 60
       
-      - name: Setup ${{ matrix.d2 }} (Minikube)
+      - name: Setup K3s (d2)
+        if: ${{ matrix.d2 == 'k3s' }}
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+      
+      - name: Setup k0s (d2)
+        if: ${{ matrix.d2 == 'k0s' }}
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+      
+      - name: Setup Minikube (d2)
         if: ${{ matrix.d2 == 'minikube' }}
-        uses: fenio/setup-${{ matrix.d2 }}@main
+        uses: fenio/setup-minikube@main
         with:
           timeout: 60
           driver: docker
@@ -255,15 +279,27 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 3
-      - name: Setup ${{ matrix.d3 }} (non-Minikube)
-        if: ${{ matrix.d3 != 'minikube' }}
-        uses: fenio/setup-${{ matrix.d3 }}@main
+      - name: Setup KubeSolo (d3)
+        if: ${{ matrix.d3 == 'kubesolo' }}
+        uses: fenio/setup-kubesolo@main
         with:
           timeout: 60
       
-      - name: Setup ${{ matrix.d3 }} (Minikube)
+      - name: Setup K3s (d3)
+        if: ${{ matrix.d3 == 'k3s' }}
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+      
+      - name: Setup k0s (d3)
+        if: ${{ matrix.d3 == 'k0s' }}
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+      
+      - name: Setup Minikube (d3)
         if: ${{ matrix.d3 == 'minikube' }}
-        uses: fenio/setup-${{ matrix.d3 }}@main
+        uses: fenio/setup-minikube@main
         with:
           timeout: 60
           driver: docker
@@ -308,15 +344,27 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 4
-      - name: Setup ${{ matrix.d4 }} (non-Minikube)
-        if: ${{ matrix.d4 != 'minikube' }}
-        uses: fenio/setup-${{ matrix.d4 }}@main
+      - name: Setup KubeSolo (d4)
+        if: ${{ matrix.d4 == 'kubesolo' }}
+        uses: fenio/setup-kubesolo@main
         with:
           timeout: 60
       
-      - name: Setup ${{ matrix.d4 }} (Minikube)
+      - name: Setup K3s (d4)
+        if: ${{ matrix.d4 == 'k3s' }}
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+      
+      - name: Setup k0s (d4)
+        if: ${{ matrix.d4 == 'k0s' }}
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+      
+      - name: Setup Minikube (d4)
         if: ${{ matrix.d4 == 'minikube' }}
-        uses: fenio/setup-${{ matrix.d4 }}@main
+        uses: fenio/setup-minikube@main
         with:
           timeout: 60
           driver: docker

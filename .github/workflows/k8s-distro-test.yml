@@ -1,0 +1,106 @@
+name: Kubernetes Distribution Testing
+
+on:
+  push:
+    branches: [ k8s-test ]
+  pull_request:
+    branches: [ k8s-test, main ]
+  workflow_dispatch:
+
+jobs:
+  test-kubesolo:
+    name: Test KubeSolo Setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup KubeSolo
+        uses: fenio/setup-kubesolo@v3
+
+      - name: Verify KubeSolo cluster
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version --short
+
+      - name: Test basic workload
+        run: |
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  test-k3s:
+    name: Test K3s Setup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup K3s
+        uses: fenio/setup-k3s@v1
+
+      - name: Verify K3s cluster
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version --short
+
+      - name: Test basic workload
+        run: |
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  compare-distros:
+    name: Compare Distributions
+    runs-on: ubuntu-latest
+    needs: [test-kubesolo, test-k3s]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "# Kubernetes Distribution Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- KubeSolo: ${{ needs.test-kubesolo.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- K3s: ${{ needs.test-k3s.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.test-kubesolo.result }}" == "success" ] && [ "${{ needs.test-k3s.result }}" == "success" ]; then
+            echo "✅ All distributions tested successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Some distributions failed testing." >> $GITHUB_STEP_SUMMARY
+          fi

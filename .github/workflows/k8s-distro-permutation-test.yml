@@ -149,11 +149,18 @@ jobs:
           rm kubectl
 
       # Distribution 1
-      - name: Setup ${{ matrix.d1 }}
+      - name: Setup ${{ matrix.d1 }} (non-Minikube)
+        if: matrix.d1 != 'minikube'
         uses: fenio/setup-${{ matrix.d1 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.d1 == 'minikube' && 'docker' || '' }}
+      
+      - name: Setup ${{ matrix.d1 }} (Minikube)
+        if: matrix.d1 == 'minikube'
+        uses: fenio/setup-${{ matrix.d1 }}@main
+        with:
+          timeout: 60
+          driver: docker
 
       - name: Verify ${{ matrix.d1 }} cluster
         env:
@@ -195,11 +202,18 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 2
-      - name: Setup ${{ matrix.d2 }}
+      - name: Setup ${{ matrix.d2 }} (non-Minikube)
+        if: matrix.d2 != 'minikube'
         uses: fenio/setup-${{ matrix.d2 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.d2 == 'minikube' && 'docker' || '' }}
+      
+      - name: Setup ${{ matrix.d2 }} (Minikube)
+        if: matrix.d2 == 'minikube'
+        uses: fenio/setup-${{ matrix.d2 }}@main
+        with:
+          timeout: 60
+          driver: docker
 
       - name: Verify ${{ matrix.d2 }} cluster
         env:
@@ -241,11 +255,18 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 3
-      - name: Setup ${{ matrix.d3 }}
+      - name: Setup ${{ matrix.d3 }} (non-Minikube)
+        if: matrix.d3 != 'minikube'
         uses: fenio/setup-${{ matrix.d3 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.d3 == 'minikube' && 'docker' || '' }}
+      
+      - name: Setup ${{ matrix.d3 }} (Minikube)
+        if: matrix.d3 == 'minikube'
+        uses: fenio/setup-${{ matrix.d3 }}@main
+        with:
+          timeout: 60
+          driver: docker
 
       - name: Verify ${{ matrix.d3 }} cluster
         env:
@@ -287,11 +308,18 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 4
-      - name: Setup ${{ matrix.d4 }}
+      - name: Setup ${{ matrix.d4 }} (non-Minikube)
+        if: matrix.d4 != 'minikube'
         uses: fenio/setup-${{ matrix.d4 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.d4 == 'minikube' && 'docker' || '' }}
+      
+      - name: Setup ${{ matrix.d4 }} (Minikube)
+        if: matrix.d4 == 'minikube'
+        uses: fenio/setup-${{ matrix.d4 }}@main
+        with:
+          timeout: 60
+          driver: docker
 
       - name: Verify ${{ matrix.d4 }} cluster
         env:

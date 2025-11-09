@@ -28,14 +28,16 @@ runs:
         sudo systemctl disable k0sworker.service || true
         sudo rm -rf /etc/k0s /var/lib/k0s || true
         
-        # Clean up k0s-specific containerd sockets and directories
-        echo "Cleaning up k0s containerd sockets and directories..."
+        # Clean up containerd sockets and directories from both k3s and k0s
+        echo "Cleaning up k3s and k0s containerd sockets and directories..."
         sudo rm -rf /run/k0s/containerd.sock || true
         sudo rm -rf /var/lib/k0s/containerd || true
+        sudo rm -rf /run/k3s/containerd/containerd.sock || true
+        sudo rm -rf /var/lib/rancher/k3s/agent/containerd || true
         
-        # After k0s cleanup, clean Docker's containerd state
-        # k0s runs its own containerd which can corrupt Docker's containerd shim state
-        echo "Cleaning Docker containerd state after k0s..."
+        # After k3s/k0s cleanup, clean Docker's containerd state
+        # Both k3s and k0s run their own containerd which can corrupt Docker's containerd shim state
+        echo "Cleaning Docker containerd state after k3s/k0s cleanup..."
         sudo systemctl stop docker
         
         # Clean containerd shim state directories

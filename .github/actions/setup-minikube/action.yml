@@ -106,13 +106,24 @@ runs:
       shell: bash
       run: |
         echo "=== Importing CSI driver image to minikube ==="
-        # minikube can load images from Docker
-        minikube image load bfenski/tns-csi:latest
         
-        # Verify image is available
-        echo "Verifying image in minikube..."
-        minikube ssh -- crictl images | grep tns-csi || {
-          echo "WARNING: Image may not be loaded, attempting alternative method..."
-          # Alternative: save and load directly
-          docker save bfenski/tns-csi:latest | minikube ssh -- docker load
+        # Method 1: Try minikube image load (works with Docker driver)
+        if minikube image load bfenski/tns-csi:latest 2>&1 | tee /tmp/minikube-load.log; then
+          echo "Image loaded via 'minikube image load'"
+        else
+          echo "WARNING: 'minikube image load' failed, trying alternative method..."
+          cat /tmp/minikube-load.log || true
+          
+          # Method 2: Save from Docker and import to containerd
+          echo "Saving image from Docker and importing to minikube's containerd..."
+          sudo docker save bfenski/tns-csi:latest | minikube ssh -- sudo ctr -n k8s.io images import -
+        fi
+        
+        # Verify image is available in minikube
+        echo "=== Verifying image in minikube ==="
+        minikube ssh -- sudo crictl images | grep -E "(REPOSITORY|tns-csi)" || {
+          echo "ERROR: Image verification failed"
+          echo "All images in minikube:"
+          minikube ssh -- sudo crictl images
+          exit 1
         }

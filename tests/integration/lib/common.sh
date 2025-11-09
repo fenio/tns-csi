@@ -425,6 +425,42 @@ wait_for_driver() {
         --timeout="${TIMEOUT_DRIVER}"; then
         stop_test_timer "wait_for_driver" "FAILED"
         test_error "CSI driver failed to become ready"
+        
+        # Show detailed diagnostics for failing pods
+        echo ""
+        echo "=== CSI Driver Pod Status ==="
+        kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide
+        
+        echo ""
+        echo "=== Failed Pod Details ==="
+        # Get all CSI driver pods that are not Running
+        local failed_pods=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
+            -o jsonpath='{range .items[?(@.status.phase!="Running")]}{.metadata.name}{"\n"}{end}')
+        
+        if [[ -n "${failed_pods}" ]]; then
+            while IFS= read -r pod_name; do
+                if [[ -n "${pod_name}" ]]; then
+                    echo ""
+                    echo "--- Pod: ${pod_name} ---"
+                    kubectl describe pod "${pod_name}" -n kube-system
+                fi
+            done <<< "${failed_pods}"
+        else
+            # If no pods in non-Running state, check for pods not Ready
+            local not_ready_pods=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
+                --no-headers | awk '$2 !~ /^[0-9]+\/\1$/ {print $1}')
+            
+            if [[ -n "${not_ready_pods}" ]]; then
+                while IFS= read -r pod_name; do
+                    if [[ -n "${pod_name}" ]]; then
+                        echo ""
+                        echo "--- Pod: ${pod_name} ---"
+                        kubectl describe pod "${pod_name}" -n kube-system
+                    fi
+                done <<< "${not_ready_pods}"
+            fi
+        fi
+        
         return 1
     fi
     

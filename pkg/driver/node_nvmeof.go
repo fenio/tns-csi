@@ -202,6 +202,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, 
 		fsType = mnt.FsType
 	}
 
+	// Wait for device to be fully ready
+	if err := s.waitForDeviceReady(ctx, devicePath); err != nil {
+		return nil, status.Errorf(codes.Internal, "Device not ready: %v", err)
+	}
+
 	// Check if device is already formatted
 	needsFormat, err := needsFormat(ctx, devicePath)
 	if err != nil {
@@ -210,11 +215,6 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, 
 
 	if needsFormat {
 		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
-
-		// Wait a moment for device to settle after connection
-		// This helps prevent race conditions on some platforms
-		klog.V(4).Infof("Waiting for device to settle before formatting")
-		time.Sleep(2 * time.Second)
 
 		if formatErr := formatDevice(ctx, devicePath, fsType); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
@@ -380,6 +380,70 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn, nsid string, t
 	}
 
 	return "", fmt.Errorf("%w after %d attempts", ErrNVMeDeviceTimeout, attempt)
+}
+
+// waitForDeviceReady waits for a device to be fully ready for I/O operations.
+// This uses udevadm settle (if available) and polls for device accessibility.
+func (s *NodeService) waitForDeviceReady(ctx context.Context, devicePath string) error {
+	klog.V(4).Infof("Waiting for device %s to be ready", devicePath)
+
+	// First, try to use udevadm settle to wait for udev processing
+	// This is the proper way to wait for device initialization on Linux
+	settleCtx, settleCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer settleCancel()
+
+	// Run udevadm settle with a timeout
+	// This waits for udev to process all events related to device initialization
+	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "-t", "10")
+	if output, err := settleCmd.CombinedOutput(); err != nil {
+		// udevadm might not be available or might fail - log warning but continue
+		klog.V(4).Infof("udevadm settle failed (this may be OK): %v, output: %s", err, string(output))
+	} else {
+		klog.V(4).Infof("udevadm settle completed successfully")
+	}
+
+	// Additional polling to verify device is accessible and ready
+	// Some platforms may need extra time even after udevadm settle
+	deadline := time.Now().Add(10 * time.Second)
+	attempt := 0
+
+	for time.Now().Before(deadline) {
+		attempt++
+
+		// Check if device exists
+		info, err := os.Stat(devicePath)
+		if err != nil {
+			klog.V(4).Infof("Device stat attempt %d failed: %v", attempt, err)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Verify it's a device or symlink (not a regular file/directory)
+		mode := info.Mode()
+		if mode&os.ModeDevice == 0 && mode&os.ModeSymlink == 0 {
+			klog.V(4).Infof("Path exists but is not a device (mode: %v), attempt %d", mode, attempt)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Try to read device size using blockdev - this verifies the device is operational
+		sizeCtx, sizeCancel := context.WithTimeout(ctx, 2*time.Second)
+		sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+		output, sizeErr := sizeCmd.CombinedOutput()
+		sizeCancel()
+
+		if sizeErr != nil {
+			klog.V(4).Infof("blockdev check attempt %d failed: %v, output: %s", attempt, sizeErr, string(output))
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		// Device is accessible and operational
+		klog.Infof("Device %s is ready after %d attempts (size: %s bytes)", devicePath, attempt, strings.TrimSpace(string(output)))
+		return nil
+	}
+
+	return fmt.Errorf("timeout waiting for device %s to be ready after %d attempts", devicePath, attempt)
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target.

@@ -28,29 +28,11 @@ runs:
         sudo systemctl disable k0sworker.service || true
         sudo rm -rf /etc/k0s /var/lib/k0s || true
         
-        # Clean up k0s containerd processes and sockets
-        echo "Cleaning up containerd from k0s..."
-        sudo pkill -9 containerd || true
-        sudo pkill -9 containerd-shim || true
-        sudo rm -rf /run/containerd/containerd.sock || true
+        # Clean up k0s-specific containerd sockets and directories
+        # Do NOT kill containerd processes as that breaks Docker
+        echo "Cleaning up k0s containerd sockets and directories..."
         sudo rm -rf /run/k0s/containerd.sock || true
         sudo rm -rf /var/lib/k0s/containerd || true
-        
-        # Restart Docker daemon to restore clean containerd state
-        echo "Restarting Docker daemon..."
-        sudo systemctl restart docker || true
-        sleep 5
-        
-        # Wait for Docker to be ready
-        echo "Waiting for Docker to be ready..."
-        for i in {1..30}; do
-          if docker ps &>/dev/null; then
-            echo "Docker is ready"
-            break
-          fi
-          echo "Docker not ready yet, waiting... (attempt $i/30)"
-          sleep 2
-        done
         
         # Stop minikube if running
         if command -v minikube &> /dev/null; then

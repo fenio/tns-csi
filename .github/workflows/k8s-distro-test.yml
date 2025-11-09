@@ -181,7 +181,7 @@ jobs:
       - name: Setup Minikube
         uses: fenio/setup-minikube@main
         with:
-          driver: none
+          driver: docker
           timeout: 60
 
       - name: Verify Minikube cluster

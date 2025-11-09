@@ -1,0 +1,281 @@
+name: Kubernetes Distribution Permutation Testing
+
+on:
+  push:
+    branches: [ k8s-test ]
+  pull_request:
+    branches: [ k8s-test, main ]
+  workflow_dispatch:
+
+jobs:
+  test-permutation:
+    name: Test ${{ matrix.order }}
+    runs-on: [self-hosted, Linux]
+    strategy:
+      fail-fast: false
+      max-parallel: 1  # Run one permutation at a time to avoid conflicts on self-hosted runner
+      matrix:
+        include:
+          # All 24 permutations of 4 distributions
+          - order: "KubeSolo → K3s → k0s → Minikube"
+            distros: ["kubesolo", "k3s", "k0s", "minikube"]
+          - order: "KubeSolo → K3s → Minikube → k0s"
+            distros: ["kubesolo", "k3s", "minikube", "k0s"]
+          - order: "KubeSolo → k0s → K3s → Minikube"
+            distros: ["kubesolo", "k0s", "k3s", "minikube"]
+          - order: "KubeSolo → k0s → Minikube → K3s"
+            distros: ["kubesolo", "k0s", "minikube", "k3s"]
+          - order: "KubeSolo → Minikube → K3s → k0s"
+            distros: ["kubesolo", "minikube", "k3s", "k0s"]
+          - order: "KubeSolo → Minikube → k0s → K3s"
+            distros: ["kubesolo", "minikube", "k0s", "k3s"]
+          - order: "K3s → KubeSolo → k0s → Minikube"
+            distros: ["k3s", "kubesolo", "k0s", "minikube"]
+          - order: "K3s → KubeSolo → Minikube → k0s"
+            distros: ["k3s", "kubesolo", "minikube", "k0s"]
+          - order: "K3s → k0s → KubeSolo → Minikube"
+            distros: ["k3s", "k0s", "kubesolo", "minikube"]
+          - order: "K3s → k0s → Minikube → KubeSolo"
+            distros: ["k3s", "k0s", "minikube", "kubesolo"]
+          - order: "K3s → Minikube → KubeSolo → k0s"
+            distros: ["k3s", "minikube", "kubesolo", "k0s"]
+          - order: "K3s → Minikube → k0s → KubeSolo"
+            distros: ["k3s", "minikube", "k0s", "kubesolo"]
+          - order: "k0s → KubeSolo → K3s → Minikube"
+            distros: ["k0s", "kubesolo", "k3s", "minikube"]
+          - order: "k0s → KubeSolo → Minikube → K3s"
+            distros: ["k0s", "kubesolo", "minikube", "k3s"]
+          - order: "k0s → K3s → KubeSolo → Minikube"
+            distros: ["k0s", "k3s", "kubesolo", "minikube"]
+          - order: "k0s → K3s → Minikube → KubeSolo"
+            distros: ["k0s", "k3s", "minikube", "kubesolo"]
+          - order: "k0s → Minikube → KubeSolo → K3s"
+            distros: ["k0s", "minikube", "kubesolo", "k3s"]
+          - order: "k0s → Minikube → K3s → KubeSolo"
+            distros: ["k0s", "minikube", "k3s", "kubesolo"]
+          - order: "Minikube → KubeSolo → K3s → k0s"
+            distros: ["minikube", "kubesolo", "k3s", "k0s"]
+          - order: "Minikube → KubeSolo → k0s → K3s"
+            distros: ["minikube", "kubesolo", "k0s", "k3s"]
+          - order: "Minikube → K3s → KubeSolo → k0s"
+            distros: ["minikube", "k3s", "kubesolo", "k0s"]
+          - order: "Minikube → K3s → k0s → KubeSolo"
+            distros: ["minikube", "k3s", "k0s", "kubesolo"]
+          - order: "Minikube → k0s → KubeSolo → K3s"
+            distros: ["minikube", "k0s", "kubesolo", "k3s"]
+          - order: "Minikube → k0s → K3s → KubeSolo"
+            distros: ["minikube", "k0s", "k3s", "kubesolo"]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          rm kubectl
+
+      # Distribution 1
+      - name: Setup ${{ matrix.distros[0] }}
+        uses: fenio/setup-${{ matrix.distros[0] }}@main
+        with:
+          timeout: 60
+          driver: ${{ matrix.distros[0] == 'minikube' && 'docker' || '' }}
+
+      - name: Verify ${{ matrix.distros[0] }} cluster
+        env:
+          KUBECONFIG: ${{ matrix.distros[0] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+
+      - name: Test workload on ${{ matrix.distros[0] }}
+        env:
+          KUBECONFIG: ${{ matrix.distros[0] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+      # Distribution 2
+      - name: Setup ${{ matrix.distros[1] }}
+        uses: fenio/setup-${{ matrix.distros[1] }}@main
+        with:
+          timeout: 60
+          driver: ${{ matrix.distros[1] == 'minikube' && 'docker' || '' }}
+
+      - name: Verify ${{ matrix.distros[1] }} cluster
+        env:
+          KUBECONFIG: ${{ matrix.distros[1] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+
+      - name: Test workload on ${{ matrix.distros[1] }}
+        env:
+          KUBECONFIG: ${{ matrix.distros[1] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+      # Distribution 3
+      - name: Setup ${{ matrix.distros[2] }}
+        uses: fenio/setup-${{ matrix.distros[2] }}@main
+        with:
+          timeout: 60
+          driver: ${{ matrix.distros[2] == 'minikube' && 'docker' || '' }}
+
+      - name: Verify ${{ matrix.distros[2] }} cluster
+        env:
+          KUBECONFIG: ${{ matrix.distros[2] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+
+      - name: Test workload on ${{ matrix.distros[2] }}
+        env:
+          KUBECONFIG: ${{ matrix.distros[2] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+      # Distribution 4
+      - name: Setup ${{ matrix.distros[3] }}
+        uses: fenio/setup-${{ matrix.distros[3] }}@main
+        with:
+          timeout: 60
+          driver: ${{ matrix.distros[3] == 'minikube' && 'docker' || '' }}
+
+      - name: Verify ${{ matrix.distros[3] }} cluster
+        env:
+          KUBECONFIG: ${{ matrix.distros[3] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+
+      - name: Test workload on ${{ matrix.distros[3] }}
+        env:
+          KUBECONFIG: ${{ matrix.distros[3] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  summary:
+    name: Permutation Test Summary
+    runs-on: [self-hosted, Linux]
+    needs: [test-permutation]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "# Kubernetes Distribution Permutation Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tested all 24 permutations of 4 distributions (KubeSolo, K3s, k0s, Minikube)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Result: ${{ needs.test-permutation.result }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.test-permutation.result }}" == "success" ]; then
+            echo "✅ All permutations passed! Cleanup works correctly between all distribution combinations." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Some permutations failed. Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+          fi

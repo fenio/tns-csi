@@ -146,7 +146,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: fenio/setup-kubesolo@v1
+      - uses: fenio/setup-kubesolo@v3
       - name: Run kubesolo NFS Compatibility Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

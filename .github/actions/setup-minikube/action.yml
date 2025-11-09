@@ -1,0 +1,69 @@
+name: Setup Fresh minikube Cluster
+description: Destroy existing minikube cluster and create a fresh one for testing
+
+runs:
+  using: composite
+  steps:
+    - name: Destroy existing minikube cluster
+      shell: bash
+      run: |
+        echo "=== Destroying existing minikube cluster for clean state ==="
+        if command -v minikube &> /dev/null; then
+          minikube delete --all --purge || true
+        fi
+        sudo rm -rf ~/.minikube ~/.kube/config || true
+        echo "minikube cluster destroyed"
+
+    - name: Install/Update minikube
+      shell: bash
+      run: |
+        echo "=== Ensuring minikube is installed ==="
+        if ! command -v minikube &> /dev/null; then
+          echo "Installing minikube..."
+          curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          rm minikube-linux-amd64
+        else
+          echo "minikube already installed: $(minikube version)"
+        fi
+
+    - name: Start minikube cluster
+      shell: bash
+      run: |
+        echo "=== Starting fresh minikube cluster ==="
+        
+        # Start minikube with Docker driver (most compatible with self-hosted runners)
+        # Use none driver if running as root, otherwise use docker
+        if [[ $EUID -eq 0 ]]; then
+          DRIVER="none"
+        else
+          DRIVER="docker"
+        fi
+        
+        echo "Using driver: ${DRIVER}"
+        
+        minikube start \
+          --driver="${DRIVER}" \
+          --container-runtime=containerd \
+          --wait=all \
+          --wait-timeout=5m
+        
+        echo "=== Cluster nodes ==="
+        kubectl get nodes
+        echo "=== Cluster version ==="
+        kubectl version
+
+    - name: Import CSI driver image to minikube
+      shell: bash
+      run: |
+        echo "=== Importing CSI driver image to minikube ==="
+        # minikube can load images from Docker
+        minikube image load bfenski/tns-csi:latest
+        
+        # Verify image is available
+        echo "Verifying image in minikube..."
+        minikube ssh -- crictl images | grep tns-csi || {
+          echo "WARNING: Image may not be loaded, attempting alternative method..."
+          # Alternative: save and load directly
+          docker save bfenski/tns-csi:latest | minikube ssh -- docker load
+        }

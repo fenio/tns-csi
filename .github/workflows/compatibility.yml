@@ -1,0 +1,198 @@
+name: Compatibility Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'LICENSE'
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Monday at 3 AM UTC
+    - cron: '0 3 * * 1'
+
+jobs:
+  # k3s compatibility tests
+  compat-k3s-nfs:
+    name: k3s - NFS Basic Operations
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
+      - name: Run k3s NFS Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nfs.sh
+
+  compat-k3s-nvmeof:
+    name: k3s - NVMe-oF Basic Operations
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - name: Run k3s NVMe-oF Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nvmeof.sh
+
+  # k0s compatibility tests
+  compat-k0s-nfs:
+    name: k0s - NFS Basic Operations
+    runs-on: self-hosted
+    needs: compat-k3s-nfs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k0s
+      - name: Run k0s NFS Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nfs.sh
+
+  compat-k0s-nvmeof:
+    name: k0s - NVMe-oF Basic Operations
+    runs-on: self-hosted
+    needs: compat-k3s-nvmeof
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k0s
+      - name: Run k0s NVMe-oF Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nvmeof.sh
+
+  # minikube compatibility tests
+  compat-minikube-nfs:
+    name: minikube - NFS Basic Operations
+    runs-on: self-hosted
+    needs: compat-k0s-nfs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-minikube
+      - name: Run minikube NFS Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nfs.sh
+
+  compat-minikube-nvmeof:
+    name: minikube - NVMe-oF Basic Operations
+    runs-on: self-hosted
+    needs: compat-k0s-nvmeof
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-minikube
+      - name: Run minikube NVMe-oF Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nvmeof.sh
+
+  # kubesolo compatibility tests
+  compat-kubesolo-nfs:
+    name: kubesolo - NFS Basic Operations
+    runs-on: self-hosted
+    needs: compat-minikube-nfs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: fenio/setup-kubesolo@v1
+      - name: Run kubesolo NFS Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nfs.sh
+
+  compat-kubesolo-nvmeof:
+    name: kubesolo - NVMe-oF Basic Operations
+    runs-on: self-hosted
+    needs: compat-minikube-nvmeof
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: fenio/setup-kubesolo@v1
+      - name: Run kubesolo NVMe-oF Compatibility Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/compatibility/test-basic-nvmeof.sh
+
+  cleanup:
+    name: Cleanup TrueNAS Artifacts
+    runs-on: self-hosted
+    needs: [compat-k3s-nfs, compat-k3s-nvmeof, compat-k0s-nfs, compat-k0s-nvmeof, compat-minikube-nfs, compat-minikube-nvmeof, compat-kubesolo-nfs, compat-kubesolo-nvmeof]
+    if: always()
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.3'
+          cache: false
+      
+      - name: Run TrueNAS cleanup
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "=== Running TrueNAS artifact cleanup ==="
+          ./scripts/cleanup-truenas-artifacts.sh
+          echo "=== Cleanup complete ==="

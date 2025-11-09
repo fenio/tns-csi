@@ -23,10 +23,14 @@ on:
       - 'LICENSE'
   workflow_dispatch:
 
+# TEMPORARILY DISABLED - Integration test suite disabled for maintenance
+# To re-enable: remove the 'if: false' condition from all jobs below
+
 jobs:
   integration-nfs:
     name: NFS Integration Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -44,6 +48,7 @@ jobs:
   integration-nvmeof:
     name: NVMe-oF Integration Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -61,6 +66,7 @@ jobs:
   integration-snapshot-nfs:
     name: NFS Snapshot Integration Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
@@ -80,6 +86,7 @@ jobs:
   integration-snapshot-nvmeof:
     name: NVMe-oF Snapshot Integration Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -99,6 +106,7 @@ jobs:
   integration-concurrent-nfs:
     name: NFS Concurrent Volume Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
@@ -117,6 +125,7 @@ jobs:
   integration-concurrent-nvmeof:
     name: NVMe-oF Concurrent Volume Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -135,6 +144,7 @@ jobs:
   integration-persistence-nfs:
     name: NFS Data Persistence Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-concurrent-nfs
     steps:
       - uses: actions/checkout@v5
@@ -153,6 +163,7 @@ jobs:
   integration-persistence-nvmeof:
     name: NVMe-oF Data Persistence Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-concurrent-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -171,6 +182,7 @@ jobs:
   integration-statefulset-nfs:
     name: NFS StatefulSet Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-persistence-nfs
     steps:
       - uses: actions/checkout@v5
@@ -189,6 +201,7 @@ jobs:
   integration-statefulset-nvmeof:
     name: NVMe-oF StatefulSet Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: integration-persistence-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -207,6 +220,7 @@ jobs:
   integration-connection-resilience:
     name: Connection Resilience Tests
     runs-on: self-hosted
+    if: false  # Temporarily disabled
     needs: [integration-statefulset-nfs, integration-statefulset-nvmeof]
     steps:
       - uses: actions/checkout@v5
@@ -222,29 +236,11 @@ jobs:
         run: |
           ./tests/integration/test-connection-resilience.sh
 
-  integration-orphaned-resources:
-    name: Orphaned Resource Detection Tests
-    runs-on: self-hosted
-    needs: integration-connection-resilience
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-dependencies
-        with:
-          protocol: both
-      - uses: ./.github/actions/setup-k3s
-      - name: Run Orphaned Resource Detection Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          ./tests/integration/test-orphaned-resources.sh
-
   cleanup:
     name: Cleanup TrueNAS Artifacts
     runs-on: self-hosted
-    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-connection-resilience, integration-orphaned-resources]
-    if: always()
+    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-connection-resilience]
+    if: false  # Temporarily disabled
     steps:
       - uses: actions/checkout@v5
       

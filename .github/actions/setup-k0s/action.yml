@@ -1,0 +1,76 @@
+name: Setup Fresh k0s Cluster
+description: Destroy existing k0s cluster and create a fresh one for testing
+
+runs:
+  using: composite
+  steps:
+    - name: Destroy existing k0s cluster
+      shell: bash
+      run: |
+        echo "=== Destroying existing k0s cluster for clean state ==="
+        if command -v k0s &> /dev/null; then
+          sudo k0s stop || true
+          sudo k0s reset || true
+        fi
+        sudo systemctl stop k0scontroller.service || true
+        sudo systemctl stop k0sworker.service || true
+        sudo systemctl disable k0scontroller.service || true
+        sudo systemctl disable k0sworker.service || true
+        sudo rm -rf /etc/k0s /var/lib/k0s ~/.kube/config || true
+        echo "k0s cluster destroyed"
+
+    - name: Install k0s (fresh cluster)
+      shell: bash
+      run: |
+        echo "=== Installing fresh k0s cluster ==="
+        
+        # Download and install k0s
+        curl -sSLf https://get.k0s.sh | sudo sh
+        
+        # Install k0s as single-node controller+worker
+        sudo k0s install controller --single
+        
+        # Start k0s service
+        sudo systemctl start k0scontroller.service
+        
+        echo "Waiting for k0s service to start..."
+        sleep 15
+        
+        echo "Waiting for cluster to become ready..."
+        retries=0
+        while [[ $retries -lt 24 ]]; do
+          if sudo k0s kubectl get nodes &>/dev/null; then
+            echo "Node registered, checking Ready condition..."
+            if sudo k0s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
+              echo "Fresh k0s cluster ready"
+              sudo k0s kubectl get nodes
+              exit 0
+            fi
+          fi
+          echo "Waiting for cluster... (attempt $((retries+1))/24)"
+          sleep 5
+          retries=$((retries + 1))
+        done
+        echo "ERROR: Cluster failed to become ready within 2 minutes"
+        sudo systemctl status k0scontroller.service || true
+        sudo journalctl -u k0scontroller.service -n 50 || true
+        exit 1
+
+    - name: Configure kubectl
+      shell: bash
+      run: |
+        echo "=== Configuring kubectl ==="
+        mkdir -p ~/.kube
+        sudo k0s kubeconfig admin > ~/.kube/config
+        sudo chown $USER:$USER ~/.kube/config
+        echo "=== Cluster nodes ==="
+        kubectl get nodes
+        echo "=== Cluster version ==="
+        kubectl version
+
+    - name: Import CSI driver image to k0s
+      shell: bash
+      run: |
+        echo "=== Importing CSI driver image to k0s ==="
+        # k0s uses containerd, import image directly
+        sudo docker save bfenski/tns-csi:latest | sudo k0s ctr images import -

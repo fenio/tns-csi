@@ -37,22 +37,21 @@ runs:
         
         # After k3s/k0s cleanup, completely restart Docker's containerd
         # Both k3s and k0s run their own containerd which can corrupt Docker's containerd shim state
-        echo "Restarting Docker and containerd to clear corrupted state..."
+        echo "Completely resetting Docker and containerd to clear corrupted state..."
         sudo systemctl stop docker
-        
-        # Clean containerd shim state directories
-        sudo rm -rf /var/lib/docker/containerd/daemon/io.containerd.runtime.v*.linux || true
-        sudo rm -rf /run/containerd/io.containerd.runtime.v*.linux || true
         
         # Stop containerd service if it's running independently
         sudo systemctl stop containerd || true
         
-        # Clean containerd's own state
+        # NUCLEAR OPTION: Remove ALL containerd state to clear shim version mismatch
+        # This includes the metadata database that tracks shim versions
+        echo "Removing all containerd state databases..."
+        sudo rm -rf /var/lib/docker/containerd/* || true
+        sudo rm -rf /var/lib/containerd/* || true
         sudo rm -rf /run/containerd/* || true
-        sudo rm -rf /var/lib/containerd/io.containerd.runtime.v*.linux || true
         
         # Restart containerd first, then Docker
-        echo "Starting containerd and Docker..."
+        echo "Starting containerd and Docker with clean state..."
         sudo systemctl start containerd || true
         sudo systemctl start docker
         

@@ -10,13 +10,32 @@ on:
 jobs:
   test-kubesolo:
     name: Test KubeSolo Setup
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Check runner environment
+        run: |
+          echo "=== System Info ==="
+          uname -a
+          echo ""
+          echo "=== Available commands ==="
+          which systemctl || echo "systemctl not found"
+          which journalctl || echo "journalctl not found"
+          which ss || echo "ss not found"
+          which kubectl || echo "kubectl not found"
+          echo ""
+          echo "=== Port 6443 status ==="
+          ss -tlnp 2>/dev/null | grep 6443 || echo "Port 6443 not in use"
+          echo ""
+          echo "=== Existing k8s processes ==="
+          ps aux | grep -E "kube|k3s|k0s|minikube" | grep -v grep || echo "No k8s processes found"
+
       - name: Setup KubeSolo
         uses: fenio/setup-kubesolo@v3
+        with:
+          timeout: 300
 
       - name: Verify KubeSolo cluster
         env:
@@ -52,7 +71,7 @@ jobs:
 
   test-k3s:
     name: Test K3s Setup
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     needs: [test-kubesolo]
     steps:
       - name: Checkout code
@@ -60,6 +79,8 @@ jobs:
 
       - name: Setup K3s
         uses: fenio/setup-k3s@v1
+        with:
+          timeout: 300
 
       - name: Verify K3s cluster
         run: |
@@ -91,7 +112,7 @@ jobs:
 
   test-k0s:
     name: Test k0s Setup
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     needs: [test-k3s]
     steps:
       - name: Checkout code
@@ -99,6 +120,8 @@ jobs:
 
       - name: Setup k0s
         uses: fenio/setup-k0s@v1
+        with:
+          timeout: 300
 
       - name: Verify k0s cluster
         run: |
@@ -130,7 +153,7 @@ jobs:
 
   test-minikube:
     name: Test Minikube Setup
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     needs: [test-k0s]
     steps:
       - name: Checkout code
@@ -138,6 +161,9 @@ jobs:
 
       - name: Setup Minikube
         uses: fenio/setup-minikube@v1
+        with:
+          driver: none
+          timeout: 300
 
       - name: Verify Minikube cluster
         run: |
@@ -169,7 +195,7 @@ jobs:
 
   compare-distros:
     name: Compare Distributions
-    runs-on: self-hosted
+    runs-on: [self-hosted, Linux]
     needs: [test-kubesolo, test-k3s, test-k0s, test-minikube]
     if: always()
     steps:

@@ -1,0 +1,246 @@
+name: Kubernetes Distribution Testing
+
+on:
+  push:
+    branches: [ k8s-test ]
+  pull_request:
+    branches: [ k8s-test, main ]
+  workflow_dispatch:
+
+jobs:
+  test-kubesolo:
+    name: Test KubeSolo Setup
+    runs-on: [self-hosted, Linux]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          rm kubectl
+
+      - name: Setup KubeSolo
+        uses: fenio/setup-kubesolo@main
+        with:
+          timeout: 60
+
+      - name: Verify KubeSolo cluster
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version
+
+      - name: Test basic workload
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  test-k3s:
+    name: Test K3s Setup
+    runs-on: [self-hosted, Linux]
+    needs: [test-kubesolo]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup K3s
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+
+      - name: Verify K3s cluster
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version
+
+      - name: Test basic workload
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  test-k0s:
+    name: Test k0s Setup
+    runs-on: [self-hosted, Linux]
+    needs: [test-k3s]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup k0s
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+
+      - name: Verify k0s cluster
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version
+
+      - name: Test basic workload
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  test-minikube:
+    name: Test Minikube Setup
+    runs-on: [self-hosted, Linux]
+    needs: [test-k0s]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Minikube
+        uses: fenio/setup-minikube@main
+        with:
+          driver: docker
+          timeout: 60
+
+      - name: Verify Minikube cluster
+        run: |
+          echo "Checking cluster info..."
+          kubectl cluster-info
+          
+          echo "Checking nodes..."
+          kubectl get nodes -o wide
+          
+          echo "Checking system pods..."
+          kubectl get pods -A
+          
+          echo "Checking Kubernetes version..."
+          kubectl version
+
+      - name: Test basic workload
+        run: |
+          echo "Waiting for default service account..."
+          for i in {1..60}; do
+            if kubectl get serviceaccount default -n default &>/dev/null; then
+              echo "Default service account is ready"
+              break
+            fi
+            echo "Waiting for default service account... ($i/60)"
+            sleep 1
+          done
+          
+          echo "Creating test pod..."
+          kubectl run test-pod --image=nginx:latest --restart=Never
+          
+          echo "Waiting for pod to be ready..."
+          kubectl wait --for=condition=Ready pod/test-pod --timeout=60s
+          
+          echo "Pod status:"
+          kubectl get pod test-pod -o wide
+          
+          echo "Cleaning up..."
+          kubectl delete pod test-pod
+
+  compare-distros:
+    name: Compare Distributions
+    runs-on: [self-hosted, Linux]
+    needs: [test-kubesolo, test-k3s, test-k0s, test-minikube]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "# Kubernetes Distribution Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- KubeSolo: ${{ needs.test-kubesolo.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- K3s: ${{ needs.test-k3s.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- k0s: ${{ needs.test-k0s.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Minikube: ${{ needs.test-minikube.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.test-kubesolo.result }}" == "success" ] && [ "${{ needs.test-k3s.result }}" == "success" ] && [ "${{ needs.test-k0s.result }}" == "success" ] && [ "${{ needs.test-minikube.result }}" == "success" ]; then
+            echo "✅ All distributions tested successfully!" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Some distributions failed testing." >> $GITHUB_STEP_SUMMARY
+          fi

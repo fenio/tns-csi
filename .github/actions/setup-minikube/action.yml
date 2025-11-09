@@ -29,10 +29,25 @@ runs:
         sudo rm -rf /etc/k0s /var/lib/k0s || true
         
         # Clean up k0s-specific containerd sockets and directories
-        # Do NOT kill containerd processes as that breaks Docker
         echo "Cleaning up k0s containerd sockets and directories..."
         sudo rm -rf /run/k0s/containerd.sock || true
         sudo rm -rf /var/lib/k0s/containerd || true
+        
+        # After k0s cleanup, restart Docker to ensure clean containerd state for minikube
+        # k0s runs its own containerd which can leave Docker's containerd in a bad state
+        echo "Restarting Docker to ensure clean state for minikube..."
+        sudo systemctl restart docker
+        
+        # Wait for Docker to be ready
+        echo "Waiting for Docker to be ready..."
+        for i in {1..30}; do
+          if docker ps &>/dev/null; then
+            echo "Docker is ready"
+            break
+          fi
+          echo "Docker not ready yet, waiting... (attempt $i/30)"
+          sleep 2
+        done
         
         # Stop minikube if running
         if command -v minikube &> /dev/null; then

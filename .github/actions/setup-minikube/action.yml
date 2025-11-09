@@ -33,10 +33,18 @@ runs:
         sudo rm -rf /run/k0s/containerd.sock || true
         sudo rm -rf /var/lib/k0s/containerd || true
         
-        # After k0s cleanup, restart Docker to ensure clean containerd state for minikube
-        # k0s runs its own containerd which can leave Docker's containerd in a bad state
-        echo "Restarting Docker to ensure clean state for minikube..."
-        sudo systemctl restart docker
+        # After k0s cleanup, clean Docker's containerd state
+        # k0s runs its own containerd which can corrupt Docker's containerd shim state
+        echo "Cleaning Docker containerd state after k0s..."
+        sudo systemctl stop docker
+        
+        # Clean containerd shim state directories
+        sudo rm -rf /var/lib/docker/containerd/daemon/io.containerd.runtime.v*.linux || true
+        sudo rm -rf /run/containerd/io.containerd.runtime.v*.linux || true
+        
+        # Restart Docker with clean state
+        echo "Restarting Docker..."
+        sudo systemctl start docker
         
         # Wait for Docker to be ready
         echo "Waiting for Docker to be ready..."

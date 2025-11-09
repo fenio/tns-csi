@@ -123,11 +123,9 @@ runs:
     - name: Build CSI driver image
       shell: bash
       run: |
-        # On self-hosted runner, skip rebuild if image already exists
-        if sudo docker inspect bfenski/tns-csi:latest &>/dev/null; then
-          echo "CSI driver image already exists, skipping build"
-          sudo docker images | grep bfenski/tns-csi || true
-        else
-          echo "Building CSI driver image..."
-          sudo -E make docker-build
-        fi
+        # Always rebuild on self-hosted runner to ensure latest code changes
+        echo "Building CSI driver image with latest code..."
+        sudo -E make docker-build
+        
+        echo "=== Built image info ==="
+        sudo docker images | grep bfenski/tns-csi || true

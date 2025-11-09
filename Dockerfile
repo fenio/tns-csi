@@ -29,7 +29,8 @@ RUN apk add --no-cache \
     xfsprogs \
     blkid \
     util-linux \
-    nvme-cli
+    nvme-cli \
+    udev
 
 # Copy the driver binary
 COPY --from=builder /workspace/bin/tns-csi-driver /usr/local/bin/

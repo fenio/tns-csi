@@ -18,53 +18,125 @@ jobs:
         include:
           # All 24 permutations of 4 distributions
           - order: "KubeSolo → K3s → k0s → Minikube"
-            distros: ["kubesolo", "k3s", "k0s", "minikube"]
+            d1: "kubesolo"
+            d2: "k3s"
+            d3: "k0s"
+            d4: "minikube"
           - order: "KubeSolo → K3s → Minikube → k0s"
-            distros: ["kubesolo", "k3s", "minikube", "k0s"]
+            d1: "kubesolo"
+            d2: "k3s"
+            d3: "minikube"
+            d4: "k0s"
           - order: "KubeSolo → k0s → K3s → Minikube"
-            distros: ["kubesolo", "k0s", "k3s", "minikube"]
+            d1: "kubesolo"
+            d2: "k0s"
+            d3: "k3s"
+            d4: "minikube"
           - order: "KubeSolo → k0s → Minikube → K3s"
-            distros: ["kubesolo", "k0s", "minikube", "k3s"]
+            d1: "kubesolo"
+            d2: "k0s"
+            d3: "minikube"
+            d4: "k3s"
           - order: "KubeSolo → Minikube → K3s → k0s"
-            distros: ["kubesolo", "minikube", "k3s", "k0s"]
+            d1: "kubesolo"
+            d2: "minikube"
+            d3: "k3s"
+            d4: "k0s"
           - order: "KubeSolo → Minikube → k0s → K3s"
-            distros: ["kubesolo", "minikube", "k0s", "k3s"]
+            d1: "kubesolo"
+            d2: "minikube"
+            d3: "k0s"
+            d4: "k3s"
           - order: "K3s → KubeSolo → k0s → Minikube"
-            distros: ["k3s", "kubesolo", "k0s", "minikube"]
+            d1: "k3s"
+            d2: "kubesolo"
+            d3: "k0s"
+            d4: "minikube"
           - order: "K3s → KubeSolo → Minikube → k0s"
-            distros: ["k3s", "kubesolo", "minikube", "k0s"]
+            d1: "k3s"
+            d2: "kubesolo"
+            d3: "minikube"
+            d4: "k0s"
           - order: "K3s → k0s → KubeSolo → Minikube"
-            distros: ["k3s", "k0s", "kubesolo", "minikube"]
+            d1: "k3s"
+            d2: "k0s"
+            d3: "kubesolo"
+            d4: "minikube"
           - order: "K3s → k0s → Minikube → KubeSolo"
-            distros: ["k3s", "k0s", "minikube", "kubesolo"]
+            d1: "k3s"
+            d2: "k0s"
+            d3: "minikube"
+            d4: "kubesolo"
           - order: "K3s → Minikube → KubeSolo → k0s"
-            distros: ["k3s", "minikube", "kubesolo", "k0s"]
+            d1: "k3s"
+            d2: "minikube"
+            d3: "kubesolo"
+            d4: "k0s"
           - order: "K3s → Minikube → k0s → KubeSolo"
-            distros: ["k3s", "minikube", "k0s", "kubesolo"]
+            d1: "k3s"
+            d2: "minikube"
+            d3: "k0s"
+            d4: "kubesolo"
           - order: "k0s → KubeSolo → K3s → Minikube"
-            distros: ["k0s", "kubesolo", "k3s", "minikube"]
+            d1: "k0s"
+            d2: "kubesolo"
+            d3: "k3s"
+            d4: "minikube"
           - order: "k0s → KubeSolo → Minikube → K3s"
-            distros: ["k0s", "kubesolo", "minikube", "k3s"]
+            d1: "k0s"
+            d2: "kubesolo"
+            d3: "minikube"
+            d4: "k3s"
           - order: "k0s → K3s → KubeSolo → Minikube"
-            distros: ["k0s", "k3s", "kubesolo", "minikube"]
+            d1: "k0s"
+            d2: "k3s"
+            d3: "kubesolo"
+            d4: "minikube"
           - order: "k0s → K3s → Minikube → KubeSolo"
-            distros: ["k0s", "k3s", "minikube", "kubesolo"]
+            d1: "k0s"
+            d2: "k3s"
+            d3: "minikube"
+            d4: "kubesolo"
           - order: "k0s → Minikube → KubeSolo → K3s"
-            distros: ["k0s", "minikube", "kubesolo", "k3s"]
+            d1: "k0s"
+            d2: "minikube"
+            d3: "kubesolo"
+            d4: "k3s"
           - order: "k0s → Minikube → K3s → KubeSolo"
-            distros: ["k0s", "minikube", "k3s", "kubesolo"]
+            d1: "k0s"
+            d2: "minikube"
+            d3: "k3s"
+            d4: "kubesolo"
           - order: "Minikube → KubeSolo → K3s → k0s"
-            distros: ["minikube", "kubesolo", "k3s", "k0s"]
+            d1: "minikube"
+            d2: "kubesolo"
+            d3: "k3s"
+            d4: "k0s"
           - order: "Minikube → KubeSolo → k0s → K3s"
-            distros: ["minikube", "kubesolo", "k0s", "k3s"]
+            d1: "minikube"
+            d2: "kubesolo"
+            d3: "k0s"
+            d4: "k3s"
           - order: "Minikube → K3s → KubeSolo → k0s"
-            distros: ["minikube", "k3s", "kubesolo", "k0s"]
+            d1: "minikube"
+            d2: "k3s"
+            d3: "kubesolo"
+            d4: "k0s"
           - order: "Minikube → K3s → k0s → KubeSolo"
-            distros: ["minikube", "k3s", "k0s", "kubesolo"]
+            d1: "minikube"
+            d2: "k3s"
+            d3: "k0s"
+            d4: "kubesolo"
           - order: "Minikube → k0s → KubeSolo → K3s"
-            distros: ["minikube", "k0s", "kubesolo", "k3s"]
+            d1: "minikube"
+            d2: "k0s"
+            d3: "kubesolo"
+            d4: "k3s"
           - order: "Minikube → k0s → K3s → KubeSolo"
-            distros: ["minikube", "k0s", "k3s", "kubesolo"]
+            d1: "minikube"
+            d2: "k0s"
+            d3: "k3s"
+            d4: "kubesolo"
     
     steps:
       - name: Checkout code
@@ -77,15 +149,15 @@ jobs:
           rm kubectl
 
       # Distribution 1
-      - name: Setup ${{ matrix.distros[0] }}
-        uses: fenio/setup-${{ matrix.distros[0] }}@main
+      - name: Setup ${{ matrix.d1 }}
+        uses: fenio/setup-${{ matrix.d1 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.distros[0] == 'minikube' && 'docker' || '' }}
+          driver: ${{ matrix.d1 == 'minikube' && 'docker' || '' }}
 
-      - name: Verify ${{ matrix.distros[0] }} cluster
+      - name: Verify ${{ matrix.d1 }} cluster
         env:
-          KUBECONFIG: ${{ matrix.distros[0] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d1 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Checking cluster info..."
           kubectl cluster-info
@@ -96,9 +168,9 @@ jobs:
           echo "Checking system pods..."
           kubectl get pods -A
 
-      - name: Test workload on ${{ matrix.distros[0] }}
+      - name: Test workload on ${{ matrix.d1 }}
         env:
-          KUBECONFIG: ${{ matrix.distros[0] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d1 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Waiting for default service account..."
           for i in {1..60}; do
@@ -123,15 +195,15 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 2
-      - name: Setup ${{ matrix.distros[1] }}
-        uses: fenio/setup-${{ matrix.distros[1] }}@main
+      - name: Setup ${{ matrix.d2 }}
+        uses: fenio/setup-${{ matrix.d2 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.distros[1] == 'minikube' && 'docker' || '' }}
+          driver: ${{ matrix.d2 == 'minikube' && 'docker' || '' }}
 
-      - name: Verify ${{ matrix.distros[1] }} cluster
+      - name: Verify ${{ matrix.d2 }} cluster
         env:
-          KUBECONFIG: ${{ matrix.distros[1] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d2 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Checking cluster info..."
           kubectl cluster-info
@@ -142,9 +214,9 @@ jobs:
           echo "Checking system pods..."
           kubectl get pods -A
 
-      - name: Test workload on ${{ matrix.distros[1] }}
+      - name: Test workload on ${{ matrix.d2 }}
         env:
-          KUBECONFIG: ${{ matrix.distros[1] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d2 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Waiting for default service account..."
           for i in {1..60}; do
@@ -169,15 +241,15 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 3
-      - name: Setup ${{ matrix.distros[2] }}
-        uses: fenio/setup-${{ matrix.distros[2] }}@main
+      - name: Setup ${{ matrix.d3 }}
+        uses: fenio/setup-${{ matrix.d3 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.distros[2] == 'minikube' && 'docker' || '' }}
+          driver: ${{ matrix.d3 == 'minikube' && 'docker' || '' }}
 
-      - name: Verify ${{ matrix.distros[2] }} cluster
+      - name: Verify ${{ matrix.d3 }} cluster
         env:
-          KUBECONFIG: ${{ matrix.distros[2] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d3 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Checking cluster info..."
           kubectl cluster-info
@@ -188,9 +260,9 @@ jobs:
           echo "Checking system pods..."
           kubectl get pods -A
 
-      - name: Test workload on ${{ matrix.distros[2] }}
+      - name: Test workload on ${{ matrix.d3 }}
         env:
-          KUBECONFIG: ${{ matrix.distros[2] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d3 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Waiting for default service account..."
           for i in {1..60}; do
@@ -215,15 +287,15 @@ jobs:
           kubectl delete pod test-pod
 
       # Distribution 4
-      - name: Setup ${{ matrix.distros[3] }}
-        uses: fenio/setup-${{ matrix.distros[3] }}@main
+      - name: Setup ${{ matrix.d4 }}
+        uses: fenio/setup-${{ matrix.d4 }}@main
         with:
           timeout: 60
-          driver: ${{ matrix.distros[3] == 'minikube' && 'docker' || '' }}
+          driver: ${{ matrix.d4 == 'minikube' && 'docker' || '' }}
 
-      - name: Verify ${{ matrix.distros[3] }} cluster
+      - name: Verify ${{ matrix.d4 }} cluster
         env:
-          KUBECONFIG: ${{ matrix.distros[3] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d4 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Checking cluster info..."
           kubectl cluster-info
@@ -234,9 +306,9 @@ jobs:
           echo "Checking system pods..."
           kubectl get pods -A
 
-      - name: Test workload on ${{ matrix.distros[3] }}
+      - name: Test workload on ${{ matrix.d4 }}
         env:
-          KUBECONFIG: ${{ matrix.distros[3] == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
+          KUBECONFIG: ${{ matrix.d4 == 'kubesolo' && '/var/lib/kubesolo/pki/admin/admin.kubeconfig' || '' }}
         run: |
           echo "Waiting for default service account..."
           for i in {1..60}; do

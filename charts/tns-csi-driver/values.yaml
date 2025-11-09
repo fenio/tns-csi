@@ -29,6 +29,11 @@ imagePullSecrets: []
 # CSI Driver name
 csiDriverName: tns.csi.io
 
+# Kubelet directory path
+# Default: /var/lib/kubelet (works for k3s, minikube, standard Kubernetes)
+# For k0s: /var/lib/k0s/kubelet
+kubeletDir: /var/lib/kubelet
+
 # Controller configuration
 controller:
   # Number of controller replicas (should be 1 for leader election)

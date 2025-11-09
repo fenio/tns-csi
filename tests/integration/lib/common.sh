@@ -356,6 +356,17 @@ deploy_driver() {
             ;;
     esac
     
+    # Detect Kubernetes distribution and set kubeletDir accordingly
+    # k0s uses a different kubelet directory than other distributions
+    local kubelet_dir="/var/lib/kubelet"  # Default for k3s, minikube, standard K8s
+    if kubectl get nodes -o yaml | grep -q 'kubeletVersion.*k0s'; then
+        kubelet_dir="/var/lib/k0s/kubelet"
+        test_info "Detected k0s, using kubeletDir: ${kubelet_dir}"
+    fi
+    base_args+=(
+        --set kubeletDir="${kubelet_dir}"
+    )
+    
     # Deploy with Helm
     if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
         "${base_args[@]}" \

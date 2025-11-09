@@ -24,7 +24,7 @@ jobs:
       - name: Setup KubeSolo
         uses: fenio/setup-kubesolo@main
         with:
-          timeout: 30
+          timeout: 60
 
       - name: Verify KubeSolo cluster
         env:
@@ -79,7 +79,7 @@ jobs:
       - name: Setup K3s
         uses: fenio/setup-k3s@main
         with:
-          timeout: 30
+          timeout: 60
 
       - name: Verify K3s cluster
         run: |
@@ -130,7 +130,7 @@ jobs:
       - name: Setup k0s
         uses: fenio/setup-k0s@main
         with:
-          timeout: 30
+          timeout: 60
 
       - name: Verify k0s cluster
         run: |
@@ -182,7 +182,7 @@ jobs:
         uses: fenio/setup-minikube@main
         with:
           driver: none
-          timeout: 30
+          timeout: 60
 
       - name: Verify Minikube cluster
         run: |

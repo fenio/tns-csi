@@ -213,6 +213,52 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 
 // formatDevice formats a device with the specified filesystem.
 func formatDevice(ctx context.Context, devicePath, fsType string) error {
+	// Pre-format diagnostics
+	klog.Infof("Pre-format diagnostics for device %s", devicePath)
+
+	// Check if device exists
+	deviceInfo, statErr := os.Stat(devicePath)
+	if statErr != nil {
+		klog.Errorf("Device stat failed: %v", statErr)
+		return fmt.Errorf("device %s not accessible: %w", devicePath, statErr)
+	}
+	klog.Infof("Device exists: mode=%v, size=%d", deviceInfo.Mode(), deviceInfo.Size())
+
+	// Check device size with blockdev
+	sizeCtx, sizeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer sizeCancel()
+	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+	sizeOutput, sizeErr := sizeCmd.CombinedOutput()
+	if sizeErr != nil {
+		klog.Warningf("Failed to get device size: %v, output: %s", sizeErr, string(sizeOutput))
+	} else {
+		klog.Infof("Device size from blockdev: %s bytes", strings.TrimSpace(string(sizeOutput)))
+	}
+
+	// Check if device is a block device
+	if deviceInfo.Mode()&os.ModeDevice == 0 {
+		klog.Warningf("Device %s is not a block device (mode: %v)", devicePath, deviceInfo.Mode())
+	}
+
+	// Resolve symlink if it is one
+	realPath := devicePath
+	if deviceInfo.Mode()&os.ModeSymlink != 0 {
+		var resolveErr error
+		realPath, resolveErr = filepath.EvalSymlinks(devicePath)
+		if resolveErr != nil {
+			klog.Warningf("Failed to resolve symlink: %v", resolveErr)
+		} else {
+			klog.Infof("Device is symlink to: %s", realPath)
+			// Re-stat the real path
+			realInfo, realStatErr := os.Stat(realPath)
+			if realStatErr != nil {
+				klog.Errorf("Real device stat failed: %v", realStatErr)
+			} else {
+				klog.Infof("Real device: mode=%v, size=%d", realInfo.Mode(), realInfo.Size())
+			}
+		}
+	}
+
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -232,9 +278,19 @@ func formatDevice(ctx context.Context, devicePath, fsType string) error {
 		return fmt.Errorf("%w: %s", ErrUnsupportedFSType, fsType)
 	}
 
-	klog.V(4).Infof("Running format command: %v", cmd.Args)
+	klog.Infof("Running format command: %v", cmd.Args)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		klog.Errorf("Format command failed: %v, output: %s", err, string(output))
+
+		// Post-failure diagnostics
+		postInfo, postErr := os.Stat(devicePath)
+		if postErr != nil {
+			klog.Errorf("Post-failure device stat: %v", postErr)
+		} else {
+			klog.Infof("Post-failure device still exists: mode=%v, size=%d", postInfo.Mode(), postInfo.Size())
+		}
+
 		return fmt.Errorf("format command failed: %w, output: %s", err, string(output))
 	}
 

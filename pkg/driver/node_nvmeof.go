@@ -210,6 +210,12 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, 
 
 	if needsFormat {
 		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
+
+		// Wait a moment for device to settle after connection
+		// This helps prevent race conditions on some platforms
+		klog.V(4).Infof("Waiting for device to settle before formatting")
+		time.Sleep(2 * time.Second)
+
 		if formatErr := formatDevice(ctx, devicePath, fsType); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}

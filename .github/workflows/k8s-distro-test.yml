@@ -15,46 +15,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Clean up existing Kubernetes clusters
-        run: |
-          echo "=== Cleaning up existing clusters ==="
-          # Stop k0s if running
-          if sudo systemctl is-active --quiet k0scontroller; then
-            echo "Stopping k0s..."
-            sudo systemctl stop k0scontroller
-            sudo systemctl disable k0scontroller
-          fi
-          
-          # Kill any remaining k8s processes
-          sudo pkill -9 k0s || true
-          sudo pkill -9 k3s || true
-          sudo pkill -9 kubelet || true
-          sudo pkill -9 kube-apiserver || true
-          
-          # Clean up directories
-          sudo rm -rf /var/lib/k0s
-          sudo rm -rf /var/lib/k3s
-          sudo rm -rf /run/k0s
-          
-          # Wait for port 6443 to be released
-          echo "Waiting for port 6443 to be released..."
-          for i in {1..30}; do
-            if ! ss -tlnp 2>/dev/null | grep -q 6443; then
-              echo "Port 6443 is now free"
-              break
-            fi
-            echo "Port 6443 still in use, waiting... ($i/30)"
-            sleep 1
-          done
-          
-          echo "=== System Info ==="
-          uname -a
-          echo ""
-          echo "=== Port 6443 status ==="
-          ss -tlnp 2>/dev/null | grep 6443 || echo "Port 6443 not in use"
-          echo ""
-          echo "=== Existing k8s processes ==="
-          ps aux | grep -E "kube|k3s|k0s|minikube" | grep -v grep || echo "No k8s processes found"
+
 
       - name: Setup KubeSolo
         uses: fenio/setup-kubesolo@v3
@@ -111,14 +72,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Clean up previous cluster
-        run: |
-          echo "Cleaning up KubeSolo..."
-          sudo systemctl stop kubesolo || true
-          sudo pkill -9 kubesolo || true
-          sudo rm -rf /var/lib/kubesolo
-          sleep 5
-
       - name: Setup K3s
         uses: fenio/setup-k3s@v1
         with:
@@ -169,14 +122,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Clean up previous cluster
-        run: |
-          echo "Cleaning up K3s..."
-          sudo systemctl stop k3s || true
-          sudo pkill -9 k3s || true
-          sudo rm -rf /var/lib/k3s
-          sleep 5
 
       - name: Setup k0s
         uses: fenio/setup-k0s@v1

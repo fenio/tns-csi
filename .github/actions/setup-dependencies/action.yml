@@ -68,7 +68,7 @@ runs:
         # k3s ships with containerd 2.x (v3 shims), but Docker installs containerd 1.x (v2 shims)
         # This causes "unsupported shim version (3)" errors when running k3s then minikube
         echo "Upgrading containerd to 2.x for compatibility..."
-        CONTAINERD_VERSION=$(containerd --version 2>/dev/null | awk '{print $3}' | cut -d. -f1 || echo "0")
+        CONTAINERD_VERSION=$(containerd --version 2>/dev/null | awk '{print $3}' | sed 's/^v//' | cut -d. -f1 || echo "0")
         if [ "$CONTAINERD_VERSION" -lt 2 ]; then
           echo "Current containerd version is 1.x, upgrading to 2.x..."
           sudo systemctl stop docker

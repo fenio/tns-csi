@@ -2,7 +2,7 @@
 # NFS Basic Compatibility Test
 # Tests basic NFS operations: mount, write, read, expand across different k8s distributions
 
-set -e
+set -e -E
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Reuse integration test library for common functions
@@ -43,12 +43,28 @@ echo "  • Volume expansion"
 echo "=========================================================="
 
 # Trap errors and cleanup
-trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL} (${K8S_DISTRO})" "FAILED"; exit 1' ERR
+trap 'echo "=== ERR TRAP EXECUTING ===" >&2; \
+      echo "TRAP: Step 1 - show_diagnostic_logs" >&2; \
+      show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; \
+      echo "TRAP: Step 2 - cleanup_test" >&2; \
+      cleanup_test "${POD_NAME}" "${PVC_NAME}"; \
+      echo "TRAP: Step 3 - test_summary FAILED" >&2; \
+      test_summary "${PROTOCOL} (${K8S_DISTRO})" "FAILED"; \
+      echo "TRAP: Step 4 - exit 1 (THIS SHOULD NEVER PRINT)" >&2; \
+      exit 1' ERR
 
 # Run basic test steps
 verify_cluster
 deploy_driver "nfs"
-wait_for_driver
+echo "DEBUG: About to call wait_for_driver" >&2
+wait_for_driver || {
+    echo "ERROR: wait_for_driver failed explicitly (returned $?)" >&2
+    echo "ERROR: Triggering explicit failure path" >&2
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    cleanup_test "${POD_NAME}" "${PVC_NAME}"
+    test_summary "${PROTOCOL} (${K8S_DISTRO})" "FAILED"
+}
+echo "DEBUG: wait_for_driver succeeded, continuing with tests" >&2
 
 #######################################
 # Test 1: Create PVC

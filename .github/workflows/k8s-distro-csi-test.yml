@@ -86,14 +86,6 @@ jobs:
         with:
           timeout: 60
 
-      - name: Import CSI driver image to k0s
-        run: |
-          echo "Importing CSI driver image to k0s..."
-          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
-          sudo k0s ctr images import /tmp/tns-csi.tar
-          sudo rm /tmp/tns-csi.tar
-          sudo k0s ctr images ls | grep bfenski/tns-csi
-
       - name: Run basic CSI test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -118,25 +110,10 @@ jobs:
         with:
           protocol: ${{ inputs.protocol }}
 
-      - name: Export CSI driver image before KubeSolo setup
-        run: |
-          echo "Exporting CSI driver image to tar file before KubeSolo disables Docker..."
-          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
-          ls -lh /tmp/tns-csi.tar
-
       - name: Setup KubeSolo
         uses: fenio/setup-kubesolo@main
         with:
           timeout: 60
-
-      - name: Import CSI driver image to KubeSolo
-        env:
-          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
-        run: |
-          echo "Importing CSI driver image to KubeSolo containerd..."
-          sudo ctr -n k8s.io images import /tmp/tns-csi.tar
-          sudo rm /tmp/tns-csi.tar
-          sudo ctr -n k8s.io images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
         env:
@@ -168,12 +145,6 @@ jobs:
         with:
           timeout: 60
           driver: docker
-
-      - name: Import CSI driver image to Minikube
-        run: |
-          echo "Importing CSI driver image to Minikube..."
-          minikube image load bfenski/tns-csi:latest
-          minikube image ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
         env:

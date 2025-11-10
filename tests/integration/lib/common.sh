@@ -308,7 +308,7 @@ deploy_driver() {
         --create-namespace
         --set image.repository=bfenski/tns-csi
         --set image.tag=latest
-        --set image.pullPolicy=Never
+        --set image.pullPolicy=IfNotPresent
         --set truenas.url="${truenas_url}"
         --set truenas.apiKey="${TRUENAS_API_KEY}"
     )

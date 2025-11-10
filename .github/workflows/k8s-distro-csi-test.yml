@@ -118,6 +118,12 @@ jobs:
         with:
           protocol: ${{ inputs.protocol }}
 
+      - name: Export CSI driver image before KubeSolo setup
+        run: |
+          echo "Exporting CSI driver image to tar file before KubeSolo disables Docker..."
+          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          ls -lh /tmp/tns-csi.tar
+
       - name: Setup KubeSolo
         uses: fenio/setup-kubesolo@main
         with:
@@ -127,9 +133,7 @@ jobs:
         env:
           KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
         run: |
-          echo "Importing CSI driver image to KubeSolo..."
-          # KubeSolo uses containerd, need to import via ctr
-          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          echo "Importing CSI driver image to KubeSolo containerd..."
           sudo ctr -n k8s.io images import /tmp/tns-csi.tar
           sudo rm /tmp/tns-csi.tar
           sudo ctr -n k8s.io images ls | grep bfenski/tns-csi

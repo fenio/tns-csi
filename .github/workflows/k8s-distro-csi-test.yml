@@ -115,6 +115,14 @@ jobs:
         with:
           timeout: 60
 
+      - name: Create KubeSolo kubelet directories
+        run: |
+          echo "Creating required kubelet directories for KubeSolo..."
+          sudo mkdir -p /var/lib/kubesolo/pods
+          sudo mkdir -p /var/lib/kubesolo/plugins
+          sudo mkdir -p /var/lib/kubesolo/plugins_registry
+          echo "Directories created successfully"
+
       - name: Run basic CSI test
         env:
           KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig

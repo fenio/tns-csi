@@ -802,12 +802,6 @@ verify_metrics() {
         return 0
     fi
     
-    echo ""
-    echo "=== Prometheus Metrics Output ==="
-    echo "${metrics_output}"
-    echo "================================="
-    echo ""
-    
     # Check for expected custom metrics
     local expected_metrics=(
         "tns_csi_operations_total"

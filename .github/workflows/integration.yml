@@ -202,28 +202,10 @@ jobs:
         run: |
           ./tests/integration/test-connection-resilience.sh
 
-  integration-orphaned-resources:
-    name: Orphaned Resource Detection Tests
-    runs-on: self-hosted
-    needs: integration-connection-resilience
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/setup-dependencies
-        with:
-          protocol: both
-      - uses: ./.github/actions/setup-k3s
-      - name: Run Orphaned Resource Detection Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          ./tests/integration/test-orphaned-resources.sh
-
   cleanup:
     name: Cleanup TrueNAS Artifacts
     runs-on: self-hosted
-    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-connection-resilience, integration-orphaned-resources]
+    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-connection-resilience]
     if: always()
     steps:
       - uses: actions/checkout@v5

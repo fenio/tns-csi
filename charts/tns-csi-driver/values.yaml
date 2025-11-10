@@ -150,7 +150,7 @@ sidecars:
   resizer:
     image:
       repository: registry.k8s.io/sig-storage/csi-resizer
-      tag: v1.12.0
+      tag: v1.14.0
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -176,7 +176,7 @@ sidecars:
   snapshotter:
     image:
       repository: registry.k8s.io/sig-storage/csi-snapshotter
-      tag: v8.2.0
+      tag: v8.4.0
       pullPolicy: IfNotPresent
     resources:
       requests:

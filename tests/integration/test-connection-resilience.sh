@@ -105,6 +105,9 @@ test_info "Checking for recent WebSocket activity..."
 RECENT_ACTIVITY=$(kubectl logs -n "${CONTROLLER_NAMESPACE}" "${CONTROLLER_POD}" -c tns-csi-plugin --tail=200 --since=60s 2>/dev/null | \
     grep -c -E "(ping|pong|Successfully authenticated)" || echo "0")
 
+# Strip leading zeros to avoid octal interpretation
+RECENT_ACTIVITY=$((10#${RECENT_ACTIVITY}))
+
 if [[ "${RECENT_ACTIVITY}" -gt 0 ]]; then
     test_success "WebSocket is active (${RECENT_ACTIVITY} ping/pong/auth events in last 60s)"
 else
@@ -204,6 +207,9 @@ test_info "Checking controller logs for connection errors..."
 ERROR_COUNT=$(kubectl logs -n "${CONTROLLER_NAMESPACE}" "${CONTROLLER_POD}" -c tns-csi-plugin --tail=500 2>/dev/null | \
     grep -c -E "(WebSocket.*error|failed to connect|connection refused)" || echo "0")
 
+# Strip leading zeros to avoid octal interpretation
+ERROR_COUNT=$((10#${ERROR_COUNT}))
+
 if [[ "${ERROR_COUNT}" -eq 0 ]]; then
     test_success "No connection errors detected during test"
 else
@@ -218,6 +224,9 @@ fi
 # Check for successful reconnections (indicates resilience is working)
 RECONNECT_COUNT=$(kubectl logs -n "${CONTROLLER_NAMESPACE}" "${CONTROLLER_POD}" -c tns-csi-plugin --tail=500 2>/dev/null | \
     grep -c -E "(Reconnecting|Successfully authenticated after)" || echo "0")
+
+# Strip leading zeros to avoid octal interpretation
+RECONNECT_COUNT=$((10#${RECONNECT_COUNT}))
 
 if [[ "${RECONNECT_COUNT}" -gt 0 ]]; then
     test_success "Connection resilience confirmed: ${RECONNECT_COUNT} successful reconnections observed"

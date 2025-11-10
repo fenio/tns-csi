@@ -12,7 +12,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NFS Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -29,7 +29,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NVMe-oF Integration Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -47,7 +47,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - uses: ./.github/actions/setup-snapshots
       - name: Run NFS Snapshot Integration Test
         env:
@@ -66,7 +66,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - uses: ./.github/actions/setup-snapshots
       - name: Run NVMe-oF Snapshot Integration Test
         env:
@@ -85,7 +85,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NFS Concurrent Volume Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -103,7 +103,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NVMe-oF Concurrent Volume Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -121,7 +121,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NFS Data Persistence Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -139,7 +139,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NVMe-oF Data Persistence Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -157,7 +157,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NFS StatefulSet Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -175,7 +175,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run NVMe-oF StatefulSet Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -193,7 +193,7 @@ jobs:
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@main
       - name: Run Connection Resilience Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

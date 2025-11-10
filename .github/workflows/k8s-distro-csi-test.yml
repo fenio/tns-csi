@@ -20,23 +20,27 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup dependencies
-        uses: ./.github/actions/setup-dependencies
-        with:
-          protocol: ${{ inputs.protocol }}
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl wget jq
+          if [[ "${{ inputs.protocol }}" == "nfs" ]]; then
+            sudo apt-get install -y nfs-common
+          else
+            sudo apt-get install -y nvme-cli
+            sudo modprobe nvme-tcp || true
+          fi
+
+      - name: Install Helm
+        run: |
+          if ! command -v helm &> /dev/null; then
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
 
       - name: Setup K3s
         uses: fenio/setup-k3s@main
         with:
           timeout: 60
-
-      - name: Import CSI driver image to K3s
-        run: |
-          echo "Importing CSI driver image to K3s..."
-          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
-          sudo k3s ctr images import /tmp/tns-csi.tar
-          sudo rm /tmp/tns-csi.tar
-          sudo k3s ctr images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
         env:

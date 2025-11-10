@@ -33,7 +33,9 @@ jobs:
       - name: Import CSI driver image to K3s
         run: |
           echo "Importing CSI driver image to K3s..."
-          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
+          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          sudo k3s ctr images import /tmp/tns-csi.tar
+          sudo rm /tmp/tns-csi.tar
           sudo k3s ctr images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
@@ -60,6 +62,14 @@ jobs:
         with:
           protocol: ${{ inputs.protocol }}
 
+      - name: Cleanup previous k0s installation
+        continue-on-error: true
+        run: |
+          echo "Cleaning up any previous k0s installation..."
+          sudo k0s stop 2>/dev/null || true
+          sudo k0s reset 2>/dev/null || true
+          sleep 2
+
       - name: Setup k0s
         uses: fenio/setup-k0s@main
         with:
@@ -68,7 +78,9 @@ jobs:
       - name: Import CSI driver image to k0s
         run: |
           echo "Importing CSI driver image to k0s..."
-          sudo docker save bfenski/tns-csi:latest | sudo k0s ctr images import -
+          /usr/bin/docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          sudo k0s ctr images import /tmp/tns-csi.tar
+          sudo rm /tmp/tns-csi.tar
           sudo k0s ctr images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
@@ -106,7 +118,9 @@ jobs:
         run: |
           echo "Importing CSI driver image to KubeSolo..."
           # KubeSolo uses containerd, need to import via ctr
-          sudo docker save bfenski/tns-csi:latest | sudo ctr -n k8s.io images import -
+          /usr/bin/docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          sudo ctr -n k8s.io images import /tmp/tns-csi.tar
+          sudo rm /tmp/tns-csi.tar
           sudo ctr -n k8s.io images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test

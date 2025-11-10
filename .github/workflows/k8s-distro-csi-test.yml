@@ -89,8 +89,7 @@ jobs:
       - name: Import CSI driver image to k0s
         run: |
           echo "Importing CSI driver image to k0s..."
-          echo "Docker location: $(command -v docker || echo 'not found')"
-          $(command -v docker || echo '/usr/bin/docker') save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
           sudo k0s ctr images import /tmp/tns-csi.tar
           sudo rm /tmp/tns-csi.tar
           sudo k0s ctr images ls | grep bfenski/tns-csi
@@ -130,8 +129,7 @@ jobs:
         run: |
           echo "Importing CSI driver image to KubeSolo..."
           # KubeSolo uses containerd, need to import via ctr
-          echo "Docker location: $(command -v docker || echo 'not found')"
-          $(command -v docker || echo '/usr/bin/docker') save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
+          sudo docker save bfenski/tns-csi:latest -o /tmp/tns-csi.tar
           sudo ctr -n k8s.io images import /tmp/tns-csi.tar
           sudo rm /tmp/tns-csi.tar
           sudo ctr -n k8s.io images ls | grep bfenski/tns-csi

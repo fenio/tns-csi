@@ -425,6 +425,26 @@ wait_for_driver() {
         --timeout="${TIMEOUT_DRIVER}"; then
         stop_test_timer "wait_for_driver" "FAILED"
         test_error "CSI driver failed to become ready"
+        
+        # Show diagnostic information for node pod issues
+        echo ""
+        echo "=== Node Pod Diagnostics ==="
+        local node_pod=$(kubectl get pods -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        
+        if [[ -n "$node_pod" ]]; then
+            echo ""
+            echo "=== Node Pod Describe ==="
+            kubectl describe pod "$node_pod" -n kube-system || true
+            
+            echo ""
+            echo "=== Node Pod Events ==="
+            kubectl get events -n kube-system \
+                --field-selector involvedObject.name="$node_pod" \
+                --sort-by='.lastTimestamp' || true
+        fi
+        
         return 1
     fi
     

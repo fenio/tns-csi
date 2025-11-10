@@ -10,8 +10,8 @@ source "${SCRIPT_DIR}/lib/common.sh"
 # Get protocol from environment or default to nfs
 TEST_PROTOCOL="${TEST_PROTOCOL:-nfs}"
 PROTOCOL="Basic CSI (${TEST_PROTOCOL})"
-PVC_NAME="basic-csi-pvc"
-POD_NAME="basic-csi-pod"
+PVC_NAME="test-pvc-${TEST_PROTOCOL}"
+POD_NAME="test-pod-${TEST_PROTOCOL}"
 
 echo "================================================"
 echo "TrueNAS CSI - Basic Functionality Test"

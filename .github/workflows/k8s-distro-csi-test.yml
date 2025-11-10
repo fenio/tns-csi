@@ -33,7 +33,7 @@ jobs:
       - name: Import CSI driver image to K3s
         run: |
           echo "Importing CSI driver image to K3s..."
-          sudo k3s ctr images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
           sudo k3s ctr images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
@@ -68,7 +68,7 @@ jobs:
       - name: Import CSI driver image to k0s
         run: |
           echo "Importing CSI driver image to k0s..."
-          sudo k0s ctr images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo docker save bfenski/tns-csi:latest | sudo k0s ctr images import -
           sudo k0s ctr images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test
@@ -106,7 +106,7 @@ jobs:
         run: |
           echo "Importing CSI driver image to KubeSolo..."
           # KubeSolo uses containerd, need to import via ctr
-          sudo ctr -n k8s.io images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo docker save bfenski/tns-csi:latest | sudo ctr -n k8s.io images import -
           sudo ctr -n k8s.io images ls | grep bfenski/tns-csi
 
       - name: Run basic CSI test

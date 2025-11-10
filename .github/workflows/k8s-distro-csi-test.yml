@@ -1,0 +1,223 @@
+name: Kubernetes Distribution CSI Testing
+
+on:
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Protocol to test'
+        required: true
+        type: choice
+        options:
+          - nfs
+          - nvmeof
+        default: nfs
+
+jobs:
+  test-k3s:
+    name: K3s CSI Test (${{ inputs.protocol }})
+    runs-on: [self-hosted, Linux]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: ${{ inputs.protocol }}
+
+      - name: Setup K3s
+        uses: fenio/setup-k3s@main
+        with:
+          timeout: 60
+
+      - name: Import CSI driver image to K3s
+        run: |
+          echo "Importing CSI driver image to K3s..."
+          sudo k3s ctr images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo k3s ctr images ls | grep bfenski/tns-csi
+
+      - name: Run basic CSI test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          TEST_PROTOCOL: ${{ inputs.protocol }}
+        run: |
+          echo "Running basic CSI test on K3s with ${{ inputs.protocol }}..."
+          ./tests/integration/test-basic-csi.sh
+
+  test-k0s:
+    name: k0s CSI Test (${{ inputs.protocol }})
+    runs-on: [self-hosted, Linux]
+    needs: test-k3s
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: ${{ inputs.protocol }}
+
+      - name: Setup k0s
+        uses: fenio/setup-k0s@main
+        with:
+          timeout: 60
+
+      - name: Import CSI driver image to k0s
+        run: |
+          echo "Importing CSI driver image to k0s..."
+          sudo k0s ctr images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo k0s ctr images ls | grep bfenski/tns-csi
+
+      - name: Run basic CSI test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          TEST_PROTOCOL: ${{ inputs.protocol }}
+        run: |
+          echo "Running basic CSI test on k0s with ${{ inputs.protocol }}..."
+          ./tests/integration/test-basic-csi.sh
+
+  test-kubesolo:
+    name: KubeSolo CSI Test (${{ inputs.protocol }})
+    runs-on: [self-hosted, Linux]
+    needs: test-k0s
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: ${{ inputs.protocol }}
+
+      - name: Setup KubeSolo
+        uses: fenio/setup-kubesolo@main
+        with:
+          timeout: 60
+
+      - name: Import CSI driver image to KubeSolo
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
+        run: |
+          echo "Importing CSI driver image to KubeSolo..."
+          # KubeSolo uses containerd, need to import via ctr
+          sudo ctr -n k8s.io images import <(sudo docker save bfenski/tns-csi:latest)
+          sudo ctr -n k8s.io images ls | grep bfenski/tns-csi
+
+      - name: Run basic CSI test
+        env:
+          KUBECONFIG: /var/lib/kubesolo/pki/admin/admin.kubeconfig
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          TEST_PROTOCOL: ${{ inputs.protocol }}
+        run: |
+          echo "Running basic CSI test on KubeSolo with ${{ inputs.protocol }}..."
+          ./tests/integration/test-basic-csi.sh
+
+  test-minikube:
+    name: Minikube CSI Test (${{ inputs.protocol }})
+    runs-on: [self-hosted, Linux]
+    needs: test-kubesolo
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: ${{ inputs.protocol }}
+
+      - name: Setup Minikube
+        uses: fenio/setup-minikube@main
+        with:
+          timeout: 60
+          driver: docker
+
+      - name: Import CSI driver image to Minikube
+        run: |
+          echo "Importing CSI driver image to Minikube..."
+          minikube image load bfenski/tns-csi:latest
+          minikube image ls | grep bfenski/tns-csi
+
+      - name: Run basic CSI test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          TEST_PROTOCOL: ${{ inputs.protocol }}
+        run: |
+          echo "Running basic CSI test on Minikube with ${{ inputs.protocol }}..."
+          ./tests/integration/test-basic-csi.sh
+
+  cleanup:
+    name: Cleanup TrueNAS Artifacts
+    runs-on: [self-hosted, Linux]
+    needs: [test-k3s, test-k0s, test-kubesolo, test-minikube]
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.4'
+          cache: false
+
+      - name: Run TrueNAS cleanup
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "=== Running TrueNAS artifact cleanup ==="
+          ./scripts/cleanup-truenas-artifacts.sh
+          echo "=== Cleanup complete ==="
+
+  summary:
+    name: CSI Distribution Test Summary
+    runs-on: [self-hosted, Linux]
+    needs: [test-k3s, test-k0s, test-kubesolo, test-minikube, cleanup]
+    if: always()
+    steps:
+      - name: Report results
+        run: |
+          echo "# Kubernetes Distribution CSI Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Protocol: **${{ inputs.protocol }}**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Distribution | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| K3s | ${{ needs.test-k3s.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| k0s | ${{ needs.test-k0s.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| KubeSolo | ${{ needs.test-kubesolo.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Minikube | ${{ needs.test-minikube.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cleanup | ${{ needs.cleanup.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.test-k3s.result }}" == "success" ] && \
+             [ "${{ needs.test-k0s.result }}" == "success" ] && \
+             [ "${{ needs.test-kubesolo.result }}" == "success" ] && \
+             [ "${{ needs.test-minikube.result }}" == "success" ]; then
+            echo "## ✅ All tests passed!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The CSI driver successfully passed basic functionality tests (mount + resize) on all 4 Kubernetes distributions." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ⚠️ Some tests failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check individual job logs for details." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests performed:** Volume provisioning, pod mount, basic I/O, volume expansion (1Gi → 2Gi)" >> $GITHUB_STEP_SUMMARY

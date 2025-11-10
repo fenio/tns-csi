@@ -302,6 +302,28 @@ deploy_driver() {
     local truenas_url="wss://${TRUENAS_HOST}/api/current"
     test_info "TrueNAS URL: ${truenas_url}"
     
+    # Detect K8s distribution and set kubelet path
+    local kubelet_path="/var/lib/kubelet"  # Default for K3s, Minikube, standard K8s
+    
+    # Check for k0s
+    if kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}' 2>/dev/null | grep -q "k0s" || \
+       pgrep -f "k0s controller" >/dev/null 2>&1 || \
+       [[ -d "/var/lib/k0s" ]]; then
+        kubelet_path="/var/lib/k0s/kubelet"
+        test_info "Detected k0s distribution - using kubelet path: ${kubelet_path}"
+    # Check for KubeSolo
+    elif kubectl get nodes -o jsonpath='{.items[0].metadata.labels}' 2>/dev/null | grep -q "kubesolo" || \
+         [[ -d "/var/lib/kubesolo" ]]; then
+        kubelet_path="/var/lib/kubesolo"
+        test_info "Detected KubeSolo distribution - using kubelet path: ${kubelet_path}"
+    # Check for K3s (explicitly, though it uses default path)
+    elif kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.containerRuntimeVersion}' 2>/dev/null | grep -q "k3s" || \
+         pgrep -f "k3s server" >/dev/null 2>&1; then
+        test_info "Detected K3s distribution - using kubelet path: ${kubelet_path}"
+    else
+        test_info "Using default kubelet path: ${kubelet_path}"
+    fi
+    
     # Base Helm values
     local base_args=(
         --namespace kube-system
@@ -311,6 +333,7 @@ deploy_driver() {
         --set image.pullPolicy=IfNotPresent
         --set truenas.url="${truenas_url}"
         --set truenas.apiKey="${TRUENAS_API_KEY}"
+        --set node.kubeletPath="${kubelet_path}"
     )
     
     # Protocol-specific configuration

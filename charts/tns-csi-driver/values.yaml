@@ -95,6 +95,15 @@ node:
   # Log verbosity level (0-5, higher = more verbose)
   logLevel: 5
   
+  # Kubelet root directory path
+  # Different K8s distributions use different paths:
+  # - K3s: /var/lib/kubelet (default)
+  # - k0s: /var/lib/k0s/kubelet
+  # - KubeSolo: /var/lib/kubesolo
+  # - Minikube: /var/lib/kubelet (default)
+  # - Standard K8s: /var/lib/kubelet (default)
+  kubeletPath: /var/lib/kubelet
+  
   # Resource requests and limits for node plugin
   resources:
     requests:

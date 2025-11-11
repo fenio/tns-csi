@@ -188,23 +188,75 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 }
 
 // needsFormat checks if a device needs to be formatted.
+// For block devices (especially cloned ZVOLs), retry with exponential backoff
+// to allow the device to become fully ready before checking for existing filesystem.
 func needsFormat(ctx context.Context, devicePath string) (bool, error) {
-	// Use blkid to check if device has a filesystem
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	const (
+		maxRetries     = 5
+		initialBackoff = 100 * time.Millisecond
+		maxBackoff     = 2 * time.Second
+	)
 
-	cmd := exec.CommandContext(checkCtx, "blkid", devicePath)
-	output, err := cmd.CombinedOutput()
+	var lastErr error
+	var lastOutput []byte
+	backoff := initialBackoff
 
-	// If blkid returns non-zero and output is empty, device needs formatting
-	if err != nil {
-		if len(output) == 0 {
+	// Retry with exponential backoff to handle device readiness timing
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			klog.V(4).Infof("Retrying blkid for %s (attempt %d/%d after %v)", devicePath, attempt+1, maxRetries, backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return false, ctx.Err()
+			}
+			// Exponential backoff: double the wait time, up to maxBackoff
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+
+		// Use blkid to check if device has a filesystem
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		cmd := exec.CommandContext(checkCtx, "blkid", devicePath)
+		output, err := cmd.CombinedOutput()
+		cancel()
+
+		lastOutput = output
+		lastErr = err
+
+		// If blkid succeeds, device has a filesystem
+		if err == nil {
+			klog.V(4).Infof("Device %s has existing filesystem: %s", devicePath, string(output))
+			return false, nil
+		}
+
+		// If device doesn't exist yet, retry (might be a cloned ZVOL still being created)
+		if strings.Contains(string(output), "No such device") || strings.Contains(string(output), "No such file") {
+			klog.V(4).Infof("Device %s not ready yet, will retry", devicePath)
+			continue
+		}
+
+		// If blkid fails because no filesystem found, this is conclusive - device needs formatting
+		if len(output) == 0 || strings.Contains(string(output), "does not contain") {
+			klog.V(4).Infof("Device %s has no filesystem, needs formatting", devicePath)
 			return true, nil
 		}
-		// Check if error is because no filesystem found
-		if strings.Contains(string(output), "does not contain") {
+
+		// For other errors, retry in case of transient issues
+		klog.V(4).Infof("blkid returned error for %s: %v, output: %s - will retry", devicePath, err, string(output))
+	}
+
+	// After all retries, if we still have an error, check the last result
+	if lastErr != nil {
+		// If the last error was "no filesystem", device needs formatting
+		if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
+			klog.Warningf("Device %s still shows no filesystem after %d retries, will format", devicePath, maxRetries)
 			return true, nil
 		}
+		// Device still not ready - this is unexpected, return error
+		return false, fmt.Errorf("device %s not ready after %d retries: %v (output: %s)", devicePath, maxRetries, lastErr, string(lastOutput))
 	}
 
 	// Device has a filesystem

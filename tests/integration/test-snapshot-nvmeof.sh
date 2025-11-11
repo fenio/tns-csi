@@ -224,6 +224,12 @@ EOF
     kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- ls -lah /data/ || test_warning "Failed to list /data"
     
     echo ""
+    test_info "=== CSI Node Logs (needsFormat check for snapshot restore) ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+        --tail=100 | grep -A 5 -B 5 "needsFormat\|invalidateDeviceCache\|NodeStageVolume.*snap" || true
+    echo ""
+    
     verify_block_pattern "${pod_name}" "/data"
     
     # Write new data to cloned volume

@@ -21,8 +21,8 @@ truenas:
 # Image configuration
 image:
   repository: bfenski/tns-csi
-  pullPolicy: IfNotPresent
-  tag: "v0.0.2"
+  pullPolicy: Always
+  tag: "latest"
 
 imagePullSecrets: []
 

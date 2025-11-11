@@ -81,14 +81,15 @@ runs:
           echo "Helm already installed"
         fi
 
-    - name: Build CSI driver image
+    - name: Pull CSI driver image
       shell: bash
       run: |
-        # On self-hosted runner, skip rebuild if image already exists
-        if sudo docker inspect bfenski/tns-csi:latest &>/dev/null; then
-          echo "CSI driver image already exists, skipping build"
-          sudo docker images | grep bfenski/tns-csi || true
-        else
-          echo "Building CSI driver image..."
-          sudo -E make docker-build
-        fi
+        # Always pull the latest image from Docker Hub to ensure we have the newest build
+        echo "Pulling latest CSI driver image from Docker Hub..."
+        sudo docker pull bfenski/tns-csi:latest || {
+          echo "Failed to pull from Docker Hub, trying GHCR..."
+          sudo docker pull ghcr.io/fenio/tns-csi:latest && \
+          sudo docker tag ghcr.io/fenio/tns-csi:latest bfenski/tns-csi:latest
+        }
+        echo "CSI driver image pulled successfully"
+        sudo docker images | grep tns-csi || true

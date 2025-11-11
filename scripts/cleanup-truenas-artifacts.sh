@@ -73,8 +73,8 @@ func main() {
 
 	ctx := context.Background()
 
-	// List all datasets in the pool
-	fmt.Println("\n=== Listing datasets ===")
+	// List all datasets in the pool (including both FILESYSTEM and VOLUME types)
+	fmt.Println("\n=== Listing datasets (NFS filesystems and NVMe-oF ZVOLs) ===")
 	var datasets []map[string]interface{}
 	if err := client.Call(ctx, "pool.dataset.query", []interface{}{}, &datasets); err != nil {
 		fmt.Printf("Failed to query datasets: %v\n", err)
@@ -88,6 +88,8 @@ func main() {
 			continue
 		}
 		
+		dsType, _ := ds["type"].(string) // FILESYSTEM or VOLUME
+		
 		// Only include datasets in the specified pool
 		if !strings.HasPrefix(name, pool+"/") && name != pool {
 			continue
@@ -96,12 +98,16 @@ func main() {
 		// Only include CSI test datasets (containing 'pvc-' or 'test-csi')
 		if strings.Contains(name, "pvc-") || strings.Contains(name, "test-csi") {
 			testDatasets = append(testDatasets, name)
-			fmt.Printf("  Found: %s\n", name)
+			if dsType == "VOLUME" {
+				fmt.Printf("  Found ZVOL (NVMe-oF): %s\n", name)
+			} else {
+				fmt.Printf("  Found dataset (NFS): %s\n", name)
+			}
 		}
 	}
 
 	if len(testDatasets) == 0 {
-		fmt.Println("\n✓ No test datasets found - TrueNAS is clean!")
+		fmt.Println("\n✓ No test datasets (NFS or NVMe-oF) found - TrueNAS is clean!")
 		return
 	}
 

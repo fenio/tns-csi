@@ -61,6 +61,8 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
+            - name: registry-dir
+              mountPath: /var/lib/tns-csi
           resources:
             requests:
               cpu: 10m
@@ -120,3 +122,7 @@ spec:
           hostPath:
             path: /sys
             type: Directory
+        - name: registry-dir
+          hostPath:
+            path: /var/lib/tns-csi
+            type: DirectoryOrCreate

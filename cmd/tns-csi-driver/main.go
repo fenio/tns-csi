@@ -11,14 +11,18 @@ import (
 )
 
 var (
+	// Version information (set via build flags)
+	Version   = "dev"
+	GitCommit = "unknown"
+	BuildDate = "unknown"
+
 	endpoint    = flag.String("endpoint", "unix:///var/lib/kubelet/plugins/tns.csi.io/csi.sock", "CSI endpoint")
 	nodeID      = flag.String("node-id", "", "Node ID")
 	driverName  = flag.String("driver-name", "tns.csi.io", "Name of the driver")
-	version     = flag.String("version", "v0.1.0", "Version of the driver")
 	apiURL      = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
 	apiKey      = flag.String("api-key", "", "Storage system API key")
 	metricsAddr = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
-	showVersion = flag.Bool("show-version", false, "Show version and exit")
+	showVersion = flag.Bool("version", false, "Show version information and exit")
 )
 
 func main() {
@@ -26,7 +30,11 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("%s version: %s\n", *driverName, *version)
+		fmt.Printf("TNS CSI Driver\n")
+		fmt.Printf("  Version:    %s\n", Version)
+		fmt.Printf("  Git Commit: %s\n", GitCommit)
+		fmt.Printf("  Build Date: %s\n", BuildDate)
+		fmt.Printf("  Driver:     %s\n", *driverName)
 		os.Exit(0)
 	}
 
@@ -44,12 +52,12 @@ func main() {
 
 	klog.Infof("Starting TNS CSI Driver")
 	klog.Infof("Driver: %s", *driverName)
-	klog.Infof("Version: %s", *version)
+	klog.Infof("Version: %s (commit: %s, built: %s)", Version, GitCommit, BuildDate)
 	klog.Infof("Node ID: %s", *nodeID)
 
 	drv, err := driver.NewDriver(driver.Config{
 		DriverName:  *driverName,
-		Version:     *version,
+		Version:     Version,
 		NodeID:      *nodeID,
 		Endpoint:    *endpoint,
 		APIURL:      *apiURL,

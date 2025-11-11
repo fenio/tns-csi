@@ -2,7 +2,7 @@
 
 DRIVER_NAME=tns-csi-driver
 IMAGE_NAME=bfenski/tns-csi
-VERSION?=v0.0.1
+VERSION?=v0.1.0
 REGISTRY?=docker.io
 
 # Go parameters
@@ -15,8 +15,13 @@ GOMOD=$(GOCMD) mod
 GOLANGCI_LINT=golangci-lint
 
 # Build parameters
-LDFLAGS=-ldflags "-s -w"
 BUILD_DIR=bin
+GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
+LDFLAGS=-ldflags "-s -w \
+	-X main.Version=$(VERSION) \
+	-X main.GitCommit=$(GIT_COMMIT) \
+	-X main.BuildDate=$(BUILD_DATE)"
 
 all: build
 

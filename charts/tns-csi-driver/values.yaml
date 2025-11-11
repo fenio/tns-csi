@@ -22,7 +22,7 @@ truenas:
 image:
   repository: bfenski/tns-csi
   pullPolicy: IfNotPresent
-  tag: "v0.0.2"
+  tag: "v0.1.0"
 
 imagePullSecrets: []
 

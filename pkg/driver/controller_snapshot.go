@@ -616,6 +616,18 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 
 	klog.Infof("Successfully cloned snapshot to dataset: %s", clonedDataset.Name)
 
+	// CRITICAL: Wait for ZFS metadata to fully sync before exposing the cloned volume
+	// ZFS clone operations can return before all metadata is written to disk.
+	// For NVMe-oF volumes, if the namespace is created immediately, the node may connect
+	// to a device where blkid cannot yet detect the existing filesystem, causing a reformat.
+	// This is especially critical for clones because the filesystem exists but isn't visible yet.
+	if snapshotMeta.Protocol == ProtocolNVMeOF {
+		const zfsSyncDelay = 2 * time.Second
+		klog.Infof("Waiting %v for ZFS metadata to sync before creating NVMe-oF namespace", zfsSyncDelay)
+		time.Sleep(zfsSyncDelay)
+		klog.V(4).Infof("ZFS sync delay complete, proceeding with NVMe-oF namespace creation")
+	}
+
 	// Get server and subsystemNQN parameters from StorageClass or source volume
 	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset)
 	if err != nil {

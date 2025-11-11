@@ -1,0 +1,29 @@
+name: Standalone Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-nfs-create:
+    name: "Standalone Test: NFS Volume Creation"
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Setup k3s cluster
+        uses: fenio/setup-k3s@main
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.3'
+      
+      - name: Run test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          cd /Users/bfenski/tns-csi
+          ./tests/standalone/01-test-nfs-create.sh

@@ -19,17 +19,17 @@ const (
 
 // FormattedVolumeEntry represents a record of a formatted volume.
 type FormattedVolumeEntry struct {
+	FormattedAt    time.Time `json:"formatted_at"`    // Timestamp when formatted
 	VolumeID       string    `json:"volume_id"`       // CSI volume ID
 	DevicePath     string    `json:"device_path"`     // Device path at time of formatting
 	FilesystemType string    `json:"filesystem_type"` // Filesystem type (ext4, xfs, etc.)
-	FormattedAt    time.Time `json:"formatted_at"`    // Timestamp when formatted
 }
 
 // FormattedVolumesRegistry tracks which volumes have been formatted.
 // This prevents accidental reformatting of existing volumes that contain user data.
 type FormattedVolumesRegistry struct {
-	mu      sync.RWMutex
 	entries map[string]FormattedVolumeEntry // key: volume ID
+	mu      sync.RWMutex
 }
 
 // globalFormattedVolumesRegistry is the singleton registry instance.
@@ -111,7 +111,7 @@ func (r *FormattedVolumesRegistry) save() error {
 
 	// Write to temporary file first (atomic write)
 	tmpPath := registryPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o640); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write temporary registry file: %w", err)
 	}
 

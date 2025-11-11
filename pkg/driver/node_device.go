@@ -19,8 +19,9 @@ import (
 
 // Static errors for device operations.
 var (
-	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
-	ErrDeviceNotReady    = errors.New("device not ready after retries")
+	ErrUnsupportedFSType      = errors.New("unsupported filesystem type")
+	ErrDeviceNotReady         = errors.New("device not ready after retries")
+	ErrVolumeAlreadyFormatted = errors.New("volume was previously formatted")
 )
 
 // publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
@@ -386,8 +387,8 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 		klog.Errorf("REFUSING to format volume %s: it was previously formatted on %v (device: %s, fs: %s). "+
 			"This volume may contain user data. If filesystem detection failed, this is likely a timing issue with blkid.",
 			volumeID, existingEntry.FormattedAt, existingEntry.DevicePath, existingEntry.FilesystemType)
-		return fmt.Errorf("refusing to format volume %s: previously formatted on %v - would cause data loss",
-			volumeID, existingEntry.FormattedAt)
+		return fmt.Errorf("%w: volume %s was formatted on %v (would cause data loss)",
+			ErrVolumeAlreadyFormatted, volumeID, existingEntry.FormattedAt)
 	}
 
 	// Volume was never formatted before - safe to format

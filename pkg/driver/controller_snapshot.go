@@ -550,6 +550,8 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
+//
+//nolint:gocognit // TODO: refactor to reduce cognitive complexity
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)

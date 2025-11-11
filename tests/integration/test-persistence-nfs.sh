@@ -9,10 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="NFS Data Persistence"
-PVC_NAME="persistence-test-pvc"
-POD_NAME="persistence-test-pod"
-POD_NAME_2="persistence-test-pod-2"
-TEST_DATA="Persistence Test Data - $(date +%s)"
+# Use unique PVC name with timestamp to prevent reuse of stale datasets if cleanup fails
+TIMESTAMP=$(date +%s)
+PVC_NAME="persistence-test-pvc-${TIMESTAMP}"
+POD_NAME="persistence-test-pod-${TIMESTAMP}"
+POD_NAME_2="persistence-test-pod-2-${TIMESTAMP}"
+TEST_DATA="Persistence Test Data - ${TIMESTAMP}"
 LARGE_FILE_SIZE_MB=50
 MANIFEST_DIR="${SCRIPT_DIR}/manifests"
 

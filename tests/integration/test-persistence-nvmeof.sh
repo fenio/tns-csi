@@ -9,10 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="NVMe-oF Data Persistence"
-PVC_NAME="persistence-test-pvc-nvmeof"
-POD_NAME="persistence-test-pod-nvmeof"
-POD_NAME_2="persistence-test-pod-nvmeof-2"
-TEST_DATA="Persistence Test Data - $(date +%s)"
+# Use unique PVC name with timestamp to prevent reuse of stale ZVOLs if cleanup fails
+TIMESTAMP=$(date +%s)
+PVC_NAME="persistence-test-pvc-nvmeof-${TIMESTAMP}"
+POD_NAME="persistence-test-pod-nvmeof-${TIMESTAMP}"
+POD_NAME_2="persistence-test-pod-nvmeof-2-${TIMESTAMP}"
+TEST_DATA="Persistence Test Data - ${TIMESTAMP}"
 LARGE_FILE_SIZE_MB=50
 MANIFEST_DIR="${SCRIPT_DIR}/manifests"
 

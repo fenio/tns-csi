@@ -188,19 +188,62 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
+// invalidateDeviceCache invalidates kernel caches for a device.
+// This is critical for cloned ZVOLs where the kernel may cache the "empty" state
+// before the clone completes, preventing blkid from detecting the existing filesystem.
+func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) error {
+	// Only run cache invalidation on retry attempts (not first attempt)
+	if attempt == 0 {
+		return nil
+	}
+
+	// Use blockdev --flushbufs to invalidate kernel buffer cache
+	// This forces the kernel to re-read the device's actual content
+	flushCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("blockdev --flushbufs failed for %s (attempt %d): %v, output: %s",
+			devicePath, attempt+1, err, string(output))
+		// Don't fail - device might not exist yet, continue anyway
+		return err
+	}
+	klog.V(4).Infof("Flushed device buffers for %s (attempt %d)", devicePath, attempt+1)
+
+	// Wait for udev to settle (process any pending device events)
+	// This ensures udev has processed any changes to the device
+	settleCtx, cancelSettle := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelSettle()
+
+	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=5")
+	settleOutput, settleErr := settleCmd.CombinedOutput()
+	if settleErr != nil {
+		klog.V(4).Infof("udevadm settle failed (attempt %d): %v, output: %s",
+			attempt+1, settleErr, string(settleOutput))
+		return settleErr
+	}
+	klog.V(4).Infof("udevadm settle completed (attempt %d)", attempt+1)
+
+	return nil
+}
+
 // needsFormat checks if a device needs to be formatted.
 // For block devices (especially cloned ZVOLs), retry with exponential backoff
 // to allow the device to become fully ready before checking for existing filesystem.
 func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	const (
-		maxRetries     = 5
+		maxRetries     = 10
 		initialBackoff = 100 * time.Millisecond
-		maxBackoff     = 2 * time.Second
+		maxBackoff     = 5 * time.Second
 	)
 
 	var lastErr error
 	var lastOutput []byte
 	backoff := initialBackoff
+
+	klog.Infof("Checking if device %s needs formatting (max %d retries, max backoff %v)", devicePath, maxRetries, maxBackoff)
 
 	// Retry with exponential backoff to handle device readiness timing
 	for attempt := range maxRetries {
@@ -215,23 +258,39 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 			}
 		}
 
+		// Invalidate kernel caches before checking filesystem
+		// This is critical for cloned ZVOLs where filesystem metadata may be cached
+		if err := invalidateDeviceCache(ctx, devicePath, attempt); err != nil {
+			klog.Warningf("Failed to invalidate device cache for %s (attempt %d): %v - continuing anyway", devicePath, attempt+1, err)
+		}
+
 		// Check device filesystem status
 		needsFmt, output, err := checkDeviceFilesystem(ctx, devicePath)
 		lastOutput = output
 		lastErr = err
 
+		// Log detailed information about this attempt
+		klog.Infof("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q",
+			attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
+
 		if err == nil {
+			if needsFmt {
+				klog.Infof("Device %s needs formatting (no existing filesystem detected after %d attempts)", devicePath, attempt+1)
+			} else {
+				klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
+			}
 			return needsFmt, nil
 		}
 
 		// If device doesn't exist yet, retry (might be a cloned ZVOL still being created)
 		if isDeviceNotReady(output) {
-			klog.V(4).Infof("Device %s not ready yet, will retry", devicePath)
+			klog.Infof("Device %s not ready yet (attempt %d/%d): %s - will retry", devicePath, attempt+1, maxRetries, string(output))
 			continue
 		}
 
 		// For other errors, retry in case of transient issues
-		klog.V(4).Infof("blkid returned error for %s: %v, output: %s - will retry", devicePath, err, string(output))
+		klog.Infof("blkid returned error for %s (attempt %d/%d): %v, output: %q - will retry",
+			devicePath, attempt+1, maxRetries, err, string(output))
 	}
 
 	// After all retries, handle the final result

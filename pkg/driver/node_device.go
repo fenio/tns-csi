@@ -344,9 +344,19 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 		return false, nil
 	}
 
-	// If the last error was "no filesystem", device needs formatting
+	// CRITICAL DATA LOSS PREVENTION:
+	// If we still can't detect a filesystem after all retries, this could be:
+	// 1. A genuinely new volume that needs formatting
+	// 2. An existing volume with data, but we're having detection issues
+	//
+	// The SAFE approach: If blkid shows "no filesystem" after all retries,
+	// assume it needs formatting. However, we should NEVER format a volume
+	// that we've previously formatted. This is handled by formatDevice() which
+	// checks the formatted volumes registry before proceeding.
+	//
+	// If the last error was "no filesystem", device *might* need formatting
 	if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
-		klog.Warningf("Device %s still shows no filesystem after %d retries, will format", devicePath, maxRetries)
+		klog.Warningf("Device %s still shows no filesystem after %d retries, MAY need formatting", devicePath, maxRetries)
 		return true, nil
 	}
 
@@ -356,7 +366,34 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 }
 
 // formatDevice formats a device with the specified filesystem.
-func formatDevice(ctx context.Context, devicePath, fsType string) error {
+// CRITICAL DATA LOSS PREVENTION: This function checks the formatted volumes registry
+// to ensure we NEVER reformat a volume that has been previously formatted, even if
+// we can't currently detect its filesystem (e.g., due to timing issues with blkid).
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
+	// LAYER 3 DEFENSE: Check if this volume was previously formatted
+	// If yes, REFUSE to format it - this prevents data loss even if blkid fails
+	registry := getFormattedVolumesRegistry()
+	wasFormatted, existingEntry := registry.WasFormatted(volumeID)
+
+	if wasFormatted {
+		// CRITICAL: This volume was previously formatted. NEVER reformat it.
+		// This could happen if:
+		// 1. Device reconnected and metadata isn't immediately visible to blkid
+		// 2. Transient kernel cache issues
+		// 3. Network connectivity issues with NVMe-oF
+		//
+		// In all cases, reformatting would destroy user data - ABORT.
+		klog.Errorf("REFUSING to format volume %s: it was previously formatted on %v (device: %s, fs: %s). "+
+			"This volume may contain user data. If filesystem detection failed, this is likely a timing issue with blkid.",
+			volumeID, existingEntry.FormattedAt, existingEntry.DevicePath, existingEntry.FilesystemType)
+		return fmt.Errorf("refusing to format volume %s: previously formatted on %v - would cause data loss",
+			volumeID, existingEntry.FormattedAt)
+	}
+
+	// Volume was never formatted before - safe to format
+	klog.Infof("Formatting new volume %s at %s with filesystem %s (not in formatted volumes registry)",
+		volumeID, devicePath, fsType)
+
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
@@ -383,5 +420,14 @@ func formatDevice(ctx context.Context, devicePath, fsType string) error {
 	}
 
 	klog.V(4).Infof("Format output: %s", string(output))
+
+	// Record this volume as formatted in the registry
+	// This ensures we'll never accidentally reformat it in the future
+	if recordErr := registry.RecordFormatted(volumeID, devicePath, fsType); recordErr != nil {
+		// Log error but don't fail - the volume is already formatted successfully
+		klog.Errorf("Failed to record formatted volume %s in registry (volume is formatted but won't be protected from future reformats): %v",
+			volumeID, recordErr)
+	}
+
 	return nil
 }

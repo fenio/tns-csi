@@ -53,7 +53,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		return s.stageNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
 	}
 
 	// Check if nvme-cli is installed
@@ -77,7 +77,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	}
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
-	return s.stageNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
@@ -141,7 +141,7 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
-func (s *NodeService) stageNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
 	// CRITICAL: Wait for filesystem metadata to become available after device connection
 	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
 	// filesystem metadata immediately available. If we check too quickly with blkid,
@@ -160,7 +160,7 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, devicePath, stagingTa
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}
-	return s.formatAndMountNVMeDevice(ctx, devicePath, stagingTargetPath, volumeCapability)
+	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
@@ -208,8 +208,8 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 // formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
-func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
-	klog.Infof("Formatting and mounting NVMe device %s to %s", devicePath, stagingTargetPath)
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
+	klog.Infof("Formatting and mounting NVMe device %s to %s (volume: %s)", devicePath, stagingTargetPath, volumeID)
 
 	// Determine filesystem type from volume capability
 	fsType := "ext4" // default
@@ -225,7 +225,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, devicePath, 
 
 	if needsFormat {
 		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
-		if formatErr := formatDevice(ctx, devicePath, fsType); formatErr != nil {
+		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 	} else {

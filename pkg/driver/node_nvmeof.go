@@ -142,6 +142,21 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
 func (s *NodeService) stageNVMeDevice(ctx context.Context, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
+	// CRITICAL: Wait for filesystem metadata to become available after device connection
+	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
+	// filesystem metadata immediately available. If we check too quickly with blkid,
+	// it won't detect an existing ext4 filesystem, causing an erroneous reformat that
+	// destroys user data. This is the same issue as snapshot clones but occurs during
+	// normal pod restarts when devices reconnect.
+	//
+	// For filesystem volumes, add a brief delay to ensure metadata is readable.
+	if !isBlockVolume {
+		const deviceMetadataDelay = 2 * time.Second
+		klog.V(4).Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
+		time.Sleep(deviceMetadataDelay)
+		klog.V(4).Infof("Device metadata stabilization delay complete for %s", devicePath)
+	}
+
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}

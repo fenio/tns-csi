@@ -13,6 +13,25 @@ runs:
         fi
         sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
         echo "k3s cluster destroyed"
+        
+        echo "=== Disconnecting all NVMe-oF connections ==="
+        # Disconnect all NVMe-oF TCP connections to ensure clean state between tests
+        # This prevents stale device state from previous tests affecting new tests
+        if command -v nvme &> /dev/null; then
+          sudo nvme disconnect-all || echo "No NVMe-oF connections to disconnect (or disconnect failed)"
+        else
+          echo "nvme-cli not installed, skipping NVMe disconnect"
+        fi
+        
+        echo "=== Flushing any remaining block device caches ==="
+        # Flush caches for any remaining block devices to prevent stale data
+        for dev in /dev/nvme*n* /dev/sd*; do
+          if [ -b "$dev" ]; then
+            sudo blockdev --flushbufs "$dev" 2>/dev/null || true
+          fi
+        done
+        
+        echo "=== Cleanup complete ==="
 
     - name: Install k3s (fresh cluster)
       shell: bash

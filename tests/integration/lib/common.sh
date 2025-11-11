@@ -88,7 +88,7 @@ check_nvmeof_configured() {
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
         --tail=20 2>/dev/null || true)
     
-    if echo "$logs" | grep -q "No TCP NVMe-oF port"; then
+    if grep -q "No TCP NVMe-oF port" <<< "$logs"; then
         test_warning "NVMe-oF ports not configured on TrueNAS server"
         test_warning "Skipping ${protocol_name} tests - this is expected if NVMe-oF is not set up"
         test_info "To enable NVMe-oF: Configure an NVMe-oF TCP portal in TrueNAS UI"
@@ -820,7 +820,7 @@ verify_metrics() {
     local missing_metrics=()
     
     for metric in "${expected_metrics[@]}"; do
-        if echo "${metrics_output}" | grep -q "^${metric}"; then
+        if grep -q "^${metric}" <<< "${metrics_output}"; then
             found_count=$((found_count + 1))
         else
             missing_metrics+=("${metric}")
@@ -845,22 +845,22 @@ verify_metrics() {
     test_info "Checking for metrics with collected data..."
     
     local metrics_with_data=0
-    if echo "${metrics_output}" | grep -E "^tns_csi_operations_total.*[1-9]" >/dev/null; then
+    if grep -E "^tns_csi_operations_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
         test_success "CSI operations were recorded"
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
-    if echo "${metrics_output}" | grep -E "^tns_csi_volume_operations_total.*[1-9]" >/dev/null; then
+    if grep -E "^tns_csi_volume_operations_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
         test_success "Volume operations were recorded"
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
-    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_connection_status" >/dev/null; then
+    if grep -E "^tns_csi_websocket_connection_status" <<< "${metrics_output}" >/dev/null; then
         test_success "WebSocket connection status is tracked"
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
-    if echo "${metrics_output}" | grep -E "^tns_csi_websocket_messages_total.*[1-9]" >/dev/null; then
+    if grep -E "^tns_csi_websocket_messages_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
         test_success "WebSocket messages were recorded"
         metrics_with_data=$((metrics_with_data + 1))
     fi

@@ -19,11 +19,17 @@ kind create cluster --config kind-config.yaml --name truenas-csi-test
 
 ### 2. Install NFS Support
 
-```bash
-./scripts/setup-kind-nfs.sh truenas-csi-test
-```
+Install `nfs-common` package on all Kind nodes, which is required for NFS mounts:
 
-This installs `nfs-common` package on all Kind nodes, which is required for NFS mounts.
+```bash
+# For each Kind node (control-plane and workers)
+docker exec truenas-csi-test-control-plane apt-get update
+docker exec truenas-csi-test-control-plane apt-get install -y nfs-common
+
+# If you have worker nodes
+docker exec truenas-csi-test-worker apt-get update
+docker exec truenas-csi-test-worker apt-get install -y nfs-common
+```
 
 ### 3. Install CSI Driver via Helm
 
@@ -87,65 +93,6 @@ kubectl exec test-pod -- cat /data/test.txt
 
 ---
 
-## Alternative: Script-based Deployment
-
-<details>
-<summary>Using deploy-to-kind.sh script - Click to expand</summary>
-
-### 1. Configure TrueNAS Credentials
-
-Create or edit `.tns-credentials` in the project root:
-
-```bash
-# TrueNAS API Credentials
-TRUENAS_URL=wss://YOUR-TRUENAS-IP:443/api/current
-TRUENAS_API_KEY=your-api-key-here
-```
-
-**Note:** The deployment script will read these credentials automatically.
-
-### 2. Deploy Everything Automatically
-
-Run the automated deployment script:
-
-```bash
-./scripts/deploy-to-kind.sh
-```
-
-This script will:
-- Create a Kind cluster with NFS support
-- Install NFS client packages in all nodes
-- Build the CSI driver Docker image
-- Load the image into Kind
-- Deploy all Kubernetes resources
-- Create the storage class
-- Wait for all pods to be ready
-
-### 3. Test the Driver
-
-Create a test PVC and pod:
-
-```bash
-kubectl apply -f test-pvc.yaml
-```
-
-Watch the status:
-
-```bash
-# Check PVC
-kubectl get pvc test-pvc-nfs
-
-# Check pod
-kubectl get pod test-nfs-pod
-
-# Check if data was written
-kubectl logs test-nfs-pod
-```
-
-</details>
-
----
-
 ## Manual Setup (Step-by-Step)
 
 <details>
@@ -161,11 +108,17 @@ kind create cluster --config kind-config.yaml
 
 ### 2. Install NFS Support
 
-```bash
-./scripts/setup-kind-nfs.sh truenas-csi-test
-```
+Install `nfs-common` package on all Kind nodes:
 
-This installs `nfs-common` package on all Kind nodes, which is required for NFS mounts.
+```bash
+# For each Kind node (control-plane and workers)
+docker exec truenas-csi-test-control-plane apt-get update
+docker exec truenas-csi-test-control-plane apt-get install -y nfs-common
+
+# If you have worker nodes
+docker exec truenas-csi-test-worker apt-get update
+docker exec truenas-csi-test-worker apt-get install -y nfs-common
+```
 
 ### 3. Build and Load Image
 
@@ -255,7 +208,7 @@ kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin --tail=100
 ```
 
 Common issues:
-- NFS client not installed (run setup-kind-nfs.sh again)
+- NFS client not installed (install nfs-common in Kind nodes)
 - Cannot reach TrueNAS server (check network/firewall)
 - Invalid NFS export path
 

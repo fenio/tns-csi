@@ -83,6 +83,8 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
+            - name: registry-dir
+              mountPath: /var/lib/tns-csi
           resources:
             {{- toYaml .Values.node.resources | nindent 12 }}
 
@@ -132,6 +134,10 @@ spec:
           hostPath:
             path: /sys
             type: Directory
+        - name: registry-dir
+          hostPath:
+            path: /var/lib/tns-csi
+            type: DirectoryOrCreate
 
       {{- with .Values.node.nodeSelector }}
       nodeSelector:

@@ -802,13 +802,7 @@ verify_metrics() {
         return 0
     fi
     
-    echo ""
-    echo "=== Prometheus Metrics Output ==="
-    echo "${metrics_output}"
-    echo "================================="
-    echo ""
-    
-    # Check for expected custom metrics
+    # Check for expected custom metrics (skip printing full output)
     local expected_metrics=(
         "tns_csi_operations_total"
         "tns_csi_operation_duration_seconds"
@@ -827,10 +821,8 @@ verify_metrics() {
     
     for metric in "${expected_metrics[@]}"; do
         if echo "${metrics_output}" | grep -q "^${metric}"; then
-            test_success "Found metric: ${metric}"
             found_count=$((found_count + 1))
         else
-            test_warning "Missing metric: ${metric}"
             missing_metrics+=("${metric}")
         fi
     done

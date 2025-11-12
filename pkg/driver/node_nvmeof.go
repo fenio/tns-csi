@@ -53,7 +53,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
 	}
 
 	// Check if nvme-cli is installed
@@ -77,7 +77,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	}
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
-	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
@@ -141,7 +141,7 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
-func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
 	// CRITICAL: Wait for filesystem metadata to become available after device connection
 	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
 	// filesystem metadata immediately available. If we check too quickly with blkid,

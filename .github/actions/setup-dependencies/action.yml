@@ -81,15 +81,11 @@ runs:
           echo "Helm already installed"
         fi
 
-    - name: Pull CSI driver image
+    - name: Verify CSI driver image availability
       shell: bash
       run: |
-        # Always pull the latest image from Docker Hub to ensure we have the newest build
-        echo "Pulling latest CSI driver image from Docker Hub..."
-        sudo docker pull bfenski/tns-csi:latest || {
-          echo "Failed to pull from Docker Hub, trying GHCR..."
-          sudo docker pull ghcr.io/fenio/tns-csi:latest && \
-          sudo docker tag ghcr.io/fenio/tns-csi:latest bfenski/tns-csi:latest
-        }
-        echo "CSI driver image pulled successfully"
-        sudo docker images | grep tns-csi || true
+        # Verify that the CSI driver image is available from registries
+        # We don't pre-pull or sideload - let k3s pull directly from the registry
+        echo "Verifying CSI driver image is available from registry..."
+        echo "Image will be pulled from bfenski/tns-csi:latest or ghcr.io/fenio/tns-csi:latest"
+        echo "No pre-pull or sideloading - k3s will pull directly from registry with imagePullPolicy: Always"

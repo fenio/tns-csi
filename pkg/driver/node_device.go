@@ -18,13 +18,6 @@ import (
 )
 
 // Static errors and constants for device operations.
-const (
-	// ForceFormatAnnotation is the annotation key that users can optionally set to "true"
-	// to force formatting even if a filesystem is detected (use with caution).
-	// This is primarily useful for debugging or recovering from filesystem corruption.
-	ForceFormatAnnotation = "csi.truenas.org/force-format"
-)
-
 var (
 	// ErrUnsupportedFSType is returned when attempting to format a device with an unsupported filesystem type.
 	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
@@ -197,15 +190,6 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-// shouldForceFormat checks if the force-format annotation is present and set to "true".
-// This is the explicit opt-in mechanism to prevent accidental data loss.
-func shouldForceFormat(volumeContext map[string]string) bool {
-	if volumeContext == nil {
-		return false
-	}
-	return volumeContext[ForceFormatAnnotation] == "true"
-}
-
 // invalidateDeviceCache invalidates kernel caches for a device.
 // This is critical for cloned ZVOLs where the kernel may cache the "empty" state
 // before the clone completes, preventing blkid from detecting the existing filesystem.
@@ -374,29 +358,57 @@ func waitWithBackoff(ctx context.Context, devicePath string, attempt, maxRetries
 	}
 }
 
-// checkDeviceFilesystem checks if a device has a filesystem using blkid.
+// checkDeviceFilesystem checks if a device has a filesystem using blkid and lsblk.
 // Returns (needsFormat, output, error).
 func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat bool, output []byte, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(checkCtx, "blkid", devicePath)
-	output, err = cmd.CombinedOutput()
+	// First, check with lsblk to verify device exists and get basic info
+	lsblkCmd := exec.CommandContext(checkCtx, "lsblk", "-n", "-o", "FSTYPE", devicePath)
+	lsblkOutput, lsblkErr := lsblkCmd.CombinedOutput()
 
-	// If blkid succeeds, device has a filesystem
-	if err == nil {
-		klog.V(4).Infof("Device %s has existing filesystem: %s", devicePath, string(output))
-		return false, output, nil
+	if lsblkErr != nil {
+		// Device doesn't exist or lsblk failed
+		klog.V(4).Infof("lsblk failed for %s: %v, output: %s", devicePath, lsblkErr, string(lsblkOutput))
+		return false, lsblkOutput, lsblkErr
 	}
 
-	// If blkid fails because no filesystem found, device needs formatting
-	if len(output) == 0 || strings.Contains(string(output), "does not contain") {
-		klog.V(4).Infof("Device %s has no filesystem, needs formatting", devicePath)
-		return true, output, nil
+	// lsblk succeeded - check if FSTYPE is empty (no filesystem)
+	fstype := strings.TrimSpace(string(lsblkOutput))
+	if fstype == "" {
+		klog.V(4).Infof("lsblk shows device %s has no filesystem (FSTYPE empty)", devicePath)
+		// Verify with blkid for consistency
+		blkidCmd := exec.CommandContext(checkCtx, "blkid", devicePath)
+		blkidOutput, blkidErr := blkidCmd.CombinedOutput()
+
+		if blkidErr != nil || len(blkidOutput) == 0 || strings.Contains(string(blkidOutput), "does not contain") {
+			klog.Infof("Device %s confirmed to have no filesystem (lsblk FSTYPE='', blkid confirms)", devicePath)
+			// Return empty output to indicate no filesystem detected (handleFinalResult expects this)
+			return true, nil, nil
+		}
+
+		// Conflicting information - blkid found filesystem but lsblk didn't
+		klog.Warningf("Device %s: lsblk shows no FSTYPE but blkid found filesystem: %s - trusting blkid",
+			devicePath, string(blkidOutput))
+		return false, blkidOutput, nil
 	}
 
-	// Return error for further handling
-	return false, output, err
+	// lsblk shows a filesystem type - verify with blkid
+	klog.V(4).Infof("lsblk shows device %s has filesystem type: %s", devicePath, fstype)
+
+	blkidCmd := exec.CommandContext(checkCtx, "blkid", devicePath)
+	blkidOutput, blkidErr := blkidCmd.CombinedOutput()
+
+	if blkidErr == nil {
+		klog.V(4).Infof("Device %s has existing filesystem confirmed by both lsblk and blkid: %s",
+			devicePath, string(blkidOutput))
+		return false, blkidOutput, nil
+	}
+
+	// lsblk found filesystem but blkid didn't - trust lsblk
+	klog.V(4).Infof("Device %s: lsblk found FSTYPE=%s, blkid failed - trusting lsblk", devicePath, fstype)
+	return false, lsblkOutput, nil
 }
 
 // isDeviceNotReady checks if blkid output indicates device is not ready.
@@ -406,11 +418,20 @@ func isDeviceNotReady(output []byte) bool {
 
 // handleFinalResult processes the final result after all retries.
 func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, lastErr error) (bool, error) {
+	// If blkid check succeeded (lastErr == nil), we need to determine if filesystem was detected
+	// based on the output. Empty output or "does not contain" means no filesystem detected.
 	if lastErr == nil {
+		// Check if no filesystem was detected
+		if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
+			klog.Infof("Device %s has no filesystem - needs formatting", devicePath)
+			return true, nil
+		}
+		// Filesystem was detected, no formatting needed
+		klog.V(4).Infof("Device %s has existing filesystem, skipping format", devicePath)
 		return false, nil
 	}
 
-	// After all retries, if no filesystem is detected, the device needs formatting.
+	// After all retries, if blkid failed but output suggests no filesystem, device needs formatting.
 	// This is standard CSI behavior - new volumes should be formatted automatically.
 	// The extensive retry logic (15 attempts with cache invalidation) protects against
 	// temporary detection issues during device reconnection/clone completion.
@@ -427,16 +448,8 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 // formatDevice formats a device with the specified filesystem.
 // This function performs the actual formatting operation. The caller is responsible
 // for determining whether formatting is appropriate (e.g., checking needsFormat first).
-func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, forceFormat bool) error {
-	// If forceFormat is false, this is a standard format operation on a new/empty device
-	// If forceFormat is true, the user explicitly requested formatting via annotation
-	if forceFormat {
-		klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
-			volumeID, devicePath, fsType)
-	} else {
-		klog.Infof("Formatting volume %s at %s with filesystem %s (standard CSI behavior - no filesystem detected)",
-			volumeID, devicePath, fsType)
-	}
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
+	klog.Infof("Formatting volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

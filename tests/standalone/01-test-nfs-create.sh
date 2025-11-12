@@ -40,18 +40,16 @@ echo "Step 2: Create test namespace"
 kubectl create namespace "${NAMESPACE}"
 echo "✓ Namespace created: ${NAMESPACE}"
 
-# Step 3: Build and import CSI driver image
+# Step 3: Build and push CSI driver image
 echo ""
 echo "Step 3: Build CSI driver"
 cd /Users/bfenski/tns-csi
 make build
 echo "✓ Driver built"
 
-# Import to k3s
 echo ""
-echo "Importing image to k3s..."
-sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
-echo "✓ Image imported"
+echo "Note: Image will be pulled from registry (bfenski/tns-csi:latest)"
+echo "Ensure the latest image is pushed to Docker Hub before running this test"
 
 # Step 4: Create TrueNAS secret
 echo ""
@@ -70,7 +68,7 @@ helm upgrade --install tns-csi ./charts/tns-csi-driver \
     --namespace kube-system \
     --set image.repository=bfenski/tns-csi \
     --set image.tag=latest \
-    --set image.pullPolicy=Never \
+    --set image.pullPolicy=Always \
     --set truenas.existingSecret=tns-csi-secret \
     --set storageClasses.nfs.enabled=true \
     --set storageClasses.nfs.pool="${TRUENAS_POOL}" \
@@ -128,7 +126,8 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox
+    image: busybox:latest
+    imagePullPolicy: Always
     command: ["sh", "-c", "echo 'Ready' && sleep 3600"]
     volumeMounts:
     - name: data

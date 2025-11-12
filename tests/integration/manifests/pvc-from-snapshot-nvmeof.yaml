@@ -2,6 +2,8 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: test-pvc-from-snapshot-nvmeof
+  annotations:
+    csi.truenas.org/force-format: "true"
 spec:
   accessModes:
     - ReadWriteOnce

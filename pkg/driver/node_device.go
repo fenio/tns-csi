@@ -18,10 +18,21 @@ import (
 )
 
 // Static errors for device operations.
+const (
+	// ForceFormatAnnotation is the annotation key that users must set to "true" to explicitly
+	// request device formatting. This prevents accidental data loss.
+	ForceFormatAnnotation = "csi.truenas.org/force-format"
+)
+
 var (
-	ErrUnsupportedFSType      = errors.New("unsupported filesystem type")
-	ErrDeviceNotReady         = errors.New("device not ready after retries")
-	ErrVolumeAlreadyFormatted = errors.New("volume was previously formatted")
+	// ErrUnsupportedFSType is returned when attempting to format a device with an unsupported filesystem type.
+	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
+	// ErrDeviceNotReady is returned when a device does not become ready after retries.
+	ErrDeviceNotReady = errors.New("device not ready after retries")
+	// ErrFilesystemDetectionFailed is returned when we cannot determine if a device has an existing filesystem.
+	ErrFilesystemDetectionFailed = errors.New("cannot determine if device has existing filesystem")
+	// ErrFormatNotExplicitlyRequested is returned when formatting is needed but the user has not explicitly opted in.
+	ErrFormatNotExplicitlyRequested = errors.New("formatting requires explicit opt-in via annotation")
 )
 
 // publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
@@ -189,6 +200,15 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
+// shouldForceFormat checks if the force-format annotation is present and set to "true".
+// This is the explicit opt-in mechanism to prevent accidental data loss.
+func shouldForceFormat(volumeContext map[string]string) bool {
+	if volumeContext == nil {
+		return false
+	}
+	return volumeContext[ForceFormatAnnotation] == "true"
+}
+
 // invalidateDeviceCache invalidates kernel caches for a device.
 // This is critical for cloned ZVOLs where the kernel may cache the "empty" state
 // before the clone completes, preventing blkid from detecting the existing filesystem.
@@ -326,7 +346,7 @@ func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, ma
 	// If check succeeded, stop retrying
 	if err == nil {
 		if needsFmt {
-			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - format registry will make final decision",
+			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - will fail unless force-format annotation is set",
 				devicePath, attempt+1)
 		} else {
 			klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
@@ -394,19 +414,18 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 	}
 
 	// CRITICAL DATA LOSS PREVENTION:
-	// If we still can't detect a filesystem after all retries, this could be:
-	// 1. A genuinely new volume that needs formatting
-	// 2. An existing volume with data, but we're having detection issues
+	// If we still can't detect a filesystem after all retries, FAIL instead of formatting.
+	// This prevents accidental data loss when:
+	// 1. User manually formatted the volume
+	// 2. Persistent blkid bugs or kernel issues
+	// 3. Filesystem corruption
+	// 4. Incompatible filesystem we don't recognize
 	//
-	// The SAFE approach: If blkid shows "no filesystem" after all retries,
-	// assume it needs formatting. However, we should NEVER format a volume
-	// that we've previously formatted. This is handled by formatDevice() which
-	// checks the formatted volumes registry before proceeding.
-	//
-	// If the last error was "no filesystem", device *might* need formatting
+	// The user must explicitly opt-in to formatting via annotation.
 	if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
-		klog.Warningf("Device %s still shows no filesystem after %d retries, MAY need formatting", devicePath, maxRetries)
-		return true, nil
+		return false, fmt.Errorf("%w: device %s shows no filesystem after %d retries (output: %s). "+
+			"Cannot determine if device has existing data. To format this device, add annotation '%s: \"true\"' to the PersistentVolumeClaim",
+			ErrFilesystemDetectionFailed, devicePath, maxRetries, string(lastOutput), ForceFormatAnnotation)
 	}
 
 	// Device still not ready - this is unexpected
@@ -415,32 +434,22 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 }
 
 // formatDevice formats a device with the specified filesystem.
-// CRITICAL DATA LOSS PREVENTION: This function checks the formatted volumes registry
-// to ensure we NEVER reformat a volume that has been previously formatted, even if
-// we can't currently detect its filesystem (e.g., due to timing issues with blkid).
-func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
-	// LAYER 3 DEFENSE: Check if this volume was previously formatted
-	// If yes, REFUSE to format it - this prevents data loss even if blkid fails
-	registry := getFormattedVolumesRegistry()
-	wasFormatted, existingEntry := registry.WasFormatted(volumeID)
-
-	if wasFormatted {
-		// CRITICAL: This volume was previously formatted. NEVER reformat it.
-		// This could happen if:
-		// 1. Device reconnected and metadata isn't immediately visible to blkid
-		// 2. Transient kernel cache issues
-		// 3. Network connectivity issues with NVMe-oF
-		//
-		// In all cases, reformatting would destroy user data - ABORT.
-		klog.Errorf("REFUSING to format volume %s: it was previously formatted on %v (device: %s, fs: %s). "+
-			"This volume may contain user data. If filesystem detection failed, this is likely a timing issue with blkid.",
-			volumeID, existingEntry.FormattedAt, existingEntry.DevicePath, existingEntry.FilesystemType)
-		return fmt.Errorf("%w: volume %s was formatted on %v (would cause data loss)",
-			ErrVolumeAlreadyFormatted, volumeID, existingEntry.FormattedAt)
+// CRITICAL DATA LOSS PREVENTION: This function requires explicit user opt-in via
+// the force-format annotation to prevent accidental data destruction.
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, forceFormat bool) error {
+	// CRITICAL: Require explicit opt-in to formatting
+	// This prevents accidental data loss if:
+	// - User manually formatted the volume but we can't detect it
+	// - Persistent blkid detection issues
+	// - Filesystem corruption that we might otherwise destroy
+	if !forceFormat {
+		klog.Errorf("REFUSING to format device %s: formatting requires explicit opt-in via annotation '%s: \"true\"'",
+			devicePath, ForceFormatAnnotation)
+		return fmt.Errorf("%w: device %s (annotation '%s: \"true\"' required on PersistentVolumeClaim)",
+			ErrFormatNotExplicitlyRequested, devicePath, ForceFormatAnnotation)
 	}
 
-	// Volume was never formatted before - safe to format
-	klog.Infof("Formatting new volume %s at %s with filesystem %s (not in formatted volumes registry)",
+	klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
 		volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
@@ -469,14 +478,7 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 	}
 
 	klog.V(4).Infof("Format output: %s", string(output))
-
-	// Record this volume as formatted in the registry
-	// This ensures we'll never accidentally reformat it in the future
-	if recordErr := registry.RecordFormatted(volumeID, devicePath, fsType); recordErr != nil {
-		// Log error but don't fail - the volume is already formatted successfully
-		klog.Errorf("Failed to record formatted volume %s in registry (volume is formatted but won't be protected from future reformats): %v",
-			volumeID, recordErr)
-	}
+	klog.Infof("Successfully formatted volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
 	return nil
 }

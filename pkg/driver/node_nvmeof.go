@@ -156,7 +156,7 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 	//
 	// For filesystem volumes, add a delay to ensure metadata is readable.
 	if !isBlockVolume {
-		const deviceMetadataDelay = 5 * time.Second
+		const deviceMetadataDelay = 8 * time.Second
 		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
 		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
@@ -171,6 +171,13 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 		} else {
 			klog.V(4).Infof("Flushed device buffers for %s after connection", devicePath)
 		}
+
+		// Wait an additional moment after buffer flush for I/O subsystem to settle
+		// This is especially important after forced pod termination where the previous
+		// connection may have left the device in an inconsistent state
+		const postFlushDelay = 2 * time.Second
+		klog.V(4).Infof("Waiting %v after buffer flush for I/O subsystem to settle", postFlushDelay)
+		time.Sleep(postFlushDelay)
 	}
 
 	if isBlockVolume {

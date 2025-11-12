@@ -263,12 +263,14 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 }
 
 // waitForNVMeStabilization adds stabilization delay for NVMe devices.
+// This delay is in addition to the delay in stageNVMeDevice and provides
+// extra protection before the filesystem check retry loop begins.
 func waitForNVMeStabilization(ctx context.Context, devicePath string) error {
 	if !strings.Contains(devicePath, "/dev/nvme") {
 		return nil
 	}
 
-	const nvmeInitialDelay = 1 * time.Second
+	const nvmeInitialDelay = 2 * time.Second
 	klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
 	select {
 	case <-time.After(nvmeInitialDelay):

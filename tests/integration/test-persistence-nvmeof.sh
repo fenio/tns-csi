@@ -100,13 +100,8 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME}" \
 
 test_success "Pod is ready"
 
-# Format the block device with ext4 if not already formatted
-echo ""
-test_info "Ensuring filesystem is formatted..."
-kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    sh -c "if ! mountpoint -q /data; then mkfs.ext4 -F /dev/xvda 2>/dev/null || true; fi" || true
-
 # Write test data
+# NOTE: CSI driver handles formatting during NodeStageVolume - no need to format here
 echo ""
 test_info "Writing test data to volume..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \

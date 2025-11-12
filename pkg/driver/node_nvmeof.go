@@ -53,7 +53,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	}
 
 	// Check if nvme-cli is installed
@@ -77,7 +77,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	}
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
-	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
@@ -141,7 +141,7 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
-func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	// CRITICAL: Wait for filesystem metadata to become available after device connection
 	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
 	// filesystem metadata immediately available. If we check too quickly with blkid,
@@ -149,18 +149,34 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 	// destroys user data. This is the same issue as snapshot clones but occurs during
 	// normal pod restarts when devices reconnect.
 	//
-	// For filesystem volumes, add a brief delay to ensure metadata is readable.
+	// IMPORTANT: After forced pod deletion (grace-period=0), NVMe-oF devices may take
+	// longer to stabilize because the previous connection was abruptly terminated.
+	// We need to ensure the kernel has fully synchronized the device state before
+	// checking for filesystems.
+	//
+	// For filesystem volumes, add a delay to ensure metadata is readable.
 	if !isBlockVolume {
-		const deviceMetadataDelay = 2 * time.Second
-		klog.V(4).Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
+		const deviceMetadataDelay = 5 * time.Second
+		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
-		klog.V(4).Infof("Device metadata stabilization delay complete for %s", devicePath)
+		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
+
+		// Additionally flush device buffers to ensure kernel caches are clear
+		// This is critical after reconnection to force re-reading of actual device state
+		flushCtx, flushCancel := context.WithTimeout(ctx, 3*time.Second)
+		defer flushCancel()
+		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+		if output, err := flushCmd.CombinedOutput(); err != nil {
+			klog.Warningf("Failed to flush device buffers for %s: %v, output: %s", devicePath, err, string(output))
+		} else {
+			klog.V(4).Infof("Flushed device buffers for %s after connection", devicePath)
+		}
 	}
 
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}
-	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability)
+	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, volumeContext)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
@@ -208,7 +224,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 // formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
-func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	klog.Infof("Formatting and mounting NVMe device %s to %s (volume: %s)", devicePath, stagingTargetPath, volumeID)
 
 	// Determine filesystem type from volume capability
@@ -224,8 +240,10 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	if needsFormat {
-		klog.Infof("Formatting device %s with filesystem %s", devicePath, fsType)
-		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
+		// Check if user explicitly requested formatting via annotation
+		forceFormat := shouldForceFormat(volumeContext)
+		klog.Infof("Device %s needs formatting (force-format annotation: %v)", devicePath, forceFormat)
+		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType, forceFormat); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 	} else {

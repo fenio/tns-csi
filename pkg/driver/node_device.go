@@ -18,13 +18,6 @@ import (
 )
 
 // Static errors and constants for device operations.
-const (
-	// ForceFormatAnnotation is the annotation key that users can optionally set to "true"
-	// to force formatting even if a filesystem is detected (use with caution).
-	// This is primarily useful for debugging or recovering from filesystem corruption.
-	ForceFormatAnnotation = "csi.truenas.org/force-format"
-)
-
 var (
 	// ErrUnsupportedFSType is returned when attempting to format a device with an unsupported filesystem type.
 	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
@@ -195,15 +188,6 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 
 	klog.Infof("Successfully staged block device at %s -> %s", stagingTargetPath, devicePath)
 	return &csi.NodeStageVolumeResponse{}, nil
-}
-
-// shouldForceFormat checks if the force-format annotation is present and set to "true".
-// This is the explicit opt-in mechanism to prevent accidental data loss.
-func shouldForceFormat(volumeContext map[string]string) bool {
-	if volumeContext == nil {
-		return false
-	}
-	return volumeContext[ForceFormatAnnotation] == "true"
 }
 
 // invalidateDeviceCache invalidates kernel caches for a device.
@@ -436,16 +420,8 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 // formatDevice formats a device with the specified filesystem.
 // This function performs the actual formatting operation. The caller is responsible
 // for determining whether formatting is appropriate (e.g., checking needsFormat first).
-func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, forceFormat bool) error {
-	// If forceFormat is false, this is a standard format operation on a new/empty device
-	// If forceFormat is true, the user explicitly requested formatting via annotation
-	if forceFormat {
-		klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
-			volumeID, devicePath, fsType)
-	} else {
-		klog.Infof("Formatting volume %s at %s with filesystem %s (standard CSI behavior - no filesystem detected)",
-			volumeID, devicePath, fsType)
-	}
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
+	klog.Infof("Formatting volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

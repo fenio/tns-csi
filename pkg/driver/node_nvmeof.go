@@ -240,10 +240,8 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	if needsFormat {
-		// Check if user explicitly requested formatting via annotation
-		forceFormat := shouldForceFormat(volumeContext)
-		klog.Infof("Device %s needs formatting (force-format annotation: %v)", devicePath, forceFormat)
-		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType, forceFormat); formatErr != nil {
+		klog.Infof("Device %s needs formatting", devicePath)
+		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 	} else {

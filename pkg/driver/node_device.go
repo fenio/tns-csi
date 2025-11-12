@@ -17,10 +17,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Static errors for device operations.
+// Static errors and constants for device operations.
 const (
-	// ForceFormatAnnotation is the annotation key that users must set to "true" to explicitly
-	// request device formatting. This prevents accidental data loss.
+	// ForceFormatAnnotation is the annotation key that users can optionally set to "true"
+	// to force formatting even if a filesystem is detected (use with caution).
+	// This is primarily useful for debugging or recovering from filesystem corruption.
 	ForceFormatAnnotation = "csi.truenas.org/force-format"
 )
 
@@ -29,10 +30,6 @@ var (
 	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
 	// ErrDeviceNotReady is returned when a device does not become ready after retries.
 	ErrDeviceNotReady = errors.New("device not ready after retries")
-	// ErrFilesystemDetectionFailed is returned when we cannot determine if a device has an existing filesystem.
-	ErrFilesystemDetectionFailed = errors.New("cannot determine if device has existing filesystem")
-	// ErrFormatNotExplicitlyRequested is returned when formatting is needed but the user has not explicitly opted in.
-	ErrFormatNotExplicitlyRequested = errors.New("formatting requires explicit opt-in via annotation")
 )
 
 // publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
@@ -413,19 +410,13 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 		return false, nil
 	}
 
-	// CRITICAL DATA LOSS PREVENTION:
-	// If we still can't detect a filesystem after all retries, FAIL instead of formatting.
-	// This prevents accidental data loss when:
-	// 1. User manually formatted the volume
-	// 2. Persistent blkid bugs or kernel issues
-	// 3. Filesystem corruption
-	// 4. Incompatible filesystem we don't recognize
-	//
-	// The user must explicitly opt-in to formatting via annotation.
+	// After all retries, if no filesystem is detected, the device needs formatting.
+	// This is standard CSI behavior - new volumes should be formatted automatically.
+	// The extensive retry logic (15 attempts with cache invalidation) protects against
+	// temporary detection issues during device reconnection/clone completion.
 	if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
-		return false, fmt.Errorf("%w: device %s shows no filesystem after %d retries (output: %s). "+
-			"Cannot determine if device has existing data. To format this device, add annotation '%s: \"true\"' to the PersistentVolumeClaim",
-			ErrFilesystemDetectionFailed, devicePath, maxRetries, string(lastOutput), ForceFormatAnnotation)
+		klog.Infof("Device %s has no filesystem after %d retries - needs formatting", devicePath, maxRetries)
+		return true, nil
 	}
 
 	// Device still not ready - this is unexpected
@@ -434,23 +425,18 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 }
 
 // formatDevice formats a device with the specified filesystem.
-// CRITICAL DATA LOSS PREVENTION: This function requires explicit user opt-in via
-// the force-format annotation to prevent accidental data destruction.
+// This function performs the actual formatting operation. The caller is responsible
+// for determining whether formatting is appropriate (e.g., checking needsFormat first).
 func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, forceFormat bool) error {
-	// CRITICAL: Require explicit opt-in to formatting
-	// This prevents accidental data loss if:
-	// - User manually formatted the volume but we can't detect it
-	// - Persistent blkid detection issues
-	// - Filesystem corruption that we might otherwise destroy
-	if !forceFormat {
-		klog.Errorf("REFUSING to format device %s: formatting requires explicit opt-in via annotation '%s: \"true\"'",
-			devicePath, ForceFormatAnnotation)
-		return fmt.Errorf("%w: device %s (annotation '%s: \"true\"' required on PersistentVolumeClaim)",
-			ErrFormatNotExplicitlyRequested, devicePath, ForceFormatAnnotation)
+	// If forceFormat is false, this is a standard format operation on a new/empty device
+	// If forceFormat is true, the user explicitly requested formatting via annotation
+	if forceFormat {
+		klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
+			volumeID, devicePath, fsType)
+	} else {
+		klog.Infof("Formatting volume %s at %s with filesystem %s (standard CSI behavior - no filesystem detected)",
+			volumeID, devicePath, fsType)
 	}
-
-	klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
-		volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)

@@ -358,29 +358,56 @@ func waitWithBackoff(ctx context.Context, devicePath string, attempt, maxRetries
 	}
 }
 
-// checkDeviceFilesystem checks if a device has a filesystem using blkid.
+// checkDeviceFilesystem checks if a device has a filesystem using blkid and lsblk.
 // Returns (needsFormat, output, error).
 func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat bool, output []byte, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(checkCtx, "blkid", devicePath)
-	output, err = cmd.CombinedOutput()
+	// First, check with lsblk to verify device exists and get basic info
+	lsblkCmd := exec.CommandContext(checkCtx, "lsblk", "-n", "-o", "FSTYPE", devicePath)
+	lsblkOutput, lsblkErr := lsblkCmd.CombinedOutput()
 
-	// If blkid succeeds, device has a filesystem
-	if err == nil {
-		klog.V(4).Infof("Device %s has existing filesystem: %s", devicePath, string(output))
-		return false, output, nil
+	if lsblkErr != nil {
+		// Device doesn't exist or lsblk failed
+		klog.V(4).Infof("lsblk failed for %s: %v, output: %s", devicePath, lsblkErr, string(lsblkOutput))
+		return false, lsblkOutput, lsblkErr
 	}
 
-	// If blkid fails because no filesystem found, device needs formatting
-	if len(output) == 0 || strings.Contains(string(output), "does not contain") {
-		klog.V(4).Infof("Device %s has no filesystem, needs formatting", devicePath)
-		return true, output, nil
+	// lsblk succeeded - check if FSTYPE is empty (no filesystem)
+	fstype := strings.TrimSpace(string(lsblkOutput))
+	if fstype == "" {
+		klog.V(4).Infof("lsblk shows device %s has no filesystem (FSTYPE empty)", devicePath)
+		// Verify with blkid for consistency
+		blkidCmd := exec.CommandContext(checkCtx, "blkid", devicePath)
+		blkidOutput, blkidErr := blkidCmd.CombinedOutput()
+
+		if blkidErr != nil || len(blkidOutput) == 0 || strings.Contains(string(blkidOutput), "does not contain") {
+			klog.Infof("Device %s confirmed to have no filesystem (lsblk FSTYPE='', blkid confirms)", devicePath)
+			return true, blkidOutput, nil
+		}
+
+		// Conflicting information - blkid found filesystem but lsblk didn't
+		klog.Warningf("Device %s: lsblk shows no FSTYPE but blkid found filesystem: %s - trusting blkid",
+			devicePath, string(blkidOutput))
+		return false, blkidOutput, nil
 	}
 
-	// Return error for further handling
-	return false, output, err
+	// lsblk shows a filesystem type - verify with blkid
+	klog.V(4).Infof("lsblk shows device %s has filesystem type: %s", devicePath, fstype)
+
+	blkidCmd := exec.CommandContext(checkCtx, "blkid", devicePath)
+	blkidOutput, blkidErr := blkidCmd.CombinedOutput()
+
+	if blkidErr == nil {
+		klog.V(4).Infof("Device %s has existing filesystem confirmed by both lsblk and blkid: %s",
+			devicePath, string(blkidOutput))
+		return false, blkidOutput, nil
+	}
+
+	// lsblk found filesystem but blkid didn't - trust lsblk
+	klog.V(4).Infof("Device %s: lsblk found FSTYPE=%s, blkid failed - trusting lsblk", devicePath, fstype)
+	return false, lsblkOutput, nil
 }
 
 // isDeviceNotReady checks if blkid output indicates device is not ready.

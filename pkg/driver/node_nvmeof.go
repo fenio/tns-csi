@@ -149,12 +149,28 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 	// destroys user data. This is the same issue as snapshot clones but occurs during
 	// normal pod restarts when devices reconnect.
 	//
-	// For filesystem volumes, add a brief delay to ensure metadata is readable.
+	// IMPORTANT: After forced pod deletion (grace-period=0), NVMe-oF devices may take
+	// longer to stabilize because the previous connection was abruptly terminated.
+	// We need to ensure the kernel has fully synchronized the device state before
+	// checking for filesystems.
+	//
+	// For filesystem volumes, add a delay to ensure metadata is readable.
 	if !isBlockVolume {
-		const deviceMetadataDelay = 2 * time.Second
-		klog.V(4).Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
+		const deviceMetadataDelay = 5 * time.Second
+		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
-		klog.V(4).Infof("Device metadata stabilization delay complete for %s", devicePath)
+		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
+
+		// Additionally flush device buffers to ensure kernel caches are clear
+		// This is critical after reconnection to force re-reading of actual device state
+		flushCtx, flushCancel := context.WithTimeout(ctx, 3*time.Second)
+		defer flushCancel()
+		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+		if output, err := flushCmd.CombinedOutput(); err != nil {
+			klog.Warningf("Failed to flush device buffers for %s: %v, output: %s", devicePath, err, string(output))
+		} else {
+			klog.V(4).Infof("Flushed device buffers for %s after connection", devicePath)
+		}
 	}
 
 	if isBlockVolume {

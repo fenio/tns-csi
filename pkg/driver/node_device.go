@@ -231,12 +231,18 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 }
 
 // needsFormat checks if a device needs to be formatted.
-// For block devices (especially cloned ZVOLs), retry with exponential backoff
-// to allow the device to become fully ready before checking for existing filesystem.
+// For block devices (especially cloned ZVOLs and reconnected NVMe-oF devices),
+// retry with exponential backoff to allow the device to become fully ready
+// before checking for existing filesystem.
+//
+// CRITICAL: This function must be extremely conservative about declaring a device
+// "needs formatting" because formatting destroys all existing data. After NVMe-oF
+// reconnections (especially after forced pod deletion), filesystem metadata may
+// take time to become visible to blkid.
 func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	const (
-		maxRetries     = 10
-		initialBackoff = 100 * time.Millisecond
+		maxRetries     = 15
+		initialBackoff = 200 * time.Millisecond
 		maxBackoff     = 5 * time.Second
 	)
 
@@ -244,7 +250,21 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	var lastOutput []byte
 	backoff := initialBackoff
 
-	klog.Infof("Checking if device %s needs formatting (max %d retries, max backoff %v)", devicePath, maxRetries, maxBackoff)
+	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff - being conservative to prevent data loss)",
+		devicePath, maxRetries, maxBackoff)
+
+	// CRITICAL: For NVMe devices, add initial stabilization delay before first check
+	// This is especially important for reconnected NVMe-oF devices where the kernel
+	// may still be processing the device attachment even after the device appears
+	if strings.Contains(devicePath, "/dev/nvme") {
+		const nvmeInitialDelay = 1 * time.Second
+		klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
+		select {
+		case <-time.After(nvmeInitialDelay):
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
 
 	// Retry with exponential backoff to handle device readiness timing
 	for attempt := range maxRetries {
@@ -260,7 +280,8 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 		}
 
 		// Invalidate kernel caches before checking filesystem
-		// This is critical for cloned ZVOLs where filesystem metadata may be cached
+		// This is critical for cloned ZVOLs and reconnected NVMe-oF devices
+		// where filesystem metadata may be cached
 		if err := invalidateDeviceCache(ctx, devicePath, attempt); err != nil {
 			klog.Warningf("Failed to invalidate device cache for %s (attempt %d): %v - continuing anyway", devicePath, attempt+1, err)
 		}
@@ -270,13 +291,19 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 		lastOutput = output
 		lastErr = err
 
-		// Log detailed information about this attempt
-		klog.Infof("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q",
-			attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
+		// Log detailed information about this attempt with WARNING level for visibility
+		if needsFmt || err != nil {
+			klog.Warningf("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q (will retry if uncertain)",
+				attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
+		} else {
+			klog.Infof("needsFormat attempt %d/%d for %s: filesystem detected, needsFormat=false",
+				attempt+1, maxRetries, devicePath)
+		}
 
 		if err == nil {
 			if needsFmt {
-				klog.Infof("Device %s needs formatting (no existing filesystem detected after %d attempts)", devicePath, attempt+1)
+				klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - format registry will make final decision",
+					devicePath, attempt+1)
 			} else {
 				klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
 			}

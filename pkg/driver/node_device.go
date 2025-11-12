@@ -384,7 +384,8 @@ func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat 
 
 		if blkidErr != nil || len(blkidOutput) == 0 || strings.Contains(string(blkidOutput), "does not contain") {
 			klog.Infof("Device %s confirmed to have no filesystem (lsblk FSTYPE='', blkid confirms)", devicePath)
-			return true, blkidOutput, nil
+			// Return empty output to indicate no filesystem detected (handleFinalResult expects this)
+			return true, nil, nil
 		}
 
 		// Conflicting information - blkid found filesystem but lsblk didn't

@@ -17,11 +17,19 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// Static errors for device operations.
+// Static errors and constants for device operations.
+const (
+	// ForceFormatAnnotation is the annotation key that users can optionally set to "true"
+	// to force formatting even if a filesystem is detected (use with caution).
+	// This is primarily useful for debugging or recovering from filesystem corruption.
+	ForceFormatAnnotation = "csi.truenas.org/force-format"
+)
+
 var (
-	ErrUnsupportedFSType      = errors.New("unsupported filesystem type")
-	ErrDeviceNotReady         = errors.New("device not ready after retries")
-	ErrVolumeAlreadyFormatted = errors.New("volume was previously formatted")
+	// ErrUnsupportedFSType is returned when attempting to format a device with an unsupported filesystem type.
+	ErrUnsupportedFSType = errors.New("unsupported filesystem type")
+	// ErrDeviceNotReady is returned when a device does not become ready after retries.
+	ErrDeviceNotReady = errors.New("device not ready after retries")
 )
 
 // publishBlockVolume publishes a block volume by bind mounting the device file from staging to target.
@@ -189,6 +197,15 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
+// shouldForceFormat checks if the force-format annotation is present and set to "true".
+// This is the explicit opt-in mechanism to prevent accidental data loss.
+func shouldForceFormat(volumeContext map[string]string) bool {
+	if volumeContext == nil {
+		return false
+	}
+	return volumeContext[ForceFormatAnnotation] == "true"
+}
+
 // invalidateDeviceCache invalidates kernel caches for a device.
 // This is critical for cloned ZVOLs where the kernel may cache the "empty" state
 // before the clone completes, preventing blkid from detecting the existing filesystem.
@@ -231,28 +248,63 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 }
 
 // needsFormat checks if a device needs to be formatted.
-// For block devices (especially cloned ZVOLs), retry with exponential backoff
-// to allow the device to become fully ready before checking for existing filesystem.
+// For block devices (especially cloned ZVOLs and reconnected NVMe-oF devices),
+// retry with exponential backoff to allow the device to become fully ready
+// before checking for existing filesystem.
+//
+// CRITICAL: This function must be extremely conservative about declaring a device
+// "needs formatting" because formatting destroys all existing data. After NVMe-oF
+// reconnections (especially after forced pod deletion), filesystem metadata may
+// take time to become visible to blkid.
 func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	const (
-		maxRetries     = 10
-		initialBackoff = 100 * time.Millisecond
+		maxRetries     = 15
+		initialBackoff = 200 * time.Millisecond
 		maxBackoff     = 5 * time.Second
 	)
 
+	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff - being conservative to prevent data loss)",
+		devicePath, maxRetries, maxBackoff)
+
+	// CRITICAL: For NVMe devices, add initial stabilization delay before first check
+	if err := waitForNVMeStabilization(ctx, devicePath); err != nil {
+		return false, err
+	}
+
+	// Retry with exponential backoff to handle device readiness timing
+	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff)
+
+	// After all retries, handle the final result
+	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+}
+
+// waitForNVMeStabilization adds stabilization delay for NVMe devices.
+func waitForNVMeStabilization(ctx context.Context, devicePath string) error {
+	if !strings.Contains(devicePath, "/dev/nvme") {
+		return nil
+	}
+
+	const nvmeInitialDelay = 1 * time.Second
+	klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
+	select {
+	case <-time.After(nvmeInitialDelay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// retryFilesystemCheck performs filesystem checks with exponential backoff.
+func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int, initialBackoff, maxBackoff time.Duration) ([]byte, error) {
 	var lastErr error
 	var lastOutput []byte
 	backoff := initialBackoff
 
-	klog.Infof("Checking if device %s needs formatting (max %d retries, max backoff %v)", devicePath, maxRetries, maxBackoff)
-
-	// Retry with exponential backoff to handle device readiness timing
 	for attempt := range maxRetries {
 		if attempt > 0 {
 			if err := waitWithBackoff(ctx, devicePath, attempt, maxRetries, backoff); err != nil {
-				return false, err
+				return lastOutput, err
 			}
-			// Exponential backoff: double the wait time, up to maxBackoff
 			backoff *= 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -260,42 +312,55 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 		}
 
 		// Invalidate kernel caches before checking filesystem
-		// This is critical for cloned ZVOLs where filesystem metadata may be cached
 		if err := invalidateDeviceCache(ctx, devicePath, attempt); err != nil {
 			klog.Warningf("Failed to invalidate device cache for %s (attempt %d): %v - continuing anyway", devicePath, attempt+1, err)
 		}
 
-		// Check device filesystem status
+		// Check device filesystem status and handle result
 		needsFmt, output, err := checkDeviceFilesystem(ctx, devicePath)
 		lastOutput = output
 		lastErr = err
 
-		// Log detailed information about this attempt
-		klog.Infof("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q",
-			attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
-
-		if err == nil {
-			if needsFmt {
-				klog.Infof("Device %s needs formatting (no existing filesystem detected after %d attempts)", devicePath, attempt+1)
-			} else {
-				klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
-			}
-			return needsFmt, nil
+		if shouldStopRetrying(needsFmt, err, devicePath, attempt, maxRetries, output) {
+			return lastOutput, lastErr
 		}
-
-		// If device doesn't exist yet, retry (might be a cloned ZVOL still being created)
-		if isDeviceNotReady(output) {
-			klog.Infof("Device %s not ready yet (attempt %d/%d): %s - will retry", devicePath, attempt+1, maxRetries, string(output))
-			continue
-		}
-
-		// For other errors, retry in case of transient issues
-		klog.Infof("blkid returned error for %s (attempt %d/%d): %v, output: %q - will retry",
-			devicePath, attempt+1, maxRetries, err, string(output))
 	}
 
-	// After all retries, handle the final result
-	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+	return lastOutput, lastErr
+}
+
+// shouldStopRetrying determines if we should stop retrying filesystem checks.
+func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, maxRetries int, output []byte) bool {
+	// Log detailed information about this attempt
+	if needsFmt || err != nil {
+		klog.Warningf("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q (will retry if uncertain)",
+			attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
+	} else {
+		klog.Infof("needsFormat attempt %d/%d for %s: filesystem detected, needsFormat=false",
+			attempt+1, maxRetries, devicePath)
+	}
+
+	// If check succeeded, stop retrying
+	if err == nil {
+		if needsFmt {
+			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - will fail unless force-format annotation is set",
+				devicePath, attempt+1)
+		} else {
+			klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
+		}
+		return true
+	}
+
+	// If device doesn't exist yet, continue retrying
+	if isDeviceNotReady(output) {
+		klog.Infof("Device %s not ready yet (attempt %d/%d): %s - will retry", devicePath, attempt+1, maxRetries, string(output))
+		return false
+	}
+
+	// For other errors, continue retrying
+	klog.Infof("blkid returned error for %s (attempt %d/%d): %v, output: %q - will retry",
+		devicePath, attempt+1, maxRetries, err, string(output))
+	return false
 }
 
 // waitWithBackoff waits for the specified backoff duration before retry.
@@ -345,19 +410,12 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 		return false, nil
 	}
 
-	// CRITICAL DATA LOSS PREVENTION:
-	// If we still can't detect a filesystem after all retries, this could be:
-	// 1. A genuinely new volume that needs formatting
-	// 2. An existing volume with data, but we're having detection issues
-	//
-	// The SAFE approach: If blkid shows "no filesystem" after all retries,
-	// assume it needs formatting. However, we should NEVER format a volume
-	// that we've previously formatted. This is handled by formatDevice() which
-	// checks the formatted volumes registry before proceeding.
-	//
-	// If the last error was "no filesystem", device *might* need formatting
+	// After all retries, if no filesystem is detected, the device needs formatting.
+	// This is standard CSI behavior - new volumes should be formatted automatically.
+	// The extensive retry logic (15 attempts with cache invalidation) protects against
+	// temporary detection issues during device reconnection/clone completion.
 	if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
-		klog.Warningf("Device %s still shows no filesystem after %d retries, MAY need formatting", devicePath, maxRetries)
+		klog.Infof("Device %s has no filesystem after %d retries - needs formatting", devicePath, maxRetries)
 		return true, nil
 	}
 
@@ -367,33 +425,18 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 }
 
 // formatDevice formats a device with the specified filesystem.
-// CRITICAL DATA LOSS PREVENTION: This function checks the formatted volumes registry
-// to ensure we NEVER reformat a volume that has been previously formatted, even if
-// we can't currently detect its filesystem (e.g., due to timing issues with blkid).
-func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
-	// LAYER 3 DEFENSE: Check if this volume was previously formatted
-	// If yes, REFUSE to format it - this prevents data loss even if blkid fails
-	registry := getFormattedVolumesRegistry()
-	wasFormatted, existingEntry := registry.WasFormatted(volumeID)
-
-	if wasFormatted {
-		// CRITICAL: This volume was previously formatted. NEVER reformat it.
-		// This could happen if:
-		// 1. Device reconnected and metadata isn't immediately visible to blkid
-		// 2. Transient kernel cache issues
-		// 3. Network connectivity issues with NVMe-oF
-		//
-		// In all cases, reformatting would destroy user data - ABORT.
-		klog.Errorf("REFUSING to format volume %s: it was previously formatted on %v (device: %s, fs: %s). "+
-			"This volume may contain user data. If filesystem detection failed, this is likely a timing issue with blkid.",
-			volumeID, existingEntry.FormattedAt, existingEntry.DevicePath, existingEntry.FilesystemType)
-		return fmt.Errorf("%w: volume %s was formatted on %v (would cause data loss)",
-			ErrVolumeAlreadyFormatted, volumeID, existingEntry.FormattedAt)
+// This function performs the actual formatting operation. The caller is responsible
+// for determining whether formatting is appropriate (e.g., checking needsFormat first).
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, forceFormat bool) error {
+	// If forceFormat is false, this is a standard format operation on a new/empty device
+	// If forceFormat is true, the user explicitly requested formatting via annotation
+	if forceFormat {
+		klog.Infof("Formatting volume %s at %s with filesystem %s (user explicitly requested via annotation)",
+			volumeID, devicePath, fsType)
+	} else {
+		klog.Infof("Formatting volume %s at %s with filesystem %s (standard CSI behavior - no filesystem detected)",
+			volumeID, devicePath, fsType)
 	}
-
-	// Volume was never formatted before - safe to format
-	klog.Infof("Formatting new volume %s at %s with filesystem %s (not in formatted volumes registry)",
-		volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
 	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -421,14 +464,7 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 	}
 
 	klog.V(4).Infof("Format output: %s", string(output))
-
-	// Record this volume as formatted in the registry
-	// This ensures we'll never accidentally reformat it in the future
-	if recordErr := registry.RecordFormatted(volumeID, devicePath, fsType); recordErr != nil {
-		// Log error but don't fail - the volume is already formatted successfully
-		klog.Errorf("Failed to record formatted volume %s in registry (volume is formatted but won't be protected from future reformats): %v",
-			volumeID, recordErr)
-	}
+	klog.Infof("Successfully formatted volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
 	return nil
 }

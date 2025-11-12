@@ -14,10 +14,14 @@ tests/integration/
 │   ├── pvc-nvmeof.yaml     # NVMe-oF PVC (filesystem mode)
 │   ├── pod-nvmeof.yaml     # NVMe-oF test pod (filesystem)
 │   ├── pvc-nvmeof-block.yaml  # NVMe-oF PVC (block mode)
-│   └── pod-nvmeof-block.yaml  # NVMe-oF test pod (block)
+│   ├── pod-nvmeof-block.yaml  # NVMe-oF test pod (block)
+│   ├── pvc-dual-nfs.yaml   # NFS PVC for dual-mount test
+│   ├── pvc-dual-nvmeof.yaml # NVMe-oF PVC for dual-mount test
+│   └── pod-dual-mount.yaml # Pod with both NFS and NVMe-oF volumes
 ├── test-nfs.sh             # NFS integration test
 ├── test-nvmeof.sh          # NVMe-oF integration test (filesystem)
-└── test-nvmeof-block.sh    # NVMe-oF integration test (block)
+├── test-nvmeof-block.sh    # NVMe-oF integration test (block)
+└── test-dual-mount.sh      # Dual-mount test (NFS + NVMe-oF)
 ```
 
 ## Test Workflow
@@ -72,6 +76,9 @@ export TRUENAS_POOL="your-pool-name"
 
 # NVMe-oF test (block device mode)
 ./tests/integration/test-nvmeof-block.sh
+
+# Dual-mount test (NFS + NVMe-oF simultaneously)
+./tests/integration/test-dual-mount.sh
 ```
 
 ### Run All Tests
@@ -240,7 +247,17 @@ set -x  # Enable bash debug output
 - Supports both filesystem and block device modes
 - Tests check if NVMe-oF ports are configured on TrueNAS (skips if not)
 
+### Dual-Mount Test
 
+- Tests simultaneous mounting of both NFS and NVMe-oF volumes in a single pod
+- Verifies that both protocols can coexist and operate independently
+- Requires both NFS and NVMe-oF to be properly configured on TrueNAS
+- Validates volume isolation - data written to one volume doesn't appear in the other
+- Tests I/O operations on both volumes concurrently
+- This test is important for validating that:
+  - The CSI driver can handle multiple protocols simultaneously
+  - There are no conflicts between NFS and NVMe-oF volume attachment/mounting
+  - Both storage backends remain fully functional when used together
 
 ## Contributing
 

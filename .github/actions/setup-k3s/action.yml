@@ -75,8 +75,9 @@ runs:
         echo "=== Cluster version ==="
         kubectl version
 
-    - name: Import CSI driver image to k3s
+    - name: Configure k3s for registry pulls
       shell: bash
       run: |
-        echo "=== Importing CSI driver image to k3s ==="
-        sudo docker save bfenski/tns-csi:latest | sudo k3s ctr images import -
+        echo "=== k3s cluster ready for registry-based image pulls ==="
+        echo "All images will be pulled directly from registries (no sideloading)"
+        kubectl get nodes

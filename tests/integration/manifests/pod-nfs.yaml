@@ -5,7 +5,8 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox
+    image: busybox:latest
+    imagePullPolicy: Always
     command: 
       - "sh"
       - "-c"

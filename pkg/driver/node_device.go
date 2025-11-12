@@ -324,7 +324,23 @@ func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, ma
 			attempt+1, maxRetries, devicePath)
 	}
 
-	// If check succeeded, stop retrying
+	// CRITICAL: For NVMe devices with no filesystem detected, continue retrying
+	// This handles the case where a volume was cloned from a snapshot - the filesystem
+	// exists but may not be visible yet due to ZFS metadata sync timing.
+	// We must retry to avoid destroying cloned data by reformatting too early.
+	if err == nil && needsFmt && strings.Contains(devicePath, "/dev/nvme") {
+		if attempt+1 < maxRetries {
+			klog.Infof("NVMe device %s has no filesystem detected yet (attempt %d/%d) - will retry to avoid destroying potential clone data",
+				devicePath, attempt+1, maxRetries)
+			return false // Continue retrying
+		}
+		// Reached max retries - stop and proceed to format
+		klog.Warningf("Device %s appears to need formatting after %d attempts - will fail unless force-format annotation is set",
+			devicePath, attempt+1)
+		return true
+	}
+
+	// If filesystem check succeeded with a definitive result (filesystem found or max retries reached)
 	if err == nil {
 		if needsFmt {
 			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - will fail unless force-format annotation is set",

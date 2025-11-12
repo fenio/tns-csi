@@ -176,7 +176,7 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}
-	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, volumeContext)
+	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
@@ -224,7 +224,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 // formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
-func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
 	klog.Infof("Formatting and mounting NVMe device %s to %s (volume: %s)", devicePath, stagingTargetPath, volumeID)
 
 	// Determine filesystem type from volume capability

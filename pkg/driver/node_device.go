@@ -246,33 +246,48 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 		maxBackoff     = 5 * time.Second
 	)
 
-	var lastErr error
-	var lastOutput []byte
-	backoff := initialBackoff
-
 	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff - being conservative to prevent data loss)",
 		devicePath, maxRetries, maxBackoff)
 
 	// CRITICAL: For NVMe devices, add initial stabilization delay before first check
-	// This is especially important for reconnected NVMe-oF devices where the kernel
-	// may still be processing the device attachment even after the device appears
-	if strings.Contains(devicePath, "/dev/nvme") {
-		const nvmeInitialDelay = 1 * time.Second
-		klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
-		select {
-		case <-time.After(nvmeInitialDelay):
-		case <-ctx.Done():
-			return false, ctx.Err()
-		}
+	if err := waitForNVMeStabilization(ctx, devicePath); err != nil {
+		return false, err
 	}
 
 	// Retry with exponential backoff to handle device readiness timing
+	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff)
+
+	// After all retries, handle the final result
+	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+}
+
+// waitForNVMeStabilization adds stabilization delay for NVMe devices.
+func waitForNVMeStabilization(ctx context.Context, devicePath string) error {
+	if !strings.Contains(devicePath, "/dev/nvme") {
+		return nil
+	}
+
+	const nvmeInitialDelay = 1 * time.Second
+	klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
+	select {
+	case <-time.After(nvmeInitialDelay):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// retryFilesystemCheck performs filesystem checks with exponential backoff.
+func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int, initialBackoff, maxBackoff time.Duration) ([]byte, error) {
+	var lastErr error
+	var lastOutput []byte
+	backoff := initialBackoff
+
 	for attempt := range maxRetries {
 		if attempt > 0 {
 			if err := waitWithBackoff(ctx, devicePath, attempt, maxRetries, backoff); err != nil {
-				return false, err
+				return lastOutput, err
 			}
-			// Exponential backoff: double the wait time, up to maxBackoff
 			backoff *= 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -280,49 +295,55 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 		}
 
 		// Invalidate kernel caches before checking filesystem
-		// This is critical for cloned ZVOLs and reconnected NVMe-oF devices
-		// where filesystem metadata may be cached
 		if err := invalidateDeviceCache(ctx, devicePath, attempt); err != nil {
 			klog.Warningf("Failed to invalidate device cache for %s (attempt %d): %v - continuing anyway", devicePath, attempt+1, err)
 		}
 
-		// Check device filesystem status
+		// Check device filesystem status and handle result
 		needsFmt, output, err := checkDeviceFilesystem(ctx, devicePath)
 		lastOutput = output
 		lastErr = err
 
-		// Log detailed information about this attempt with WARNING level for visibility
-		if needsFmt || err != nil {
-			klog.Warningf("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q (will retry if uncertain)",
-				attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
-		} else {
-			klog.Infof("needsFormat attempt %d/%d for %s: filesystem detected, needsFormat=false",
-				attempt+1, maxRetries, devicePath)
+		if shouldStopRetrying(needsFmt, err, devicePath, attempt, maxRetries, output) {
+			return lastOutput, lastErr
 		}
-
-		if err == nil {
-			if needsFmt {
-				klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - format registry will make final decision",
-					devicePath, attempt+1)
-			} else {
-				klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
-			}
-			return needsFmt, nil
-		}
-
-		// If device doesn't exist yet, retry (might be a cloned ZVOL still being created)
-		if isDeviceNotReady(output) {
-			klog.Infof("Device %s not ready yet (attempt %d/%d): %s - will retry", devicePath, attempt+1, maxRetries, string(output))
-			continue
-		}
-
-		// For other errors, retry in case of transient issues
-		klog.Infof("blkid returned error for %s (attempt %d/%d): %v, output: %q - will retry",
-			devicePath, attempt+1, maxRetries, err, string(output))
 	}
 
-	// After all retries, handle the final result
-	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+	return lastOutput, lastErr
+}
+
+// shouldStopRetrying determines if we should stop retrying filesystem checks.
+func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, maxRetries int, output []byte) bool {
+	// Log detailed information about this attempt
+	if needsFmt || err != nil {
+		klog.Warningf("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q (will retry if uncertain)",
+			attempt+1, maxRetries, devicePath, needsFmt, err, string(output))
+	} else {
+		klog.Infof("needsFormat attempt %d/%d for %s: filesystem detected, needsFormat=false",
+			attempt+1, maxRetries, devicePath)
+	}
+
+	// If check succeeded, stop retrying
+	if err == nil {
+		if needsFmt {
+			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - format registry will make final decision",
+				devicePath, attempt+1)
+		} else {
+			klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
+		}
+		return true
+	}
+
+	// If device doesn't exist yet, continue retrying
+	if isDeviceNotReady(output) {
+		klog.Infof("Device %s not ready yet (attempt %d/%d): %s - will retry", devicePath, attempt+1, maxRetries, string(output))
+		return false
+	}
+
+	// For other errors, continue retrying
+	klog.Infof("blkid returned error for %s (attempt %d/%d): %v, output: %q - will retry",
+		devicePath, attempt+1, maxRetries, err, string(output))
+	return false
 }
 
 // waitWithBackoff waits for the specified backoff duration before retry.

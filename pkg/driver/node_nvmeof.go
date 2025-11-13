@@ -260,22 +260,8 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
 		klog.Warningf("Volume %s was cloned from snapshot - SKIPPING format check to preserve data", volumeID)
 		klog.Infof("Device %s is a cloned snapshot volume, assuming existing filesystem", devicePath)
-	} else {
-		// Check if device is already formatted (only for non-cloned volumes)
-		needsFormat, err := needsFormat(ctx, devicePath)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
-		}
-
-		if needsFormat {
-			klog.Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
-			if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
-				return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
-			}
-		} else {
-			klog.Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s, NSID: %s)",
-				devicePath, datasetName, nqn, nsid)
-		}
+	} else if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, nsid); err != nil {
+		return nil, err
 	}
 
 	// Create staging target path if it doesn't exist
@@ -453,6 +439,27 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn, nsid string, t
 	return "", fmt.Errorf("%w after %d attempts", ErrNVMeDeviceTimeout, attempt)
 }
 
+// handleDeviceFormatting checks if a device needs formatting and formats it if necessary.
+func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn, nsid string) error {
+	// Check if device is already formatted (only for non-cloned volumes)
+	needsFormat, err := needsFormat(ctx, devicePath)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
+	}
+
+	if needsFormat {
+		klog.Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
+		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
+			return status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
+		}
+		return nil
+	}
+
+	klog.Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s, NSID: %s)",
+		devicePath, datasetName, nqn, nsid)
+	return nil
+}
+
 // logDeviceInfo logs detailed information about an NVMe device for troubleshooting.
 func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	// Log basic device info
@@ -466,7 +473,6 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	// Try to get device UUID (for better tracking)
 	uuidCtx, uuidCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer uuidCancel()
-	//nolint:gosec // blkid on device path is expected for CSI driver
 	blkidCmd := exec.CommandContext(uuidCtx, "blkid", "-s", "UUID", "-o", "value", devicePath)
 	if uuidOutput, err := blkidCmd.CombinedOutput(); err == nil && len(uuidOutput) > 0 {
 		uuid := strings.TrimSpace(string(uuidOutput))
@@ -478,7 +484,6 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	// Try to get filesystem type
 	fsTypeCtx, fsTypeCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer fsTypeCancel()
-	//nolint:gosec // blkid on device path is expected for CSI driver
 	fsCmd := exec.CommandContext(fsTypeCtx, "blkid", "-s", "TYPE", "-o", "value", devicePath)
 	if fsOutput, err := fsCmd.CombinedOutput(); err == nil && len(fsOutput) > 0 {
 		fsType := strings.TrimSpace(string(fsOutput))

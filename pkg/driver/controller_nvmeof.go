@@ -328,52 +328,12 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID)
 
 	// Step 1: Delete NVMe-oF namespace
-	if meta.NVMeOFNamespaceID > 0 {
-		klog.Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
-			meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
-		if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
-			// If deletion fails, return an error to ensure the operation is retried.
-			// This is critical for preventing orphaned ZVOLs if the namespace is stuck.
-			e := status.Errorf(codes.Internal, "Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v",
-				meta.NVMeOFNamespaceID, meta.DatasetID, err)
-			klog.Error(e)
-			timer.ObserveError()
-			return nil, e
-		}
-		klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
-
-		// Verify namespace is gone by querying all namespaces
-		// This helps ensure TrueNAS has completed the deletion before we return
-		klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
-		if allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx); queryErr == nil {
-			found := false
-			for _, ns := range allNamespaces {
-				if ns.ID == meta.NVMeOFNamespaceID {
-					found = true
-					// Return an error to retry, as the namespace still exists.
-					e := status.Errorf(codes.Internal, "Namespace %d still exists after deletion (NSID: %d, device: %s)",
-						ns.ID, ns.NSID, ns.Device)
-					klog.Error(e)
-					timer.ObserveError()
-					return nil, e
-				}
-			}
-			if !found {
-				klog.V(4).Infof("Verified namespace %d is fully deleted", meta.NVMeOFNamespaceID)
-			}
-		}
+	if err := s.deleteNVMeOFNamespace(ctx, meta, timer); err != nil {
+		return nil, err
 	}
 
 	// Step 2: Delete ZVOL
-	if meta.DatasetID != "" {
-		klog.Infof("Deleting ZVOL: %s", meta.DatasetID)
-		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
-			// Check if dataset doesn't exist - this is OK (idempotency)
-			klog.Warningf("Failed to delete ZVOL %s: %v (continuing anyway)", meta.DatasetID, err)
-		} else {
-			klog.Infof("Successfully deleted ZVOL %s", meta.DatasetID)
-		}
-	}
+	s.deleteZVOL(ctx, meta)
 
 	// NOTE: Subsystem (ID: %d) is NOT deleted - it's pre-configured infrastructure
 	// serving multiple volumes. Administrator manages subsystem lifecycle independently.
@@ -391,6 +351,78 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
+}
+
+// deleteNVMeOFNamespace deletes an NVMe-oF namespace and verifies deletion.
+func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
+	if meta.NVMeOFNamespaceID <= 0 {
+		return nil
+	}
+
+	klog.Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
+		meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
+
+	if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
+		// Check if namespace already deleted (idempotency)
+		if isNotFoundError(err) {
+			klog.Infof("Namespace %d not found, assuming already deleted (idempotency)", meta.NVMeOFNamespaceID)
+			return nil
+		}
+		// For other errors, fail and retry to prevent orphaned ZVOLs
+		e := status.Errorf(codes.Internal, "Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v",
+			meta.NVMeOFNamespaceID, meta.DatasetID, err)
+		klog.Error(e)
+		timer.ObserveError()
+		return e
+	}
+
+	klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
+
+	// Verify namespace is gone
+	return s.verifyNamespaceDeletion(ctx, meta, timer)
+}
+
+// verifyNamespaceDeletion verifies that a namespace has been fully deleted.
+func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
+	klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
+
+	allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	if queryErr != nil {
+		// Query error - log but don't fail the deletion
+		klog.V(4).Infof("Could not verify namespace deletion: %v", queryErr)
+		return nil
+	}
+
+	// Check if namespace still exists
+	for _, ns := range allNamespaces {
+		if ns.ID != meta.NVMeOFNamespaceID {
+			continue
+		}
+		// Namespace still exists - return error to retry
+		e := status.Errorf(codes.Internal, "Namespace %d still exists after deletion (NSID: %d, device: %s)",
+			ns.ID, ns.NSID, ns.Device)
+		klog.Error(e)
+		timer.ObserveError()
+		return e
+	}
+
+	klog.V(4).Infof("Verified namespace %d is fully deleted", meta.NVMeOFNamespaceID)
+	return nil
+}
+
+// deleteZVOL deletes a ZVOL dataset.
+func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) {
+	if meta.DatasetID == "" {
+		return
+	}
+
+	klog.Infof("Deleting ZVOL: %s", meta.DatasetID)
+	if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
+		// Check if dataset doesn't exist - this is OK (idempotency)
+		klog.Warningf("Failed to delete ZVOL %s: %v (continuing anyway)", meta.DatasetID, err)
+	} else {
+		klog.Infof("Successfully deleted ZVOL %s", meta.DatasetID)
+	}
 }
 
 func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, subsystemNQN, snapshotID string) (*csi.CreateVolumeResponse, error) {

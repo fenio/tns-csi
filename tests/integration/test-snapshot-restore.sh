@@ -143,15 +143,38 @@ spec:
 EOF
 
 # Wait for snapshot to be ready
-test_info "Waiting for snapshot to be ready..."
+test_info "Waiting for snapshot to be ready (timeout: 120s)..."
 timeout=120
 elapsed=0
+last_status=""
 while [[ $elapsed -lt $timeout ]]; do
     READY_TO_USE=$(kubectl get volumesnapshot "${SNAPSHOT_NAME_1}" -n "${TEST_NAMESPACE}" \
         -o jsonpath='{.status.readyToUse}' 2>/dev/null || echo "false")
+    ERROR_MSG=$(kubectl get volumesnapshot "${SNAPSHOT_NAME_1}" -n "${TEST_NAMESPACE}" \
+        -o jsonpath='{.status.error.message}' 2>/dev/null || echo "")
+    
+    # Log progress every 15 seconds
+    if [[ $((elapsed % 15)) -eq 0 ]] && [[ $elapsed -gt 0 ]]; then
+        current_status="readyToUse=${READY_TO_USE}"
+        if [[ -n "${ERROR_MSG}" ]]; then
+            current_status="${current_status}, error: ${ERROR_MSG}"
+        fi
+        if [[ "${current_status}" != "${last_status}" ]]; then
+            test_info "Snapshot status after ${elapsed}s: ${current_status}"
+            last_status="${current_status}"
+        fi
+    fi
     
     if [[ "${READY_TO_USE}" == "true" ]]; then
         break
+    fi
+    
+    # Fail fast if error detected
+    if [[ -n "${ERROR_MSG}" ]]; then
+        test_error "Snapshot creation failed: ${ERROR_MSG}"
+        kubectl describe volumesnapshot "${SNAPSHOT_NAME_1}" -n "${TEST_NAMESPACE}"
+        kubectl logs -n kube-system -l app.kubernetes.io/component=controller --tail=50
+        exit 1
     fi
     
     sleep 5
@@ -159,8 +182,13 @@ while [[ $elapsed -lt $timeout ]]; do
 done
 
 if [[ "${READY_TO_USE}" != "true" ]]; then
-    test_error "Snapshot failed to become ready"
+    test_error "Snapshot failed to become ready after ${timeout}s"
+    echo ""
+    echo "=== Snapshot Status ==="
     kubectl describe volumesnapshot "${SNAPSHOT_NAME_1}" -n "${TEST_NAMESPACE}"
+    echo ""
+    echo "=== Controller Logs (last 100 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/component=controller --tail=100
     exit 1
 fi
 
@@ -203,15 +231,38 @@ spec:
 EOF
 
 # Wait for second snapshot
-test_info "Waiting for second snapshot..."
+test_info "Waiting for second snapshot (timeout: 120s)..."
 timeout=120
 elapsed=0
+last_status=""
 while [[ $elapsed -lt $timeout ]]; do
     READY_TO_USE=$(kubectl get volumesnapshot "${SNAPSHOT_NAME_2}" -n "${TEST_NAMESPACE}" \
         -o jsonpath='{.status.readyToUse}' 2>/dev/null || echo "false")
+    ERROR_MSG=$(kubectl get volumesnapshot "${SNAPSHOT_NAME_2}" -n "${TEST_NAMESPACE}" \
+        -o jsonpath='{.status.error.message}' 2>/dev/null || echo "")
+    
+    # Log progress every 15 seconds
+    if [[ $((elapsed % 15)) -eq 0 ]] && [[ $elapsed -gt 0 ]]; then
+        current_status="readyToUse=${READY_TO_USE}"
+        if [[ -n "${ERROR_MSG}" ]]; then
+            current_status="${current_status}, error: ${ERROR_MSG}"
+        fi
+        if [[ "${current_status}" != "${last_status}" ]]; then
+            test_info "Snapshot status after ${elapsed}s: ${current_status}"
+            last_status="${current_status}"
+        fi
+    fi
     
     if [[ "${READY_TO_USE}" == "true" ]]; then
         break
+    fi
+    
+    # Fail fast if error detected
+    if [[ -n "${ERROR_MSG}" ]]; then
+        test_error "Second snapshot creation failed: ${ERROR_MSG}"
+        kubectl describe volumesnapshot "${SNAPSHOT_NAME_2}" -n "${TEST_NAMESPACE}"
+        kubectl logs -n kube-system -l app.kubernetes.io/component=controller --tail=50
+        exit 1
     fi
     
     sleep 5
@@ -219,7 +270,13 @@ while [[ $elapsed -lt $timeout ]]; do
 done
 
 if [[ "${READY_TO_USE}" != "true" ]]; then
-    test_error "Second snapshot failed to become ready"
+    test_error "Second snapshot failed to become ready after ${timeout}s"
+    echo ""
+    echo "=== Snapshot Status ==="
+    kubectl describe volumesnapshot "${SNAPSHOT_NAME_2}" -n "${TEST_NAMESPACE}"
+    echo ""
+    echo "=== Controller Logs (last 100 lines) ==="
+    kubectl logs -n kube-system -l app.kubernetes.io/component=controller --tail=100
     exit 1
 fi
 

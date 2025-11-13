@@ -332,28 +332,34 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		klog.Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
 			meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
 		if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
-			// Log error but continue - the namespace might already be deleted
-			klog.Warningf("Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v (continuing anyway)",
+			// If deletion fails, return an error to ensure the operation is retried.
+			// This is critical for preventing orphaned ZVOLs if the namespace is stuck.
+			e := status.Errorf(codes.Internal, "Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v",
 				meta.NVMeOFNamespaceID, meta.DatasetID, err)
-		} else {
-			klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
+			klog.Error(e)
+			timer.ObserveError()
+			return nil, e
+		}
+		klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
 
-			// Verify namespace is gone by querying all namespaces
-			// This helps ensure TrueNAS has completed the deletion before we return
-			klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
-			if allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx); queryErr == nil {
-				found := false
-				for _, ns := range allNamespaces {
-					if ns.ID == meta.NVMeOFNamespaceID {
-						found = true
-						klog.Warningf("Namespace %d still exists after deletion (NSID: %d, device: %s) - may indicate async deletion",
-							ns.ID, ns.NSID, ns.Device)
-						break
-					}
+		// Verify namespace is gone by querying all namespaces
+		// This helps ensure TrueNAS has completed the deletion before we return
+		klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
+		if allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx); queryErr == nil {
+			found := false
+			for _, ns := range allNamespaces {
+				if ns.ID == meta.NVMeOFNamespaceID {
+					found = true
+					// Return an error to retry, as the namespace still exists.
+					e := status.Errorf(codes.Internal, "Namespace %d still exists after deletion (NSID: %d, device: %s)",
+						ns.ID, ns.NSID, ns.Device)
+					klog.Error(e)
+					timer.ObserveError()
+					return nil, e
 				}
-				if !found {
-					klog.V(4).Infof("Verified namespace %d is fully deleted", meta.NVMeOFNamespaceID)
-				}
+			}
+			if !found {
+				klog.V(4).Infof("Verified namespace %d is fully deleted", meta.NVMeOFNamespaceID)
 			}
 		}
 	}

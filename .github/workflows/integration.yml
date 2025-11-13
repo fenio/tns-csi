@@ -27,6 +27,7 @@ jobs:
   integration-nfs:
     name: NFS Integration Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -44,6 +45,7 @@ jobs:
   integration-nvmeof:
     name: NVMe-oF Integration Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -61,6 +63,7 @@ jobs:
   integration-snapshot-nfs:
     name: NFS Snapshot Integration Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
@@ -80,6 +83,7 @@ jobs:
   integration-snapshot-nvmeof:
     name: NVMe-oF Snapshot Integration Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -99,6 +103,7 @@ jobs:
   integration-concurrent-nfs:
     name: NFS Concurrent Volume Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-nfs
     steps:
       - uses: actions/checkout@v5
@@ -117,6 +122,7 @@ jobs:
   integration-concurrent-nvmeof:
     name: NVMe-oF Concurrent Volume Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -135,6 +141,7 @@ jobs:
   integration-persistence-nfs:
     name: NFS Data Persistence Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-concurrent-nfs
     steps:
       - uses: actions/checkout@v5
@@ -153,6 +160,7 @@ jobs:
   integration-persistence-nvmeof:
     name: NVMe-oF Data Persistence Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-concurrent-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -171,6 +179,7 @@ jobs:
   integration-statefulset-nfs:
     name: NFS StatefulSet Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-persistence-nfs
     steps:
       - uses: actions/checkout@v5
@@ -189,6 +198,7 @@ jobs:
   integration-statefulset-nvmeof:
     name: NVMe-oF StatefulSet Tests
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: integration-persistence-nvmeof
     steps:
       - uses: actions/checkout@v5
@@ -207,6 +217,7 @@ jobs:
   integration-dual-mount:
     name: Dual Mount Tests (NFS + NVMe-oF)
     runs-on: self-hosted
+    timeout-minutes: 10
     needs: [integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v5
@@ -225,6 +236,7 @@ jobs:
   integration-connection-resilience:
     name: Connection Resilience Tests
     runs-on: self-hosted
+    timeout-minutes: 15
     needs: [integration-statefulset-nfs, integration-statefulset-nvmeof]
     steps:
       - uses: actions/checkout@v5
@@ -240,10 +252,126 @@ jobs:
         run: |
           ./tests/integration/test-connection-resilience.sh
 
+  integration-volume-expansion-nfs:
+    name: NFS Volume Expansion Tests
+    runs-on: self-hosted
+    timeout-minutes: 10
+    needs: integration-nfs
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
+      - name: Run NFS Volume Expansion Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-volume-expansion-nfs.sh
+
+  integration-volume-expansion-nvmeof:
+    name: NVMe-oF Volume Expansion Tests
+    runs-on: self-hosted
+    timeout-minutes: 10
+    needs: integration-nvmeof
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - name: Run NVMe-oF Volume Expansion Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-volume-expansion-nvmeof.sh
+
+  integration-pod-restart:
+    name: Pod Restart and Reattachment Tests
+    runs-on: self-hosted
+    timeout-minutes: 10
+    needs: [integration-nfs, integration-nvmeof]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - name: Run Pod Restart Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-pod-restart.sh
+
+  integration-access-modes:
+    name: Access Mode Validation Tests
+    runs-on: self-hosted
+    timeout-minutes: 10
+    needs: [integration-nfs, integration-nvmeof]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - name: Run Access Mode Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-access-modes.sh
+
+  integration-snapshot-restore:
+    name: Snapshot Restore Verification Tests
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: [integration-snapshot-nfs, integration-snapshot-nvmeof]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Snapshot Restore Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-snapshot-restore.sh
+
+  integration-volume-stress:
+    name: Volume Limits Stress Tests
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: [integration-concurrent-nfs, integration-concurrent-nvmeof]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+      - name: Run Volume Stress Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-volume-stress.sh
+
   cleanup:
     name: Cleanup TrueNAS Artifacts
     runs-on: self-hosted
-    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-dual-mount, integration-connection-resilience]
+    timeout-minutes: 10
+    needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-dual-mount, integration-connection-resilience, integration-volume-expansion-nfs, integration-volume-expansion-nvmeof, integration-pod-restart, integration-access-modes, integration-snapshot-restore, integration-volume-stress]
     if: always()
     steps:
       - uses: actions/checkout@v5

@@ -137,13 +137,29 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 			return nil, status.Errorf(codes.Internal, "Failed to query NVMe-oF namespaces: %v", nsErr)
 		}
 
+		klog.V(4).Infof("Checking for existing namespace: device=%s, subsystem=%d, total namespaces=%d", devicePath, subsystem.ID, len(namespaces))
+
+		// Log all namespaces for this subsystem to help diagnose NSID conflicts
+		subsystemNamespaces := 0
+		for _, ns := range namespaces {
+			if ns.Subsystem == subsystem.ID {
+				subsystemNamespaces++
+				klog.V(5).Infof("Existing namespace in subsystem %d: ID=%d, NSID=%d, device=%s",
+					subsystem.ID, ns.ID, ns.NSID, ns.Device)
+			}
+		}
+		if subsystemNamespaces > 0 {
+			klog.V(4).Infof("Found %d existing namespace(s) in subsystem %d", subsystemNamespaces, subsystem.ID)
+		}
+
 		// Find namespace matching this ZVOL in the target subsystem
 		for _, ns := range namespaces {
 			if ns.Subsystem != subsystem.ID || ns.Device != devicePath {
 				continue
 			}
 			// Volume already exists with namespace - return existing volume
-			klog.Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d), returning existing volume", ns.ID, ns.NSID)
+			klog.Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d, device: %s, subsystem: %d), returning existing volume",
+				ns.ID, ns.NSID, ns.Device, ns.Subsystem)
 
 			meta := VolumeMetadata{
 				Name:              volumeName,
@@ -228,7 +244,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
 	devicePath := "zvol/" + zvolName
 
-	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
+	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d (ZVOL ID: %s)", devicePath, subsystem.ID, zvol.ID)
 
 	// Note: NSID is not specified (omitted) - TrueNAS will auto-assign the next available namespace ID
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
@@ -247,7 +263,8 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
 
-	klog.Infof("Created NVMe-oF namespace with ID: %d (NSID: %d)", namespace.ID, namespace.NSID)
+	klog.Infof("Successfully created NVMe-oF namespace: ID=%d, NSID=%d, device=%s, subsystem=%d, ZVOL=%s",
+		namespace.ID, namespace.NSID, devicePath, subsystem.ID, zvol.ID)
 
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
@@ -312,12 +329,32 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	// Step 1: Delete NVMe-oF namespace
 	if meta.NVMeOFNamespaceID > 0 {
-		klog.Infof("Deleting NVMe-oF namespace with ID: %d", meta.NVMeOFNamespaceID)
+		klog.Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
+			meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
 		if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
 			// Log error but continue - the namespace might already be deleted
-			klog.Warningf("Failed to delete NVMe-oF namespace %d: %v (continuing anyway)", meta.NVMeOFNamespaceID, err)
+			klog.Warningf("Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v (continuing anyway)",
+				meta.NVMeOFNamespaceID, meta.DatasetID, err)
 		} else {
-			klog.Infof("Successfully deleted NVMe-oF namespace %d", meta.NVMeOFNamespaceID)
+			klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
+
+			// Verify namespace is gone by querying all namespaces
+			// This helps ensure TrueNAS has completed the deletion before we return
+			klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
+			if allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx); queryErr == nil {
+				found := false
+				for _, ns := range allNamespaces {
+					if ns.ID == meta.NVMeOFNamespaceID {
+						found = true
+						klog.Warningf("Namespace %d still exists after deletion (NSID: %d, device: %s) - may indicate async deletion",
+							ns.ID, ns.NSID, ns.Device)
+						break
+					}
+				}
+				if !found {
+					klog.V(4).Infof("Verified namespace %d is fully deleted", meta.NVMeOFNamespaceID)
+				}
+			}
 		}
 	}
 

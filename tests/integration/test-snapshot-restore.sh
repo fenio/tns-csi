@@ -35,7 +35,7 @@ trap 'show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"; cleanup_te
 
 # Run test steps
 verify_cluster
-deploy_driver "nfs"
+deploy_driver "nfs" --set snapshots.enabled=true
 wait_for_driver
 
 #######################################
@@ -43,10 +43,11 @@ wait_for_driver
 #######################################
 test_step 4 14 "Verifying snapshot support"
 
-# Check if VolumeSnapshotClass exists
-if ! kubectl get volumesnapshotclass tns-csi-nfs &>/dev/null; then
-    test_error "VolumeSnapshotClass 'tns-csi-nfs' not found"
+# Check if VolumeSnapshotClass exists (created by Helm chart as <storage-class-name>-snapshot)
+if ! kubectl get volumesnapshotclass tns-csi-nfs-snapshot &>/dev/null; then
+    test_error "VolumeSnapshotClass 'tns-csi-nfs-snapshot' not found"
     test_info "Please ensure snapshot CRDs and snapshot controller are installed"
+    test_info "And driver is deployed with snapshots.enabled=true"
     exit 1
 fi
 
@@ -136,7 +137,7 @@ kind: VolumeSnapshot
 metadata:
   name: ${SNAPSHOT_NAME_1}
 spec:
-  volumeSnapshotClassName: tns-csi-nfs
+  volumeSnapshotClassName: tns-csi-nfs-snapshot
   source:
     persistentVolumeClaimName: ${PVC_NAME_SOURCE}
 EOF
@@ -196,7 +197,7 @@ kind: VolumeSnapshot
 metadata:
   name: ${SNAPSHOT_NAME_2}
 spec:
-  volumeSnapshotClassName: tns-csi-nfs
+  volumeSnapshotClassName: tns-csi-nfs-snapshot
   source:
     persistentVolumeClaimName: ${PVC_NAME_SOURCE}
 EOF

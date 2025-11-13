@@ -54,7 +54,7 @@ trap 'cleanup_all; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
 # Run test steps
 verify_cluster
-deploy_driver "nvmeof"  # Test with both protocols
+deploy_driver "nfs"  # Test with NFS protocol
 wait_for_driver
 
 #######################################

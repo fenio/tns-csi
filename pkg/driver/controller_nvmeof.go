@@ -439,6 +439,10 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
+	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
+	// This signals to the node that the volume has existing data and should NEVER be formatted
+	volumeContext["clonedFromSnapshot"] = "true"
+
 	klog.Infof("Successfully created NVMe-oF volume from snapshot with encoded ID: %s", encodedVolumeID)
 
 	// Record volume capacity metric

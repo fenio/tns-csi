@@ -319,12 +319,15 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	}
 
 	// Construct volume context with metadata for node plugin
+	// CRITICAL: Add clonedFromSnapshot flag to prevent reformatting of cloned volumes
+	// ZFS clones inherit filesystems from snapshots, but detection may fail due to caching
 	volumeContext := map[string]string{
-		"server":      server,
-		"share":       dataset.Mountpoint,
-		"datasetID":   dataset.ID,
-		"datasetName": dataset.Name,
-		"nfsShareID":  strconv.Itoa(nfsShare.ID),
+		"server":             server,
+		"share":              dataset.Mountpoint,
+		"datasetID":          dataset.ID,
+		"datasetName":        dataset.Name,
+		"nfsShareID":         strconv.Itoa(nfsShare.ID),
+		"clonedFromSnapshot": "true",
 	}
 
 	// Get requested capacity

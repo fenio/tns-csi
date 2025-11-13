@@ -53,7 +53,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s", devicePath)
-		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	}
 
 	// Check if nvme-cli is installed
@@ -77,7 +77,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	}
 
 	klog.Infof("NVMe-oF device connected at %s", devicePath)
-	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume)
+	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
@@ -141,7 +141,7 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
-func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	// CRITICAL: Wait for filesystem metadata to become available after device connection
 	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
 	// filesystem metadata immediately available. If we check too quickly with blkid,
@@ -183,7 +183,7 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 	if isBlockVolume {
 		return s.stageBlockDevice(devicePath, stagingTargetPath)
 	}
-	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability)
+	return s.formatAndMountNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, volumeContext)
 }
 
 // unstageNVMeOFVolume unstages an NVMe-oF volume by disconnecting from the target.
@@ -231,7 +231,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 }
 
 // formatAndMountNVMeDevice formats (if needed) and mounts an NVMe device.
-func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability) (*csi.NodeStageVolumeResponse, error) {
+func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	klog.Infof("Formatting and mounting NVMe device %s to %s (volume: %s)", devicePath, stagingTargetPath, volumeID)
 
 	// Determine filesystem type from volume capability
@@ -240,19 +240,29 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 		fsType = mnt.FsType
 	}
 
-	// Check if device is already formatted
-	needsFormat, err := needsFormat(ctx, devicePath)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
-	}
-
-	if needsFormat {
-		klog.Infof("Device %s needs formatting", devicePath)
-		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
-		}
+	// CRITICAL: Check if this volume was cloned from a snapshot
+	// If clonedFromSnapshot flag is set, SKIP formatting check entirely to preserve data
+	// ZFS clones inherit the filesystem from the snapshot, but the filesystem may not be
+	// immediately detectable by blkid due to kernel caching or metadata sync delays.
+	// Formatting a cloned volume would DESTROY the snapshot data.
+	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
+		klog.Warningf("Volume %s was cloned from snapshot - SKIPPING format check to preserve data", volumeID)
+		klog.Infof("Device %s is a cloned snapshot volume, assuming existing filesystem", devicePath)
 	} else {
-		klog.V(4).Infof("Device %s is already formatted", devicePath)
+		// Check if device is already formatted (only for non-cloned volumes)
+		needsFormat, err := needsFormat(ctx, devicePath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
+		}
+
+		if needsFormat {
+			klog.Infof("Device %s needs formatting", devicePath)
+			if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
+				return nil, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
+			}
+		} else {
+			klog.V(4).Infof("Device %s is already formatted", devicePath)
+		}
 	}
 
 	// Create staging target path if it doesn't exist

@@ -331,8 +331,8 @@ jobs:
   integration-snapshot-restore:
     name: Snapshot Restore Verification Tests
     runs-on: self-hosted
-    timeout-minutes: 15
-    needs: [integration-snapshot-nfs, integration-snapshot-nvmeof]
+    timeout-minutes: 20
+    needs: [integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies

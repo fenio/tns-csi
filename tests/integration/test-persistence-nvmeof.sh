@@ -21,6 +21,13 @@ MANIFEST_DIR="${SCRIPT_DIR}/manifests"
 echo "=========================================="
 echo "TrueNAS CSI - NVMe-oF Data Persistence Test"
 echo "=========================================="
+echo ""
+echo "Test Configuration:"
+echo "  Timestamp: ${TIMESTAMP}"
+echo "  PVC Name: ${PVC_NAME}"
+echo "  Pod Name: ${POD_NAME}"
+echo "  Test Data: '${TEST_DATA}'"
+echo ""
 
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
@@ -93,20 +100,45 @@ test_success "PVC is bound"
 PV_NAME=$(kubectl get pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
 test_info "Created PV: ${PV_NAME}"
 
+# Get detailed PV information
+echo ""
+test_info "=== PV Details ==="
+kubectl get pv "${PV_NAME}" -o yaml | grep -E "volumeHandle:|csi:|volumeAttributes:" -A 10
+echo ""
+
 # Wait for pod to be ready
+test_info "Waiting for pod ${POD_NAME} to be ready (using PVC: ${PVC_NAME}, PV: ${PV_NAME})..."
 kubectl wait --for=condition=Ready pod/"${POD_NAME}" \
     -n "${TEST_NAMESPACE}" \
     --timeout="${TIMEOUT_POD}"
 
 test_success "Pod is ready"
 
+# Check initial volume state
+echo ""
+test_info "=== Initial Volume State ==="
+test_info "Checking what exists on the volume before writing..."
+kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- ls -la /data/ || echo "(Volume is empty or not yet mounted)"
+kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data || true
+echo ""
+
 # Write test data
 # NOTE: CSI driver handles formatting during NodeStageVolume - no need to format here
 echo ""
 test_info "Writing test data to volume..."
+test_info "Test data content: '${TEST_DATA}'"
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo '${TEST_DATA}' > /data/test.txt"
 test_success "Wrote test file: test.txt"
+
+# Verify what was actually written
+WRITTEN_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
+test_info "Verified written data: '${WRITTEN_DATA}'"
+
+if [[ "${WRITTEN_DATA}" != "${TEST_DATA}" ]]; then
+    test_error "CRITICAL: Data mismatch immediately after write! Expected: '${TEST_DATA}', Got: '${WRITTEN_DATA}'"
+    exit 1
+fi
 
 # Write a large file to test data integrity
 echo ""
@@ -153,7 +185,7 @@ sleep 5
 test_success "Pod deleted"
 
 # Recreate the same pod
-test_info "Recreating pod with same PVC..."
+test_info "Recreating pod with same PVC: ${PVC_NAME} (backed by PV: ${PV_NAME})..."
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
 kind: Pod
@@ -173,16 +205,24 @@ spec:
       claimName: ${PVC_NAME}
 EOF
 
+test_info "Waiting for pod to reconnect to volume..."
 kubectl wait --for=condition=Ready pod/"${POD_NAME}" \
     -n "${TEST_NAMESPACE}" \
     --timeout="${TIMEOUT_POD}"
 
 test_success "Pod recreated and ready"
 
+# Show what files exist on the volume after restart
+echo ""
+test_info "Files on volume after restart:"
+kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- ls -la /data/
+
 # Verify data is intact
 echo ""
 test_info "Verifying test data persisted after graceful restart..."
+test_info "Expected data: '${TEST_DATA}'"
 RETRIEVED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
+test_info "Retrieved data: '${RETRIEVED_DATA}'"
 if [[ "${RETRIEVED_DATA}" == "${TEST_DATA}" ]]; then
     test_success "Test data intact: ${RETRIEVED_DATA}"
 else

@@ -42,6 +42,123 @@ export TEST_CURRENT_STEP=0
 # Debug mode - set TEST_DEBUG=1 for verbose output
 export TEST_DEBUG="${TEST_DEBUG:-0}"
 
+#######################################
+# Show YAML manifest contents with formatting
+# Arguments:
+#   Manifest file path
+#   Description (optional)
+#######################################
+show_yaml_manifest() {
+    local manifest=$1
+    local description=${2:-"YAML Manifest"}
+    
+    echo ""
+    echo "=== ${description} ==="
+    echo "File: ${manifest}"
+    echo "---"
+    cat "${manifest}"
+    echo "---"
+}
+
+#######################################
+# Show Kubernetes resource details in YAML format
+# Arguments:
+#   Resource type (e.g., pvc, pod, pv)
+#   Resource name
+#   Namespace (optional)
+#######################################
+show_resource_yaml() {
+    local resource_type=$1
+    local resource_name=$2
+    local namespace=${3:-}
+    
+    local namespace_arg=""
+    if [[ -n "${namespace}" ]]; then
+        namespace_arg="-n ${namespace}"
+    fi
+    
+    echo ""
+    echo "=== ${resource_type}/${resource_name} (YAML) ==="
+    kubectl get "${resource_type}" "${resource_name}" ${namespace_arg} -o yaml 2>&1 || echo "Resource not found or error occurred"
+}
+
+#######################################
+# Show mount information from pod
+# Arguments:
+#   Pod name
+#   Namespace
+#######################################
+show_pod_mounts() {
+    local pod_name=$1
+    local namespace=$2
+    
+    echo ""
+    echo "=== Mount Information for ${pod_name} ==="
+    echo ""
+    echo "--- /proc/mounts ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- cat /proc/mounts 2>&1 || echo "Failed to read /proc/mounts"
+    
+    echo ""
+    echo "--- mount command output ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- mount 2>&1 || echo "mount command failed"
+    
+    echo ""
+    echo "--- df -h output ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- df -h 2>&1 || echo "df command failed"
+}
+
+#######################################
+# Show NVMe-oF device and connection details from pod
+# Arguments:
+#   Pod name
+#   Namespace
+#######################################
+show_nvmeof_details() {
+    local pod_name=$1
+    local namespace=$2
+    
+    echo ""
+    echo "=== NVMe-oF Device Details for ${pod_name} ==="
+    
+    echo ""
+    echo "--- nvme list output ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- nvme list 2>&1 || echo "nvme list failed (nvme-cli may not be installed)"
+    
+    echo ""
+    echo "--- /sys/class/nvme devices ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- sh -c "ls -la /sys/class/nvme* 2>/dev/null || echo 'No NVMe devices found'" 2>&1
+    
+    echo ""
+    echo "--- /dev/nvme* devices ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- sh -c "ls -la /dev/nvme* 2>/dev/null || echo 'No NVMe block devices found'" 2>&1
+    
+    echo ""
+    echo "--- Block device details ---"
+    kubectl exec "${pod_name}" -n "${namespace}" -- sh -c "lsblk 2>/dev/null || echo 'lsblk not available'" 2>&1
+}
+
+#######################################
+# Show node-level mount and device information
+# Requires access to node via privileged pod or node debugging
+#######################################
+show_node_mounts() {
+    echo ""
+    echo "=== Node-Level Mount Information ==="
+    
+    # Get node name (assuming single-node cluster for tests)
+    local node_name
+    node_name=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+    
+    echo "Node: ${node_name}"
+    echo ""
+    
+    # Check node logs for mount operations
+    echo "--- CSI Node Driver Logs (mount operations) ---"
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+        --tail=50 2>&1 | grep -E "NodeStageVolume|NodePublishVolume|mount|Mount" || echo "No mount-related logs found"
+}
+
 # Test tags for selective execution
 #######################################
 # Check if test should be skipped based on tags
@@ -417,7 +534,23 @@ deploy_driver() {
             ;;
     esac
     
+    # Show Helm command for debugging
+    echo ""
+    echo "=== Helm Installation Command ==="
+    echo "helm upgrade --install tns-csi ./charts/tns-csi-driver \\"
+    for arg in "${base_args[@]}" "${helm_args[@]}"; do
+        # Mask sensitive values
+        if [[ "${arg}" == *"apiKey="* ]]; then
+            echo "  ${arg/=*/=***MASKED***} \\"
+        else
+            echo "  ${arg} \\"
+        fi
+    done
+    echo "  --wait --timeout 5m"
+    echo ""
+    
     # Deploy with Helm
+    test_info "Executing Helm deployment..."
     if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
         "${base_args[@]}" \
         "${helm_args[@]}" \
@@ -435,8 +568,35 @@ deploy_driver() {
     helm list -n kube-system
     
     echo ""
+    echo "=== Helm values (deployed) ==="
+    helm get values tns-csi -n kube-system || true
+    
+    echo ""
     echo "=== CSI driver pods ==="
-    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide
+    
+    echo ""
+    echo "=== StorageClasses ==="
+    kubectl get storageclass
+    
+    echo ""
+    echo "=== StorageClass Details (YAML) ==="
+    case "${protocol}" in
+        nfs)
+            kubectl get storageclass tns-csi-nfs -o yaml || true
+            ;;
+        nvmeof)
+            kubectl get storageclass tns-csi-nvmeof -o yaml || true
+            ;;
+        iscsi)
+            kubectl get storageclass tns-csi-iscsi -o yaml || true
+            ;;
+    esac
+    
+    echo ""
+    echo "=== CSIDriver Resource ==="
+    kubectl get csidriver tns.csi.truenas.com -o yaml || true
+    
     stop_test_timer "deploy_driver" "PASSED"
 }
 
@@ -516,6 +676,11 @@ create_pvc() {
     test_step "Creating PersistentVolumeClaim: ${pvc_name}"
     test_debug "Manifest: ${manifest}, Wait for binding: ${wait_for_binding}"
     
+    # Show manifest contents
+    show_yaml_manifest "${manifest}" "PVC Manifest - ${pvc_name}"
+    
+    echo ""
+    test_info "Applying PVC manifest..."
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
     # Wait for PVC to be created and start provisioning (poll until it exists)
@@ -537,8 +702,11 @@ create_pvc() {
     
     # Check PVC status
     echo ""
-    echo "=== PVC Status ==="
+    echo "=== PVC Status (describe) ==="
     kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}"
+    
+    # Show full PVC YAML
+    show_resource_yaml "pvc" "${pvc_name}" "${TEST_NAMESPACE}"
     
     # Check controller logs
     echo ""
@@ -562,10 +730,17 @@ create_pvc() {
         
         test_success "PVC is bound"
         
-        # Get PV name
+        # Get PV name and show details
         local pv_name
         pv_name=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
         test_info "Created PV: ${pv_name}"
+        
+        # Show PV details
+        show_resource_yaml "pv" "${pv_name}"
+        
+        echo ""
+        echo "=== PV Details (describe) ==="
+        kubectl describe pv "${pv_name}"
     else
         echo ""
         test_info "Skipping PVC binding wait (volumeBindingMode: WaitForFirstConsumer)"
@@ -588,6 +763,11 @@ create_test_pod() {
     test_step "Creating test pod: ${pod_name}"
     test_debug "Manifest: ${manifest}, Timeout: ${TIMEOUT_POD}"
     
+    # Show manifest contents
+    show_yaml_manifest "${manifest}" "Pod Manifest - ${pod_name}"
+    
+    echo ""
+    test_info "Applying pod manifest..."
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
     # Wait for pod to be ready
@@ -622,6 +802,33 @@ create_test_pod() {
     
     test_success "Pod is ready"
     
+    # Show detailed pod information
+    show_resource_yaml "pod" "${pod_name}" "${TEST_NAMESPACE}"
+    
+    echo ""
+    echo "=== Pod Details (describe) ==="
+    kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}"
+    
+    # Show mount information
+    show_pod_mounts "${pod_name}" "${TEST_NAMESPACE}"
+    
+    # Detect if this is NVMe-oF based on storage class or volume attributes
+    local pvc_name
+    pvc_name=$(kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumes[0].persistentVolumeClaim.claimName}' 2>/dev/null || echo "")
+    
+    if [[ -n "${pvc_name}" ]]; then
+        local storage_class
+        storage_class=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.storageClassName}' 2>/dev/null || echo "")
+        
+        if [[ "${storage_class}" == *"nvmeof"* ]]; then
+            test_info "Detected NVMe-oF volume, showing device details..."
+            show_nvmeof_details "${pod_name}" "${TEST_NAMESPACE}"
+        fi
+    fi
+    
+    # Show node driver logs for this mount operation
+    show_node_mounts
+    
     # Show pod logs
     echo ""
     echo "=== Pod Logs ==="
@@ -647,13 +854,20 @@ test_io_operations() {
     
     if [[ "${test_type}" == "filesystem" ]]; then
         # Filesystem tests
-        echo "Writing test file..."
+        echo ""
+        echo "=== I/O Test Command ==="
+        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- sh -c \"echo 'CSI Test Data' > ${path}/test.txt\""
+        echo ""
+        test_info "Writing test file..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             sh -c "echo 'CSI Test Data' > ${path}/test.txt"
         test_success "Write operation successful"
         
         echo ""
-        echo "Reading test file..."
+        echo "=== Read Test Command ==="
+        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- cat ${path}/test.txt"
+        echo ""
+        test_info "Reading test file..."
         local content
         content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${path}/test.txt")
         if [[ "${content}" == "CSI Test Data" ]]; then
@@ -665,7 +879,10 @@ test_io_operations() {
         fi
         
         echo ""
-        echo "Writing large test file (100MB)..."
+        echo "=== Large File Write Command ==="
+        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- dd if=/dev/zero of=${path}/iotest.bin bs=1M count=100"
+        echo ""
+        test_info "Writing large test file (100MB)..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             dd if=/dev/zero of="${path}/iotest.bin" bs=1M count=100 2>&1 | tail -3
         test_success "Large file write successful"
@@ -697,12 +914,27 @@ test_io_operations() {
 }
 
 #######################################
-# Test volume expansion
+# Apply inline YAML with debugging output
+# Reads from stdin and applies, showing the manifest
 # Arguments:
-#   PVC name
-#   Pod name
-#   Mount path (for filesystem verification)
-#   New size (e.g., "3Gi")
+#   Description
+#######################################
+apply_inline_manifest() {
+    local description=$1
+    local manifest_content=$(cat)
+    
+    echo ""
+    echo "=== Applying Inline Manifest: ${description} ==="
+    echo "---"
+    echo "${manifest_content}"
+    echo "---"
+    echo ""
+    
+    echo "${manifest_content}" | kubectl apply -f -
+}
+
+#######################################
+# Test tags for selective execution
 #######################################
 test_volume_expansion() {
     local pvc_name=$1
@@ -728,11 +960,17 @@ test_volume_expansion() {
     
     # Patch PVC to request larger size
     echo ""
+    echo "=== Volume Expansion Command ==="
+    echo "Command: kubectl patch pvc ${pvc_name} -n ${TEST_NAMESPACE} -p '{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"${new_size}\"}}}}'"
+    echo ""
     test_info "Expanding PVC from ${current_size} to ${new_size}..."
     kubectl patch pvc "${pvc_name}" -n "${TEST_NAMESPACE}" \
         -p "{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"${new_size}\"}}}}"
     
     test_success "PVC expansion request submitted"
+    
+    # Show updated PVC YAML
+    show_resource_yaml "pvc" "${pvc_name}" "${TEST_NAMESPACE}"
     
     # Wait for PVC condition to show expansion in progress or completed
     echo ""
@@ -1014,43 +1252,84 @@ show_diagnostic_logs() {
     local pvc_name=${2:-}
     
     echo ""
+    echo "========================================"
     echo "=== DIAGNOSTIC INFORMATION ==="
+    echo "========================================"
     echo ""
     
-    echo "=== Controller Logs ==="
+    echo "=== Controller Logs (last 200 lines) ==="
     kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
-        --tail=100 || true
+        --tail=200 || true
     
     echo ""
-    echo "=== Node Logs ==="
+    echo "=== Node Logs (last 200 lines) ==="
     kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
-        --tail=100 || true
+        --tail=200 || true
     
     if [[ -n "${pvc_name}" ]]; then
         echo ""
-        echo "=== PVC Status ==="
+        echo "=== PVC Status (describe) ==="
         kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}" || true
+        
+        echo ""
+        echo "=== PVC Status (YAML) ==="
+        kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o yaml || true
+        
+        # Get associated PV
+        local pv_name
+        pv_name=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}' 2>/dev/null || echo "")
+        if [[ -n "${pv_name}" ]]; then
+            echo ""
+            echo "=== Associated PV: ${pv_name} (YAML) ==="
+            kubectl get pv "${pv_name}" -o yaml || true
+        fi
     fi
     
     if [[ -n "${pod_name}" ]]; then
         echo ""
-        echo "=== Pod Status ==="
+        echo "=== Pod Status (describe) ==="
         kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}" || true
+        
+        echo ""
+        echo "=== Pod Status (YAML) ==="
+        kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" -o yaml || true
         
         echo ""
         echo "=== Pod Logs ==="
         kubectl logs "${pod_name}" -n "${TEST_NAMESPACE}" || true
+        
+        # Try to show mount information if pod is running
+        if kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null | grep -q "Running"; then
+            show_pod_mounts "${pod_name}" "${TEST_NAMESPACE}" || true
+        fi
     fi
     
     echo ""
-    echo "=== All PVCs ==="
+    echo "=== All PVCs in test namespace ==="
+    kubectl get pvc -n "${TEST_NAMESPACE}" -o wide || true
+    
+    echo ""
+    echo "=== All PVCs (cluster-wide) ==="
     kubectl get pvc -A || true
     
     echo ""
     echo "=== All PVs ==="
-    kubectl get pv || true
+    kubectl get pv -o wide || true
+    
+    echo ""
+    echo "=== Events in test namespace ==="
+    kubectl get events -n "${TEST_NAMESPACE}" --sort-by='.lastTimestamp' || true
+    
+    echo ""
+    echo "=== CSI Driver Pods ==="
+    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide || true
+    
+    echo ""
+    echo "========================================"
+    echo "=== END DIAGNOSTIC INFORMATION ==="
+    echo "========================================"
 }
 
 #######################################

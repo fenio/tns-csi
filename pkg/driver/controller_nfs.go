@@ -248,19 +248,20 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 
 	// Delete ZFS dataset - TrueNAS automatically deletes associated NFS shares
 	// when the dataset is deleted, so we don't need to explicitly delete the share
-	if meta.DatasetID != "" {
+	if meta.DatasetID == "" {
+		klog.Infof("No dataset ID provided, skipping dataset deletion")
+	} else {
 		klog.Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
-		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
-			// Check if dataset doesn't exist - this is OK (idempotency)
-			if isNotFoundError(err) {
-				klog.Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
-			} else {
-				// For other errors, return error to trigger retry and prevent orphaned datasets
-				timer.ObserveError()
-				return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
-			}
-		} else {
+		err := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+		if err != nil && !isNotFoundError(err) {
+			// For non-idempotent errors, return error to trigger retry and prevent orphaned datasets
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
+		}
+		if err == nil {
 			klog.Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
+		} else {
+			klog.Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 		}
 	}
 

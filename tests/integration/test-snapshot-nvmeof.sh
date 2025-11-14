@@ -30,7 +30,7 @@ create_snapshot() {
     local snapshot_manifest=$1
     local snapshot_name=$2
     
-    test_step 6 11 "Creating VolumeSnapshot: ${snapshot_name}"
+    test_step "Creating VolumeSnapshot: ${snapshot_name}"
     
     # Apply VolumeSnapshotClass first
     kubectl apply -f "${MANIFEST_DIR}/volumesnapshotclass-nvmeof.yaml"
@@ -96,7 +96,7 @@ test_block_io_with_pattern() {
     local pod_name=$1
     local mount_path=$2
     
-    test_step 6 11 "Testing filesystem I/O with data pattern"
+    test_step "Testing filesystem I/O with data pattern"
     
     # Write pattern to filesystem
     echo ""
@@ -165,7 +165,7 @@ test_snapshot_restore() {
     local pvc_name=$2
     local pod_name=$3
     
-    test_step 7 11 "Testing snapshot restore: ${pvc_name}"
+    test_step "Testing snapshot restore: ${pvc_name}"
     
     # Create PVC from snapshot
     kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}"
@@ -258,7 +258,7 @@ EOF
 # Cleanup snapshot test resources
 #######################################
 cleanup_snapshot_test() {
-    test_step 8 11 "Cleaning up snapshot test resources"
+    test_step "Cleaning up snapshot test resources"
     
     # Delete pods first
     test_info "Deleting pods..."

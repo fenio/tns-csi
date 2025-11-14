@@ -18,6 +18,8 @@ echo "================================================"
 echo "TrueNAS CSI - Pod Restart/Rescheduling Test"
 echo "================================================"
 echo ""
+# Configure test with 11 total steps
+set_test_steps 11
 echo "This test verifies:"
 echo "  • Volumes reattach after graceful pod restart"
 echo "  • Volumes reattach after forced termination"
@@ -36,7 +38,7 @@ wait_for_driver
 #######################################
 # Test 1: Create NFS and NVMe-oF PVCs
 #######################################
-test_step 4 11 "Creating NFS and NVMe-oF PVCs"
+test_step "Creating NFS and NVMe-oF PVCs"
 
 # Create NFS PVC
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
@@ -75,7 +77,7 @@ test_success "NVMe-oF PVC created: ${PVC_NAME_NVMEOF}"
 #######################################
 # Test 2: Create pod with both volumes
 #######################################
-test_step 5 11 "Creating pod with both NFS and NVMe-oF volumes"
+test_step "Creating pod with both NFS and NVMe-oF volumes"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -125,9 +127,10 @@ test_success "Pod running on node: ${NODE_NAME}"
 #######################################
 # Test 3: Write initial data
 #######################################
-test_step 6 11 "Writing initial test data"
+test_step "Writing initial test data"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Writing data to NFS volume..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'NFS data v1' > /nfs/test.txt && \
@@ -137,6 +140,7 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 test_success "Data written to NFS volume"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Writing data to NVMe-oF volume..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'NVMe-oF data v1' > /nvmeof/test.txt && \
@@ -152,9 +156,10 @@ NVMEOF_DATA_V1=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /nvmeo
 #######################################
 # Test 4: Graceful pod restart
 #######################################
-test_step 7 11 "Testing graceful pod restart"
+test_step "Testing graceful pod restart"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Deleting pod gracefully..."
 kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --grace-period=30
 
@@ -199,9 +204,10 @@ test_success "Pod restarted on node: ${NEW_NODE_NAME}"
 #######################################
 # Test 5: Verify data after graceful restart
 #######################################
-test_step 8 11 "Verifying data after graceful restart"
+test_step "Verifying data after graceful restart"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Checking NFS data..."
 NFS_DATA_V2=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /nfs/test.txt)
 
@@ -225,9 +231,10 @@ fi
 #######################################
 # Test 6: Write new data after restart
 #######################################
-test_step 9 11 "Writing new data after restart"
+test_step "Writing new data after restart"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Appending data to volumes..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'NFS data v2 - after restart' >> /nfs/test.txt"
@@ -240,9 +247,10 @@ test_success "New data written successfully"
 #######################################
 # Test 7: Forced termination test
 #######################################
-test_step 10 11 "Testing forced pod termination"
+test_step "Testing forced pod termination"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Force deleting pod (grace-period=0)..."
 kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --force --grace-period=0
 
@@ -286,9 +294,10 @@ test_success "Pod restarted after forced termination"
 #######################################
 # Test 8: Final data verification
 #######################################
-test_step 11 11 "Final data verification after forced restart"
+test_step "Final data verification after forced restart"
 
 echo ""
+# Configure test with 11 total steps
 test_info "Verifying all data is intact..."
 
 # Check NFS data includes both v1 and v2
@@ -311,6 +320,7 @@ fi
 
 # Write final verification data
 echo ""
+# Configure test with 11 total steps
 test_info "Writing final verification data..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Final write after forced restart' > /nfs/final.txt && \
@@ -319,10 +329,12 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 test_success "Final data written successfully"
 
 echo ""
+# Configure test with 11 total steps
 echo "================================================"
 echo "Pod Restart/Rescheduling Summary"
 echo "================================================"
 echo ""
+# Configure test with 11 total steps
 echo "✓ Created volumes with initial data"
 echo "✓ Performed graceful pod restart"
 echo "✓ Verified data integrity after graceful restart"
@@ -331,10 +343,12 @@ echo "✓ Performed forced pod termination"
 echo "✓ Verified data integrity after forced restart"
 echo "✓ Both NFS and NVMe-oF volumes reattached correctly"
 echo ""
+# Configure test with 11 total steps
 echo "Node changes:"
 echo "  Initial node: ${NODE_NAME}"
 echo "  After graceful restart: ${NEW_NODE_NAME}"
 echo ""
+# Configure test with 11 total steps
 echo "================================================"
 
 # Verify metrics

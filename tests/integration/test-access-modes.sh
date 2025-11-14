@@ -19,6 +19,8 @@ echo "================================================"
 echo "TrueNAS CSI - Access Mode Validation Test"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
+set_test_steps 10
 echo "This test verifies:"
 echo "  • ReadWriteMany (RWX) allows multiple pods to mount"
 echo "  • ReadWriteOnce (RWO) restricts to single pod"
@@ -37,7 +39,7 @@ wait_for_driver
 #######################################
 # Test 1: Create RWX PVC (NFS)
 #######################################
-test_step 4 10 "Creating ReadWriteMany PVC (NFS)"
+test_step "Creating ReadWriteMany PVC (NFS)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -63,7 +65,7 @@ test_success "RWX PVC created and bound"
 #######################################
 # Test 2: Mount RWX volume in first pod
 #######################################
-test_step 5 10 "Mounting RWX volume in first pod"
+test_step "Mounting RWX volume in first pod"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -94,6 +96,7 @@ test_success "First pod mounted RWX volume"
 
 # Write data from first pod
 echo ""
+# Configure test with 10 total steps
 test_info "Writing data from first pod..."
 kubectl exec "${POD_NAME_1}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Data from pod 1' > /data/pod1.txt && \
@@ -104,7 +107,7 @@ test_success "Data written by pod 1"
 #######################################
 # Test 3: Mount RWX volume in second pod
 #######################################
-test_step 6 10 "Mounting RWX volume in second pod (concurrent)"
+test_step "Mounting RWX volume in second pod (concurrent)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -136,9 +139,10 @@ test_success "Second pod mounted same RWX volume concurrently"
 #######################################
 # Test 4: Verify data sharing in RWX
 #######################################
-test_step 7 10 "Verifying data sharing in RWX mode"
+test_step "Verifying data sharing in RWX mode"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking if pod 2 can read data written by pod 1..."
 POD1_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/pod1.txt)
 
@@ -168,6 +172,7 @@ fi
 
 # Test concurrent writes
 echo ""
+# Configure test with 10 total steps
 test_info "Testing concurrent writes..."
 kubectl exec "${POD_NAME_1}" -n "${TEST_NAMESPACE}" -- \
     sh -c "for i in 1 2 3 4 5; do echo \"pod1-\$i\" >> /data/concurrent.txt; sleep 0.1; done" &
@@ -192,7 +197,7 @@ fi
 #######################################
 # Test 5: Create RWO PVC (NVMe-oF)
 #######################################
-test_step 8 10 "Creating ReadWriteOnce PVC (NVMe-oF)"
+test_step "Creating ReadWriteOnce PVC (NVMe-oF)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -243,6 +248,7 @@ test_success "RWO PVC created and bound to pod 3"
 
 # Write data to RWO volume
 echo ""
+# Configure test with 10 total steps
 test_info "Writing data to RWO volume..."
 kubectl exec "${POD_NAME_3}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Exclusive data from pod 3' > /data/exclusive.txt"
@@ -252,9 +258,10 @@ test_success "Data written to RWO volume"
 #######################################
 # Test 6: Verify RWO exclusivity
 #######################################
-test_step 9 10 "Verifying RWO volume exclusivity"
+test_step "Verifying RWO volume exclusivity"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Attempting to create second pod with same RWO volume..."
 test_info "This should remain in ContainerCreating or Pending state"
 
@@ -307,9 +314,10 @@ kubectl delete pod access-test-rwo-violation -n "${TEST_NAMESPACE}" --wait=false
 #######################################
 # Test 7: Summary and verification
 #######################################
-test_step 10 10 "Final verification and summary"
+test_step "Final verification and summary"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Listing all files in RWX volume..."
 RWX_FILES=$(kubectl exec "${POD_NAME_1}" -n "${TEST_NAMESPACE}" -- ls -la /data/)
 echo "${RWX_FILES}"
@@ -335,22 +343,26 @@ else
 fi
 
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 echo "Access Mode Validation Summary"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
 echo "ReadWriteMany (RWX) - NFS:"
 echo "  ✓ Two pods mounted same volume concurrently"
 echo "  ✓ Data shared between pods bidirectionally"
 echo "  ✓ Both pods could read and write"
 echo "  ✓ Files created: ${RWX_FILE_COUNT}"
 echo ""
+# Configure test with 10 total steps
 echo "ReadWriteOnce (RWO) - NVMe-oF:"
 echo "  ✓ Single pod mounted volume successfully"
 echo "  ✓ Second pod blocked from mounting"
 echo "  ✓ Kubernetes enforced exclusivity"
 echo "  ✓ Data remained isolated to single pod"
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 
 # Verify metrics

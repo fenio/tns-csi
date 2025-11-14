@@ -25,7 +25,7 @@ trap 'show_diagnostic_logs "" ""; cleanup_concurrent_test; test_summary "${PROTO
 # Cleanup concurrent test resources
 #######################################
 cleanup_concurrent_test() {
-    test_step 5 5 "Cleaning up concurrent test resources"
+    test_step "Cleaning up concurrent test resources"
     
     # Delete the entire namespace - this triggers CSI DeleteVolume for all PVCs
     test_info "Deleting test namespace: ${TEST_NAMESPACE}"
@@ -61,12 +61,15 @@ verify_cluster
 
 # Pre-check: Verify NVMe-oF subsystem exists
 echo ""
+# Configure test with 5 total steps
+set_test_steps 5
 test_info "Verifying NVMe-oF subsystem configuration..."
 SUBSYSTEM_NQN="${NVMEOF_SUBSYSTEM_NQN:-nqn.2005-03.org.truenas:csi-test}"
 test_info "Expected subsystem NQN: ${SUBSYSTEM_NQN}"
 test_warning "IMPORTANT: The NVMe-oF subsystem with NQN '${SUBSYSTEM_NQN}' must be pre-configured"
 test_warning "in TrueNAS (Shares > NVMe-oF Subsystems) with at least one TCP port attached."
 echo ""
+# Configure test with 5 total steps
 
 deploy_driver "nvmeof"
 wait_for_driver
@@ -80,7 +83,7 @@ fi
 #######################################
 # Test: Concurrent PVC Creation
 #######################################
-test_step 4 5 "Creating ${NUM_VOLUMES} PVCs concurrently"
+test_step "Creating ${NUM_VOLUMES} PVCs concurrently"
 
 # Generate unique PVC names
 declare -a PVC_NAMES
@@ -153,8 +156,10 @@ sleep 15
 
 # Monitor pod status (pods will trigger PVC binding)
 echo ""
+# Configure test with 5 total steps
 test_info "Monitoring pod scheduling and PVC provisioning..."
 echo ""
+# Configure test with 5 total steps
 
 # Wait for all pods to be ready (with timeout)
 test_info "Waiting for all pods to be ready (timeout: 360s)..."
@@ -221,6 +226,7 @@ fi
 
 # Verify all PVCs got unique PVs (no duplicates)
 echo ""
+# Configure test with 5 total steps
 test_info "Verifying all PVs are unique..."
 UNIQUE_PV_COUNT=$(kubectl get pvc -n "${TEST_NAMESPACE}" \
     -o jsonpath='{range .items[*]}{.spec.volumeName}{"\n"}{end}' | sort -u | wc -l)
@@ -238,6 +244,7 @@ fi
 
 # Test I/O on a subset of volumes (test first, middle, and last)
 echo ""
+# Configure test with 5 total steps
 test_info "Testing I/O operations on sample volumes..."
 
 for i in 1 $((NUM_VOLUMES / 2)) ${NUM_VOLUMES}; do
@@ -262,6 +269,7 @@ done
 
 # Verify no critical errors in controller logs
 echo ""
+# Configure test with 5 total steps
 test_info "Checking controller logs for errors..."
 CONTROLLER_ERRORS=$(kubectl logs -n kube-system \
     -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
@@ -276,14 +284,17 @@ fi
 
 # Show final status
 echo ""
+# Configure test with 5 total steps
 echo "=== Final Pod Status ==="
 kubectl get pods -n "${TEST_NAMESPACE}"
 
 echo ""
+# Configure test with 5 total steps
 echo "=== Final PVC Status ==="
 kubectl get pvc -n "${TEST_NAMESPACE}"
 
 echo ""
+# Configure test with 5 total steps
 echo "=== Final PV Status ==="
 kubectl get pv | grep "${TEST_NAMESPACE}" || echo "No PVs found"
 

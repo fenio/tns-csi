@@ -1,6 +1,15 @@
 #!/bin/bash
 # Common test library for CSI driver integration tests
 # Provides standardized functions for deploying, testing, and cleaning up
+#
+# USAGE:
+#   1. Source this file: source "${SCRIPT_DIR}/lib/common.sh"
+#   2. Set total test steps: set_test_steps 9
+#   3. Call test_step with description only: test_step "Description"
+#   4. Steps will auto-increment with correct numbering
+#
+# DEBUG MODE:
+#   Set TEST_DEBUG=1 to enable verbose debug output
 
 set -e
 
@@ -24,6 +33,14 @@ export TIMEOUT_DRIVER="${TIMEOUT_DRIVER:-120s}"
 declare -a TEST_RESULTS=()
 declare -A TEST_DURATIONS=()
 export TEST_START_TIME=$(date +%s)
+
+# Test step tracking - each test can set its own total steps
+# Tests should call: set_test_steps <total_number_of_steps>
+export TEST_TOTAL_STEPS=9  # Default fallback
+export TEST_CURRENT_STEP=0
+
+# Debug mode - set TEST_DEBUG=1 for verbose output
+export TEST_DEBUG="${TEST_DEBUG:-0}"
 
 # Test tags for selective execution
 #######################################
@@ -188,19 +205,50 @@ test_summary() {
 }
 
 #######################################
+# Set total number of steps for the current test
+# Arguments:
+#   Total steps
+#######################################
+set_test_steps() {
+    export TEST_TOTAL_STEPS=$1
+    export TEST_CURRENT_STEP=0
+    test_debug "Test configured with ${TEST_TOTAL_STEPS} steps"
+}
+
+#######################################
 # Print a test step header
 # Arguments:
+#   Description (step number auto-incremented)
+# OR (legacy compatibility):
 #   Step number
-#   Total steps
+#   Total steps (optional, uses TEST_TOTAL_STEPS if omitted)
 #   Description
 #######################################
 test_step() {
-    local step=$1
-    local total=$2
-    local description=$3
-    echo ""
-    echo -e "${BLUE}[Step ${step}/${total}]${NC} ${description}"
-    echo ""
+    # Support both new and legacy calling conventions
+    if [[ $# -eq 1 ]]; then
+        # New style: test_step "Description"
+        TEST_CURRENT_STEP=$((TEST_CURRENT_STEP + 1))
+        local description=$1
+        echo ""
+        echo -e "${BLUE}[Step ${TEST_CURRENT_STEP}/${TEST_TOTAL_STEPS}]${NC} ${description}"
+        echo ""
+    elif [[ $# -eq 2 ]]; then
+        # Legacy style with auto total: test_step 1 "Description"
+        TEST_CURRENT_STEP=$1
+        local description=$2
+        echo ""
+        echo -e "${BLUE}[Step ${TEST_CURRENT_STEP}/${TEST_TOTAL_STEPS}]${NC} ${description}"
+        echo ""
+    else
+        # Legacy style: test_step 1 9 "Description"
+        TEST_CURRENT_STEP=$1
+        local total=$2
+        local description=$3
+        echo ""
+        echo -e "${BLUE}[Step ${TEST_CURRENT_STEP}/${total}]${NC} ${description}"
+        echo ""
+    fi
 }
 
 #######################################
@@ -240,11 +288,23 @@ test_info() {
 }
 
 #######################################
+# Print debug message (only if TEST_DEBUG=1)
+# Arguments:
+#   Message
+#######################################
+test_debug() {
+    if [[ "${TEST_DEBUG}" == "1" ]]; then
+        echo -e "${CYAN}[DEBUG]${NC} $1"
+    fi
+}
+
+#######################################
 # Verify cluster is accessible and create test namespace
 #######################################
 verify_cluster() {
     start_test_timer "verify_cluster"
-    test_step 1 9 "Verifying cluster access"
+    test_step "Verifying cluster access"
+    test_debug "Checking kubectl cluster-info"
     
     if ! kubectl cluster-info &>/dev/null; then
         stop_test_timer "verify_cluster" "FAILED"
@@ -277,7 +337,8 @@ deploy_driver() {
     local helm_args=("$@")
     
     start_test_timer "deploy_driver"
-    test_step 2 9 "Deploying CSI driver for ${protocol}"
+    test_step "Deploying CSI driver for ${protocol}"
+    test_debug "Protocol: ${protocol}, Helm args: ${helm_args[*]}"
     
     # Check required environment variables
     if [[ -z "${TRUENAS_HOST}" ]]; then
@@ -417,7 +478,8 @@ wait_for_resource_deleted() {
 #######################################
 wait_for_driver() {
     start_test_timer "wait_for_driver"
-    test_step 3 9 "Waiting for CSI driver to be ready"
+    test_step "Waiting for CSI driver to be ready"
+    test_debug "Timeout: ${TIMEOUT_DRIVER}"
     
     if ! kubectl wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=tns-csi-driver \
@@ -451,7 +513,8 @@ create_pvc() {
     local wait_for_binding="${3:-true}"
     
     start_test_timer "create_pvc"
-    test_step 4 9 "Creating PersistentVolumeClaim: ${pvc_name}"
+    test_step "Creating PersistentVolumeClaim: ${pvc_name}"
+    test_debug "Manifest: ${manifest}, Wait for binding: ${wait_for_binding}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
@@ -522,7 +585,8 @@ create_test_pod() {
     local pod_name=$2
     
     start_test_timer "create_test_pod"
-    test_step 5 9 "Creating test pod: ${pod_name}"
+    test_step "Creating test pod: ${pod_name}"
+    test_debug "Manifest: ${manifest}, Timeout: ${TIMEOUT_POD}"
     
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
@@ -578,7 +642,8 @@ test_io_operations() {
     local test_type=${3:-filesystem}
     
     start_test_timer "test_io_operations"
-    test_step 6 9 "Testing I/O operations (${test_type})"
+    test_step "Testing I/O operations (${test_type})"
+    test_debug "Pod: ${pod_name}, Path: ${path}, Type: ${test_type}"
     
     if [[ "${test_type}" == "filesystem" ]]; then
         # Filesystem tests
@@ -646,7 +711,8 @@ test_volume_expansion() {
     local new_size=$4
     
     start_test_timer "test_volume_expansion"
-    test_step 7 9 "Testing volume expansion to ${new_size}"
+    test_step "Testing volume expansion to ${new_size}"
+    test_debug "PVC: ${pvc_name}, Pod: ${pod_name}, Mount: ${mount_path}"
     
     # Get current PVC size
     local current_size
@@ -777,7 +843,8 @@ test_volume_expansion() {
 #######################################
 verify_metrics() {
     start_test_timer "verify_metrics"
-    test_step 8 9 "Verifying Prometheus metrics collection"
+    test_step "Verifying Prometheus metrics collection"
+    test_debug "Looking for controller pod in kube-system namespace"
     
     # Find the controller pod
     local controller_pod
@@ -888,7 +955,8 @@ cleanup_test() {
     local pvc_name=$2
     
     start_test_timer "cleanup_test"
-    test_step 9 9 "Cleaning up test resources"
+    test_step "Cleaning up test resources"
+    test_debug "Namespace: ${TEST_NAMESPACE}, Pod: ${pod_name}, PVC: ${pvc_name}"
     
     # Delete the entire namespace - this triggers CSI DeleteVolume
     test_info "Deleting test namespace: ${TEST_NAMESPACE}"

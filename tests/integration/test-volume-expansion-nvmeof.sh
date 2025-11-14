@@ -17,6 +17,8 @@ echo "================================================"
 echo "TrueNAS CSI - NVMe-oF Volume Expansion Test"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
+set_test_steps 10
 echo "This test verifies:"
 echo "  • ZVOL can be expanded"
 echo "  • Filesystem resizes automatically"
@@ -35,7 +37,7 @@ wait_for_driver
 #######################################
 # Check NVMe-oF configuration
 #######################################
-test_step 3 10 "Checking NVMe-oF configuration"
+test_step "Checking NVMe-oF configuration"
 
 # Create temporary PVC to check if NVMe-oF is configured
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
@@ -61,7 +63,7 @@ test_success "NVMe-oF is configured"
 #######################################
 # Test 1: Create pod to bind volume
 #######################################
-test_step 4 10 "Creating pod to bind volume (1Gi)"
+test_step "Creating pod to bind volume (1Gi)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -102,9 +104,10 @@ test_success "Pod attached to volume successfully"
 #######################################
 # Test 2: Write initial data
 #######################################
-test_step 5 10 "Writing test data to volume"
+test_step "Writing test data to volume"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Writing test data..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Initial data before expansion' > /data/test.txt && \
@@ -126,9 +129,10 @@ test_info "Initial block device size: $((INITIAL_DEV_SIZE / 1024 / 1024))MB"
 #######################################
 # Test 3: Expand volume to 3Gi
 #######################################
-test_step 6 10 "Expanding volume to 3Gi"
+test_step "Expanding volume to 3Gi"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Requesting volume expansion to 3Gi..."
 kubectl patch pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" \
     -p '{"spec":{"resources":{"requests":{"storage":"3Gi"}}}}'
@@ -164,9 +168,10 @@ fi
 #######################################
 # Test 4: Verify block device expansion
 #######################################
-test_step 7 10 "Verifying block device reflects new size"
+test_step "Verifying block device reflects new size"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Waiting for block device to reflect new size..."
 sleep 15  # Give system time to recognize new size
 
@@ -186,9 +191,10 @@ fi
 #######################################
 # Test 5: Verify filesystem expansion
 #######################################
-test_step 8 10 "Verifying filesystem reflects new size"
+test_step "Verifying filesystem reflects new size"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking filesystem size..."
 EXPANDED_FS_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data | tail -1 | awk '{print $2}')
 EXPANDED_FS_BYTES=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df /data | tail -1 | awk '{print $2}')
@@ -204,9 +210,10 @@ fi
 #######################################
 # Test 6: Verify data integrity
 #######################################
-test_step 9 10 "Verifying data integrity after expansion"
+test_step "Verifying data integrity after expansion"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking original data..."
 DATA_CONTENT=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
 
@@ -232,6 +239,7 @@ fi
 
 # Write additional data to expanded space
 echo ""
+# Configure test with 10 total steps
 test_info "Writing additional data to expanded space..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Data written after expansion' > /data/test2.txt && \
@@ -250,9 +258,10 @@ test_success "Successfully wrote data to expanded volume"
 #######################################
 # Test 7: Check controller logs
 #######################################
-test_step 10 10 "Verifying controller handled expansion"
+test_step "Verifying controller handled expansion"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking controller logs for expansion operations..."
 
 CONTROLLER_POD=$(kubectl get pods -n kube-system \
@@ -284,10 +293,12 @@ else
 fi
 
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 echo "NVMe-oF Volume Expansion Summary"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
 echo "✓ Initial volume created: ${INITIAL_SIZE}"
 echo "✓ Volume expanded to: 3Gi"
 echo "✓ Block device expanded: $((INITIAL_DEV_SIZE / 1024 / 1024))MB → ${EXPANDED_DEV_SIZE_MB}MB"
@@ -295,6 +306,7 @@ echo "✓ Filesystem updated: ${INITIAL_FS_SIZE} → ${EXPANDED_FS_SIZE}"
 echo "✓ Data integrity maintained"
 echo "✓ Successfully used expanded space"
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 
 # Verify metrics

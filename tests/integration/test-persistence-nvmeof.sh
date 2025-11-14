@@ -29,6 +29,9 @@ echo "  Pod Name: ${POD_NAME}"
 echo "  Test Data: '${TEST_DATA}'"
 echo ""
 
+# Configure test with 9 total steps
+set_test_steps 9
+
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
@@ -46,7 +49,7 @@ fi
 #######################################
 # Create PVC (WaitForFirstConsumer)
 #######################################
-test_step 4 9 "Creating PVC: ${PVC_NAME}"
+test_step "Creating PVC: ${PVC_NAME}"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -67,7 +70,7 @@ test_success "PVC created (will bind when pod is created)"
 #######################################
 # Create initial pod and write data
 #######################################
-test_step 5 9 "Creating initial pod and writing test data"
+test_step "Creating initial pod and writing test data"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -173,7 +176,7 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 #######################################
 # Test 1: Graceful pod restart
 #######################################
-test_step 6 9 "Test 1: Graceful pod restart (delete and recreate)"
+test_step "Test 1: Graceful pod restart (delete and recreate)"
 
 test_info "Deleting pod gracefully..."
 kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --timeout=60s
@@ -256,7 +259,7 @@ fi
 #######################################
 # Test 2: Force delete (simulated crash)
 #######################################
-test_step 7 9 "Test 2: Force delete (simulated pod crash)"
+test_step "Test 2: Force delete (simulated pod crash)"
 
 test_info "Force deleting pod (simulating crash)..."
 kubectl delete pod "${POD_NAME}" -n "${TEST_NAMESPACE}" --force --grace-period=0
@@ -461,7 +464,7 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     find /data -type f -exec ls -lh {} \;
 
 # Verify metrics
-test_step 8 9 "Verifying metrics collection"
+test_step "Verifying metrics collection"
 verify_metrics
 
 # Cleanup

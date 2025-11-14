@@ -16,6 +16,8 @@ echo "================================================"
 echo "TrueNAS CSI - Volume Limits Stress Test"
 echo "================================================"
 echo ""
+# Configure test with 8 total steps
+set_test_steps 8
 echo "This test verifies:"
 echo "  • Driver handles multiple volumes (${NUM_VOLUMES}) concurrently"
 echo "  • All volumes can be created and bound successfully"
@@ -60,9 +62,10 @@ wait_for_driver
 #######################################
 # Test 1: Create multiple PVCs (NFS)
 #######################################
-test_step 4 8 "Creating ${NUM_VOLUMES} NFS PVCs"
+test_step "Creating ${NUM_VOLUMES} NFS PVCs"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Creating PVCs in parallel..."
 
 for i in $(seq 1 $NUM_VOLUMES); do
@@ -90,9 +93,10 @@ test_success "${NUM_VOLUMES} PVCs created"
 #######################################
 # Test 2: Wait for all PVCs to bind
 #######################################
-test_step 5 8 "Waiting for all PVCs to bind"
+test_step "Waiting for all PVCs to bind"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Waiting for PVCs to bind (timeout: ${TIMEOUT_PVC} each)..."
 
 BIND_FAILURES=0
@@ -117,6 +121,7 @@ fi
 
 # Get PV names
 echo ""
+# Configure test with 8 total steps
 test_info "Recording PV names..."
 for pvc_name in "${PVC_NAMES[@]}"; do
     PV_NAME=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
@@ -127,9 +132,10 @@ test_info "Tracked ${#PV_NAMES[@]} PVs"
 #######################################
 # Test 3: Create pods to mount volumes
 #######################################
-test_step 6 8 "Creating ${NUM_VOLUMES} pods to mount volumes"
+test_step "Creating ${NUM_VOLUMES} pods to mount volumes"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Creating pods in parallel..."
 
 for i in $(seq 1 $NUM_VOLUMES); do
@@ -165,9 +171,10 @@ test_success "${NUM_VOLUMES} pods created"
 #######################################
 # Test 4: Wait for all pods to be ready
 #######################################
-test_step 7 8 "Waiting for all pods to become ready"
+test_step "Waiting for all pods to become ready"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Waiting for pods to be ready (timeout: ${TIMEOUT_POD} each)..."
 
 POD_FAILURES=0
@@ -192,9 +199,10 @@ fi
 #######################################
 # Test 5: Verify data in all volumes
 #######################################
-test_step 8 8 "Verifying data in all mounted volumes"
+test_step "Verifying data in all mounted volumes"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Reading data from all pods..."
 
 DATA_FAILURES=0
@@ -232,6 +240,7 @@ fi
 # Test 6: Check controller health
 #######################################
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 test_info "Checking controller health under load"
 echo "================================================"
@@ -268,6 +277,7 @@ fi
 # Test 7: Cleanup stress
 #######################################
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 test_info "Testing cleanup under load"
 echo "================================================"
@@ -312,6 +322,7 @@ fi
 
 # Check for orphaned PVs
 echo ""
+# Configure test with 8 total steps
 test_info "Checking for orphaned PVs..."
 ORPHANED_PVS=0
 for pv_name in "${PV_NAMES[@]}"; do
@@ -327,25 +338,30 @@ else
 fi
 
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 echo "Volume Limits Stress Test Summary"
 echo "================================================"
 echo ""
+# Configure test with 8 total steps
 echo "Volume Creation:"
 echo "  ✓ Created ${NUM_VOLUMES} PVCs concurrently"
 echo "  ✓ All PVCs bound successfully"
 echo "  ✓ Created ${NUM_VOLUMES} pods concurrently"
 echo "  ✓ $((NUM_VOLUMES - POD_FAILURES)) pods became ready"
 echo ""
+# Configure test with 8 total steps
 echo "Data Verification:"
 echo "  ✓ $((NUM_VOLUMES - DATA_FAILURES)) volumes verified"
 echo "  ✓ All data integrity checks passed"
 echo ""
+# Configure test with 8 total steps
 echo "Resource Cleanup:"
 echo "  ✓ $((NUM_VOLUMES - PVC_DELETE_FAILURES)) PVCs deleted"
 echo "  ✓ $((${#PV_NAMES[@]} - ORPHANED_PVS)) PVs cleaned up"
 echo "  ✓ Controller remained healthy under load"
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 
 # Verify metrics

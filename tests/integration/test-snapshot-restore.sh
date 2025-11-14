@@ -502,6 +502,15 @@ fi
 test_step 14 14 "Testing snapshot cleanup"
 
 echo ""
+test_info "Cleaning up restored volumes (must be done before deleting snapshots)..."
+# CRITICAL: Must delete cloned volumes BEFORE deleting snapshots
+# ZFS snapshots cannot be deleted while clones exist
+cleanup_test "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
+cleanup_test "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
+
+test_info "Waiting for volume deletion to complete..."
+sleep 5
+
 test_info "Deleting snapshots..."
 kubectl delete volumesnapshot "${SNAPSHOT_NAME_1}" -n "${TEST_NAMESPACE}"
 kubectl delete volumesnapshot "${SNAPSHOT_NAME_2}" -n "${TEST_NAMESPACE}"
@@ -556,8 +565,7 @@ verify_metrics
 
 # Cleanup
 cleanup_test "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
-cleanup_test "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
-cleanup_test "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
+# Note: Restore volumes already cleaned up in test step 14
 
 # Success
 test_summary "${PROTOCOL}" "PASSED"

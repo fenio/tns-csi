@@ -311,7 +311,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 			wantErr: false, // Should succeed due to idempotency
 		},
 		{
-			name: "deletion with dataset error (continues anyway)",
+			name: "deletion with dataset error (should fail and retry)",
 			meta: &VolumeMetadata{
 				Name:        "test-nfs-volume",
 				Protocol:    ProtocolNFS,
@@ -324,7 +324,7 @@ func TestDeleteNFSVolume(t *testing.T) {
 					return errors.New("some backend error")
 				}
 			},
-			wantErr: false, // Should succeed - errors are logged but don't fail the operation
+			wantErr: true, // Should fail to trigger retry and prevent orphaned datasets
 		},
 		{
 			name: "deletion with missing share ID",

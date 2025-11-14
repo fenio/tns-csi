@@ -333,7 +333,9 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	// Step 2: Delete ZVOL
-	s.deleteZVOL(ctx, meta)
+	if err := s.deleteZVOL(ctx, meta); err != nil {
+		return nil, err
+	}
 
 	// NOTE: Subsystem (ID: %d) is NOT deleted - it's pre-configured infrastructure
 	// serving multiple volumes. Administrator manages subsystem lifecycle independently.
@@ -411,18 +413,24 @@ func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *V
 }
 
 // deleteZVOL deletes a ZVOL dataset.
-func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) {
+func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.DatasetID == "" {
-		return
+		return nil
 	}
 
 	klog.Infof("Deleting ZVOL: %s", meta.DatasetID)
 	if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
 		// Check if dataset doesn't exist - this is OK (idempotency)
-		klog.Warningf("Failed to delete ZVOL %s: %v (continuing anyway)", meta.DatasetID, err)
-	} else {
-		klog.Infof("Successfully deleted ZVOL %s", meta.DatasetID)
+		if isNotFoundError(err) {
+			klog.Infof("ZVOL %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+			return nil
+		}
+		// For other errors, return error to trigger retry and prevent orphaned ZVOLs
+		return status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 	}
+
+	klog.Infof("Successfully deleted ZVOL %s", meta.DatasetID)
+	return nil
 }
 
 func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, subsystemNQN, snapshotID string) (*csi.CreateVolumeResponse, error) {

@@ -252,7 +252,13 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		klog.Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
 		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
 			// Check if dataset doesn't exist - this is OK (idempotency)
-			klog.Warningf("Dataset deletion returned error for %s: %v (may already be deleted)", meta.DatasetID, err)
+			if isNotFoundError(err) {
+				klog.Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+			} else {
+				// For other errors, return error to trigger retry and prevent orphaned datasets
+				timer.ObserveError()
+				return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
+			}
 		} else {
 			klog.Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
 		}

@@ -30,7 +30,7 @@ create_snapshot() {
     local snapshot_manifest=$1
     local snapshot_name=$2
     
-    test_step 6 11 "Creating VolumeSnapshot: ${snapshot_name}"
+    test_step "Creating VolumeSnapshot: ${snapshot_name}"
     
     # Apply VolumeSnapshotClass first
     kubectl apply -f "${MANIFEST_DIR}/volumesnapshotclass-nfs.yaml"
@@ -99,7 +99,7 @@ test_snapshot_restore() {
     local mount_path=$4
     local expected_content=$5
     
-    test_step 7 11 "Testing snapshot restore: ${pvc_name}"
+    test_step "Testing snapshot restore: ${pvc_name}"
     
     # Show controller logs BEFORE creating PVC from snapshot
     echo ""
@@ -209,7 +209,7 @@ EOF
 # Cleanup snapshot test resources
 #######################################
 cleanup_snapshot_test() {
-    test_step 8 11 "Cleaning up snapshot test resources"
+    test_step "Cleaning up snapshot test resources"
     
     # Delete pods first
     test_info "Deleting pods..."

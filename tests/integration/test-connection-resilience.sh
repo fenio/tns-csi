@@ -19,6 +19,8 @@ echo "================================================"
 echo "TrueNAS CSI - Connection Resilience Test"
 echo "================================================"
 echo ""
+# Configure test with 8 total steps
+set_test_steps 8
 echo "This test verifies:"
 echo "  • WebSocket connection stability"
 echo "  • Automatic reconnection after disruption"
@@ -36,7 +38,7 @@ wait_for_driver
 #######################################
 # Test 1: Verify initial connection
 #######################################
-test_step 4 8 "Verifying initial WebSocket connection"
+test_step "Verifying initial WebSocket connection"
 
 # Find controller pod
 CONTROLLER_POD=$(kubectl get pods -n "${CONTROLLER_NAMESPACE}" \
@@ -52,6 +54,7 @@ test_info "Controller pod: ${CONTROLLER_POD}"
 
 # Check for successful authentication in logs
 echo ""
+# Configure test with 8 total steps
 test_info "Checking WebSocket authentication..."
 if kubectl logs -n "${CONTROLLER_NAMESPACE}" "${CONTROLLER_POD}" -c tns-csi-plugin --tail=100 2>/dev/null | \
     grep -q "Successfully authenticated"; then
@@ -63,7 +66,7 @@ fi
 #######################################
 # Test 2: Create volume during normal operation
 #######################################
-test_step 5 8 "Creating volume during normal operation: ${PVC_NAME_1}"
+test_step "Creating volume during normal operation: ${PVC_NAME_1}"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -90,9 +93,10 @@ test_success "Volume created successfully: ${PV_NAME_1}"
 #######################################
 # Test 3: Monitor connection health
 #######################################
-test_step 6 8 "Monitoring WebSocket ping/pong activity"
+test_step "Monitoring WebSocket ping/pong activity"
 
 echo ""
+# Configure test with 8 total steps
 test_info "WebSocket connection details:"
 test_info "  • Ping interval: 30 seconds"
 test_info "  • Read deadline: 120 seconds (4x ping interval)"
@@ -101,6 +105,7 @@ test_info "  • Backoff: Exponential (5s, 10s, 20s, 40s, 60s)"
 
 # Check for recent ping activity (within last 60 seconds of logs)
 echo ""
+# Configure test with 8 total steps
 test_info "Checking for recent WebSocket activity..."
 RECENT_ACTIVITY=$(kubectl logs -n "${CONTROLLER_NAMESPACE}" "${CONTROLLER_POD}" -c tns-csi-plugin --tail=200 --since=60s 2>/dev/null | \
     grep -c -E "(ping|pong|Successfully authenticated)" || echo "0")
@@ -114,9 +119,10 @@ fi
 #######################################
 # Test 4: Simulate connection stress by rapid operations
 #######################################
-test_step 7 8 "Testing driver resilience with rapid operations"
+test_step "Testing driver resilience with rapid operations"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Creating second volume to verify connection stability under load..."
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
@@ -143,6 +149,7 @@ test_success "Second volume created: ${PV_NAME_2}"
 
 # Create pod to verify mount operations work
 echo ""
+# Configure test with 8 total steps
 test_info "Creating pod to verify mount operations..."
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
@@ -177,6 +184,7 @@ test_success "Pod mounted both volumes successfully"
 
 # Verify volumes are writable
 echo ""
+# Configure test with 8 total steps
 test_info "Verifying volumes are functional..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'test data 1' > /data1/test.txt && echo 'test data 2' > /data2/test.txt"
@@ -195,9 +203,10 @@ fi
 #######################################
 # Test 5: Check for connection errors
 #######################################
-test_step 8 8 "Verifying no connection errors during test"
+test_step "Verifying no connection errors during test"
 
 echo ""
+# Configure test with 8 total steps
 test_info "Checking controller logs for connection errors..."
 
 # Look for connection errors in recent logs
@@ -226,10 +235,12 @@ else
 fi
 
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 echo "Connection Resilience Summary"
 echo "================================================"
 echo ""
+# Configure test with 8 total steps
 echo "✓ WebSocket connection verified"
 echo "✓ Ping/pong mechanism active (30s interval)"
 echo "✓ Multiple volume operations successful"
@@ -239,14 +250,17 @@ if [[ "${RECONNECT_COUNT}" -gt 0 ]]; then
     echo "✓ Automatic reconnection verified"
 fi
 echo ""
+# Configure test with 8 total steps
 echo "Key Findings:"
 echo "  • The WebSocket client maintains stable connection"
 echo "  • Driver operations work reliably during test"
 echo "  • Automatic reconnection mechanism is in place"
 echo ""
+# Configure test with 8 total steps
 echo "Note: As per AGENTS.md guidance, this test does NOT"
 echo "      modify the working WebSocket connection code."
 echo ""
+# Configure test with 8 total steps
 echo "================================================"
 
 # Verify metrics

@@ -22,6 +22,8 @@ echo "================================================"
 echo "TrueNAS CSI - Snapshot Restore Verification Test"
 echo "================================================"
 echo ""
+# Configure test with 14 total steps
+set_test_steps 14
 echo "This test verifies:"
 echo "  • Snapshot creation from active volume"
 echo "  • Multiple snapshots of same volume"
@@ -41,7 +43,7 @@ wait_for_driver
 #######################################
 # Check snapshot support
 #######################################
-test_step 4 14 "Verifying snapshot support"
+test_step "Verifying snapshot support"
 
 # Check if VolumeSnapshotClass exists (created by Helm chart as <storage-class-name>-snapshot)
 if ! kubectl get volumesnapshotclass tns-csi-nfs-snapshot &>/dev/null; then
@@ -56,7 +58,7 @@ test_success "VolumeSnapshotClass available"
 #######################################
 # Test 1: Create source volume and write initial data
 #######################################
-test_step 5 14 "Creating source PVC and pod"
+test_step "Creating source PVC and pod"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -108,9 +110,10 @@ test_success "Source pod ready"
 #######################################
 # Test 2: Write data for first snapshot
 #######################################
-test_step 6 14 "Writing initial data (version 1)"
+test_step "Writing initial data (version 1)"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Creating dataset version 1..."
 kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Version 1 data' > /data/version.txt && \
@@ -129,7 +132,7 @@ test_info "Version 1 contains ${V1_FILE_COUNT} files in v1/ directory"
 #######################################
 # Test 3: Create first snapshot
 #######################################
-test_step 7 14 "Creating first snapshot"
+test_step "Creating first snapshot"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: snapshot.storage.k8s.io/v1
@@ -199,9 +202,10 @@ test_success "Snapshot 1 created: ${SNAPSHOT_CONTENT_NAME}"
 #######################################
 # Test 4: Modify data and create second snapshot
 #######################################
-test_step 8 14 "Modifying data and creating second snapshot"
+test_step "Modifying data and creating second snapshot"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Creating dataset version 2..."
 kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Version 2 data' > /data/version.txt && \
@@ -285,7 +289,7 @@ test_success "Snapshot 2 created"
 #######################################
 # Test 5: Restore from first snapshot
 #######################################
-test_step 9 14 "Restoring volume from snapshot 1"
+test_step "Restoring volume from snapshot 1"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -315,7 +319,7 @@ test_success "Restore PVC 1 created and bound"
 #######################################
 # Test 6: Verify restored data (snapshot 1)
 #######################################
-test_step 10 14 "Verifying data from snapshot 1 restore"
+test_step "Verifying data from snapshot 1 restore"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -343,6 +347,7 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME_RESTORE1}" \
 test_success "Restore pod 1 ready"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Verifying snapshot 1 data..."
 
 # Check version
@@ -382,7 +387,7 @@ fi
 #######################################
 # Test 7: Restore from second snapshot
 #######################################
-test_step 11 14 "Restoring volume from snapshot 2"
+test_step "Restoring volume from snapshot 2"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -412,7 +417,7 @@ test_success "Restore PVC 2 created and bound"
 #######################################
 # Test 8: Verify restored data (snapshot 2)
 #######################################
-test_step 12 14 "Verifying data from snapshot 2 restore"
+test_step "Verifying data from snapshot 2 restore"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -440,6 +445,7 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME_RESTORE2}" \
 test_success "Restore pod 2 ready"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Verifying snapshot 2 data..."
 
 # Check version
@@ -471,9 +477,10 @@ fi
 #######################################
 # Test 9: Verify independence of restored volumes
 #######################################
-test_step 13 14 "Verifying restored volumes are independent"
+test_step "Verifying restored volumes are independent"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Writing to restored volume 1..."
 kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Modified in restore 1' > /data/restore1-modification.txt"
@@ -499,9 +506,10 @@ fi
 #######################################
 # Test 10: Cleanup snapshots
 #######################################
-test_step 14 14 "Testing snapshot cleanup"
+test_step "Testing snapshot cleanup"
 
 echo ""
+# Configure test with 14 total steps
 test_info "Cleaning up restored volumes (must be done before deleting snapshots)..."
 # CRITICAL: Must delete cloned volumes BEFORE deleting snapshots
 # ZFS snapshots cannot be deleted while clones exist
@@ -531,33 +539,39 @@ else
 fi
 
 echo ""
+# Configure test with 14 total steps
 echo "================================================"
 echo "Snapshot Restore Verification Summary"
 echo "================================================"
 echo ""
+# Configure test with 14 total steps
 echo "Source Volume Operations:"
 echo "  ✓ Created source volume with initial data (v1)"
 echo "  ✓ Created first snapshot"
 echo "  ✓ Modified data (v2)"
 echo "  ✓ Created second snapshot"
 echo ""
+# Configure test with 14 total steps
 echo "Snapshot 1 Verification:"
 echo "  ✓ Restored volume from snapshot 1"
 echo "  ✓ Version matched: '${V1_VERSION}'"
 echo "  ✓ File count correct: ${V1_FILE_COUNT} files"
 echo "  ✓ No v2 data (correct point-in-time)"
 echo ""
+# Configure test with 14 total steps
 echo "Snapshot 2 Verification:"
 echo "  ✓ Restored volume from snapshot 2"
 echo "  ✓ Version matched: '${V2_VERSION}'"
 echo "  ✓ V2 data present: ${V2_V2_FILE_COUNT} files"
 echo "  ✓ Modified data present (correct point-in-time)"
 echo ""
+# Configure test with 14 total steps
 echo "Independence Verification:"
 echo "  ✓ Restored volumes independent of source"
 echo "  ✓ Restored volumes independent of each other"
 echo "  ✓ Snapshot deletion successful"
 echo ""
+# Configure test with 14 total steps
 echo "================================================"
 
 # Verify metrics

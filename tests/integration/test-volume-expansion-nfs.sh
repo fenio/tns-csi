@@ -35,7 +35,7 @@ wait_for_driver
 #######################################
 # Test 1: Create initial volume (1Gi)
 #######################################
-test_step 4 9 "Creating initial NFS PVC (1Gi)"
+test_step "Creating initial NFS PVC (1Gi)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -63,7 +63,7 @@ test_success "PVC created and bound: ${PV_NAME} (${INITIAL_SIZE})"
 #######################################
 # Test 2: Create pod and write data
 #######################################
-test_step 5 9 "Creating pod and writing test data"
+test_step "Creating pod and writing test data"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -107,7 +107,7 @@ test_info "Initial filesystem size: ${INITIAL_FS_SIZE}"
 #######################################
 # Test 3: Expand volume to 2Gi (online)
 #######################################
-test_step 6 9 "Expanding volume to 2Gi (online expansion)"
+test_step "Expanding volume to 2Gi (online expansion)"
 
 echo ""
 test_info "Requesting volume expansion to 2Gi..."
@@ -143,7 +143,7 @@ fi
 #######################################
 # Test 4: Verify filesystem expansion
 #######################################
-test_step 7 9 "Verifying filesystem reflects new size"
+test_step "Verifying filesystem reflects new size"
 
 echo ""
 test_info "Waiting for filesystem to be resized..."
@@ -165,7 +165,7 @@ fi
 #######################################
 # Test 5: Verify data integrity
 #######################################
-test_step 8 9 "Verifying data integrity after expansion"
+test_step "Verifying data integrity after expansion"
 
 echo ""
 test_info "Checking original data..."
@@ -204,7 +204,7 @@ test_success "Successfully wrote 200MB to expanded volume"
 #######################################
 # Test 6: Check controller logs
 #######################################
-test_step 9 9 "Verifying controller handled expansion"
+test_step "Verifying controller handled expansion"
 
 echo ""
 test_info "Checking controller logs for expansion operations..."

@@ -21,6 +21,9 @@ echo ""
 test_info "This test validates that NFS and NVMe-oF volumes can be mounted simultaneously in a single pod"
 echo ""
 
+# Configure test with 10 total steps
+set_test_steps 10
+
 # Check if test should be skipped
 if should_skip_test "${TEST_TAGS}"; then
     echo "Skipping dual-mount test due to tag filter: ${TEST_SKIP_TAGS}"
@@ -36,7 +39,7 @@ cleanup_dual_test() {
     local pvc_nfs=$2
     local pvc_nvmeof=$3
     
-    test_step 10 10 "Cleaning up test resources"
+    test_step "Cleaning up test resources"
     
     # Delete pod first
     if kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
@@ -67,7 +70,7 @@ verify_cluster
 
 # Deploy driver with BOTH storage classes enabled
 start_test_timer "deploy_driver_dual"
-test_step 2 10 "Deploying CSI driver with both NFS and NVMe-oF support"
+test_step "Deploying CSI driver with both NFS and NVMe-oF support"
 
 # Check required environment variables
 if [[ -z "${TRUENAS_HOST}" ]]; then
@@ -138,21 +141,21 @@ stop_test_timer "deploy_driver_dual" "PASSED"
 wait_for_driver
 
 # Check if NVMe-oF is configured (using temporary PVC)
-test_step 4 10 "Checking NVMe-oF configuration"
+test_step "Checking NVMe-oF configuration"
 if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-dual-nvmeof.yaml" "${PVC_NAME_NVMEOF}" "${PROTOCOL}"; then
     exit 0  # Gracefully skip test if not configured
 fi
 
 # Create NFS PVC (immediate binding)
-test_step 5 10 "Creating NFS PVC"
+test_step "Creating NFS PVC"
 create_pvc "${MANIFEST_DIR}/pvc-dual-nfs.yaml" "${PVC_NAME_NFS}"
 
 # Create NVMe-oF PVC (WaitForFirstConsumer binding - will bind when pod starts)
-test_step 6 10 "Creating NVMe-oF PVC"
+test_step "Creating NVMe-oF PVC"
 create_pvc "${MANIFEST_DIR}/pvc-dual-nvmeof.yaml" "${PVC_NAME_NVMEOF}" "false"
 
 # Create pod with both volumes mounted
-test_step 7 10 "Creating pod with both NFS and NVMe-oF volumes"
+test_step "Creating pod with both NFS and NVMe-oF volumes"
 start_test_timer "create_dual_pod"
 
 test_info "Deploying pod: ${POD_NAME}"
@@ -176,7 +179,7 @@ test_info "Verifying both PVCs are bound"
 kubectl get pvc -n "${TEST_NAMESPACE}"
 
 # Test I/O operations on both volumes
-test_step 8 10 "Testing I/O operations on both volumes"
+test_step "Testing I/O operations on both volumes"
 
 start_test_timer "io_operations_nfs"
 test_info "Testing NFS volume at /data-nfs"
@@ -234,7 +237,7 @@ fi
 test_success "Volume isolation verified - both volumes operate independently"
 
 # Verify metrics
-test_step 9 10 "Verifying CSI driver metrics"
+test_step "Verifying CSI driver metrics"
 verify_metrics
 
 # Cleanup

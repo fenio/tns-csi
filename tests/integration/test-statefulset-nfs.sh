@@ -29,7 +29,7 @@ wait_for_driver
 #######################################
 # Create headless service
 #######################################
-test_step 4 10 "Creating headless service: ${SERVICE_NAME}"
+test_step "Creating headless service: ${SERVICE_NAME}"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
@@ -52,7 +52,7 @@ test_success "Headless service created"
 #######################################
 # Create StatefulSet with volumeClaimTemplates
 #######################################
-test_step 5 10 "Creating StatefulSet: ${STS_NAME} (${REPLICAS} replicas)"
+test_step "Creating StatefulSet: ${STS_NAME} (${REPLICAS} replicas)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: apps/v1
@@ -101,7 +101,7 @@ test_success "StatefulSet created"
 #######################################
 # Wait for all pods to be ready
 #######################################
-test_step 6 10 "Waiting for all ${REPLICAS} pods to be ready"
+test_step "Waiting for all ${REPLICAS} pods to be ready"
 
 # StatefulSets create pods in order (0, 1, 2...)
 for i in $(seq 0 $((REPLICAS - 1))); do
@@ -116,9 +116,11 @@ done
 #######################################
 # Verify each pod has its own PVC/PV
 #######################################
-test_step 7 10 "Verifying each pod has unique persistent volume"
+test_step "Verifying each pod has unique persistent volume"
 
 echo ""
+# Configure test with 10 total steps
+set_test_steps 10
 test_info "Checking PVCs created by volumeClaimTemplates..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     PVC_NAME="data-${STS_NAME}-${i}"
@@ -138,9 +140,10 @@ done
 #######################################
 # Verify data isolation between replicas
 #######################################
-test_step 8 10 "Verifying data isolation between replicas"
+test_step "Verifying data isolation between replicas"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking each pod wrote to its own volume..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -157,6 +160,7 @@ done
 
 # Write unique data to each pod's volume
 echo ""
+# Configure test with 10 total steps
 test_info "Writing unique test data to each replica's volume..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -168,7 +172,7 @@ done
 #######################################
 # Test: Scale down and verify remaining data
 #######################################
-test_step 9 10 "Testing scale down operation"
+test_step "Testing scale down operation"
 
 NEW_REPLICAS=2
 test_info "Scaling StatefulSet from ${REPLICAS} to ${NEW_REPLICAS} replicas..."
@@ -183,6 +187,7 @@ test_success "Scaled down to ${NEW_REPLICAS} replicas"
 
 # Verify remaining pods still have their data
 echo ""
+# Configure test with 10 total steps
 test_info "Verifying remaining pods retained their data..."
 for i in $(seq 0 $((NEW_REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -223,6 +228,7 @@ test_success "Scaled back up to ${REPLICAS} replicas"
 
 # Verify the scaled-up pod has the same PVC and data
 echo ""
+# Configure test with 10 total steps
 test_info "Verifying scaled-up pod reattached to original volume..."
 IDENTITY=$(kubectl exec "${SCALED_UP_POD}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt | head -1)
 EXPECTED="Pod: ${SCALED_UP_POD}"
@@ -237,7 +243,7 @@ fi
 #######################################
 # Test: Rolling update (delete pod and let it recreate)
 #######################################
-test_step 10 10 "Testing rolling update (pod recreation)"
+test_step "Testing rolling update (pod recreation)"
 
 TEST_POD="${STS_NAME}-1"
 test_info "Deleting pod ${TEST_POD} to simulate rolling update..."
@@ -252,6 +258,7 @@ test_success "Pod ${TEST_POD} recreated"
 
 # Verify recreated pod has the same data
 echo ""
+# Configure test with 10 total steps
 test_info "Verifying recreated pod has original data..."
 REPLICA_DATA=$(kubectl exec "${TEST_POD}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt)
 EXPECTED="Unique data for replica 1"

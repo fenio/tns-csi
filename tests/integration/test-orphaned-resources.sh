@@ -18,6 +18,8 @@ echo "================================================"
 echo "TrueNAS CSI - Orphaned Resource Detection Test"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
+set_test_steps 10
 echo "This test verifies:"
 echo "  • Datasets are cleaned up after PVC deletion"
 echo "  • NFS shares are removed properly"
@@ -34,7 +36,7 @@ verify_cluster
 #######################################
 # Capture baseline state
 #######################################
-test_step 1 10 "Capturing baseline TrueNAS state"
+test_step "Capturing baseline TrueNAS state"
 
 # Record initial dataset count
 test_info "Recording baseline state before test..."
@@ -46,7 +48,7 @@ test_success "Baseline captured"
 #######################################
 # Test 1: NFS volume lifecycle
 #######################################
-test_step 2 10 "Testing NFS volume creation and deletion"
+test_step "Testing NFS volume creation and deletion"
 
 deploy_driver "nfs"
 wait_for_driver
@@ -127,7 +129,7 @@ test_success "NFS volume deleted from Kubernetes"
 #######################################
 # Test 2: NVMe-oF volume lifecycle
 #######################################
-test_step 3 10 "Testing NVMe-oF volume creation and deletion"
+test_step "Testing NVMe-oF volume creation and deletion"
 
 deploy_driver "nvmeof"
 wait_for_driver
@@ -211,7 +213,7 @@ test_success "NVMe-oF volume deleted from Kubernetes"
 #######################################
 # Test 3: Wait for TrueNAS cleanup
 #######################################
-test_step 4 10 "Waiting for TrueNAS backend cleanup"
+test_step "Waiting for TrueNAS backend cleanup"
 
 test_info "Waiting 60 seconds for TrueNAS to process deletions..."
 sleep 60
@@ -220,9 +222,10 @@ test_success "Backend cleanup wait complete"
 #######################################
 # Test 4: Check for orphaned resources via logs
 #######################################
-test_step 5 10 "Checking controller logs for cleanup confirmation"
+test_step "Checking controller logs for cleanup confirmation"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Analyzing controller logs for cleanup operations..."
 
 CONTROLLER_POD=$(kubectl get pods -n kube-system \
@@ -262,9 +265,10 @@ fi
 #######################################
 # Test 5: Verify no PVs remain
 #######################################
-test_step 6 10 "Verifying no CSI PVs remain in cluster"
+test_step "Verifying no CSI PVs remain in cluster"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking for any remaining CSI PVs..."
 
 REMAINING_PVS=$(kubectl get pv -o json | \
@@ -281,9 +285,10 @@ fi
 #######################################
 # Test 6: Check for specific volume handles
 #######################################
-test_step 7 10 "Verifying specific volume handles are gone"
+test_step "Verifying specific volume handles are gone"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Checking if test volumes were fully removed..."
 
 # Check if our specific PVs still exist
@@ -304,9 +309,10 @@ fi
 #######################################
 # Test 7: Final state check
 #######################################
-test_step 8 10 "Final TrueNAS state verification"
+test_step "Final TrueNAS state verification"
 
 echo ""
+# Configure test with 10 total steps
 test_info "Summary of cleanup verification:"
 test_info "  ✓ Kubernetes PVs deleted"
 test_info "  ✓ Controller logs show cleanup operations"
@@ -315,6 +321,7 @@ test_info "  ✓ No orphaned PVs in cluster"
 
 # Note about TrueNAS state
 echo ""
+# Configure test with 10 total steps
 test_info "TrueNAS cleanup expectations:"
 test_info "  • Datasets should be deleted (verified by driver logs)"
 test_info "  • NFS shares should be removed (automatic on dataset delete)"
@@ -326,23 +333,25 @@ test_success "Orphan detection checks passed"
 #######################################
 # Verify metrics
 #######################################
-test_step 9 10 "Verifying metrics collection"
+test_step "Verifying metrics collection"
 verify_metrics
 
 #######################################
 # Final cleanup
 #######################################
-test_step 10 10 "Final cleanup"
+test_step "Final cleanup"
 
 test_info "Deleting test namespace..."
 kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
 test_success "Cleanup complete"
 
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 echo "Orphaned Resource Detection Summary"
 echo "================================================"
 echo ""
+# Configure test with 10 total steps
 echo "✓ Created and deleted NFS volume"
 echo "✓ Created and deleted NVMe-oF volume"
 echo "✓ Verified Kubernetes resources cleaned up"
@@ -350,12 +359,15 @@ echo "✓ Verified controller performed cleanup operations"
 echo "✓ No cleanup errors detected"
 echo "✓ No orphaned PVs found in cluster"
 echo ""
+# Configure test with 10 total steps
 echo "Result: No orphaned resources detected"
 echo ""
+# Configure test with 10 total steps
 echo "Note: This test verifies cleanup from Kubernetes"
 echo "      perspective and driver logs. Direct TrueNAS"
 echo "      API queries could be added for deeper validation."
 echo ""
+# Configure test with 10 total steps
 echo "================================================"
 
 # Success

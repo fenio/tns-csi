@@ -19,8 +19,8 @@ type NodeRegistry struct {
 // This prevents premature disconnection of shared subsystems when multiple
 // volumes (namespaces) are using the same NVMe-oF target.
 //
-// Key format: "nqn:nsid" (e.g., "nqn.2005-03.org.truenas:csi-test:2")
-// Value: reference count for this namespace
+// Key format: "nqn:nsid" (e.g., "nqn.2005-03.org.truenas:csi-test:2").
+// Value: reference count for this namespace.
 type NVMeOFNamespaceRegistry struct {
 	// namespaces tracks individual namespace usage
 	namespaces map[string]int

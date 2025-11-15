@@ -235,28 +235,36 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 	nsid := volumeContext["nsid"]
 
 	// Disconnect from NVMe-oF target ONLY if this is the last namespace for this NQN
-	if nqn != "" && nsid != "" {
-		isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
-		if isLastNamespace {
-			klog.Infof("Unstaging volume %s: Last namespace (NSID=%s) for NQN=%s, proceeding with disconnect",
-				volumeID, nsid, nqn)
-			if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
-				klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
-			} else {
-				klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
-			}
-		} else {
-			activeCount := s.namespaceRegistry.GetNQNCount(nqn)
-			klog.Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
-				volumeID, nqn, nsid, activeCount)
-		}
-	} else if nqn != "" {
-		// Fallback: if we can't determine NSID, disconnect anyway (backwards compatibility)
+	if nqn == "" {
+		return &csi.NodeUnstageVolumeResponse{}, nil
+	}
+
+	// If NSID is missing, disconnect anyway for backwards compatibility
+	if nsid == "" {
 		klog.Warningf("Could not determine NSID for volume %s, disconnecting NQN=%s anyway (may affect other volumes!)",
 			volumeID, nqn)
 		if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
 		}
+		return &csi.NodeUnstageVolumeResponse{}, nil
+	}
+
+	// Unregister namespace and check if we should disconnect
+	isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
+	if !isLastNamespace {
+		activeCount := s.namespaceRegistry.GetNQNCount(nqn)
+		klog.Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
+			volumeID, nqn, nsid, activeCount)
+		return &csi.NodeUnstageVolumeResponse{}, nil
+	}
+
+	// This is the last namespace, proceed with disconnect
+	klog.Infof("Unstaging volume %s: Last namespace (NSID=%s) for NQN=%s, proceeding with disconnect",
+		volumeID, nsid, nqn)
+	if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
+		klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
+	} else {
+		klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil

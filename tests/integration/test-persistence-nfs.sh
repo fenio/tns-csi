@@ -110,8 +110,12 @@ test_success "Wrote large file: large-file.bin"
 echo ""
 # Configure test with 8 total steps
 test_info "Calculating checksum of large file..."
-ORIGINAL_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    md5sum /data/large-file.bin | awk '{print $1}')
+if ! ORIGINAL_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- md5sum /data/large-file.bin 2>&1 | awk '{print $1}'); then
+    test_error "Failed to calculate checksum of large file!"
+    test_error "Error: ${ORIGINAL_CHECKSUM}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
 test_info "Original checksum: ${ORIGINAL_CHECKSUM}"
 
 # Create a directory structure
@@ -174,11 +178,27 @@ test_success "Pod recreated and ready"
 echo ""
 # Configure test with 8 total steps
 test_info "Verifying test data persisted after graceful restart..."
-RETRIEVED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
+test_info "Expected data: '${TEST_DATA}'"
+
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/test.txt"; then
+    test_error "CRITICAL: test.txt does not exist after restart!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+    test_error "Failed to read test.txt after graceful restart!"
+    test_error "Error: ${RETRIEVED_DATA}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Retrieved data: '${RETRIEVED_DATA}'"
 if [[ "${RETRIEVED_DATA}" == "${TEST_DATA}" ]]; then
     test_success "Test data intact: ${RETRIEVED_DATA}"
 else
     test_error "Data mismatch! Expected: '${TEST_DATA}', Got: '${RETRIEVED_DATA}'"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
 
@@ -186,12 +206,27 @@ fi
 echo ""
 # Configure test with 8 total steps
 test_info "Verifying large file integrity..."
-NEW_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    md5sum /data/large-file.bin | awk '{print $1}')
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/large-file.bin"; then
+    test_error "CRITICAL: large-file.bin does not exist after restart!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>&1); then
+    test_error "Failed to calculate checksum after restart!"
+    test_error "Error: ${NEW_CHECKSUM}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Original checksum: ${ORIGINAL_CHECKSUM}"
+test_info "Current checksum:  ${NEW_CHECKSUM}"
+
 if [[ "${NEW_CHECKSUM}" == "${ORIGINAL_CHECKSUM}" ]]; then
     test_success "Large file integrity verified (checksum matches)"
 else
     test_error "Large file corrupted! Original: ${ORIGINAL_CHECKSUM}, New: ${NEW_CHECKSUM}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
 
@@ -199,11 +234,26 @@ fi
 echo ""
 # Configure test with 8 total steps
 test_info "Verifying nested directory structure..."
-NESTED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt)
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/subdir1/subdir2/nested.txt"; then
+    test_error "CRITICAL: nested.txt does not exist after restart!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! NESTED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>&1); then
+    test_error "Failed to read nested.txt after restart!"
+    test_error "Error: ${NESTED_DATA}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Nested data: '${NESTED_DATA}'"
+
 if [[ "${NESTED_DATA}" == "nested data" ]]; then
     test_success "Nested directory structure intact"
 else
-    test_error "Nested data mismatch!"
+    test_error "Nested data mismatch! Expected: 'nested data', Got: '${NESTED_DATA}'"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
 
@@ -251,29 +301,76 @@ test_success "New pod ready"
 echo ""
 # Configure test with 8 total steps
 test_info "Verifying all data persisted after force delete..."
+test_info "Expected data: '${TEST_DATA}'"
 
-RETRIEVED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
-if [[ "${RETRIEVED_DATA}" == "${TEST_DATA}" ]]; then
-    test_success "Test data intact after force delete"
-else
-    test_error "Data lost after force delete!"
+if ! pod_file_exists "${POD_NAME_2}" "${TEST_NAMESPACE}" "/data/test.txt"; then
+    test_error "CRITICAL: test.txt does not exist after force delete!"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
     exit 1
 fi
 
-NEW_CHECKSUM=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- \
-    md5sum /data/large-file.bin | awk '{print $1}')
+if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+    test_error "Failed to read test.txt after force delete!"
+    test_error "Error: ${RETRIEVED_DATA}"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Retrieved data: '${RETRIEVED_DATA}'"
+if [[ "${RETRIEVED_DATA}" == "${TEST_DATA}" ]]; then
+    test_success "Test data intact after force delete"
+else
+    test_error "Data lost after force delete! Expected: '${TEST_DATA}', Got: '${RETRIEVED_DATA}'"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! pod_file_exists "${POD_NAME_2}" "${TEST_NAMESPACE}" "/data/large-file.bin"; then
+    test_error "CRITICAL: large-file.bin does not exist after force delete!"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>&1); then
+    test_error "Failed to calculate checksum after force delete!"
+    test_error "Error: ${NEW_CHECKSUM}"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Original checksum: ${ORIGINAL_CHECKSUM}"
+test_info "Current checksum:  ${NEW_CHECKSUM}"
+
 if [[ "${NEW_CHECKSUM}" == "${ORIGINAL_CHECKSUM}" ]]; then
     test_success "Large file integrity maintained after force delete"
 else
     test_error "Large file corrupted after force delete!"
+    test_error "  Original: ${ORIGINAL_CHECKSUM}"
+    test_error "  Current:  ${NEW_CHECKSUM}"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
     exit 1
 fi
 
-NESTED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt)
+if ! pod_file_exists "${POD_NAME_2}" "${TEST_NAMESPACE}" "/data/subdir1/subdir2/nested.txt"; then
+    test_error "CRITICAL: nested.txt does not exist after force delete!"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! NESTED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>&1); then
+    test_error "Failed to read nested.txt after force delete!"
+    test_error "Error: ${NESTED_DATA}"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Nested data: '${NESTED_DATA}'"
+
 if [[ "${NESTED_DATA}" == "nested data" ]]; then
     test_success "All data structures intact after force delete"
 else
-    test_error "Nested data lost after force delete!"
+    test_error "Nested data lost after force delete! Expected: 'nested data', Got: '${NESTED_DATA}'"
+    show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
     exit 1
 fi
 
@@ -315,11 +412,26 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME}" \
 echo ""
 # Configure test with 8 total steps
 test_info "Verifying data from second pod persisted..."
-SECOND_POD_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/second-pod.txt)
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/second-pod.txt"; then
+    test_error "CRITICAL: second-pod.txt does not exist!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! SECOND_POD_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/second-pod.txt 2>&1); then
+    test_error "Failed to read second-pod.txt!"
+    test_error "Error: ${SECOND_POD_DATA}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Retrieved data: '${SECOND_POD_DATA}'"
+
 if [[ "${SECOND_POD_DATA}" == "Data from second pod" ]]; then
     test_success "Data from second pod persisted correctly"
 else
-    test_error "Data from second pod was lost!"
+    test_error "Data from second pod was lost! Expected: 'Data from second pod', Got: '${SECOND_POD_DATA}'"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
 

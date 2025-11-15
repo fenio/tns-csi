@@ -117,13 +117,27 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 test_success "Test data written (100MB file created)"
 
 # Get initial filesystem size
-INITIAL_FS_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data | tail -1 | awk '{print $2}')
-INITIAL_FS_BYTES=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df /data | tail -1 | awk '{print $2}')
+if ! INITIAL_FS_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data 2>&1 | tail -1 | awk '{print $2}'); then
+    test_error "Failed to get initial filesystem size!"
+    test_error "Error: ${INITIAL_FS_SIZE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+if ! INITIAL_FS_BYTES=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df /data 2>&1 | tail -1 | awk '{print $2}'); then
+    test_error "Failed to get initial filesystem size in bytes!"
+    test_error "Error: ${INITIAL_FS_BYTES}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
 test_info "Initial filesystem size: ${INITIAL_FS_SIZE}"
 
 # Get block device size
-INITIAL_DEV_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    sh -c "blockdev --getsize64 \$(df /data | tail -1 | awk '{print \$1}')")
+if ! INITIAL_DEV_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "blockdev --getsize64 \$(df /data | tail -1 | awk '{print \$1}')" 2>&1); then
+    test_error "Failed to get initial block device size!"
+    test_error "Error: ${INITIAL_DEV_SIZE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
 test_info "Initial block device size: $((INITIAL_DEV_SIZE / 1024 / 1024))MB"
 
 #######################################
@@ -175,8 +189,12 @@ echo ""
 test_info "Waiting for block device to reflect new size..."
 sleep 15  # Give system time to recognize new size
 
-EXPANDED_DEV_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    sh -c "blockdev --getsize64 \$(df /data | tail -1 | awk '{print \$1}')")
+if ! EXPANDED_DEV_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "blockdev --getsize64 \$(df /data | tail -1 | awk '{print \$1}')" 2>&1); then
+    test_error "Failed to get expanded block device size!"
+    test_error "Error: ${EXPANDED_DEV_SIZE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
 EXPANDED_DEV_SIZE_MB=$((EXPANDED_DEV_SIZE / 1024 / 1024))
 test_info "Expanded block device size: ${EXPANDED_DEV_SIZE_MB}MB"
 
@@ -196,8 +214,18 @@ test_step "Verifying filesystem reflects new size"
 echo ""
 # Configure test with 10 total steps
 test_info "Checking filesystem size..."
-EXPANDED_FS_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data | tail -1 | awk '{print $2}')
-EXPANDED_FS_BYTES=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df /data | tail -1 | awk '{print $2}')
+if ! EXPANDED_FS_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df -h /data 2>&1 | tail -1 | awk '{print $2}'); then
+    test_error "Failed to get expanded filesystem size!"
+    test_error "Error: ${EXPANDED_FS_SIZE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+if ! EXPANDED_FS_BYTES=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- df /data 2>&1 | tail -1 | awk '{print $2}'); then
+    test_error "Failed to get expanded filesystem size in bytes!"
+    test_error "Error: ${EXPANDED_FS_BYTES}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
 test_info "Expanded filesystem size: ${EXPANDED_FS_SIZE}"
 
 if [[ $EXPANDED_FS_BYTES -gt $((INITIAL_FS_BYTES * 2)) ]]; then
@@ -215,27 +243,48 @@ test_step "Verifying data integrity after expansion"
 echo ""
 # Configure test with 10 total steps
 test_info "Checking original data..."
-DATA_CONTENT=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt)
+test_info "Expected data: 'Initial data before expansion'"
+
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/test.txt"; then
+    test_error "CRITICAL: test.txt does not exist after expansion!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+if ! DATA_CONTENT=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+    test_error "Failed to read test.txt after expansion!"
+    test_error "Error: ${DATA_CONTENT}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Retrieved data: '${DATA_CONTENT}'"
 
 if [[ "${DATA_CONTENT}" == "Initial data before expansion" ]]; then
     test_success "Original data intact"
 else
-    test_error "Data verification failed: ${DATA_CONTENT}"
+    test_error "Data verification failed! Expected: 'Initial data before expansion', Got: '${DATA_CONTENT}'"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
 
 # Verify the large file still exists
 test_info "Verifying large file..."
-FILE_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    sh -c "ls -lh /data/largefile | awk '{print \$5}'")
-test_info "Large file size: ${FILE_SIZE}"
-
-if [[ -n "${FILE_SIZE}" ]]; then
-    test_success "Large file still present"
-else
-    test_error "Large file missing after expansion"
+if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/largefile"; then
+    test_error "CRITICAL: largefile missing after expansion!"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
     exit 1
 fi
+
+if ! FILE_SIZE=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "ls -lh /data/largefile | awk '{print \$5}'" 2>&1); then
+    test_error "Failed to check largefile size!"
+    test_error "Error: ${FILE_SIZE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    exit 1
+fi
+
+test_info "Large file size: ${FILE_SIZE}"
+test_success "Large file still present"
 
 # Write additional data to expanded space
 echo ""

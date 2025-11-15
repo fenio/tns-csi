@@ -56,6 +56,10 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	if err == nil && devicePath != "" {
 		klog.Infof("NVMe-oF device already connected at %s (NQN: %s, NSID: %s, dataset: %s)",
 			devicePath, params.nqn, params.nsid, datasetName)
+
+		// Register this namespace as active to prevent premature disconnect
+		s.namespaceRegistry.Register(params.nqn, params.nsid)
+
 		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	}
 
@@ -82,6 +86,10 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 
 	klog.Infof("NVMe-oF device connected at %s (NQN: %s, NSID: %s, dataset: %s)",
 		devicePath, params.nqn, params.nsid, datasetName)
+
+	// Register this namespace as active to prevent premature disconnect
+	s.namespaceRegistry.Register(params.nqn, params.nsid)
+
 	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 }
 
@@ -223,12 +231,31 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 		}
 	}
 
-	// Disconnect from NVMe-oF target
-	if nqn != "" {
+	// Get NSID from volume context
+	nsid := volumeContext["nsid"]
+
+	// Disconnect from NVMe-oF target ONLY if this is the last namespace for this NQN
+	if nqn != "" && nsid != "" {
+		isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
+		if isLastNamespace {
+			klog.Infof("Unstaging volume %s: Last namespace (NSID=%s) for NQN=%s, proceeding with disconnect",
+				volumeID, nsid, nqn)
+			if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
+				klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
+			} else {
+				klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
+			}
+		} else {
+			activeCount := s.namespaceRegistry.GetNQNCount(nqn)
+			klog.Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
+				volumeID, nqn, nsid, activeCount)
+		}
+	} else if nqn != "" {
+		// Fallback: if we can't determine NSID, disconnect anyway (backwards compatibility)
+		klog.Warningf("Could not determine NSID for volume %s, disconnecting NQN=%s anyway (may affect other volumes!)",
+			volumeID, nqn)
 		if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
-		} else {
-			klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
 		}
 	}
 

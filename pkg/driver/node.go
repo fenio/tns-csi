@@ -33,19 +33,21 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient    tnsapi.ClientInterface
-	nodeRegistry *NodeRegistry
-	nodeID       string
-	testMode     bool // Test mode flag to skip actual mounts
+	apiClient         tnsapi.ClientInterface
+	nodeRegistry      *NodeRegistry
+	namespaceRegistry *NVMeOFNamespaceRegistry
+	nodeID            string
+	testMode          bool // Test mode flag to skip actual mounts
 }
 
 // NewNodeService creates a new node service.
 func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bool, nodeRegistry *NodeRegistry) *NodeService {
 	return &NodeService{
-		nodeID:       nodeID,
-		apiClient:    apiClient,
-		testMode:     testMode,
-		nodeRegistry: nodeRegistry,
+		nodeID:            nodeID,
+		apiClient:         apiClient,
+		testMode:          testMode,
+		nodeRegistry:      nodeRegistry,
+		namespaceRegistry: NewNVMeOFNamespaceRegistry(),
 	}
 }
 

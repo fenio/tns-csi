@@ -172,7 +172,18 @@ EOF
     echo ""
     test_info "Verifying snapshot data is present..."
     local content
-    content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test.txt")
+    if ! pod_file_exists "${pod_name}" "${TEST_NAMESPACE}" "${mount_path}/test.txt"; then
+        test_error "CRITICAL: test.txt does not exist in snapshot!"
+        return 1
+    fi
+    
+    if ! content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test.txt" 2>&1); then
+        test_error "Failed to read test.txt from snapshot!"
+        test_error "Error: ${content}"
+        return 1
+    fi
+    
+    test_info "Retrieved: '${content}', Expected: '${expected_content}'"
     
     if [[ "${content}" == "${expected_content}" ]]; then
         test_success "Snapshot data verified: ${content}"
@@ -195,12 +206,23 @@ EOF
         sh -c "echo 'Data written to cloned volume' > ${mount_path}/cloned-data.txt"
     
     local new_content
-    new_content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/cloned-data.txt")
+    if ! pod_file_exists "${pod_name}" "${TEST_NAMESPACE}" "${mount_path}/cloned-data.txt"; then
+        test_error "CRITICAL: cloned-data.txt was not created!"
+        return 1
+    fi
+    
+    if ! new_content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/cloned-data.txt" 2>&1); then
+        test_error "Failed to read cloned-data.txt!"
+        test_error "Error: ${new_content}"
+        return 1
+    fi
+    
+    test_info "Retrieved: '${new_content}'"
     
     if [[ "${new_content}" == "Data written to cloned volume" ]]; then
         test_success "Write to cloned volume successful"
     else
-        test_error "Failed to write to cloned volume"
+        test_error "Failed to write to cloned volume (got: '${new_content}')"
         return 1
     fi
 }

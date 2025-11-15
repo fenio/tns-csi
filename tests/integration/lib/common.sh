@@ -934,6 +934,77 @@ apply_inline_manifest() {
 }
 
 #######################################
+# Safely execute kubectl exec and capture output
+# Properly handles errors and shows diagnostics on failure
+# Arguments:
+#   pod_name
+#   namespace
+#   command (the full command to execute in the pod)
+#   expected_value (optional - if provided, will validate output)
+#   error_context (optional - description for error messages)
+# Returns:
+#   0 on success (output in stdout)
+#   1 on failure (after showing diagnostics)
+#######################################
+safe_kubectl_exec() {
+    local pod_name=$1
+    local namespace=$2
+    local command=$3
+    local expected_value=${4:-}
+    local error_context=${5:-"command execution"}
+    
+    local output
+    local exit_code
+    
+    # Execute and capture both output and exit code
+    if ! output=$(kubectl exec "${pod_name}" -n "${namespace}" -- sh -c "${command}" 2>&1); then
+        exit_code=$?
+        test_error "${pod_name}: Failed ${error_context}"
+        test_error "Command: ${command}"
+        test_error "Exit code: ${exit_code}"
+        test_error "Output: ${output}"
+        show_diagnostic_logs "${pod_name}" ""
+        return 1
+    fi
+    
+    # If expected value provided, validate it
+    if [[ -n "${expected_value}" ]]; then
+        if [[ "${output}" != "${expected_value}" ]]; then
+            test_error "${pod_name}: ${error_context} - data mismatch"
+            test_error "Expected: '${expected_value}'"
+            test_error "Got: '${output}'"
+            show_diagnostic_logs "${pod_name}" ""
+            return 1
+        fi
+    fi
+    
+    # Output the result so it can be captured by caller
+    echo "${output}"
+    return 0
+}
+
+#######################################
+# Check if a file exists in a pod
+# Arguments:
+#   pod_name
+#   namespace
+#   file_path
+# Returns:
+#   0 if file exists
+#   1 if file doesn't exist or error
+#######################################
+pod_file_exists() {
+    local pod_name=$1
+    local namespace=$2
+    local file_path=$3
+    
+    if ! kubectl exec "${pod_name}" -n "${namespace}" -- test -f "${file_path}" 2>/dev/null; then
+        return 1
+    fi
+    return 0
+}
+
+#######################################
 # Test tags for selective execution
 #######################################
 test_volume_expansion() {

@@ -125,8 +125,25 @@ kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- \
 test_success "Version 1 data written"
 
 # Store checksums
-V1_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt)
-V1_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ | wc -l)
+if ! pod_file_exists "${POD_NAME_SOURCE}" "${TEST_NAMESPACE}" "/data/version.txt"; then
+    test_error "CRITICAL: version.txt does not exist!"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
+
+if ! V1_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+    test_error "Failed to read version.txt!"
+    test_error "Error: ${V1_VERSION}"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
+
+if ! V1_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ 2>&1 | wc -l); then
+    test_error "Failed to list v1/ directory!"
+    test_error "Error: ${V1_FILE_COUNT}"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
 test_info "Version 1 contains ${V1_FILE_COUNT} files in v1/ directory"
 
 #######################################
@@ -217,9 +234,26 @@ kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- \
 
 test_success "Version 2 data written"
 
-V2_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt)
-V2_V1_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ | wc -l)
-V2_V2_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v2/ | wc -l)
+if ! V2_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+    test_error "Failed to read version.txt for version 2!"
+    test_error "Error: ${V2_VERSION}"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
+
+if ! V2_V1_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ 2>&1 | wc -l); then
+    test_error "Failed to list v1/ directory for version 2!"
+    test_error "Error: ${V2_V1_FILE_COUNT}"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
+
+if ! V2_V2_FILE_COUNT=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- ls /data/v2/ 2>&1 | wc -l); then
+    test_error "Failed to list v2/ directory for version 2!"
+    test_error "Error: ${V2_V2_FILE_COUNT}"
+    show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
+    exit 1
+fi
 test_info "Version 2: v1/ has ${V2_V1_FILE_COUNT} files, v2/ has ${V2_V2_FILE_COUNT} files"
 
 # Create second snapshot
@@ -351,20 +385,43 @@ echo ""
 test_info "Verifying snapshot 1 data..."
 
 # Check version
-RESTORE1_VERSION=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt)
+if ! pod_file_exists "${POD_NAME_RESTORE1}" "${TEST_NAMESPACE}" "/data/version.txt"; then
+    test_error "CRITICAL: version.txt does not exist in restored volume!"
+    show_diagnostic_logs "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
+    exit 1
+fi
+
+if ! RESTORE1_VERSION=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+    test_error "Failed to read version.txt from restored volume!"
+    test_error "Error: ${RESTORE1_VERSION}"
+    show_diagnostic_logs "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
+    exit 1
+fi
+
+test_info "Restored version: '${RESTORE1_VERSION}', Expected: '${V1_VERSION}'"
+
 if [[ "${RESTORE1_VERSION}" == "${V1_VERSION}" ]]; then
     test_success "Version file matches snapshot 1: '${RESTORE1_VERSION}'"
 else
-    test_error "Version mismatch: expected '${V1_VERSION}', got '${RESTORE1_VERSION}'"
+    test_error "Version mismatch! Expected: '${V1_VERSION}', Got: '${RESTORE1_VERSION}'"
+    show_diagnostic_logs "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
     exit 1
 fi
 
 # Check v1 directory
-RESTORE1_V1_COUNT=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ 2>/dev/null | wc -l || echo "0")
+if ! RESTORE1_V1_COUNT=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- ls /data/v1/ 2>&1 | wc -l); then
+    # If ls fails completely, set to 0
+    RESTORE1_V1_COUNT=0
+    test_warning "Could not list v1/ directory: ${RESTORE1_V1_COUNT}"
+fi
+
+test_info "V1 directory file count: ${RESTORE1_V1_COUNT}, Expected: ${V1_FILE_COUNT}"
+
 if [[ $RESTORE1_V1_COUNT -eq $V1_FILE_COUNT ]]; then
     test_success "V1 directory file count correct: ${RESTORE1_V1_COUNT}"
 else
     test_error "V1 file count mismatch: expected ${V1_FILE_COUNT}, got ${RESTORE1_V1_COUNT}"
+    show_diagnostic_logs "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
     exit 1
 fi
 
@@ -449,20 +506,43 @@ echo ""
 test_info "Verifying snapshot 2 data..."
 
 # Check version
-RESTORE2_VERSION=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt)
+if ! pod_file_exists "${POD_NAME_RESTORE2}" "${TEST_NAMESPACE}" "/data/version.txt"; then
+    test_error "CRITICAL: version.txt does not exist in restored volume from snapshot 2!"
+    show_diagnostic_logs "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
+    exit 1
+fi
+
+if ! RESTORE2_VERSION=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+    test_error "Failed to read version.txt from snapshot 2 restore!"
+    test_error "Error: ${RESTORE2_VERSION}"
+    show_diagnostic_logs "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
+    exit 1
+fi
+
+test_info "Restored version: '${RESTORE2_VERSION}', Expected: '${V2_VERSION}'"
+
 if [[ "${RESTORE2_VERSION}" == "${V2_VERSION}" ]]; then
     test_success "Version file matches snapshot 2: '${RESTORE2_VERSION}'"
 else
     test_error "Version mismatch: expected '${V2_VERSION}', got '${RESTORE2_VERSION}'"
+    show_diagnostic_logs "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
     exit 1
 fi
 
 # Check v2 directory exists
-RESTORE2_V2_COUNT=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- ls /data/v2/ 2>/dev/null | wc -l || echo "0")
+if ! RESTORE2_V2_COUNT=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- ls /data/v2/ 2>&1 | wc -l); then
+    # If ls fails completely, set to 0
+    RESTORE2_V2_COUNT=0
+    test_warning "Could not list v2/ directory: ${RESTORE2_V2_COUNT}"
+fi
+
+test_info "V2 directory file count: ${RESTORE2_V2_COUNT}, Expected: ${V2_V2_FILE_COUNT}"
+
 if [[ $RESTORE2_V2_COUNT -eq $V2_V2_FILE_COUNT ]]; then
     test_success "V2 directory present with correct file count: ${RESTORE2_V2_COUNT}"
 else
     test_error "V2 file count mismatch: expected ${V2_V2_FILE_COUNT}, got ${RESTORE2_V2_COUNT}"
+    show_diagnostic_logs "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"
     exit 1
 fi
 

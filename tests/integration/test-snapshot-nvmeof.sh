@@ -125,7 +125,17 @@ test_block_io_with_pattern() {
     
     # Verify pattern can be read
     local verify_pattern
-    verify_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>/dev/null || echo "")
+    if ! pod_file_exists "${pod_name}" "${TEST_NAMESPACE}" "${mount_path}/test-pattern.txt"; then
+        test_error "CRITICAL: test-pattern.txt does not exist before snapshot!"
+        return 1
+    fi
+    
+    if ! verify_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>&1); then
+        test_error "Failed to read test-pattern.txt before snapshot!"
+        test_error "Error: ${verify_pattern}"
+        return 1
+    fi
+    
     if [[ "${verify_pattern}" == *"NVMeOF-CSI-TEST-PATTERN"* ]]; then
         test_success "Pattern verified before snapshot"
     else
@@ -145,8 +155,16 @@ verify_block_pattern() {
     
     # Read file and verify pattern
     local pattern
-    pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-        cat "${mount_path}/test-pattern.txt" 2>/dev/null || echo "")
+    if ! pod_file_exists "${pod_name}" "${TEST_NAMESPACE}" "${mount_path}/test-pattern.txt"; then
+        test_error "CRITICAL: test-pattern.txt does not exist in restored snapshot!"
+        return 1
+    fi
+    
+    if ! pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>&1); then
+        test_error "Failed to read test-pattern.txt from snapshot!"
+        test_error "Error: ${pattern}"
+        return 1
+    fi
     
     if [[ "${pattern}" == *"NVMeOF-CSI-TEST-PATTERN"* ]]; then
         test_success "Filesystem pattern verified"

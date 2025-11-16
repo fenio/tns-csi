@@ -231,21 +231,24 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 		}
 	}
 
-	// Get NSID from volume context
+	// Get NSID from volume context first
 	nsid := volumeContext["nsid"]
+
+	// If NSID is not in volumeContext, decode it from volumeID
+	// CSI spec doesn't guarantee volumeContext is passed to NodeUnstageVolume
+	if nsid == "" {
+		meta, err := decodeVolumeID(volumeID)
+		if err != nil {
+			klog.Errorf("Failed to get NSID for volume %s: cannot decode volumeID: %v", volumeID, err)
+			klog.Errorf("Cannot safely disconnect - NSID required to avoid affecting other volumes sharing NQN=%s", nqn)
+			return nil, status.Errorf(codes.Internal, "Cannot determine NSID for volume: %v", err)
+		}
+		nsid = fmt.Sprintf("%d", meta.NVMeOFNamespaceID)
+		klog.Infof("Decoded NSID=%s from volumeID for volume %s", nsid, volumeID)
+	}
 
 	// Disconnect from NVMe-oF target ONLY if this is the last namespace for this NQN
 	if nqn == "" {
-		return &csi.NodeUnstageVolumeResponse{}, nil
-	}
-
-	// If NSID is missing, disconnect anyway for backwards compatibility
-	if nsid == "" {
-		klog.Warningf("Could not determine NSID for volume %s, disconnecting NQN=%s anyway (may affect other volumes!)",
-			volumeID, nqn)
-		if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
-			klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
-		}
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 

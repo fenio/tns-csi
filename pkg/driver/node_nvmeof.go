@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -243,7 +244,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 			klog.Errorf("Cannot safely disconnect - NSID required to avoid affecting other volumes sharing NQN=%s", nqn)
 			return nil, status.Errorf(codes.Internal, "Cannot determine NSID for volume: %v", err)
 		}
-		nsid = fmt.Sprintf("%d", meta.NVMeOFNamespaceID)
+		nsid = strconv.Itoa(meta.NVMeOFNamespaceID)
 		klog.Infof("Decoded NSID=%s from volumeID for volume %s", nsid, volumeID)
 	}
 

@@ -193,6 +193,23 @@ done
 #######################################
 test_step "Testing scale down operation"
 
+# DIAGNOSTIC: Show state BEFORE scaling down
+test_info "BEFORE SCALE DOWN: Capturing baseline state..."
+test_info "Node NVMe devices before scale down:"
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
+
+# Check that all pods can still read their data BEFORE scaling
+test_info "Verifying all pods can read data BEFORE scale down..."
+for i in $(seq 0 $((REPLICAS - 1))); do
+    POD_NAME="${STS_NAME}-${i}"
+    if REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then
+        test_success "${POD_NAME}: Can read data before scale down: ${REPLICA_DATA}"
+    else
+        test_error "${POD_NAME}: Cannot read data BEFORE scale down - test environment is broken!"
+        exit 1
+    fi
+done
+
 NEW_REPLICAS=2
 test_info "Scaling StatefulSet from ${REPLICAS} to ${NEW_REPLICAS} replicas..."
 kubectl scale statefulset "${STS_NAME}" -n "${TEST_NAMESPACE}" --replicas=${NEW_REPLICAS}
@@ -204,24 +221,58 @@ kubectl wait --for=delete pod/"${DELETED_POD}" -n "${TEST_NAMESPACE}" --timeout=
 
 test_success "Scaled down to ${NEW_REPLICAS} replicas"
 
+# DIAGNOSTIC: Give system time to settle after delete and show state
+test_info "Waiting 5 seconds for system to settle after pod deletion..."
+sleep 5
+test_info "AFTER SCALE DOWN: Checking node state..."
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
+
 # Verify remaining pods still have their data
 echo ""
 # Configure test with 10 total steps
 test_info "Verifying remaining pods retained their data..."
+
+# First, show node state AFTER scaling down to understand the environment
+test_info "Checking NVMe device state on node after scale down..."
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'echo "=== NVMe devices ==="; ls -la /dev/nvme* 2>&1 || echo "No NVMe devices"; echo "=== NVMe list ==="; nvme list 2>&1 || echo "nvme list failed"' || true
+
 for i in $(seq 0 $((NEW_REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
     
+    test_info "Checking pod ${POD_NAME} volume state..."
+    
+    # Show mount information inside the pod
+    test_info "${POD_NAME}: Mount information:"
+    kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c 'echo "=== Mounts ==="; mount | grep /data; echo "=== /data contents ==="; ls -la /data; echo "=== Filesystem on /data ==="; df -h /data' 2>&1 | head -20 || true
+    
     # Check if file is accessible first
-    if ! kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- test -f /data/replica-data.txt; then
+    test_info "${POD_NAME}: Testing if /data/replica-data.txt exists..."
+    if ! kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- test -f /data/replica-data.txt 2>&1; then
         test_error "${POD_NAME}: File /data/replica-data.txt does not exist or is not accessible!"
+        test_error "${POD_NAME}: Directory listing:"
+        kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- ls -la /data 2>&1 || true
         show_diagnostic_logs "${POD_NAME}" ""
         exit 1
     fi
     
     # Read the data - explicitly check for errors
+    test_info "${POD_NAME}: Reading /data/replica-data.txt..."
     if ! REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then
         test_error "${POD_NAME}: Failed to read /data/replica-data.txt - I/O error!"
         test_error "Error output: ${REPLICA_DATA}"
+        
+        # Additional debugging: check dmesg for I/O errors
+        test_error "${POD_NAME}: Checking for kernel I/O errors..."
+        kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- dmesg | tail -50 2>&1 || true
+        
+        # Check mount status
+        test_error "${POD_NAME}: Mount status:"
+        kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- mount | grep /data 2>&1 || true
+        
+        # Check if device is still connected
+        test_error "${POD_NAME}: Checking NVMe devices in container:"
+        kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- ls -la /dev/nvme* 2>&1 || echo "No NVMe devices visible"
+        
         show_diagnostic_logs "${POD_NAME}" ""
         exit 1
     fi

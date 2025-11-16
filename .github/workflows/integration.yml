@@ -24,10 +24,35 @@ on:
   workflow_dispatch:
 
 jobs:
+  pre-cleanup:
+    name: Pre-Test Cleanup
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.3'
+          cache: false
+      
+      - name: Clean TrueNAS artifacts before tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "=== Cleaning TrueNAS artifacts before test run ==="
+          echo "This ensures tests start with a clean slate"
+          ./scripts/cleanup-truenas-artifacts.sh
+          echo "=== Pre-test cleanup complete ==="
+
   integration-nfs:
     name: NFS Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
+    needs: pre-cleanup
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies
@@ -46,6 +71,7 @@ jobs:
     name: NVMe-oF Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
+    needs: pre-cleanup
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-dependencies

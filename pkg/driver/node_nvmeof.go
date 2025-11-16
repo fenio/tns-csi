@@ -206,6 +206,67 @@ func invalidateNVMeDeviceCaches(ctx context.Context, devicePath string) error {
 	return nil
 }
 
+// flushAllNVMeDeviceCaches flushes buffer caches for all NVMe block devices on the node.
+// This is critical after disconnecting any NVMe device to prevent stale caches affecting
+// other volumes. When one NVMe device is disconnected, the kernel may leave stale data
+// in the buffer cache for other NVMe devices, causing I/O errors.
+func (s *NodeService) flushAllNVMeDeviceCaches(ctx context.Context) error {
+	klog.V(4).Info("Flushing caches for all NVMe devices on the node")
+
+	// Find all NVMe block devices
+	devices, err := filepath.Glob("/dev/nvme*n*")
+	if err != nil {
+		return fmt.Errorf("failed to list NVMe devices: %w", err)
+	}
+
+	if len(devices) == 0 {
+		klog.V(4).Info("No NVMe devices found to flush")
+		return nil
+	}
+
+	var flushErrors []string
+	flushedCount := 0
+
+	for _, device := range devices {
+		// Skip partition devices (e.g., nvme0n1p1)
+		if strings.Contains(filepath.Base(device), "p") {
+			continue
+		}
+
+		// Check if device exists and is a block device
+		info, err := os.Stat(device)
+		if err != nil {
+			continue // Device may have been removed, skip it
+		}
+
+		if info.Mode()&os.ModeDevice == 0 {
+			continue // Not a block device, skip
+		}
+
+		// Flush buffer cache for this device
+		flushCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", device)
+		if output, err := flushCmd.CombinedOutput(); err != nil {
+			cancel()
+			errMsg := fmt.Sprintf("failed to flush %s: %v, output: %s", device, err, string(output))
+			klog.V(4).Info(errMsg)
+			flushErrors = append(flushErrors, errMsg)
+			continue
+		}
+		cancel()
+
+		flushedCount++
+		klog.V(4).Infof("Flushed buffer cache for %s", device)
+	}
+
+	if len(flushErrors) > 0 {
+		klog.Warningf("Failed to flush %d/%d NVMe devices: %v", len(flushErrors), len(devices), flushErrors)
+	}
+
+	klog.V(4).Infof("Successfully flushed caches for %d NVMe devices", flushedCount)
+	return nil
+}
+
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
 func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	// CRITICAL: Invalidate device cache and wait for device stabilization
@@ -590,5 +651,14 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	}
 
 	klog.V(4).Infof("Successfully disconnected from NVMe-oF target")
+
+	// CRITICAL: Flush caches for ALL remaining NVMe devices after disconnect
+	// When one NVMe device is disconnected, other NVMe devices on the same node
+	// may have stale cached data. This prevents I/O errors in StatefulSets and
+	// other scenarios where multiple volumes exist on the same node.
+	if err := s.flushAllNVMeDeviceCaches(ctx); err != nil {
+		klog.Warningf("Failed to flush caches for remaining NVMe devices: %v", err)
+	}
+
 	return nil
 }

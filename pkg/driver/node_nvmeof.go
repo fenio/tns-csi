@@ -245,6 +245,7 @@ func (s *NodeService) flushAllNVMeDeviceCaches(ctx context.Context) error {
 
 		// Flush buffer cache for this device
 		flushCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		//nolint:gosec // device path comes from filepath.Glob of /dev/nvme*, safe for CSI driver operation
 		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", device)
 		if output, err := flushCmd.CombinedOutput(); err != nil {
 			cancel()

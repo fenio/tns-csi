@@ -153,149 +153,44 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 	return nil
 }
 
-// invalidateNVMeDeviceCaches aggressively invalidates all kernel caches for an NVMe device.
-// This is critical for preventing I/O errors when devices are reconnected with existing data.
-func invalidateNVMeDeviceCaches(ctx context.Context, devicePath string) error {
-	klog.V(4).Infof("Starting aggressive cache invalidation for %s", devicePath)
-
-	// 1. Flush block device buffer cache
-	flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
-	if output, err := flushCmd.CombinedOutput(); err != nil {
-		klog.Warningf("blockdev --flushbufs failed for %s: %v, output: %s", devicePath, err, string(output))
-		return fmt.Errorf("failed to flush device buffers: %w", err)
-	}
-	klog.V(4).Infof("Flushed block device buffers for %s", devicePath)
-
-	// 2. Attempt to reread partition table (may fail for raw block devices - that's ok)
-	rereadCtx, cancelReread := context.WithTimeout(ctx, 5*time.Second)
-	defer cancelReread()
-
-	rereadCmd := exec.CommandContext(rereadCtx, "blockdev", "--rereadpt", devicePath)
-	if _, err := rereadCmd.CombinedOutput(); err != nil {
-		// This is expected to fail for raw block devices without partition tables
-		klog.V(4).Infof("blockdev --rereadpt for %s: %v (expected for raw block devices)", devicePath, err)
-	} else {
-		klog.V(4).Infof("Reread partition table for %s", devicePath)
-	}
-
-	// 3. Force device rescan to ensure kernel has latest state
-	// For NVMe devices, trigger a rescan of the namespace
-	if strings.Contains(devicePath, "/dev/nvme") {
-		// Extract controller and namespace from path (e.g., /dev/nvme0n1 -> nvme0)
-		parts := strings.Split(filepath.Base(devicePath), "n")
-		if len(parts) >= 2 {
-			controller := parts[0] // e.g., "nvme0"
-			//nolint:gocritic // sysfs path must be constructed with /sys/class/nvme as base
-			rescanPath := filepath.Join("/sys/class/nvme", controller, "rescan_controller")
-
-			// Write "1" to trigger rescan
-			if err := os.WriteFile(rescanPath, []byte("1"), 0o200); err != nil {
-				klog.V(4).Infof("Failed to trigger NVMe controller rescan at %s: %v (may not be supported)", rescanPath, err)
-			} else {
-				klog.V(4).Infof("Triggered NVMe controller rescan for %s", controller)
-				// Give controller a moment to complete rescan
-				time.Sleep(500 * time.Millisecond)
-			}
-		}
-	}
-
-	klog.V(4).Infof("Completed cache invalidation for %s", devicePath)
-	return nil
-}
-
-// flushAllNVMeDeviceCaches flushes buffer caches for all NVMe block devices on the node.
-// This is critical after disconnecting any NVMe device to prevent stale caches affecting
-// other volumes. When one NVMe device is disconnected, the kernel may leave stale data
-// in the buffer cache for other NVMe devices, causing I/O errors.
-func (s *NodeService) flushAllNVMeDeviceCaches(ctx context.Context) error {
-	klog.V(4).Info("Flushing caches for all NVMe devices on the node")
-
-	// Find all NVMe block devices
-	devices, err := filepath.Glob("/dev/nvme*n*")
-	if err != nil {
-		return fmt.Errorf("failed to list NVMe devices: %w", err)
-	}
-
-	if len(devices) == 0 {
-		klog.V(4).Info("No NVMe devices found to flush")
-		return nil
-	}
-
-	var flushErrors []string
-	flushedCount := 0
-
-	for _, device := range devices {
-		// Skip partition devices (e.g., nvme0n1p1)
-		if strings.Contains(filepath.Base(device), "p") {
-			continue
-		}
-
-		// Check if device exists and is a block device
-		info, err := os.Stat(device)
-		if err != nil {
-			continue // Device may have been removed, skip it
-		}
-
-		if info.Mode()&os.ModeDevice == 0 {
-			continue // Not a block device, skip
-		}
-
-		// Flush buffer cache for this device
-		flushCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		//nolint:gosec // device path comes from filepath.Glob of /dev/nvme*, safe for CSI driver operation
-		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", device)
-		if output, err := flushCmd.CombinedOutput(); err != nil {
-			cancel()
-			errMsg := fmt.Sprintf("failed to flush %s: %v, output: %s", device, err, string(output))
-			klog.V(4).Info(errMsg)
-			flushErrors = append(flushErrors, errMsg)
-			continue
-		}
-		cancel()
-
-		flushedCount++
-		klog.V(4).Infof("Flushed buffer cache for %s", device)
-	}
-
-	if len(flushErrors) > 0 {
-		klog.Warningf("Failed to flush %d/%d NVMe devices: %v", len(flushErrors), len(devices), flushErrors)
-	}
-
-	klog.V(4).Infof("Successfully flushed caches for %d NVMe devices", flushedCount)
-	return nil
-}
-
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
 func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
-	// CRITICAL: Invalidate device cache and wait for device stabilization
-	// When NVMe-oF devices connect (either fresh or reconnect), we must ensure the kernel
-	// has cleared all stale caches and synchronized with the actual device state.
+	// CRITICAL: Wait for filesystem metadata to become available after device connection
+	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
+	// filesystem metadata immediately available. If we check too quickly with blkid,
+	// it won't detect an existing ext4 filesystem, causing an erroneous reformat that
+	// destroys user data. This is the same issue as snapshot clones but occurs during
+	// normal pod restarts when devices reconnect.
 	//
-	// Common issues this prevents:
-	// 1. Stale filesystem metadata causing blkid to miss existing filesystems
-	// 2. Stale page cache causing I/O errors when reading/writing files
-	// 3. Stale buffer cache causing filesystem detection failures
+	// IMPORTANT: After forced pod deletion (grace-period=0), NVMe-oF devices may take
+	// longer to stabilize because the previous connection was abruptly terminated.
+	// We need to ensure the kernel has fully synchronized the device state before
+	// checking for filesystems.
 	//
-	// This is especially critical for:
-	// - Pod restarts where devices reconnect with existing data
-	// - StatefulSet scale operations where pods reattach to previous volumes
-	// - After forced pod deletion (grace-period=0) where connection was abruptly terminated
-	//
-	// The aggressive cache invalidation prevents data corruption and I/O errors.
-	klog.Infof("Invalidating all caches for device %s to prevent stale data issues", devicePath)
-	if err := invalidateNVMeDeviceCaches(ctx, devicePath); err != nil {
-		klog.Warningf("Failed to invalidate caches for %s: %v - continuing with caution", devicePath, err)
-	}
-
-	// For filesystem volumes, add additional stabilization delay
+	// For filesystem volumes, add a delay to ensure metadata is readable.
 	if !isBlockVolume {
 		const deviceMetadataDelay = 8 * time.Second
 		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
 		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
+
+		// Additionally flush device buffers to ensure kernel caches are clear
+		// This is critical after reconnection to force re-reading of actual device state
+		flushCtx, flushCancel := context.WithTimeout(ctx, 3*time.Second)
+		defer flushCancel()
+		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+		if output, err := flushCmd.CombinedOutput(); err != nil {
+			klog.Warningf("Failed to flush device buffers for %s: %v, output: %s", devicePath, err, string(output))
+		} else {
+			klog.V(4).Infof("Flushed device buffers for %s after connection", devicePath)
+		}
+
+		// Wait an additional moment after buffer flush for I/O subsystem to settle
+		// This is especially important after forced pod termination where the previous
+		// connection may have left the device in an inconsistent state
+		const postFlushDelay = 2 * time.Second
+		klog.V(4).Infof("Waiting %v after buffer flush for I/O subsystem to settle", postFlushDelay)
+		time.Sleep(postFlushDelay)
 	}
 
 	if isBlockVolume {
@@ -652,14 +547,5 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	}
 
 	klog.V(4).Infof("Successfully disconnected from NVMe-oF target")
-
-	// CRITICAL: Flush caches for ALL remaining NVMe devices after disconnect
-	// When one NVMe device is disconnected, other NVMe devices on the same node
-	// may have stale cached data. This prevents I/O errors in StatefulSets and
-	// other scenarios where multiple volumes exist on the same node.
-	if err := s.flushAllNVMeDeviceCaches(ctx); err != nil {
-		klog.Warningf("Failed to flush caches for remaining NVMe devices: %v", err)
-	}
-
 	return nil
 }

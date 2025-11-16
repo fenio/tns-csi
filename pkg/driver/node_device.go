@@ -191,18 +191,15 @@ func (s *NodeService) stageBlockDevice(devicePath, stagingTargetPath string) (*c
 }
 
 // invalidateDeviceCache invalidates kernel caches for a device.
-// This is critical for cloned ZVOLs and NVMe-oF device reconnections where the kernel
-// may cache stale state, preventing blkid from detecting the existing filesystem
-// or causing I/O errors when accessing the device.
+// This is critical for cloned ZVOLs where the kernel may cache the "empty" state
+// before the clone completes, preventing blkid from detecting the existing filesystem.
 func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) error {
 	// Only run cache invalidation on retry attempts (not first attempt)
 	if attempt == 0 {
 		return nil
 	}
 
-	var lastErr error
-
-	// 1. Flush block device buffer cache
+	// Use blockdev --flushbufs to invalidate kernel buffer cache
 	// This forces the kernel to re-read the device's actual content
 	flushCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -212,45 +209,26 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 	if err != nil {
 		klog.V(4).Infof("blockdev --flushbufs failed for %s (attempt %d): %v, output: %s",
 			devicePath, attempt+1, err, string(output))
-		lastErr = err
-		// Don't fail - device might not exist yet, continue with other invalidation methods
-	} else {
-		klog.V(4).Infof("Flushed device buffers for %s (attempt %d)", devicePath, attempt+1)
+		// Don't fail - device might not exist yet, continue anyway
+		return err
 	}
+	klog.V(4).Infof("Flushed device buffers for %s (attempt %d)", devicePath, attempt+1)
 
-	// 2. Reread partition table to ensure kernel has latest device information
-	// This is especially important for NVMe devices that may have been reconnected
-	rereadCtx, cancelReread := context.WithTimeout(ctx, 3*time.Second)
-	defer cancelReread()
-
-	rereadCmd := exec.CommandContext(rereadCtx, "blockdev", "--rereadpt", devicePath)
-	rereadOutput, rereadErr := rereadCmd.CombinedOutput()
-	if rereadErr != nil {
-		// This may fail for devices without partition tables (raw block devices)
-		// or if device is busy, which is normal - log at debug level
-		klog.V(4).Infof("blockdev --rereadpt for %s (attempt %d): %v, output: %s (this is normal for raw block devices)",
-			devicePath, attempt+1, rereadErr, string(rereadOutput))
-	} else {
-		klog.V(4).Infof("Reread partition table for %s (attempt %d)", devicePath, attempt+1)
-	}
-
-	// 3. Try udevadm settle if available (not critical if it fails)
-	// udevadm may not be available in containers, so we don't fail if it's missing
+	// Wait for udev to settle (process any pending device events)
+	// This ensures udev has processed any changes to the device
 	settleCtx, cancelSettle := context.WithTimeout(ctx, 5*time.Second)
 	defer cancelSettle()
 
 	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=5")
 	settleOutput, settleErr := settleCmd.CombinedOutput()
 	if settleErr != nil {
-		// Log at V(5) since udevadm is often not available in containers
-		klog.V(5).Infof("udevadm settle (attempt %d): %v, output: %s (not critical - udevadm may not be available in containers)",
+		klog.V(4).Infof("udevadm settle failed (attempt %d): %v, output: %s",
 			attempt+1, settleErr, string(settleOutput))
-	} else {
-		klog.V(4).Infof("udevadm settle completed for %s (attempt %d)", devicePath, attempt+1)
+		return settleErr
 	}
+	klog.V(4).Infof("udevadm settle completed (attempt %d)", attempt+1)
 
-	// Return error only from blockdev --flushbufs, as that's the critical operation
-	return lastErr
+	return nil
 }
 
 // needsFormat checks if a device needs to be formatted.

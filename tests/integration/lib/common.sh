@@ -1152,7 +1152,7 @@ test_volume_expansion() {
 #######################################
 verify_metrics() {
     start_test_timer "verify_metrics"
-    test_step "Verifying Prometheus metrics collection"
+    test_info "Verifying Prometheus metrics collection"
     test_debug "Looking for controller pod in kube-system namespace"
     
     # Find the controller pod

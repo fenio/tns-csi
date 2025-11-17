@@ -25,6 +25,9 @@ echo "========================================"
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
+# Configure test with 8 steps (verify cluster, deploy driver, wait for driver, then 5 test steps)
+set_test_steps 8
+
 # Run test steps
 verify_cluster
 deploy_driver "nfs"
@@ -91,7 +94,6 @@ test_success "Pod is ready"
 
 # Write test data
 echo ""
-# Configure test with 8 total steps
 set_test_steps 8
 test_info "Writing test data to volume..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
@@ -100,7 +102,6 @@ test_success "Wrote test file: test.txt"
 
 # Write a large file to test data integrity
 echo ""
-# Configure test with 8 total steps
 test_info "Writing large file (${LARGE_FILE_SIZE_MB}MB) for integrity test..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     dd if=/dev/urandom of=/data/large-file.bin bs=1M count=${LARGE_FILE_SIZE_MB} 2>&1 | tail -3
@@ -108,7 +109,6 @@ test_success "Wrote large file: large-file.bin"
 
 # Calculate checksum of the large file
 echo ""
-# Configure test with 8 total steps
 test_info "Calculating checksum of large file..."
 if ! ORIGINAL_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- md5sum /data/large-file.bin 2>&1 | awk '{print $1}'); then
     test_error "Failed to calculate checksum of large file!"
@@ -120,7 +120,6 @@ test_info "Original checksum: ${ORIGINAL_CHECKSUM}"
 
 # Create a directory structure
 echo ""
-# Configure test with 8 total steps
 test_info "Creating directory structure..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "mkdir -p /data/subdir1/subdir2 && echo 'nested data' > /data/subdir1/subdir2/nested.txt"
@@ -128,7 +127,6 @@ test_success "Created nested directories and files"
 
 # List all files
 echo ""
-# Configure test with 8 total steps
 test_info "Current file structure:"
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     find /data -type f -exec ls -lh {} \;
@@ -176,7 +174,6 @@ test_success "Pod recreated and ready"
 
 # Verify data is intact
 echo ""
-# Configure test with 8 total steps
 test_info "Verifying test data persisted after graceful restart..."
 test_info "Expected data: '${TEST_DATA}'"
 
@@ -204,7 +201,6 @@ fi
 
 # Verify large file checksum
 echo ""
-# Configure test with 8 total steps
 test_info "Verifying large file integrity..."
 if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/large-file.bin"; then
     test_error "CRITICAL: large-file.bin does not exist after restart!"
@@ -232,7 +228,6 @@ fi
 
 # Verify nested file
 echo ""
-# Configure test with 8 total steps
 test_info "Verifying nested directory structure..."
 if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/subdir1/subdir2/nested.txt"; then
     test_error "CRITICAL: nested.txt does not exist after restart!"
@@ -299,7 +294,6 @@ test_success "New pod ready"
 
 # Verify all data is still intact after force delete
 echo ""
-# Configure test with 8 total steps
 test_info "Verifying all data persisted after force delete..."
 test_info "Expected data: '${TEST_DATA}'"
 
@@ -378,7 +372,6 @@ fi
 # Test 3: Write new data and verify persistence
 #######################################
 echo ""
-# Configure test with 8 total steps
 test_info "Writing additional data from new pod..."
 kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Data from second pod' > /data/second-pod.txt"
@@ -410,7 +403,6 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME}" \
     --timeout="${TIMEOUT_POD}"
 
 echo ""
-# Configure test with 8 total steps
 test_info "Verifying data from second pod persisted..."
 if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/second-pod.txt"; then
     test_error "CRITICAL: second-pod.txt does not exist!"
@@ -437,7 +429,6 @@ fi
 
 # Final file listing
 echo ""
-# Configure test with 8 total steps
 test_info "Final file structure:"
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     find /data -type f -exec ls -lh {} \;

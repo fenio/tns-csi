@@ -57,6 +57,9 @@ cleanup_concurrent_test() {
     test_success "Cleanup complete"
 }
 
+# Configure test with 4 steps: verify cluster, deploy driver, wait for driver, create PVCs
+set_test_steps 4
+
 # Run test steps
 verify_cluster
 
@@ -68,9 +71,6 @@ test_info "Expected subsystem NQN: ${SUBSYSTEM_NQN}"
 test_warning "IMPORTANT: The NVMe-oF subsystem with NQN '${SUBSYSTEM_NQN}' must be pre-configured"
 test_warning "in TrueNAS (Shares > NVMe-oF Subsystems) with at least one TCP port attached."
 echo ""
-
-# Configure test with 1 main step
-set_test_steps 1
 
 deploy_driver "nvmeof"
 wait_for_driver

@@ -57,13 +57,13 @@ cleanup_concurrent_test() {
     test_success "Cleanup complete"
 }
 
+# Configure test with 4 steps: verify cluster, deploy driver, wait for driver, create PVCs
+set_test_steps 4
+
 # Run test steps
 verify_cluster
 deploy_driver "nfs"
 wait_for_driver
-
-# Configure test with 1 main step
-set_test_steps 1
 
 #######################################
 # Test: Concurrent PVC Creation

@@ -21,6 +21,9 @@ echo "=========================================="
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "" ""; kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=120s || true; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
+# Configure test with 10 steps (verify cluster, deploy driver, wait for driver, then 7 test steps)
+set_test_steps 10
+
 # Run test steps
 verify_cluster
 deploy_driver "nvmeof"
@@ -31,9 +34,6 @@ MANIFEST_DIR="${SCRIPT_DIR}/manifests"
 if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-nvmeof.yaml" "test-pvc-nvmeof" "${PROTOCOL}"; then
     exit 0  # Gracefully skip test if not configured
 fi
-
-# Configure test with 7 total steps
-set_test_steps 7
 
 #######################################
 # Create headless service

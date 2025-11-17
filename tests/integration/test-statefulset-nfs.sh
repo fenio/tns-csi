@@ -21,13 +21,13 @@ echo "========================================"
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "" ""; kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=120s || true; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
+# Configure test with 9 steps (verify cluster, deploy driver, wait for driver, then 6 test steps)
+set_test_steps 9
+
 # Run test steps
 verify_cluster
 deploy_driver "nfs"
 wait_for_driver
-
-# Configure test with 6 total steps
-set_test_steps 6
 
 #######################################
 # Create headless service

@@ -595,7 +595,7 @@ deploy_driver() {
     
     echo ""
     echo "=== CSIDriver Resource ==="
-    kubectl get csidriver tns.csi.truenas.com -o yaml || true
+    kubectl get csidriver tns.csi.io -o yaml || true
     
     stop_test_timer "deploy_driver" "PASSED"
 }

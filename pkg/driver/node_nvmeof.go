@@ -58,6 +58,38 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		klog.Infof("NVMe-oF device already connected at %s (NQN: %s, NSID: %s, dataset: %s)",
 			devicePath, params.nqn, params.nsid, datasetName)
 
+		// CRITICAL: Flush device cache for "already connected" devices
+		// When NVMe-oF disconnect/reconnect happens rapidly (e.g., during test runs or pod restarts),
+		// the kernel may still have the device node present with STALE filesystem metadata from the
+		// previous ZVOL. If TrueNAS reuses the same NSID for a new ZVOL, we might read old data!
+		//
+		// This happens because:
+		// 1. Pod A uses ZVOL-1 on /dev/nvme0n2 (NSID=2)
+		// 2. Pod A deleted, CSI calls "nvme disconnect"
+		// 3. Kernel doesn't immediately remove /dev/nvme0n2, cached metadata remains
+		// 4. TrueNAS creates ZVOL-2, reuses NSID=2
+		// 5. Pod B connects, finds /dev/nvme0n2 "already connected"
+		// 6. blkid reads STALE filesystem UUID from kernel cache -> wrong data!
+		//
+		// Solution: Force kernel to invalidate caches before proceeding
+		klog.Infof("Flushing device cache for already-connected device %s to ensure fresh metadata", devicePath)
+		flushCtx, flushCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer flushCancel()
+		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+		if output, flushErr := flushCmd.CombinedOutput(); flushErr != nil {
+			klog.Warningf("Failed to flush device buffers for already-connected device %s: %v, output: %s (continuing anyway)", devicePath, flushErr, string(output))
+		} else {
+			klog.V(4).Infof("Successfully flushed device buffers for already-connected device %s", devicePath)
+		}
+
+		// Wait for udev to settle after cache flush
+		settleCtx, settleCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer settleCancel()
+		settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=5")
+		if settleOutput, settleErr := settleCmd.CombinedOutput(); settleErr != nil {
+			klog.V(4).Infof("udevadm settle failed for already-connected device: %v, output: %s (continuing anyway)", settleErr, string(settleOutput))
+		}
+
 		// Register this namespace as active to prevent premature disconnect
 		s.namespaceRegistry.Register(params.nqn, params.nsid)
 
@@ -532,7 +564,7 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	}
 }
 
-// disconnectNVMeOF disconnects from an NVMe-oF target.
+// disconnectNVMeOF disconnects from an NVMe-oF target and waits for device cleanup.
 func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	klog.V(4).Infof("Disconnecting from NVMe-oF target: %s", nqn)
 
@@ -551,5 +583,20 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	}
 
 	klog.V(4).Infof("Successfully disconnected from NVMe-oF target")
+
+	// CRITICAL: Wait for kernel to actually remove the device nodes
+	// Without this wait, rapid disconnect/reconnect cycles (common in tests and pod restarts)
+	// can lead to the "already connected" path finding stale devices with old filesystem metadata.
+	// Give the kernel a moment to clean up device nodes to prevent NSID reuse issues.
+	const deviceCleanupDelay = 2 * time.Second
+	klog.V(4).Infof("Waiting %v for kernel to cleanup NVMe devices after disconnect", deviceCleanupDelay)
+	select {
+	case <-time.After(deviceCleanupDelay):
+		klog.V(4).Infof("Device cleanup delay complete")
+	case <-ctx.Done():
+		klog.Warningf("Context cancelled during device cleanup delay: %v", ctx.Err())
+		return ctx.Err()
+	}
+
 	return nil
 }

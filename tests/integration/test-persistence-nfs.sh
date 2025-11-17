@@ -25,8 +25,8 @@ echo "========================================"
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
-# Configure test with 8 steps (verify cluster, deploy driver, wait for driver, then 5 test steps)
-set_test_steps 8
+# Configure test with 7 steps (verify cluster, deploy driver, wait for driver, then 4 test steps)
+set_test_steps 7
 
 # Run test steps
 verify_cluster
@@ -94,7 +94,6 @@ test_success "Pod is ready"
 
 # Write test data
 echo ""
-set_test_steps 8
 test_info "Writing test data to volume..."
 kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo '${TEST_DATA}' > /data/test.txt"
@@ -434,7 +433,6 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     find /data -type f -exec ls -lh {} \;
 
 # Verify metrics
-test_step "Verifying metrics collection"
 verify_metrics
 
 # Cleanup

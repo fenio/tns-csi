@@ -18,8 +18,8 @@ echo "================================================"
 echo "TrueNAS CSI - Orphaned Resource Detection Test"
 echo "================================================"
 echo ""
-# Configure test with 10 total steps
-set_test_steps 10
+# Configure test with 14 total steps
+set_test_steps 14
 echo "This test verifies:"
 echo "  • Datasets are cleaned up after PVC deletion"
 echo "  • NFS shares are removed properly"
@@ -333,7 +333,6 @@ test_success "Orphan detection checks passed"
 #######################################
 # Verify metrics
 #######################################
-test_step "Verifying metrics collection"
 verify_metrics
 
 #######################################

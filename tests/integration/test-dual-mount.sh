@@ -21,8 +21,8 @@ echo ""
 test_info "This test validates that NFS and NVMe-oF volumes can be mounted simultaneously in a single pod"
 echo ""
 
-# Configure test with 10 total steps
-set_test_steps 10
+# Configure test with 8 total steps
+set_test_steps 8
 
 # Check if test should be skipped
 if should_skip_test "${TEST_TAGS}"; then
@@ -39,7 +39,7 @@ cleanup_dual_test() {
     local pvc_nfs=$2
     local pvc_nvmeof=$3
     
-    test_step "Cleaning up test resources"
+    test_info "Cleaning up test resources"
     
     # Delete pod first
     if kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
@@ -147,11 +147,9 @@ if ! check_nvmeof_configured "${MANIFEST_DIR}/pvc-dual-nvmeof.yaml" "${PVC_NAME_
 fi
 
 # Create NFS PVC (immediate binding)
-test_step "Creating NFS PVC"
 create_pvc "${MANIFEST_DIR}/pvc-dual-nfs.yaml" "${PVC_NAME_NFS}"
 
 # Create NVMe-oF PVC (WaitForFirstConsumer binding - will bind when pod starts)
-test_step "Creating NVMe-oF PVC"
 create_pvc "${MANIFEST_DIR}/pvc-dual-nvmeof.yaml" "${PVC_NAME_NVMEOF}" "false"
 
 # Create pod with both volumes mounted
@@ -237,7 +235,6 @@ fi
 test_success "Volume isolation verified - both volumes operate independently"
 
 # Verify metrics
-test_step "Verifying CSI driver metrics"
 verify_metrics
 
 # Cleanup

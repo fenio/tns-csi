@@ -29,8 +29,8 @@ echo "  Pod Name: ${POD_NAME}"
 echo "  Test Data: '${TEST_DATA}'"
 echo ""
 
-# Configure test with 9 total steps
-set_test_steps 9
+# Configure test with 7 total steps
+set_test_steps 7
 
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
@@ -559,7 +559,6 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
     find /data -type f -exec ls -lh {} \;
 
 # Verify metrics
-test_step "Verifying metrics collection"
 verify_metrics
 
 # Cleanup

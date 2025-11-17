@@ -376,17 +376,18 @@ func (c *Client) readLoop() {
 		_, rawMsg, err := c.conn.ReadMessage()
 		//nolint:nestif // Complex WebSocket error handling with reconnection - necessary for stability
 		if err != nil {
-			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				klog.Errorf("WebSocket read error: %v", err)
-			}
-
-			// Check if client was intentionally closed
+			// Check if client was intentionally closed before logging errors
 			c.mu.Lock()
 			if c.closed {
 				c.mu.Unlock()
 				return
 			}
 			c.mu.Unlock()
+
+			// Log error only if not a normal closure
+			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				klog.Errorf("WebSocket read error: %v", err)
+			}
 
 			// Attempt to reconnect
 			if c.reconnect() {

@@ -75,6 +75,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		klog.Infof("Flushing device cache for already-connected device %s to ensure fresh metadata", devicePath)
 		flushCtx, flushCancel := context.WithTimeout(ctx, 5*time.Second)
 		defer flushCancel()
+		//nolint:gosec // blockdev with device path from validated NVMe discovery is safe
 		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
 		if output, flushErr := flushCmd.CombinedOutput(); flushErr != nil {
 			klog.Warningf("Failed to flush device buffers for already-connected device %s: %v, output: %s (continuing anyway)", devicePath, flushErr, string(output))
@@ -594,7 +595,7 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	case <-time.After(deviceCleanupDelay):
 		klog.V(4).Infof("Device cleanup delay complete")
 	case <-ctx.Done():
-		klog.Warningf("Context cancelled during device cleanup delay: %v", ctx.Err())
+		klog.Warningf("Context canceled during device cleanup delay: %v", ctx.Err())
 		return ctx.Err()
 	}
 

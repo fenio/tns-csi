@@ -1264,7 +1264,8 @@ cleanup_test() {
     local pvc_name=$2
     
     start_test_timer "cleanup_test"
-    test_step "Cleaning up test resources"
+    echo ""
+    test_info "Cleaning up test resources..."
     test_debug "Namespace: ${TEST_NAMESPACE}, Pod: ${pod_name}, PVC: ${pvc_name}"
     
     # Delete the entire namespace - this triggers CSI DeleteVolume

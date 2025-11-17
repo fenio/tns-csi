@@ -26,6 +26,9 @@ verify_cluster
 deploy_driver "nfs"
 wait_for_driver
 
+# Configure test with 6 total steps
+set_test_steps 6
+
 #######################################
 # Create headless service
 #######################################
@@ -119,8 +122,6 @@ done
 test_step "Verifying each pod has unique persistent volume"
 
 echo ""
-# Configure test with 10 total steps
-set_test_steps 10
 test_info "Checking PVCs created by volumeClaimTemplates..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     PVC_NAME="data-${STS_NAME}-${i}"
@@ -143,7 +144,6 @@ done
 test_step "Verifying data isolation between replicas"
 
 echo ""
-# Configure test with 10 total steps
 test_info "Checking each pod wrote to its own volume..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -168,7 +168,6 @@ done
 
 # Write unique data to each pod's volume
 echo ""
-# Configure test with 10 total steps
 test_info "Writing unique test data to each replica's volume..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -195,7 +194,6 @@ test_success "Scaled down to ${NEW_REPLICAS} replicas"
 
 # Verify remaining pods still have their data
 echo ""
-# Configure test with 10 total steps
 test_info "Verifying remaining pods retained their data..."
 for i in $(seq 0 $((NEW_REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
@@ -254,7 +252,6 @@ test_success "Scaled back up to ${REPLICAS} replicas"
 
 # Verify the scaled-up pod has the same PVC and data
 echo ""
-# Configure test with 10 total steps
 test_info "Verifying scaled-up pod reattached to original volume..."
 
 if ! IDENTITY=$(kubectl exec "${SCALED_UP_POD}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt 2>&1 | head -1); then
@@ -293,7 +290,6 @@ test_success "Pod ${TEST_POD} recreated"
 
 # Verify recreated pod has the same data
 echo ""
-# Configure test with 10 total steps
 test_info "Verifying recreated pod has original data..."
 
 if ! REPLICA_DATA=$(kubectl exec "${TEST_POD}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then

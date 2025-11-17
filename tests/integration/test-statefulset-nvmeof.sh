@@ -196,7 +196,7 @@ test_step "Testing scale down operation"
 # DIAGNOSTIC: Show state BEFORE scaling down
 test_info "BEFORE SCALE DOWN: Capturing baseline state..."
 test_info "Node NVMe devices before scale down:"
-kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app.kubernetes.io/component=node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
 
 # Check that all pods can still read their data BEFORE scaling
 test_info "Verifying all pods can read data BEFORE scale down..."
@@ -225,7 +225,7 @@ test_success "Scaled down to ${NEW_REPLICAS} replicas"
 test_info "Waiting 5 seconds for system to settle after pod deletion..."
 sleep 5
 test_info "AFTER SCALE DOWN: Checking node state..."
-kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app.kubernetes.io/component=node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'nvme list 2>&1 || echo "nvme list failed"; echo "=== Block devices ==="; lsblk | grep nvme || echo "No nvme in lsblk"' 2>&1 | head -30 || true
 
 # Verify remaining pods still have their data
 echo ""
@@ -234,7 +234,7 @@ test_info "Verifying remaining pods retained their data..."
 
 # First, show node state AFTER scaling down to understand the environment
 test_info "Checking NVMe device state on node after scale down..."
-kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app=tns-csi-node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'echo "=== NVMe devices ==="; ls -la /dev/nvme* 2>&1 || echo "No NVMe devices"; echo "=== NVMe list ==="; nvme list 2>&1 || echo "nvme list failed"' || true
+kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app.kubernetes.io/component=node -o jsonpath='{.items[0].metadata.name}') -c tns-csi-plugin -- sh -c 'echo "=== NVMe devices ==="; ls -la /dev/nvme* 2>&1 || echo "No NVMe devices"; echo "=== NVMe list ==="; nvme list 2>&1 || echo "nvme list failed"' || true
 
 for i in $(seq 0 $((NEW_REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"

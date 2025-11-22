@@ -10,7 +10,7 @@ on:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -27,7 +27,7 @@ jobs:
 
   test:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v5
 
@@ -47,7 +47,7 @@ jobs:
 
   build-and-push-dev:
     name: Build and Push Dev Image
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [lint, test]
     # Only push on main branch, not PRs
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -89,7 +89,7 @@ jobs:
 
   build-image-pr:
     name: Build Docker Image (PR)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [lint, test]
     # Only build (not push) on PRs
     if: github.event_name == 'pull_request'

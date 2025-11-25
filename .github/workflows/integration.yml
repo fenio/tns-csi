@@ -29,7 +29,7 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 10
     needs: pre-cleanup
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -73,7 +73,7 @@ jobs:
     timeout-minutes: 10
     needs: pre-cleanup
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -92,7 +92,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nfs
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -112,7 +112,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nvmeof
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -132,7 +132,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nfs
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -151,7 +151,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nvmeof
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -170,7 +170,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-concurrent-nfs
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-concurrent-nvmeof
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -208,7 +208,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-persistence-nfs
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -227,7 +227,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-persistence-nvmeof
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -246,7 +246,7 @@ jobs:
     timeout-minutes: 10
     needs: [integration-nfs, integration-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -265,7 +265,7 @@ jobs:
     timeout-minutes: 15
     needs: [integration-statefulset-nfs, integration-statefulset-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -284,7 +284,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nfs
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nfs
@@ -303,7 +303,7 @@ jobs:
     timeout-minutes: 10
     needs: integration-nvmeof
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -322,7 +322,7 @@ jobs:
     timeout-minutes: 10
     needs: [integration-nfs, integration-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -341,7 +341,7 @@ jobs:
     timeout-minutes: 10
     needs: [integration-nfs, integration-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -360,7 +360,7 @@ jobs:
     timeout-minutes: 20
     needs: [integration-nfs, integration-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -380,7 +380,7 @@ jobs:
     timeout-minutes: 15
     needs: [integration-concurrent-nfs, integration-concurrent-nvmeof]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
         with:
           protocol: nvmeof
@@ -400,7 +400,7 @@ jobs:
     needs: [integration-nfs, integration-nvmeof, integration-snapshot-nfs, integration-snapshot-nvmeof, integration-concurrent-nfs, integration-concurrent-nvmeof, integration-persistence-nfs, integration-persistence-nvmeof, integration-statefulset-nfs, integration-statefulset-nvmeof, integration-dual-mount, integration-connection-resilience, integration-volume-expansion-nfs, integration-volume-expansion-nvmeof, integration-pod-restart, integration-access-modes, integration-snapshot-restore, integration-volume-stress]
     if: always()
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       
       - name: Set up Go
         uses: actions/setup-go@v6

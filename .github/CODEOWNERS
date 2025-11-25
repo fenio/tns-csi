@@ -1,0 +1,24 @@
+# CODEOWNERS file for tns-csi
+# These owners will be automatically requested for review when someone opens a PR
+
+# Default owner for everything
+* @fenio
+
+# Core driver implementation
+/pkg/driver/ @fenio
+/pkg/tnsapi/ @fenio
+
+# Helm charts and deployment
+/charts/ @fenio
+/deploy/ @fenio
+
+# CI/CD workflows
+/.github/workflows/ @fenio
+
+# Documentation
+/docs/ @fenio
+README.md @fenio
+
+# Security-related files
+SECURITY.md @fenio
+.github/workflows/security.yml @fenio

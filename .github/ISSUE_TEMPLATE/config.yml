@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/fenio/tns-csi/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately - see SECURITY.md
+  - name: Documentation
+    url: https://github.com/fenio/tns-csi/tree/main/docs
+    about: Check the documentation for guides and examples

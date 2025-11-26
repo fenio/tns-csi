@@ -29,6 +29,7 @@ RUN apk add --no-cache \
     xfsprogs \
     blkid \
     util-linux \
+    eudev \
     nvme-cli
 
 # Copy the driver binary

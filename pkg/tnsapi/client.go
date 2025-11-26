@@ -677,13 +677,22 @@ func (c *Client) CreateDataset(ctx context.Context, params DatasetCreateParams) 
 func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 	klog.V(4).Infof("Deleting dataset: %s", datasetID)
 
+	// Use recursive and force flags to ensure dataset is deleted even if it has snapshots or children
+	// This prevents orphaned datasets when volumes are deleted after creating snapshots
 	var result bool
-	err := c.Call(ctx, "pool.dataset.delete", []interface{}{datasetID}, &result)
+	params := []interface{}{
+		datasetID,
+		map[string]interface{}{
+			"recursive": true,
+			"force":     true,
+		},
+	}
+	err := c.Call(ctx, "pool.dataset.delete", params, &result)
 	if err != nil {
 		return fmt.Errorf("failed to delete dataset: %w", err)
 	}
 
-	klog.V(4).Infof("Successfully deleted dataset: %s", datasetID)
+	klog.V(4).Infof("Successfully deleted dataset: %s (recursive)", datasetID)
 	return nil
 }
 

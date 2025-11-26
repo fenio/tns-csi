@@ -231,37 +231,6 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 	return nil
 }
 
-// needsFormat checks if a device needs to be formatted.
-// For block devices (especially cloned ZVOLs and reconnected NVMe-oF devices),
-// retry with exponential backoff to allow the device to become fully ready
-// before checking for existing filesystem.
-//
-// CRITICAL: This function must be extremely conservative about declaring a device
-// "needs formatting" because formatting destroys all existing data. After NVMe-oF
-// reconnections (especially after forced pod deletion), filesystem metadata may
-// take time to become visible to blkid.
-func needsFormat(ctx context.Context, devicePath string) (bool, error) {
-	const (
-		maxRetries     = 25
-		initialBackoff = 200 * time.Millisecond
-		maxBackoff     = 10 * time.Second
-	)
-
-	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff - being conservative to prevent data loss)",
-		devicePath, maxRetries, maxBackoff)
-
-	// CRITICAL: For NVMe devices, add initial stabilization delay before first check
-	if err := waitForNVMeStabilization(ctx, devicePath); err != nil {
-		return false, err
-	}
-
-	// Retry with exponential backoff to handle device readiness timing
-	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff)
-
-	// After all retries, handle the final result
-	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
-}
-
 // needsFormatWithRetries checks if a device needs formatting with different retry logic for clones vs new volumes.
 // For new volumes, we use fewer retries to avoid gRPC timeouts (3 retries ~30s).
 // For cloned volumes, we use many retries to ensure filesystem metadata has propagated (25 retries ~4min).

@@ -1,0 +1,47 @@
+name: Quick Snapshot Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  snapshot-test:
+    name: NVMe-oF Snapshot Test (Quick)
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      
+      - name: Clean TrueNAS artifacts
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "=== Pre-test cleanup ==="
+          ./scripts/cleanup-truenas-artifacts.sh
+      
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      
+      - uses: ./.github/actions/setup-k3s
+      
+      - uses: ./.github/actions/setup-snapshots
+      
+      - name: Run NVMe-oF Snapshot Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          ./tests/integration/test-snapshot-nvmeof.sh
+      
+      - name: Cleanup TrueNAS artifacts (post-test)
+        if: always()
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "=== Post-test cleanup ==="
+          ./scripts/cleanup-truenas-artifacts.sh

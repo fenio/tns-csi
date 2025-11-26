@@ -20,9 +20,10 @@ import (
 
 // Static errors for NVMe-oF operations.
 var (
-	ErrNVMeCLINotFound    = errors.New("nvme command not found - please install nvme-cli")
-	ErrNVMeDeviceNotFound = errors.New("NVMe device not found")
-	ErrNVMeDeviceTimeout  = errors.New("timeout waiting for NVMe device to appear")
+	ErrNVMeCLINotFound             = errors.New("nvme command not found - please install nvme-cli")
+	ErrNVMeDeviceNotFound          = errors.New("NVMe device not found")
+	ErrNVMeDeviceTimeout           = errors.New("timeout waiting for NVMe device to appear")
+	ErrDeviceInitializationTimeout = errors.New("device failed to initialize - size remained zero or unreadable")
 )
 
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
@@ -205,11 +206,11 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, totalTimeout)
 	defer cancel()
 
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		// Check if context is cancelled
+	for attempt := range maxAttempts {
+		// Check if context is canceled
 		select {
 		case <-timeoutCtx.Done():
-			return fmt.Errorf("timeout waiting for device %s initialization: %w", devicePath, timeoutCtx.Err())
+			return fmt.Errorf("%w for device %s: %w", ErrDeviceInitializationTimeout, devicePath, timeoutCtx.Err())
 		default:
 		}
 
@@ -235,12 +236,12 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 			select {
 			case <-time.After(checkInterval):
 			case <-timeoutCtx.Done():
-				return fmt.Errorf("timeout waiting for device %s initialization: %w", devicePath, timeoutCtx.Err())
+				return fmt.Errorf("%w for device %s: %w", ErrDeviceInitializationTimeout, devicePath, timeoutCtx.Err())
 			}
 		}
 	}
 
-	return fmt.Errorf("device %s failed to initialize after %d attempts (device size remained zero or unreadable)", devicePath, maxAttempts)
+	return ErrDeviceInitializationTimeout
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.

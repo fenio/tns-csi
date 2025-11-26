@@ -378,6 +378,18 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	klog.Infof("Formatting and mounting NVMe device: device=%s, path=%s, volume=%s, dataset=%s, NQN=%s, NSID=%s",
 		devicePath, stagingTargetPath, volumeID, datasetName, nqn, nsid)
 
+	// DEBUG: Log volumeContext to troubleshoot clonedFromSnapshot flag
+	keys := []string{}
+	for k := range volumeContext {
+		keys = append(keys, k)
+	}
+	klog.Infof("VolumeContext contains keys: %v", keys)
+	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists {
+		klog.Infof("VolumeContext clonedFromSnapshot flag: %s", cloned)
+	} else {
+		klog.Infof("VolumeContext does NOT contain clonedFromSnapshot key (new volume, not cloned)")
+	}
+
 	// Log device information for troubleshooting
 	s.logDeviceInfo(ctx, devicePath)
 
@@ -388,14 +400,20 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	// CRITICAL: Check if this volume was cloned from a snapshot
-	// If clonedFromSnapshot flag is set, SKIP formatting check entirely to preserve data
-	// ZFS clones inherit the filesystem from the snapshot, but the filesystem may not be
-	// immediately detectable by blkid due to kernel caching or metadata sync delays.
-	// Formatting a cloned volume would DESTROY the snapshot data.
+	// If clonedFromSnapshot flag is set, add extra stabilization delay before format check
+	// ZFS clones inherit the filesystem from the snapshot, but the filesystem metadata
+	// takes additional time to propagate through NVMe-oF layers and become visible to the kernel.
+	// The device size may be correct, but filesystem signatures (ext4 superblock) need more time.
 	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
-		klog.Warningf("Volume %s was cloned from snapshot - SKIPPING format check to preserve data", volumeID)
-		klog.Infof("Device %s is a cloned snapshot volume, assuming existing filesystem", devicePath)
-	} else if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, nsid); err != nil {
+		klog.Warningf("Volume %s was cloned from snapshot - adding extra stabilization delay before filesystem check", volumeID)
+		const cloneStabilizationDelay = 15 * time.Second
+		klog.Infof("Waiting %v for cloned volume %s filesystem metadata to stabilize", cloneStabilizationDelay, devicePath)
+		time.Sleep(cloneStabilizationDelay)
+		klog.Infof("Clone stabilization delay complete for %s", devicePath)
+	}
+
+	// Check if device needs formatting (will detect existing filesystem or format if needed)
+	if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, nsid); err != nil {
 		return nil, err
 	}
 

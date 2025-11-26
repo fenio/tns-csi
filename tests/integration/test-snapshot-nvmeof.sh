@@ -185,12 +185,52 @@ test_snapshot_restore() {
     
     test_step "Testing snapshot restore: ${pvc_name}"
     
+    # Show PVC manifest for debugging
+    echo ""
+    echo "=== PVC-from-snapshot Manifest ==="
+    cat "${pvc_manifest}"
+    echo ""
+    
     # Create PVC from snapshot
     kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}"
     
     # Note: With WaitForFirstConsumer, PVC won't bind until pod is created
     echo ""
     test_info "PVC created from snapshot (will bind when pod is created)"
+    
+    # Check PVC status immediately after creation
+    echo ""
+    echo "=== PVC Status (immediately after creation) ==="
+    kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o yaml
+    echo ""
+    
+    # Wait a moment for provisioner to process
+    test_info "Waiting 5 seconds for provisioner to process PVC..."
+    sleep 5
+    
+    # Check controller logs for CreateVolume calls
+    echo ""
+    echo "=== Controller Logs (after PVC creation) ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c tns-csi-plugin \
+        --tail=50 | grep -A 10 -B 5 "CreateVolume\|VolumeContentSource\|snapshot" || echo "No CreateVolume calls found"
+    echo ""
+    
+    # Check csi-provisioner logs
+    echo ""
+    echo "=== CSI Provisioner Sidecar Logs ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c csi-provisioner \
+        --tail=50 || echo "No provisioner logs found"
+    echo ""
+    
+    # Check PVC events
+    echo ""
+    echo "=== PVC Events ==="
+    kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}" | grep -A 20 "Events:" || echo "No events found"
+    echo ""
     
     # Create test pod manifest on the fly
     echo ""

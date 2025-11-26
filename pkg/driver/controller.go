@@ -109,6 +109,22 @@ func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *Cont
 func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("CreateVolume called with request: %+v", req)
 
+	// Detailed debug logging for snapshot troubleshooting
+	klog.Infof("=== CreateVolume Debug Info ===")
+	klog.Infof("Volume Name: %s", req.GetName())
+	klog.Infof("VolumeContentSource: %+v", req.GetVolumeContentSource())
+	if req.GetVolumeContentSource() != nil {
+		klog.Infof("VolumeContentSource Type: %T", req.GetVolumeContentSource().GetType())
+		klog.Infof("VolumeContentSource.Snapshot: %+v", req.GetVolumeContentSource().GetSnapshot())
+		klog.Infof("VolumeContentSource.Volume: %+v", req.GetVolumeContentSource().GetVolume())
+	}
+	klog.Infof("Parameters: %+v", req.GetParameters())
+	klog.Infof("CapacityRange: %+v", req.GetCapacityRange())
+	klog.Infof("VolumeCapabilities: %+v", req.GetVolumeCapabilities())
+	klog.Infof("AccessibilityRequirements: %+v", req.GetAccessibilityRequirements())
+	klog.Infof("Secrets: [REDACTED - %d keys]", len(req.GetSecrets()))
+	klog.Infof("===============================")
+
 	// Validate request
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume name is required")
@@ -136,6 +152,7 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, err
 	}
 	if existingVolume != nil {
+		klog.Infof("Returning existing volume for idempotency: %s", req.GetName())
 		return existingVolume, nil
 	}
 
@@ -161,8 +178,9 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		}
 
 		klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
+	} else {
+		klog.Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
 	}
-	klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
 
 	klog.Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
 

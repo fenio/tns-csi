@@ -230,7 +230,7 @@ storageClasses:
     # Filesystem type for formatted volumes (ext4, ext3, xfs)
     fsType: "ext4"
     reclaimPolicy: Delete
-    volumeBindingMode: WaitForFirstConsumer
+    volumeBindingMode: Immediate
     allowVolumeExpansion: true
     mountOptions: []
     parameters: {}

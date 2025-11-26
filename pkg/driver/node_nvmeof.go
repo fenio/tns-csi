@@ -404,7 +404,9 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	// ZFS clones inherit the filesystem from the snapshot, but the filesystem metadata
 	// takes additional time to propagate through NVMe-oF layers and become visible to the kernel.
 	// The device size may be correct, but filesystem signatures (ext4 superblock) need more time.
+	isClone := false
 	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
+		isClone = true
 		klog.Warningf("Volume %s was cloned from snapshot - adding extra stabilization delay before filesystem check", volumeID)
 		const cloneStabilizationDelay = 15 * time.Second
 		klog.Infof("Waiting %v for cloned volume %s filesystem metadata to stabilize", cloneStabilizationDelay, devicePath)
@@ -413,7 +415,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	// Check if device needs formatting (will detect existing filesystem or format if needed)
-	if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, nsid); err != nil {
+	if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, nsid, isClone); err != nil {
 		return nil, err
 	}
 
@@ -593,9 +595,10 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn, nsid string, t
 }
 
 // handleDeviceFormatting checks if a device needs formatting and formats it if necessary.
-func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn, nsid string) error {
-	// Check if device is already formatted (only for non-cloned volumes)
-	needsFormat, err := needsFormat(ctx, devicePath)
+func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn, nsid string, isClone bool) error {
+	// Check if device is already formatted
+	// Use different retry logic: new volumes format quickly, clones wait longer
+	needsFormat, err := needsFormatWithRetries(ctx, devicePath, isClone)
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
 	}

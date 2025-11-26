@@ -262,6 +262,39 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
 }
 
+// needsFormatWithRetries checks if a device needs formatting with different retry logic for clones vs new volumes.
+// For new volumes, we use fewer retries to avoid gRPC timeouts (3 retries ~30s).
+// For cloned volumes, we use many retries to ensure filesystem metadata has propagated (25 retries ~4min).
+func needsFormatWithRetries(ctx context.Context, devicePath string, isClone bool) (bool, error) {
+	var maxRetries int
+	if isClone {
+		maxRetries = 25 // Conservative for clones - allow time for filesystem metadata to propagate
+		klog.Infof("Checking cloned volume filesystem (max %d retries to avoid destroying clone data)", maxRetries)
+	} else {
+		maxRetries = 3 // Fast for new volumes - avoid gRPC timeout (typical 2min deadline)
+		klog.Infof("Checking new volume filesystem (max %d retries, will format if needed)", maxRetries)
+	}
+
+	const (
+		initialBackoff = 200 * time.Millisecond
+		maxBackoff     = 10 * time.Second
+	)
+
+	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff)",
+		devicePath, maxRetries, maxBackoff)
+
+	// CRITICAL: For NVMe devices, add initial stabilization delay before first check
+	if err := waitForNVMeStabilization(ctx, devicePath); err != nil {
+		return false, err
+	}
+
+	// Retry with exponential backoff to handle device readiness timing
+	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff)
+
+	// After all retries, handle the final result
+	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+}
+
 // waitForNVMeStabilization adds stabilization delay for NVMe devices.
 // This delay is in addition to the device initialization wait in stageNVMeDevice.
 // After the device reports non-zero size, we add a small additional delay before

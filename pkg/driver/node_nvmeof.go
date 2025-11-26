@@ -187,23 +187,85 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 	return nil
 }
 
+// waitForDeviceInitialization waits for an NVMe device to be fully initialized.
+// A device is considered initialized when it reports a non-zero size.
+// This is critical to prevent checking filesystem metadata on a device that hasn't
+// been fully initialized by the kernel yet, which can lead to false "no filesystem"
+// detection and subsequent data-destroying reformatting.
+func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
+	const (
+		maxAttempts   = 30               // 30 attempts
+		checkInterval = 1 * time.Second  // 1 second between checks
+		totalTimeout  = 35 * time.Second // Maximum wait time
+	)
+
+	klog.Infof("Waiting for device %s to be fully initialized (non-zero size)", devicePath)
+
+	// Create a context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, totalTimeout)
+	defer cancel()
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		// Check if context is cancelled
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("timeout waiting for device %s initialization: %w", devicePath, timeoutCtx.Err())
+		default:
+		}
+
+		// Get device size using blockdev
+		sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
+		cmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+		output, err := cmd.CombinedOutput()
+		sizeCancel()
+
+		if err == nil {
+			sizeStr := strings.TrimSpace(string(output))
+			if size, parseErr := strconv.ParseInt(sizeStr, 10, 64); parseErr == nil && size > 0 {
+				klog.Infof("Device %s initialized successfully with size %d bytes (after %d attempts)", devicePath, size, attempt+1)
+				return nil
+			}
+			klog.V(4).Infof("Device %s size check attempt %d/%d: size=%s (waiting for non-zero)", devicePath, attempt+1, maxAttempts, sizeStr)
+		} else {
+			klog.V(4).Infof("Device %s size check attempt %d/%d failed: %v (device may not be ready yet)", devicePath, attempt+1, maxAttempts, err)
+		}
+
+		// Wait before next attempt (unless this is the last attempt)
+		if attempt < maxAttempts-1 {
+			select {
+			case <-time.After(checkInterval):
+			case <-timeoutCtx.Done():
+				return fmt.Errorf("timeout waiting for device %s initialization: %w", devicePath, timeoutCtx.Err())
+			}
+		}
+	}
+
+	return fmt.Errorf("device %s failed to initialize after %d attempts (device size remained zero or unreadable)", devicePath, maxAttempts)
+}
+
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.
 func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
-	// CRITICAL: Wait for filesystem metadata to become available after device connection
+	// CRITICAL: Wait for device to be fully initialized before proceeding
 	// When NVMe-oF devices connect (either fresh or reconnect), the kernel may not have
-	// filesystem metadata immediately available. If we check too quickly with blkid,
-	// it won't detect an existing ext4 filesystem, causing an erroneous reformat that
-	// destroys user data. This is the same issue as snapshot clones but occurs during
-	// normal pod restarts when devices reconnect.
+	// the device fully initialized immediately. The device may appear in /dev but report
+	// 0 bytes in size, and filesystem metadata won't be readable by blkid/lsblk.
+	// If we check too quickly, it won't detect an existing ext4 filesystem, causing an
+	// erroneous reformat that destroys user data.
 	//
 	// IMPORTANT: After forced pod deletion (grace-period=0), NVMe-oF devices may take
 	// longer to stabilize because the previous connection was abruptly terminated.
 	// We need to ensure the kernel has fully synchronized the device state before
 	// checking for filesystems.
 	//
-	// For filesystem volumes, add a delay to ensure metadata is readable.
+	// For filesystem volumes, wait for device to be fully initialized.
 	if !isBlockVolume {
-		const deviceMetadataDelay = 8 * time.Second
+		// First, wait for device to report non-zero size (indicates device is initialized)
+		if err := waitForDeviceInitialization(ctx, devicePath); err != nil {
+			return nil, status.Errorf(codes.Internal, "Device initialization timeout: %v", err)
+		}
+
+		// Additional stabilization delay to ensure metadata is readable
+		const deviceMetadataDelay = 5 * time.Second
 		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
 		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)

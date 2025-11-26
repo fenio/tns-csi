@@ -242,9 +242,9 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 // take time to become visible to blkid.
 func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 	const (
-		maxRetries     = 15
+		maxRetries     = 25
 		initialBackoff = 200 * time.Millisecond
-		maxBackoff     = 5 * time.Second
+		maxBackoff     = 10 * time.Second
 	)
 
 	klog.Infof("Checking if device %s needs formatting (max %d retries with up to %v backoff - being conservative to prevent data loss)",
@@ -263,14 +263,15 @@ func needsFormat(ctx context.Context, devicePath string) (bool, error) {
 }
 
 // waitForNVMeStabilization adds stabilization delay for NVMe devices.
-// This delay is in addition to the delay in stageNVMeDevice and provides
-// extra protection before the filesystem check retry loop begins.
+// This delay is in addition to the device initialization wait in stageNVMeDevice.
+// After the device reports non-zero size, we add a small additional delay before
+// the filesystem check retry loop begins to give filesystem metadata time to settle.
 func waitForNVMeStabilization(ctx context.Context, devicePath string) error {
 	if !strings.Contains(devicePath, "/dev/nvme") {
 		return nil
 	}
 
-	const nvmeInitialDelay = 2 * time.Second
+	const nvmeInitialDelay = 3 * time.Second
 	klog.V(4).Infof("NVMe device detected, waiting %v before first filesystem check", nvmeInitialDelay)
 	select {
 	case <-time.After(nvmeInitialDelay):

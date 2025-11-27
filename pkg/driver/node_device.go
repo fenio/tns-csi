@@ -232,15 +232,28 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 }
 
 // needsFormatWithRetries checks if a device needs formatting with different retry logic for clones vs new volumes.
-// For new volumes, we use fewer retries to avoid gRPC timeouts (3 retries ~30s).
-// For cloned volumes, we use many retries to ensure filesystem metadata has propagated (25 retries ~4min).
+// For NVMe devices, we use many retries (15) because after abrupt disconnection (e.g., force delete),
+// the filesystem metadata may take time to become visible to blkid/lsblk.
+// For cloned volumes, we use even more retries (25) to ensure filesystem metadata has propagated.
+// For non-NVMe devices, we use fewer retries (3) to avoid gRPC timeouts.
 func needsFormatWithRetries(ctx context.Context, devicePath string, isClone bool) (bool, error) {
 	var maxRetries int
-	if isClone {
-		maxRetries = 25 // Conservative for clones - allow time for filesystem metadata to propagate
+	isNVMe := strings.Contains(devicePath, "/dev/nvme")
+
+	switch {
+	case isClone:
+		maxRetries = 25 // Most conservative for clones - allow time for filesystem metadata to propagate
 		klog.Infof("Checking cloned volume filesystem (max %d retries to avoid destroying clone data)", maxRetries)
-	} else {
-		maxRetries = 3 // Fast for new volumes - avoid gRPC timeout (typical 2min deadline)
+	case isNVMe:
+		// CRITICAL: NVMe devices need more retries even for non-clone volumes.
+		// After abrupt disconnection (force delete, pod crash), the device may appear
+		// quickly but filesystem metadata (ext4 superblock) takes longer to stabilize.
+		// Without sufficient retries, blkid/lsblk may not detect the existing filesystem,
+		// leading to erroneous reformatting and DATA LOSS.
+		maxRetries = 15 // Conservative for NVMe - protect existing data after reconnection
+		klog.Infof("Checking NVMe volume filesystem (max %d retries to protect existing data)", maxRetries)
+	default:
+		maxRetries = 3 // Fast for non-NVMe new volumes - avoid gRPC timeout (typical 2min deadline)
 		klog.Infof("Checking new volume filesystem (max %d retries, will format if needed)", maxRetries)
 	}
 

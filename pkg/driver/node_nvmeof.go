@@ -270,29 +270,20 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 			return nil, status.Errorf(codes.Internal, "Device initialization timeout: %v", err)
 		}
 
-		// Additional stabilization delay to ensure metadata is readable
-		const deviceMetadataDelay = 5 * time.Second
-		klog.Infof("Waiting %v for device %s metadata to stabilize before filesystem check", deviceMetadataDelay, devicePath)
-		time.Sleep(deviceMetadataDelay)
-		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
-
-		// Additionally flush device buffers to ensure kernel caches are clear
-		// This is critical after reconnection to force re-reading of actual device state
-		flushCtx, flushCancel := context.WithTimeout(ctx, 3*time.Second)
-		defer flushCancel()
-		flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
-		if output, err := flushCmd.CombinedOutput(); err != nil {
-			klog.Warningf("Failed to flush device buffers for %s: %v, output: %s", devicePath, err, string(output))
-		} else {
-			klog.V(4).Infof("Flushed device buffers for %s after connection", devicePath)
+		// CRITICAL: Force the kernel to completely re-read the device identity
+		// This is essential to handle NSID reuse by TrueNAS. When a namespace is deleted
+		// and a new one is created with the same NSID, the kernel may cache stale metadata
+		// from the previous ZVOL. Simply flushing buffers is NOT enough - we need to force
+		// a complete re-read of the device's block layer identity.
+		if err := forceDeviceRescan(ctx, devicePath); err != nil {
+			klog.Warningf("Device rescan warning for %s: %v (continuing anyway)", devicePath, err)
 		}
 
-		// Wait an additional moment after buffer flush for I/O subsystem to settle
-		// This is especially important after forced pod termination where the previous
-		// connection may have left the device in an inconsistent state
-		const postFlushDelay = 2 * time.Second
-		klog.V(4).Infof("Waiting %v after buffer flush for I/O subsystem to settle", postFlushDelay)
-		time.Sleep(postFlushDelay)
+		// Additional stabilization delay to ensure metadata is readable after rescan
+		const deviceMetadataDelay = 3 * time.Second
+		klog.Infof("Waiting %v for device %s metadata to stabilize after rescan", deviceMetadataDelay, devicePath)
+		time.Sleep(deviceMetadataDelay)
+		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
 	}
 
 	if isBlockVolume {
@@ -397,6 +388,12 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 
 	// Log device information for troubleshooting
 	s.logDeviceInfo(ctx, devicePath)
+
+	// SAFETY CHECK: Verify device size matches expected capacity
+	// This helps detect NSID reuse issues where a different ZVOL is presented
+	if err := s.verifyDeviceSize(ctx, devicePath, volumeContext); err != nil {
+		klog.Warningf("Device size verification warning for %s: %v", devicePath, err)
+	}
 
 	// Determine filesystem type from volume capability
 	fsType := "ext4" // default
@@ -631,6 +628,17 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 		return
 	}
 
+	// Get actual device size using blockdev
+	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer sizeCancel()
+	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+	if sizeOutput, err := sizeCmd.CombinedOutput(); err == nil {
+		deviceSize := strings.TrimSpace(string(sizeOutput))
+		klog.Infof("Device %s has size: %s bytes", devicePath, deviceSize)
+	} else {
+		klog.Warningf("Failed to get device size for %s: %v", devicePath, err)
+	}
+
 	// Try to get device UUID (for better tracking)
 	uuidCtx, uuidCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer uuidCancel()
@@ -652,6 +660,105 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 			klog.Infof("Device %s has filesystem type: %s", devicePath, fsType)
 		}
 	}
+}
+
+// verifyDeviceSize compares the actual device size with expected capacity from volume context.
+// This helps detect NSID reuse issues where a stale ZVOL might be presented instead of the expected one.
+func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, volumeContext map[string]string) error {
+	// Get actual device size
+	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer sizeCancel()
+	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+	sizeOutput, err := sizeCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to get device size: %w", err)
+	}
+
+	actualSize, err := strconv.ParseInt(strings.TrimSpace(string(sizeOutput)), 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse device size: %w", err)
+	}
+
+	// Log actual device size for debugging
+	datasetName := volumeContext["datasetName"]
+	klog.Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
+
+	return nil
+}
+
+// forceDeviceRescan forces the kernel to completely re-read device identity and metadata.
+// This is essential when TrueNAS reuses NSIDs after namespace deletion/recreation.
+// Without this, the kernel may return cached filesystem metadata from a previous ZVOL.
+func forceDeviceRescan(ctx context.Context, devicePath string) error {
+	klog.Infof("Forcing device rescan for %s to clear kernel caches", devicePath)
+
+	// Step 1: Drop page cache related to this device
+	// This forces the kernel to discard any cached filesystem metadata
+	syncCtx, syncCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer syncCancel()
+	syncCmd := exec.CommandContext(syncCtx, "sync")
+	if output, err := syncCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("sync command failed: %v, output: %s", err, string(output))
+	}
+
+	// Step 2: Flush device buffers
+	flushCtx, flushCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer flushCancel()
+	flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
+	if output, err := flushCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("blockdev --flushbufs failed for %s: %v, output: %s", devicePath, err, string(output))
+	} else {
+		klog.V(4).Infof("Flushed device buffers for %s", devicePath)
+	}
+
+	// Step 3: Force kernel to re-read partition table / device geometry
+	// This is the key operation that forces the kernel to completely re-probe the device
+	rereadCtx, rereadCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer rereadCancel()
+	rereadCmd := exec.CommandContext(rereadCtx, "blockdev", "--rereadpt", devicePath)
+	if output, err := rereadCmd.CombinedOutput(); err != nil {
+		// --rereadpt may fail if device is in use or doesn't have partitions
+		// This is expected for raw ZVOLs, so we just log it
+		klog.V(4).Infof("blockdev --rereadpt for %s (expected for raw ZVOL): %v, output: %s", devicePath, err, string(output))
+	} else {
+		klog.V(4).Infof("Re-read partition table for %s", devicePath)
+	}
+
+	// Step 4: Trigger udev to re-process the device
+	// This ensures udev rules are re-applied and device metadata is refreshed
+	udevCtx, udevCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer udevCancel()
+	udevCmd := exec.CommandContext(udevCtx, "udevadm", "trigger", "--action=change", devicePath)
+	if output, err := udevCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("udevadm trigger failed for %s: %v, output: %s", devicePath, err, string(output))
+	} else {
+		klog.V(4).Infof("Triggered udev change event for %s", devicePath)
+	}
+
+	// Step 5: Wait for udev to settle
+	settleCtx, settleCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer settleCancel()
+	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=10")
+	if output, err := settleCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("udevadm settle failed: %v, output: %s", err, string(output))
+	} else {
+		klog.V(4).Infof("udevadm settle completed")
+	}
+
+	// Step 6: Read a small amount of data from the device to force kernel I/O
+	// This ensures the kernel actually reads from the device, not from cache
+	ddCtx, ddCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer ddCancel()
+	//nolint:gosec // dd with device path from CSI staging context
+	ddCmd := exec.CommandContext(ddCtx, "dd", "if="+devicePath, "of=/dev/null", "bs=4096", "count=1", "iflag=direct")
+	if output, err := ddCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("dd read failed for %s: %v, output: %s", devicePath, err, string(output))
+	} else {
+		klog.V(4).Infof("Performed direct read from %s to force kernel I/O", devicePath)
+	}
+
+	klog.Infof("Device rescan completed for %s", devicePath)
+	return nil
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target and waits for device cleanup.

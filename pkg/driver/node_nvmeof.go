@@ -24,6 +24,7 @@ var (
 	ErrNVMeDeviceNotFound          = errors.New("NVMe device not found")
 	ErrNVMeDeviceTimeout           = errors.New("timeout waiting for NVMe device to appear")
 	ErrDeviceInitializationTimeout = errors.New("device failed to initialize - size remained zero or unreadable")
+	ErrNVMeControllerNotFound      = errors.New("could not extract NVMe controller path from device path")
 )
 
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
@@ -747,7 +748,7 @@ func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string
 	// The nvme ns-rescan command operates on the controller, not the namespace device
 	controllerPath := extractNVMeController(devicePath)
 	if controllerPath == "" {
-		return fmt.Errorf("could not extract controller path from %s", devicePath)
+		return fmt.Errorf("%w: %s", ErrNVMeControllerNotFound, devicePath)
 	}
 
 	klog.Infof("Rescanning NVMe namespace on controller %s (device: %s)", controllerPath, devicePath)
@@ -756,6 +757,7 @@ func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string
 	defer cancel()
 
 	// nvme ns-rescan forces the kernel to re-read namespace data from the target
+	//nolint:gosec // nvme ns-rescan with controller path derived from device path is expected for CSI driver
 	cmd := exec.CommandContext(rescanCtx, "nvme", "ns-rescan", controllerPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -768,8 +770,8 @@ func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string
 	return nil
 }
 
-// extractNVMeController extracts the controller device path from a namespace device path.
-// e.g., /dev/nvme0n1 -> /dev/nvme0, /dev/nvme1n2 -> /dev/nvme1
+// extractNVMeController extracts the controller device path from a namespace device path
+// (e.g., /dev/nvme0n1 -> /dev/nvme0, /dev/nvme1n2 -> /dev/nvme1).
 func extractNVMeController(devicePath string) string {
 	// Find the position of 'n' followed by a digit (the namespace part)
 	// Device format: /dev/nvmeXnY where X is controller number and Y is namespace number

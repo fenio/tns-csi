@@ -54,53 +54,31 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		volumeID, isBlockVolume, params.server, params.port, params.nqn, params.nsid, datasetName, namespaceID)
 
 	// Check if already connected
+	// CRITICAL: Following the pattern used by democratic-csi and iSCSI CSI drivers:
+	// If the device is already connected, REUSE the existing connection instead of
+	// disconnecting and reconnecting. Forced disconnect/reconnect was causing data loss
+	// because it confuses the kernel's device state.
+	//
+	// The proper approach is:
+	// 1. Find existing device path for the NQN/NSID
+	// 2. Rescan the namespace to ensure fresh data from the target
+	// 3. Proceed with staging using the existing device
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
-		// CRITICAL FIX: Force disconnect and reconnect to prevent stale data
-		//
-		// When we find a device "already connected", it could be a STALE device from a previous
-		// volume that used the same NSID. TrueNAS reuses NSIDs when namespaces are deleted and
-		// recreated. The kernel may still have the old device node cached with stale filesystem
-		// metadata from the previous ZVOL.
-		//
-		// The previous approach of just flushing buffers was INSUFFICIENT because:
-		// 1. blockdev --flushbufs only flushes in-memory buffers, not device identity
-		// 2. The kernel may still report the old device's filesystem metadata
-		// 3. blkid reads from kernel cache -> detects old ext4 -> skips format -> stale data!
-		//
-		// The ONLY reliable solution is to force a full disconnect/reconnect cycle.
-		// This ensures:
-		// 1. The kernel completely removes the old device node and all associated metadata
-		// 2. A fresh connection is established to the (possibly new) ZVOL backing this NSID
-		// 3. The kernel re-reads device metadata from the storage target
-		//
-		// Performance impact: ~3-5 seconds added to staging for "already connected" devices.
-		// This is acceptable because correctness (preventing data loss) is paramount.
-		klog.Warningf("STALE DEVICE PROTECTION: Found 'already connected' device %s for NQN=%s NSID=%s - forcing disconnect/reconnect to prevent stale data",
+		klog.Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
 			devicePath, params.nqn, params.nsid)
 
-		// Force disconnect
-		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
-			klog.Warningf("Failed to disconnect stale NVMe-oF device (will try to reconnect anyway): %v", disconnectErr)
-		} else {
-			klog.Infof("Successfully disconnected potentially stale NVMe-oF device for NQN=%s", params.nqn)
+		// Rescan the namespace to ensure we have fresh data from the target
+		// This is what democratic-csi does to ensure the kernel has current device state
+		if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
+			klog.Warningf("Failed to rescan NVMe namespace %s: %v (continuing anyway)", devicePath, rescanErr)
 		}
 
-		// Additional wait for kernel to fully remove device nodes
-		// The disconnectNVMeOF already waits 2 seconds, but for "already connected" devices
-		// we need extra time to ensure complete cleanup of cached metadata
-		const staleDeviceCleanupDelay = 3 * time.Second
-		klog.Infof("Waiting %v for kernel to fully cleanup stale device nodes after forced disconnect", staleDeviceCleanupDelay)
-		select {
-		case <-time.After(staleDeviceCleanupDelay):
-			klog.Infof("Stale device cleanup delay complete")
-		case <-ctx.Done():
-			return nil, status.Errorf(codes.DeadlineExceeded, "Context canceled during stale device cleanup: %v", ctx.Err())
-		}
+		// Register this namespace as active to prevent premature disconnect
+		s.namespaceRegistry.Register(params.nqn, params.nsid)
 
-		// Now fall through to the normal connection flow below
-		// This ensures we get a fresh connection with no cached metadata
-		klog.Infof("Proceeding with fresh NVMe-oF connection after forced disconnect")
+		// Proceed directly to staging with the existing device
+		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	}
 
 	// Check if nvme-cli is installed
@@ -759,6 +737,51 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 
 	klog.Infof("Device rescan completed for %s", devicePath)
 	return nil
+}
+
+// rescanNVMeNamespace rescans an NVMe namespace to ensure the kernel has fresh device data.
+// This is similar to what democratic-csi does with "nvme ns-rescan".
+// It forces the kernel to re-read namespace metadata from the target.
+func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string) error {
+	// Extract controller path from device path (e.g., /dev/nvme0n1 -> /dev/nvme0)
+	// The nvme ns-rescan command operates on the controller, not the namespace device
+	controllerPath := extractNVMeController(devicePath)
+	if controllerPath == "" {
+		return fmt.Errorf("could not extract controller path from %s", devicePath)
+	}
+
+	klog.Infof("Rescanning NVMe namespace on controller %s (device: %s)", controllerPath, devicePath)
+
+	rescanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// nvme ns-rescan forces the kernel to re-read namespace data from the target
+	cmd := exec.CommandContext(rescanCtx, "nvme", "ns-rescan", controllerPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// ns-rescan may not be supported on all nvme-cli versions
+		klog.V(4).Infof("nvme ns-rescan failed for %s: %v, output: %s (this may be OK)", controllerPath, err, string(output))
+		return fmt.Errorf("ns-rescan failed: %w, output: %s", err, string(output))
+	}
+
+	klog.Infof("Successfully rescanned NVMe namespace on controller %s", controllerPath)
+	return nil
+}
+
+// extractNVMeController extracts the controller device path from a namespace device path.
+// e.g., /dev/nvme0n1 -> /dev/nvme0, /dev/nvme1n2 -> /dev/nvme1
+func extractNVMeController(devicePath string) string {
+	// Find the position of 'n' followed by a digit (the namespace part)
+	// Device format: /dev/nvmeXnY where X is controller number and Y is namespace number
+	for i := len(devicePath) - 1; i >= 0; i-- {
+		if devicePath[i] == 'n' && i > 0 && devicePath[i-1] >= '0' && devicePath[i-1] <= '9' {
+			// Check if this 'n' is followed by digits (namespace number)
+			if i+1 < len(devicePath) && devicePath[i+1] >= '0' && devicePath[i+1] <= '9' {
+				return devicePath[:i]
+			}
+		}
+	}
+	return ""
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target and waits for device cleanup.

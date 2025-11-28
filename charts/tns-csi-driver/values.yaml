@@ -244,7 +244,10 @@ storageClasses:
     # Filesystem type for formatted volumes (ext4, ext3, xfs)
     fsType: "ext4"
     reclaimPolicy: Delete
-    volumeBindingMode: WaitForFirstConsumer
+    # NOTE: Must use Immediate for snapshot restore to work correctly.
+    # WaitForFirstConsumer causes csi-provisioner to not pass VolumeContentSource
+    # (snapshot reference) to CreateVolume, resulting in empty volumes instead of clones.
+    volumeBindingMode: Immediate
     allowVolumeExpansion: true
     mountOptions: []
     parameters: {}

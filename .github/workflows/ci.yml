@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ '**' ]  # All branches
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -45,12 +45,12 @@ jobs:
       - name: Build
         run: make build
 
-  build-and-push-dev:
-    name: Build and Push Dev Image
+  build-and-push:
+    name: Build and Push Image
     runs-on: self-hosted
     needs: [lint, test]
-    # Only push on main branch, not PRs
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Push on any branch push or manual trigger (not PRs)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       packages: write
@@ -73,12 +73,38 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push dev images
+      - name: Extract branch name
+        id: branch
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BRANCH=${GITHUB_REF#refs/heads/}
+          else
+            BRANCH=${{ github.ref_name }}
+          fi
+          # Sanitize branch name for docker tag (replace / with -)
+          TAG=$(echo "$BRANCH" | sed 's/\//-/g')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "is_main=$([[ '$BRANCH' == 'main' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Build and push images
         uses: docker/build-push-action@v6
         with:
           context: .
           # Only build amd64 for faster CI (ARM64 builds via QEMU take 10+ minutes)
           # Multi-arch builds happen in release workflow for tagged versions
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi:${{ steps.branch.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ steps.branch.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push latest tag (main branch only)
+        if: steps.branch.outputs.is_main == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
           platforms: linux/amd64
           push: true
           tags: |

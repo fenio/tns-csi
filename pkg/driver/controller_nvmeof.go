@@ -187,6 +187,8 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
 				"nvmeofNamespaceID": strconv.Itoa(ns.ID),
 				"nsid":              strconv.Itoa(ns.NSID),
+				// Include expected capacity for device verification during staging
+				"expectedCapacity": strconv.FormatInt(existingCapacity, 10),
 			}
 
 			// Record volume capacity metric (use EXISTING capacity, not requested)
@@ -302,6 +304,9 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
 		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
 		"nsid":              strconv.Itoa(namespace.NSID),
+		// Include expected capacity for device verification during staging
+		// This helps detect NSID reuse issues where TrueNAS presents a different ZVOL
+		"expectedCapacity": strconv.FormatInt(requestedCapacity, 10),
 	}
 
 	klog.Infof("Created NVMe-oF volume: %s", volumeName)
@@ -521,6 +526,9 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	if requestedCapacity == 0 {
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
+
+	// Include expected capacity for device verification during staging
+	volumeContext["expectedCapacity"] = strconv.FormatInt(requestedCapacity, 10)
 
 	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
 	// This signals to the node that the volume has existing data and should NEVER be formatted

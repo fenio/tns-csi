@@ -25,6 +25,7 @@ var (
 	ErrNVMeDeviceTimeout           = errors.New("timeout waiting for NVMe device to appear")
 	ErrDeviceInitializationTimeout = errors.New("device failed to initialize - size remained zero or unreadable")
 	ErrNVMeControllerNotFound      = errors.New("could not extract NVMe controller path from device path")
+	ErrDeviceSizeMismatch          = errors.New("device size does not match expected capacity - possible NSID reuse")
 )
 
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
@@ -370,8 +371,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 
 	// SAFETY CHECK: Verify device size matches expected capacity
 	// This helps detect NSID reuse issues where a different ZVOL is presented
+	// CRITICAL: If size mismatch is detected, fail the staging to prevent data corruption
 	if err := s.verifyDeviceSize(ctx, devicePath, volumeContext); err != nil {
-		klog.Warningf("Device size verification warning for %s: %v", devicePath, err)
+		klog.Errorf("Device size verification FAILED for %s: %v", devicePath, err)
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"Device size mismatch detected - refusing to mount to prevent data corruption: %v", err)
 	}
 
 	// Determine filesystem type from volume capability
@@ -643,6 +647,7 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 
 // verifyDeviceSize compares the actual device size with expected capacity from volume context.
 // This helps detect NSID reuse issues where a stale ZVOL might be presented instead of the expected one.
+// Returns an error if the device size does not match the expected capacity (with tolerance for ZFS overhead).
 func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, volumeContext map[string]string) error {
 	// Get actual device size
 	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
@@ -662,6 +667,46 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, v
 	datasetName := volumeContext["datasetName"]
 	klog.V(4).Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
 
+	// Get expected capacity from volume context
+	expectedCapacityStr := volumeContext["expectedCapacity"]
+	if expectedCapacityStr == "" {
+		klog.V(4).Infof("No expectedCapacity in volume context for %s, skipping size verification", devicePath)
+		return nil
+	}
+
+	expectedCapacity, err := strconv.ParseInt(expectedCapacityStr, 10, 64)
+	if err != nil {
+		klog.Warningf("Failed to parse expectedCapacity '%s' for %s: %v", expectedCapacityStr, devicePath, err)
+		return nil
+	}
+
+	// CRITICAL: Verify the device size matches expected capacity
+	// Allow a tolerance of 10% to account for ZFS overhead and rounding
+	// But reject if the size is way off (e.g., completely different volume)
+	sizeDiff := actualSize - expectedCapacity
+	if sizeDiff < 0 {
+		sizeDiff = -sizeDiff
+	}
+
+	// Calculate tolerance: 10% of expected capacity, minimum 100MB
+	tolerance := expectedCapacity / 10
+	if tolerance < 100*1024*1024 {
+		tolerance = 100 * 1024 * 1024
+	}
+
+	if sizeDiff > tolerance {
+		klog.Errorf("CRITICAL: Device size mismatch detected for %s!", devicePath)
+		klog.Errorf("  Expected capacity: %d bytes (%d GiB)", expectedCapacity, expectedCapacity/(1024*1024*1024))
+		klog.Errorf("  Actual device size: %d bytes (%d GiB)", actualSize, actualSize/(1024*1024*1024))
+		klog.Errorf("  Difference: %d bytes (%d GiB)", sizeDiff, sizeDiff/(1024*1024*1024))
+		klog.Errorf("  This indicates NSID reuse - TrueNAS is presenting a different ZVOL than expected!")
+		klog.Errorf("  Dataset: %s, NQN: %s, NSID: %s", datasetName, volumeContext["nqn"], volumeContext["nsid"])
+		return fmt.Errorf("%w: expected %d bytes, got %d bytes (diff: %d bytes)",
+			ErrDeviceSizeMismatch, expectedCapacity, actualSize, sizeDiff)
+	}
+
+	klog.V(4).Infof("Device size verification passed for %s: expected=%d, actual=%d, diff=%d (tolerance=%d)",
+		devicePath, expectedCapacity, actualSize, sizeDiff, tolerance)
 	return nil
 }
 

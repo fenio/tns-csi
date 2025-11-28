@@ -91,6 +91,7 @@ spec:
             - "--timeout=60s"
             - "--leader-election"
             - "--default-fstype=nfs"
+            - "--extra-create-metadata"
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock

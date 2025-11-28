@@ -24,10 +24,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Compute the image tag from branch name (handles / -> - conversion)
+  compute-tag:
+    name: Compute Image Tag
+    runs-on: self-hosted
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Compute image tag from branch
+        id: tag
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "main" ]; then
+            TAG="latest"
+          else
+            # Sanitize branch name for docker tag (replace / with -)
+            TAG=$(echo "$BRANCH" | sed 's/\//-/g')
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG (from branch: $BRANCH)"
+
   pre-cleanup:
     name: Pre-Test Cleanup
     runs-on: self-hosted
     timeout-minutes: 10
+    needs: compute-tag
     steps:
       - uses: actions/checkout@v6
       
@@ -52,7 +73,7 @@ jobs:
     name: NFS Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: pre-cleanup
+    needs: [compute-tag, pre-cleanup]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -64,6 +85,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-nfs.sh
 
@@ -71,7 +93,7 @@ jobs:
     name: NVMe-oF Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: pre-cleanup
+    needs: [compute-tag, pre-cleanup]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -83,6 +105,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-nvmeof.sh
 
@@ -90,7 +113,7 @@ jobs:
     name: NFS Snapshot Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nfs
+    needs: [compute-tag, integration-nfs]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -103,6 +126,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-snapshot-nfs.sh
 
@@ -110,7 +134,7 @@ jobs:
     name: NVMe-oF Snapshot Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nvmeof
+    needs: [compute-tag, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -123,6 +147,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-snapshot-nvmeof.sh
 
@@ -130,7 +155,7 @@ jobs:
     name: NFS Concurrent Volume Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nfs
+    needs: [compute-tag, integration-nfs]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -142,6 +167,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-concurrent-nfs.sh
 
@@ -149,7 +175,7 @@ jobs:
     name: NVMe-oF Concurrent Volume Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nvmeof
+    needs: [compute-tag, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -161,6 +187,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-concurrent-nvmeof.sh
 
@@ -168,7 +195,7 @@ jobs:
     name: NFS Data Persistence Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-concurrent-nfs
+    needs: [compute-tag, integration-concurrent-nfs]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -180,6 +207,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-persistence-nfs.sh
 
@@ -187,7 +215,7 @@ jobs:
     name: NVMe-oF Data Persistence Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-concurrent-nvmeof
+    needs: [compute-tag, integration-concurrent-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -199,6 +227,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-persistence-nvmeof.sh
 
@@ -206,7 +235,7 @@ jobs:
     name: NFS StatefulSet Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-persistence-nfs
+    needs: [compute-tag, integration-persistence-nfs]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -218,6 +247,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-statefulset-nfs.sh
 
@@ -225,7 +255,7 @@ jobs:
     name: NVMe-oF StatefulSet Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-persistence-nvmeof
+    needs: [compute-tag, integration-persistence-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -237,6 +267,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-statefulset-nvmeof.sh
 
@@ -244,7 +275,7 @@ jobs:
     name: Dual Mount Tests (NFS + NVMe-oF)
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [integration-nfs, integration-nvmeof]
+    needs: [compute-tag, integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -256,6 +287,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-dual-mount.sh
 
@@ -263,7 +295,7 @@ jobs:
     name: Connection Resilience Tests
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [integration-statefulset-nfs, integration-statefulset-nvmeof]
+    needs: [compute-tag, integration-statefulset-nfs, integration-statefulset-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -275,6 +307,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-connection-resilience.sh
 
@@ -282,7 +315,7 @@ jobs:
     name: NFS Volume Expansion Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nfs
+    needs: [compute-tag, integration-nfs]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -294,6 +327,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-volume-expansion-nfs.sh
 
@@ -301,7 +335,7 @@ jobs:
     name: NVMe-oF Volume Expansion Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: integration-nvmeof
+    needs: [compute-tag, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -313,6 +347,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-volume-expansion-nvmeof.sh
 
@@ -320,7 +355,7 @@ jobs:
     name: Pod Restart and Reattachment Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [integration-nfs, integration-nvmeof]
+    needs: [compute-tag, integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -332,6 +367,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-pod-restart.sh
 
@@ -339,7 +375,7 @@ jobs:
     name: Access Mode Validation Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [integration-nfs, integration-nvmeof]
+    needs: [compute-tag, integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -351,6 +387,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-access-modes.sh
 
@@ -358,7 +395,7 @@ jobs:
     name: Snapshot Restore Verification Tests
     runs-on: self-hosted
     timeout-minutes: 20
-    needs: [integration-nfs, integration-nvmeof]
+    needs: [compute-tag, integration-nfs, integration-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -371,6 +408,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-snapshot-restore.sh
 
@@ -378,7 +416,7 @@ jobs:
     name: Volume Limits Stress Tests
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [integration-concurrent-nfs, integration-concurrent-nvmeof]
+    needs: [compute-tag, integration-concurrent-nfs, integration-concurrent-nvmeof]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -390,6 +428,7 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: |
           ./tests/integration/test-volume-stress.sh
 

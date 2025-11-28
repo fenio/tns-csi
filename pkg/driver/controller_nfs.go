@@ -56,7 +56,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	klog.Infof("Creating dataset: %s with capacity: %d bytes", datasetName, requestedCapacity)
+	klog.V(4).Infof("Creating dataset: %s with capacity: %d bytes", datasetName, requestedCapacity)
 
 	// Check if dataset already exists (idempotency)
 	existingDatasets, err := s.apiClient.QueryAllDatasets(ctx, datasetName)
@@ -68,7 +68,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	// If dataset exists, check if it matches the request
 	if len(existingDatasets) > 0 {
 		existingDataset := existingDatasets[0]
-		klog.Infof("Dataset %s already exists (ID: %s), checking idempotency", datasetName, existingDataset.ID)
+		klog.V(4).Infof("Dataset %s already exists (ID: %s), checking idempotency", datasetName, existingDataset.ID)
 
 		// Check if an NFS share exists for this dataset
 		existingShares, shareErr := s.apiClient.QueryAllNFSShares(ctx, existingDataset.Mountpoint)
@@ -80,7 +80,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		if len(existingShares) > 0 {
 			// Volume already exists with NFS share - check if capacity matches
 			existingShare := existingShares[0]
-			klog.Infof("NFS volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
+			klog.V(4).Infof("NFS volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
 
 			// Parse capacity from comment (format: "CSI Volume: name, Capacity: bytes")
 			// If comment doesn't contain capacity, assume it matches (backward compatibility)
@@ -103,7 +103,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 					volumeID, existingCapacity, requestedCapacity)
 			}
 
-			klog.Infof("Capacity is compatible, returning existing volume")
+			klog.V(4).Infof("Capacity is compatible, returning existing volume")
 
 			// Build volume metadata
 			meta := VolumeMetadata{
@@ -155,7 +155,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	if len(existingDatasets) > 0 {
 		// Dataset exists but no NFS share - use existing dataset
 		dataset = &existingDatasets[0]
-		klog.Infof("Using existing dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
+		klog.V(4).Infof("Using existing dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
 	} else {
 		// Create new dataset
 		newDataset, createErr := s.apiClient.CreateDataset(ctx, tnsapi.DatasetCreateParams{
@@ -167,7 +167,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 			return nil, status.Errorf(codes.Internal, "Failed to create dataset: %v", createErr)
 		}
 		dataset = newDataset
-		klog.Infof("Created dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
+		klog.V(4).Infof("Created dataset: %s with mountpoint: %s", dataset.Name, dataset.Mountpoint)
 	}
 
 	// Step 2: Create NFS share for the dataset
@@ -191,7 +191,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		return nil, status.Errorf(codes.Internal, "Failed to create NFS share: %v", err)
 	}
 
-	klog.Infof("Created NFS share with ID: %d for path: %s", nfsShare.ID, nfsShare.Path)
+	klog.V(4).Infof("Created NFS share with ID: %d for path: %s", nfsShare.ID, nfsShare.Path)
 
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
@@ -226,7 +226,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		"nfsShareID":  strconv.Itoa(nfsShare.ID),
 	}
 
-	klog.Infof("Successfully created NFS volume with encoded ID: %s", encodedVolumeID)
+	klog.Infof("Created NFS volume: %s", volumeName)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requestedCapacity)
@@ -249,9 +249,9 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	// Delete ZFS dataset - TrueNAS automatically deletes associated NFS shares
 	// when the dataset is deleted, so we don't need to explicitly delete the share
 	if meta.DatasetID == "" {
-		klog.Infof("No dataset ID provided, skipping dataset deletion")
+		klog.V(4).Infof("No dataset ID provided, skipping dataset deletion")
 	} else {
-		klog.Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
+		klog.V(4).Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
 		err := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
 		if err != nil && !isNotFoundError(err) {
 			// For non-idempotent errors, return error to trigger retry and prevent orphaned datasets
@@ -259,13 +259,13 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 			return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
 		}
 		if err == nil {
-			klog.Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
+			klog.V(4).Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
 		} else {
-			klog.Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+			klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 		}
 	}
 
-	klog.Infof("Successfully deleted NFS volume: %s", meta.Name)
+	klog.Infof("Deleted NFS volume: %s", meta.Name)
 
 	// Remove volume capacity metric
 	// Note: We need to reconstruct the volumeID to delete the metric
@@ -300,7 +300,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		return nil, status.Errorf(codes.Internal, "Failed to create NFS share for cloned volume: %v", err)
 	}
 
-	klog.Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
+	klog.V(4).Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
 
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
@@ -343,7 +343,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	klog.Infof("Successfully created NFS volume from snapshot with encoded ID: %s", encodedVolumeID)
+	klog.Infof("Created NFS volume from snapshot: %s", volumeName)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requestedCapacity)
@@ -379,7 +379,7 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 	// For NFS volumes, we update the quota on the dataset
 	// Note: ZFS datasets don't have a strict "size", but we can set a quota
 	// to limit the maximum space usage
-	klog.Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New Quota: %d bytes",
+	klog.V(4).Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New Quota: %d bytes",
 		meta.DatasetID, meta.DatasetName, requiredBytes)
 
 	updateParams := tnsapi.DatasetUpdateParams{
@@ -397,7 +397,7 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 				"Error: %v", meta.DatasetID, meta.DatasetName, err)
 	}
 
-	klog.Infof("Successfully expanded NFS volume %s to %d bytes", meta.Name, requiredBytes)
+	klog.Infof("Expanded NFS volume: %s to %d bytes", meta.Name, requiredBytes)
 
 	// Update volume capacity metric
 	// Note: We need to reconstruct the volumeID to update the metric

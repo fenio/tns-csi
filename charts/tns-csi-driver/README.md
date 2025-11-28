@@ -387,15 +387,40 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c csi-pro
 
 ### Enable Debug Logging
 
-Add verbose logging to troubleshoot issues:
+The CSI driver uses log levels to control verbosity:
+
+| Level | Description |
+|-------|-------------|
+| 0 | Errors only |
+| 2 | Normal operation (default) - volume created/deleted messages |
+| 4 | Detailed operations - API calls, staging details |
+| 5 | Debug - request/response bodies, context dumps |
+
+**Option 1: Use the debug flag (recommended)**
+
+Set `controller.debug=true` and/or `node.debug=true` to enable verbose logging (equivalent to level 4+):
 
 ```bash
 helm upgrade tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --reuse-values \
-  --set controller.extraArgs="{--v=5}" \
-  --set node.extraArgs="{--v=5}"
+  --set controller.debug=true \
+  --set node.debug=true
 ```
+
+**Option 2: Set log level directly**
+
+```bash
+helm upgrade tns-csi ./charts/tns-csi-driver \
+  --namespace kube-system \
+  --reuse-values \
+  --set controller.logLevel=4 \
+  --set node.logLevel=4
+```
+
+**Option 3: Set DEBUG_CSI environment variable**
+
+If running the driver directly (outside Helm), set `DEBUG_CSI=true` or `DEBUG_CSI=1` to enable verbose logging.
 
 ## Development
 

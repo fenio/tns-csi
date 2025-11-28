@@ -28,7 +28,7 @@ func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublish
 		return nil, status.Error(codes.InvalidArgument, "server and share must be provided in volume context for NFS volumes")
 	}
 
-	klog.Infof("Mounting NFS volume %s from %s:%s to %s", volumeID, server, share, targetPath)
+	klog.V(4).Infof("Mounting NFS volume %s from %s:%s to %s", volumeID, server, share, targetPath)
 
 	// Check if target path exists, create if not
 	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
@@ -77,6 +77,6 @@ func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublish
 		return nil, status.Errorf(codes.Internal, "Failed to mount NFS share: %v, output: %s", err, string(output))
 	}
 
-	klog.Infof("Successfully mounted NFS volume %s at %s", volumeID, targetPath)
+	klog.V(4).Infof("Mounted NFS volume %s at %s", volumeID, targetPath)
 	return &csi.NodePublishVolumeResponse{}, nil
 }

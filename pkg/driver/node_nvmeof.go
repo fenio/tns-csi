@@ -51,7 +51,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	isBlockVolume := volumeCapability.GetBlock() != nil
 	datasetName := volumeContext["datasetName"]
 	namespaceID := volumeContext["nvmeofNamespaceID"]
-	klog.Infof("Staging NVMe-oF volume %s (block mode: %v): server=%s:%s, NQN=%s, NSID=%s, dataset=%s, namespace=%s",
+	klog.V(4).Infof("Staging NVMe-oF volume %s (block mode: %v): server=%s:%s, NQN=%s, NSID=%s, dataset=%s, namespace=%s",
 		volumeID, isBlockVolume, params.server, params.port, params.nqn, params.nsid, datasetName, namespaceID)
 
 	// Check if already connected
@@ -66,7 +66,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	// 3. Proceed with staging using the existing device
 	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
 	if err == nil && devicePath != "" {
-		klog.Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
+		klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
 			devicePath, params.nqn, params.nsid)
 
 		// Rescan the namespace to ensure we have fresh data from the target
@@ -103,7 +103,7 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 			params.nqn, params.nsid, err)
 	}
 
-	klog.Infof("NVMe-oF device connected at %s (NQN: %s, NSID: %s, dataset: %s)",
+	klog.V(4).Infof("NVMe-oF device connected at %s (NQN: %s, NSID: %s, dataset: %s)",
 		devicePath, params.nqn, params.nsid, datasetName)
 
 	// Register this namespace as active to prevent premature disconnect
@@ -154,7 +154,7 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 	}
 
 	// Connect to the NVMe-oF target
-	klog.Infof("Connecting to NVMe-oF target: %s", params.nqn)
+	klog.V(4).Infof("Connecting to NVMe-oF target: %s", params.nqn)
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer connectCancel()
 	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
@@ -184,7 +184,7 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 		totalTimeout  = 35 * time.Second // Maximum wait time
 	)
 
-	klog.Infof("Waiting for device %s to be fully initialized (non-zero size)", devicePath)
+	klog.V(4).Infof("Waiting for device %s to be fully initialized (non-zero size)", devicePath)
 
 	// Create a context with timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, totalTimeout)
@@ -207,7 +207,7 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 		if err == nil {
 			sizeStr := strings.TrimSpace(string(output))
 			if size, parseErr := strconv.ParseInt(sizeStr, 10, 64); parseErr == nil && size > 0 {
-				klog.Infof("Device %s initialized successfully with size %d bytes (after %d attempts)", devicePath, size, attempt+1)
+				klog.V(4).Infof("Device %s initialized successfully with size %d bytes (after %d attempts)", devicePath, size, attempt+1)
 				return nil
 			}
 			klog.V(4).Infof("Device %s size check attempt %d/%d: size=%s (waiting for non-zero)", devicePath, attempt+1, maxAttempts, sizeStr)
@@ -260,9 +260,9 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 
 		// Additional stabilization delay to ensure metadata is readable after rescan
 		const deviceMetadataDelay = 3 * time.Second
-		klog.Infof("Waiting %v for device %s metadata to stabilize after rescan", deviceMetadataDelay, devicePath)
+		klog.V(4).Infof("Waiting %v for device %s metadata to stabilize after rescan", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
-		klog.Infof("Device metadata stabilization delay complete for %s", devicePath)
+		klog.V(4).Infof("Device metadata stabilization delay complete for %s", devicePath)
 	}
 
 	if isBlockVolume {
@@ -276,7 +276,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
-	klog.Infof("Unstaging NVMe-oF volume %s from %s", volumeID, stagingTargetPath)
+	klog.V(4).Infof("Unstaging NVMe-oF volume %s from %s", volumeID, stagingTargetPath)
 
 	// Get NQN from volume context
 	nqn := volumeContext["nqn"]
@@ -297,7 +297,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 	}
 
 	if mounted {
-		klog.Infof("Unmounting staging path: %s", stagingTargetPath)
+		klog.V(4).Infof("Unmounting staging path: %s", stagingTargetPath)
 		if err := mount.Unmount(ctx, stagingTargetPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmount staging path: %v", err)
 		}
@@ -316,7 +316,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 			return nil, status.Errorf(codes.Internal, "Cannot determine NSID for volume: %v", err)
 		}
 		nsid = strconv.Itoa(meta.NVMeOFNamespaceID)
-		klog.Infof("Decoded NSID=%s from volumeID for volume %s", nsid, volumeID)
+		klog.V(4).Infof("Decoded NSID=%s from volumeID for volume %s", nsid, volumeID)
 	}
 
 	// Disconnect from NVMe-oF target ONLY if this is the last namespace for this NQN
@@ -328,18 +328,18 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 	isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
 	if !isLastNamespace {
 		activeCount := s.namespaceRegistry.GetNQNCount(nqn)
-		klog.Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
+		klog.V(4).Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
 			volumeID, nqn, nsid, activeCount)
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
 	// This is the last namespace, proceed with disconnect
-	klog.Infof("Unstaging volume %s: Last namespace (NSID=%s) for NQN=%s, proceeding with disconnect",
+	klog.V(4).Infof("Unstaging volume %s: Last namespace (NSID=%s) for NQN=%s, proceeding with disconnect",
 		volumeID, nsid, nqn)
 	if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
 		klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
 	} else {
-		klog.Infof("Successfully disconnected from NVMe-oF target: %s", nqn)
+		klog.V(4).Infof("Disconnected from NVMe-oF target: %s", nqn)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -350,7 +350,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	datasetName := volumeContext["datasetName"]
 	nsid := volumeContext["nsid"]
 	nqn := volumeContext["nqn"]
-	klog.Infof("Formatting and mounting NVMe device: device=%s, path=%s, volume=%s, dataset=%s, NQN=%s, NSID=%s",
+	klog.V(4).Infof("Formatting and mounting NVMe device: device=%s, path=%s, volume=%s, dataset=%s, NQN=%s, NSID=%s",
 		devicePath, stagingTargetPath, volumeID, datasetName, nqn, nsid)
 
 	// DEBUG: Log volumeContext to troubleshoot clonedFromSnapshot flag
@@ -358,11 +358,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	for k := range volumeContext {
 		keys = append(keys, k)
 	}
-	klog.Infof("VolumeContext contains keys: %v", keys)
+	klog.V(5).Infof("VolumeContext contains keys: %v", keys)
 	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists {
-		klog.Infof("VolumeContext clonedFromSnapshot flag: %s", cloned)
+		klog.V(4).Infof("VolumeContext clonedFromSnapshot flag: %s", cloned)
 	} else {
-		klog.Infof("VolumeContext does NOT contain clonedFromSnapshot key (new volume, not cloned)")
+		klog.V(5).Infof("VolumeContext does NOT contain clonedFromSnapshot key (new volume, not cloned)")
 	}
 
 	// Log device information for troubleshooting
@@ -388,11 +388,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	isClone := false
 	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
 		isClone = true
-		klog.Warningf("Volume %s was cloned from snapshot - adding extra stabilization delay before filesystem check", volumeID)
+		klog.V(4).Infof("Volume %s was cloned from snapshot - adding extra stabilization delay before filesystem check", volumeID)
 		const cloneStabilizationDelay = 15 * time.Second
-		klog.Infof("Waiting %v for cloned volume %s filesystem metadata to stabilize", cloneStabilizationDelay, devicePath)
+		klog.V(4).Infof("Waiting %v for cloned volume %s filesystem metadata to stabilize", cloneStabilizationDelay, devicePath)
 		time.Sleep(cloneStabilizationDelay)
-		klog.Infof("Clone stabilization delay complete for %s", devicePath)
+		klog.V(4).Infof("Clone stabilization delay complete for %s", devicePath)
 	}
 
 	// Check if device needs formatting (will detect existing filesystem or format if needed)
@@ -417,7 +417,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	// Mount the device
-	klog.Infof("Mounting device %s to %s", devicePath, stagingTargetPath)
+	klog.V(4).Infof("Mounting device %s to %s", devicePath, stagingTargetPath)
 	mountOptions := []string{}
 	if mnt := volumeCapability.GetMount(); mnt != nil {
 		mountOptions = mnt.MountFlags
@@ -438,7 +438,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 		return nil, status.Errorf(codes.Internal, "Failed to mount device: %v, output: %s", err, string(output))
 	}
 
-	klog.Infof("Successfully mounted NVMe device to staging path")
+	klog.V(4).Infof("Mounted NVMe device to staging path")
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
@@ -565,7 +565,7 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn, nsid string, t
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, err := os.Stat(devicePath); err == nil {
-				klog.Infof("NVMe device found at %s after %d attempts", devicePath, attempt)
+				klog.V(4).Infof("NVMe device found at %s after %d attempts", devicePath, attempt)
 				return devicePath, nil
 			}
 		}
@@ -585,14 +585,14 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 	}
 
 	if needsFormat {
-		klog.Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
+		klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
 		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
 			return status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 		return nil
 	}
 
-	klog.Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s, NSID: %s)",
+	klog.V(4).Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s, NSID: %s)",
 		devicePath, datasetName, nqn, nsid)
 	return nil
 }
@@ -613,7 +613,7 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
 	if sizeOutput, err := sizeCmd.CombinedOutput(); err == nil {
 		deviceSize := strings.TrimSpace(string(sizeOutput))
-		klog.Infof("Device %s has size: %s bytes", devicePath, deviceSize)
+		klog.V(4).Infof("Device %s has size: %s bytes", devicePath, deviceSize)
 	} else {
 		klog.Warningf("Failed to get device size for %s: %v", devicePath, err)
 	}
@@ -625,7 +625,7 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	if uuidOutput, err := blkidCmd.CombinedOutput(); err == nil && len(uuidOutput) > 0 {
 		uuid := strings.TrimSpace(string(uuidOutput))
 		if uuid != "" {
-			klog.Infof("Device %s has filesystem UUID: %s", devicePath, uuid)
+			klog.V(4).Infof("Device %s has filesystem UUID: %s", devicePath, uuid)
 		}
 	}
 
@@ -636,7 +636,7 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	if fsOutput, err := fsCmd.CombinedOutput(); err == nil && len(fsOutput) > 0 {
 		fsType := strings.TrimSpace(string(fsOutput))
 		if fsType != "" {
-			klog.Infof("Device %s has filesystem type: %s", devicePath, fsType)
+			klog.V(4).Infof("Device %s has filesystem type: %s", devicePath, fsType)
 		}
 	}
 }
@@ -660,7 +660,7 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, v
 
 	// Log actual device size for debugging
 	datasetName := volumeContext["datasetName"]
-	klog.Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
+	klog.V(4).Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
 
 	return nil
 }
@@ -669,7 +669,7 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, v
 // This is essential when TrueNAS reuses NSIDs after namespace deletion/recreation.
 // Without this, the kernel may return cached filesystem metadata from a previous ZVOL.
 func forceDeviceRescan(ctx context.Context, devicePath string) error {
-	klog.Infof("Forcing device rescan for %s to clear kernel caches", devicePath)
+	klog.V(4).Infof("Forcing device rescan for %s to clear kernel caches", devicePath)
 
 	// Step 1: Drop page cache related to this device
 	// This forces the kernel to discard any cached filesystem metadata
@@ -736,7 +736,7 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 		klog.V(4).Infof("Performed direct read from %s to force kernel I/O", devicePath)
 	}
 
-	klog.Infof("Device rescan completed for %s", devicePath)
+	klog.V(4).Infof("Device rescan completed for %s", devicePath)
 	return nil
 }
 
@@ -751,7 +751,7 @@ func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string
 		return fmt.Errorf("%w: %s", ErrNVMeControllerNotFound, devicePath)
 	}
 
-	klog.Infof("Rescanning NVMe namespace on controller %s (device: %s)", controllerPath, devicePath)
+	klog.V(4).Infof("Rescanning NVMe namespace on controller %s (device: %s)", controllerPath, devicePath)
 
 	rescanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -766,7 +766,7 @@ func (s *NodeService) rescanNVMeNamespace(ctx context.Context, devicePath string
 		return fmt.Errorf("ns-rescan failed: %w, output: %s", err, string(output))
 	}
 
-	klog.Infof("Successfully rescanned NVMe namespace on controller %s", controllerPath)
+	klog.V(4).Infof("Successfully rescanned NVMe namespace on controller %s", controllerPath)
 	return nil
 }
 

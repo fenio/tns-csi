@@ -100,11 +100,15 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		if rescanErr := s.rescanNVMeController(ctx, existingController); rescanErr != nil {
 			klog.Warningf("Failed to rescan controller %s: %v (will try connect anyway)", existingController, rescanErr)
 		} else {
-			// Wait briefly for kernel to process the rescan
-			time.Sleep(2 * time.Second)
+			// Wait for kernel to process the rescan
+			// This needs more time for cloned ZVOLs where the namespace was just created
+			// and the kernel needs to discover and initialize the new device
+			time.Sleep(5 * time.Second)
 
 			// Try to find the device again after rescan
-			devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 15*time.Second)
+			// Use longer timeout for rescanned namespaces - cloned volumes may take
+			// additional time for filesystem metadata to propagate through NVMe-oF layers
+			devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
 			if err == nil && devicePath != "" {
 				klog.V(4).Infof("Found new namespace device %s after controller rescan", devicePath)
 

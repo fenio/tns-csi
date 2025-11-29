@@ -336,8 +336,7 @@ jobs:
     timeout-minutes: 10
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
+      github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -359,8 +358,7 @@ jobs:
     timeout-minutes: 15
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
+      github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -428,8 +426,7 @@ jobs:
     timeout-minutes: 10
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
+      github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -451,8 +448,7 @@ jobs:
     timeout-minutes: 10
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
+      github.event.inputs.test == '' || github.event.inputs.test == 'access-modes'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -474,8 +470,7 @@ jobs:
     timeout-minutes: 20
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
+      github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -498,8 +493,7 @@ jobs:
     timeout-minutes: 15
     needs: [compute-tag, pre-cleanup]
     if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
+      github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress'
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies

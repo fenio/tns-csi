@@ -88,7 +88,36 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
 
-	// Connect to NVMe-oF target
+	// Check if subsystem is already connected but this specific namespace isn't visible yet.
+	// This happens when new namespaces are created on an already-connected subsystem
+	// (e.g., snapshot restore creates a new NSID while original volume is still mounted).
+	// We need to rescan the existing controller to discover new namespaces.
+	if existingController := s.findControllerByNQN(ctx, params.nqn); existingController != "" {
+		klog.V(4).Infof("Subsystem %s already connected via controller %s, rescanning to discover new namespace NSID=%s",
+			params.nqn, existingController, params.nsid)
+
+		// Rescan the controller to discover new namespaces
+		if rescanErr := s.rescanNVMeController(ctx, existingController); rescanErr != nil {
+			klog.Warningf("Failed to rescan controller %s: %v (will try connect anyway)", existingController, rescanErr)
+		} else {
+			// Wait briefly for kernel to process the rescan
+			time.Sleep(2 * time.Second)
+
+			// Try to find the device again after rescan
+			devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 15*time.Second)
+			if err == nil && devicePath != "" {
+				klog.V(4).Infof("Found new namespace device %s after controller rescan", devicePath)
+
+				// Register this namespace as active to prevent premature disconnect
+				s.namespaceRegistry.Register(params.nqn, params.nsid)
+
+				return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+			}
+			klog.Warningf("Device not found after rescan, will try full connect: %v", err)
+		}
+	}
+
+	// Connect to NVMe-oF target (this handles both new connections and retries)
 	if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
 		return nil, connectErr
 	}
@@ -227,6 +256,79 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 	}
 
 	return ErrDeviceInitializationTimeout
+}
+
+// findControllerByNQN finds an NVMe controller that is connected to the given NQN.
+// Returns the controller path (e.g., "/dev/nvme0") if found, empty string otherwise.
+// This is used to detect when a subsystem is already connected but a specific
+// namespace isn't visible yet (e.g., newly created namespace from snapshot restore).
+func (s *NodeService) findControllerByNQN(ctx context.Context, nqn string) string {
+	_ = ctx // Reserved for future cancellation support
+	klog.V(4).Infof("Searching for existing controller connected to NQN: %s", nqn)
+
+	// Read /sys/class/nvme/nvmeX/subsysnqn for each controller
+	nvmeDir := "/sys/class/nvme"
+	entries, err := os.ReadDir(nvmeDir)
+	if err != nil {
+		klog.V(4).Infof("Failed to read %s: %v", nvmeDir, err)
+		return ""
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		deviceName := entry.Name()
+		// Skip non-controller entries (like "ctl", "nvme-subsys0", etc.)
+		// Controller entries are like "nvme0", "nvme1", etc.
+		if !strings.HasPrefix(deviceName, "nvme") {
+			continue
+		}
+		// Skip if it contains additional segments (namespace devices, subsystem refs)
+		if strings.Contains(deviceName[4:], "n") || strings.Contains(deviceName, "-") {
+			continue
+		}
+
+		nqnPath := filepath.Join(nvmeDir, deviceName, "subsysnqn")
+		//nolint:gosec // Reading NVMe subsystem info from standard sysfs path
+		data, err := os.ReadFile(nqnPath)
+		if err != nil {
+			klog.V(5).Infof("Cannot read NQN for %s: %v", deviceName, err)
+			continue
+		}
+
+		deviceNQN := strings.TrimSpace(string(data))
+		if deviceNQN == nqn {
+			controllerPath := "/dev/" + deviceName
+			klog.V(4).Infof("Found controller %s connected to NQN %s", controllerPath, nqn)
+			return controllerPath
+		}
+	}
+
+	klog.V(4).Infof("No existing controller found for NQN: %s", nqn)
+	return ""
+}
+
+// rescanNVMeController rescans an NVMe controller to discover new namespaces.
+// This is essential when new namespaces are added to an already-connected subsystem
+// (e.g., when restoring from snapshot while the original volume is still mounted).
+// The nvme ns-rescan command forces the kernel to re-query the target for namespace changes.
+func (s *NodeService) rescanNVMeController(ctx context.Context, controllerPath string) error {
+	klog.V(4).Infof("Rescanning NVMe controller %s to discover new namespaces", controllerPath)
+
+	rescanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// nvme ns-rescan forces the kernel to re-read namespace list from the target
+	cmd := exec.CommandContext(rescanCtx, "nvme", "ns-rescan", controllerPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.Warningf("nvme ns-rescan failed for %s: %v, output: %s", controllerPath, err, string(output))
+		return fmt.Errorf("ns-rescan failed for %s: %w, output: %s", controllerPath, err, string(output))
+	}
+
+	klog.V(4).Infof("Successfully rescanned NVMe controller %s", controllerPath)
+	return nil
 }
 
 // stageNVMeDevice stages an NVMe device as either block or filesystem volume.

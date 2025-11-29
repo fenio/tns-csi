@@ -232,26 +232,25 @@ func invalidateDeviceCache(ctx context.Context, devicePath string, attempt int) 
 }
 
 // needsFormatWithRetries checks if a device needs formatting with different retry logic for clones vs new volumes.
-// For NVMe devices, we use many retries (15) because after abrupt disconnection (e.g., force delete),
-// the filesystem metadata may take time to become visible to blkid/lsblk.
-// For cloned volumes, we use even more retries (25) to ensure filesystem metadata has propagated.
-// For non-NVMe devices, we use fewer retries (3) to avoid gRPC timeouts.
+// For cloned volumes, we use many retries (25) to ensure filesystem metadata has propagated.
+// For new NVMe volumes, we use fewer retries (3) since we expect to format them.
+// For non-NVMe devices, we use few retries (3) to avoid gRPC timeouts.
 func needsFormatWithRetries(ctx context.Context, devicePath string, isClone bool) (bool, error) {
 	var maxRetries int
 	isNVMe := strings.Contains(devicePath, "/dev/nvme")
 
 	switch {
 	case isClone:
-		maxRetries = 25 // Most conservative for clones - allow time for filesystem metadata to propagate
+		// Clones inherit filesystem from snapshot - need many retries to detect it
+		// and avoid destroying data by reformatting.
+		maxRetries = 25
 		klog.Infof("Checking cloned volume filesystem (max %d retries to avoid destroying clone data)", maxRetries)
 	case isNVMe:
-		// CRITICAL: NVMe devices need more retries even for non-clone volumes.
-		// After abrupt disconnection (force delete, pod crash), the device may appear
-		// quickly but filesystem metadata (ext4 superblock) takes longer to stabilize.
-		// Without sufficient retries, blkid/lsblk may not detect the existing filesystem,
-		// leading to erroneous reformatting and DATA LOSS.
-		maxRetries = 15 // Conservative for NVMe - protect existing data after reconnection
-		klog.Infof("Checking NVMe volume filesystem (max %d retries to protect existing data)", maxRetries)
+		// New NVMe volumes: We expect to format them, so use fewer retries.
+		// 3 retries with exponential backoff is enough to confirm no filesystem exists.
+		// This avoids the 150+ second delay that was causing pod ready timeouts.
+		maxRetries = 3
+		klog.Infof("Checking new NVMe volume filesystem (max %d retries, will format if needed)", maxRetries)
 	default:
 		maxRetries = 3 // Fast for non-NVMe new volumes - avoid gRPC timeout (typical 2min deadline)
 		klog.Infof("Checking new volume filesystem (max %d retries, will format if needed)", maxRetries)
@@ -271,7 +270,7 @@ func needsFormatWithRetries(ctx context.Context, devicePath string, isClone bool
 	}
 
 	// Retry with exponential backoff to handle device readiness timing
-	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff)
+	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff, isClone)
 
 	// After all retries, handle the final result
 	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
@@ -297,7 +296,7 @@ func waitForNVMeStabilization(ctx context.Context, devicePath string) error {
 }
 
 // retryFilesystemCheck performs filesystem checks with exponential backoff.
-func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int, initialBackoff, maxBackoff time.Duration) ([]byte, error) {
+func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int, initialBackoff, maxBackoff time.Duration, isClone bool) ([]byte, error) {
 	var lastErr error
 	var lastOutput []byte
 	backoff := initialBackoff
@@ -323,7 +322,7 @@ func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int
 		lastOutput = output
 		lastErr = err
 
-		if shouldStopRetrying(needsFmt, err, devicePath, attempt, maxRetries, output) {
+		if shouldStopRetrying(needsFmt, err, devicePath, attempt, maxRetries, output, isClone) {
 			return lastOutput, lastErr
 		}
 	}
@@ -332,7 +331,7 @@ func retryFilesystemCheck(ctx context.Context, devicePath string, maxRetries int
 }
 
 // shouldStopRetrying determines if we should stop retrying filesystem checks.
-func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, maxRetries int, output []byte) bool {
+func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, maxRetries int, output []byte, isClone bool) bool {
 	// Log detailed information about this attempt
 	if needsFmt || err != nil {
 		klog.Warningf("needsFormat attempt %d/%d for %s: needsFormat=%v, err=%v, output=%q (will retry if uncertain)",
@@ -342,30 +341,31 @@ func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, ma
 			attempt+1, maxRetries, devicePath)
 	}
 
-	// CRITICAL: For NVMe devices with no filesystem detected, continue retrying
-	// This handles the case where a volume was cloned from a snapshot - the filesystem
-	// exists but may not be visible yet due to ZFS metadata sync timing.
+	// For CLONED volumes with no filesystem detected, continue retrying.
+	// Clones inherit filesystem from snapshot but metadata may take time to propagate.
 	// We must retry to avoid destroying cloned data by reformatting too early.
-	if err == nil && needsFmt && strings.Contains(devicePath, "/dev/nvme") {
+	if err == nil && needsFmt && isClone {
 		if attempt+1 < maxRetries {
-			klog.Infof("NVMe device %s has no filesystem detected yet (attempt %d/%d) - will retry to avoid destroying potential clone data",
+			klog.Infof("Cloned volume %s has no filesystem detected yet (attempt %d/%d) - will retry to avoid destroying clone data",
 				devicePath, attempt+1, maxRetries)
 			return false // Continue retrying
 		}
-		// Reached max retries - stop and proceed to format
-		klog.Warningf("Device %s appears to need formatting after %d attempts - will fail unless force-format annotation is set",
+		// Reached max retries for clone - stop and warn
+		klog.Warningf("Cloned volume %s still shows no filesystem after %d attempts - will fail unless force-format annotation is set",
 			devicePath, attempt+1)
 		return true
 	}
 
-	// If filesystem check succeeded with a definitive result (filesystem found or max retries reached)
-	if err == nil {
-		if needsFmt {
-			klog.Warningf("Device %s appears to need formatting (no filesystem detected after %d attempts) - will fail unless force-format annotation is set",
-				devicePath, attempt+1)
-		} else {
-			klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
-		}
+	// For NEW volumes (not clones): If no filesystem detected with no error, we can stop immediately.
+	// New volumes are expected to be empty and need formatting - no need to retry excessively.
+	if err == nil && needsFmt && !isClone {
+		klog.Infof("New volume %s has no filesystem (confirmed after %d attempts) - proceeding to format", devicePath, attempt+1)
+		return true
+	}
+
+	// If filesystem check succeeded with filesystem found
+	if err == nil && !needsFmt {
+		klog.Infof("Device %s has existing filesystem, skipping format (detected after %d attempts)", devicePath, attempt+1)
 		return true
 	}
 

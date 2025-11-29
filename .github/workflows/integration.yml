@@ -22,6 +22,35 @@ on:
   #     - 'SECURITY.md'
   #     - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Protocol to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - nfs
+          - nvmeof
+      test:
+        description: 'Specific test to run (leave empty for all tests of selected protocol)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - basic
+          - snapshot
+          - concurrent
+          - persistence
+          - statefulset
+          - volume-expansion
+          - dual-mount
+          - connection-resilience
+          - pod-restart
+          - access-modes
+          - snapshot-restore
+          - volume-stress
 
 jobs:
   # Compute the image tag from branch name (handles / -> - conversion)
@@ -74,6 +103,9 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -94,6 +126,9 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 10
     needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -113,7 +148,10 @@ jobs:
     name: NFS Snapshot Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -134,7 +172,10 @@ jobs:
     name: NVMe-oF Snapshot Integration Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -155,7 +196,10 @@ jobs:
     name: NFS Concurrent Volume Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -175,7 +219,10 @@ jobs:
     name: NVMe-oF Concurrent Volume Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -195,7 +242,10 @@ jobs:
     name: NFS Data Persistence Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-concurrent-nfs]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -215,7 +265,10 @@ jobs:
     name: NVMe-oF Data Persistence Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-concurrent-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -235,7 +288,10 @@ jobs:
     name: NFS StatefulSet Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-persistence-nfs]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -255,7 +311,10 @@ jobs:
     name: NVMe-oF StatefulSet Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-persistence-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -275,7 +334,10 @@ jobs:
     name: Dual Mount Tests (NFS + NVMe-oF)
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -295,7 +357,10 @@ jobs:
     name: Connection Resilience Tests
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, integration-statefulset-nfs, integration-statefulset-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -315,7 +380,10 @@ jobs:
     name: NFS Volume Expansion Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -335,7 +403,10 @@ jobs:
     name: NVMe-oF Volume Expansion Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -355,7 +426,10 @@ jobs:
     name: Pod Restart and Reattachment Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -375,7 +449,10 @@ jobs:
     name: Access Mode Validation Tests
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, integration-nfs, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -395,7 +472,10 @@ jobs:
     name: Snapshot Restore Verification Tests
     runs-on: self-hosted
     timeout-minutes: 20
-    needs: [compute-tag, integration-nfs, integration-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies
@@ -416,7 +496,10 @@ jobs:
     name: Volume Limits Stress Tests
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, integration-concurrent-nfs, integration-concurrent-nvmeof]
+    needs: [compute-tag, pre-cleanup]
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-dependencies

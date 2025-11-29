@@ -624,7 +624,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	// to a device where blkid cannot yet detect the existing filesystem, causing a reformat.
 	// This is especially critical for clones because the filesystem exists but isn't visible yet.
 	if snapshotMeta.Protocol == ProtocolNVMeOF {
-		const zfsSyncDelay = 2 * time.Second
+		const zfsSyncDelay = 5 * time.Second
 		klog.Infof("Waiting %v for ZFS metadata to sync before creating NVMe-oF namespace", zfsSyncDelay)
 		time.Sleep(zfsSyncDelay)
 		klog.V(4).Infof("ZFS sync delay complete, proceeding with NVMe-oF namespace creation")

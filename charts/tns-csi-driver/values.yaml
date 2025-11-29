@@ -35,7 +35,14 @@ controller:
   replicas: 1
   
   # Log verbosity level (0-5, higher = more verbose)
-  logLevel: 5
+  # 0: Errors only
+  # 2: Normal operation (default) - volume created/deleted messages
+  # 4: Detailed operations - API calls, dataset queries
+  # 5: Debug - request/response bodies, context dumps
+  logLevel: 2
+  
+  # Enable debug mode (sets DEBUG_CSI=true, equivalent to logLevel 4+)
+  debug: false
   
   # Metrics configuration
   metrics:
@@ -93,7 +100,14 @@ controller:
 # Node plugin configuration
 node:
   # Log verbosity level (0-5, higher = more verbose)
-  logLevel: 5
+  # 0: Errors only
+  # 2: Normal operation (default) - volume created/deleted messages
+  # 4: Detailed operations - API calls, staging details
+  # 5: Debug - request/response bodies, context dumps
+  logLevel: 2
+  
+  # Enable debug mode (sets DEBUG_CSI=true, equivalent to logLevel 4+)
+  debug: false
   
   # Resource requests and limits for node plugin
   resources:
@@ -230,7 +244,10 @@ storageClasses:
     # Filesystem type for formatted volumes (ext4, ext3, xfs)
     fsType: "ext4"
     reclaimPolicy: Delete
-    volumeBindingMode: WaitForFirstConsumer
+    # NOTE: Must use Immediate for snapshot restore to work correctly.
+    # WaitForFirstConsumer causes csi-provisioner to not pass VolumeContentSource
+    # (snapshot reference) to CreateVolume, resulting in empty volumes instead of clones.
+    volumeBindingMode: Immediate
     allowVolumeExpansion: true
     mountOptions: []
     parameters: {}

@@ -86,7 +86,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	volumeName := req.GetName()
 	zvolName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
-	klog.Infof("Creating ZVOL: %s with size: %d bytes", zvolName, requestedCapacity)
+	klog.V(4).Infof("Creating ZVOL: %s with size: %d bytes", zvolName, requestedCapacity)
 
 	// Check if ZVOL already exists (idempotency)
 	existingZvols, err := s.apiClient.QueryAllDatasets(ctx, zvolName)
@@ -98,12 +98,12 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	// If ZVOL exists, check if it matches the request
 	if len(existingZvols) > 0 {
 		existingZvol := existingZvols[0]
-		klog.Infof("ZVOL %s already exists (ID: %s), checking idempotency", zvolName, existingZvol.ID)
+		klog.V(4).Infof("ZVOL %s already exists (ID: %s), checking idempotency", zvolName, existingZvol.ID)
 
 		// Extract existing ZVOL capacity
 		existingCapacity := getZvolCapacity(&existingZvol)
 		if existingCapacity > 0 {
-			klog.Infof("Existing ZVOL capacity: %d bytes, requested: %d bytes", existingCapacity, requestedCapacity)
+			klog.V(4).Infof("Existing ZVOL capacity: %d bytes, requested: %d bytes", existingCapacity, requestedCapacity)
 
 			// Check if capacity matches (CSI idempotency requirement)
 			if existingCapacity != requestedCapacity {
@@ -119,7 +119,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		}
 
 		// Verify subsystem exists
-		klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
+		klog.V(4).Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
 		subsystem, subsysErr := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
 		if subsysErr != nil {
 			timer.ObserveError()
@@ -158,7 +158,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				continue
 			}
 			// Volume already exists with namespace - return existing volume
-			klog.Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d, device: %s, subsystem: %d), returning existing volume",
+			klog.V(4).Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d, device: %s, subsystem: %d), returning existing volume",
 				ns.ID, ns.NSID, ns.Device, ns.Subsystem)
 
 			meta := VolumeMetadata{
@@ -187,6 +187,8 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
 				"nvmeofNamespaceID": strconv.Itoa(ns.ID),
 				"nsid":              strconv.Itoa(ns.NSID),
+				// Include expected capacity for device verification during staging
+				"expectedCapacity": strconv.FormatInt(existingCapacity, 10),
 			}
 
 			// Record volume capacity metric (use EXISTING capacity, not requested)
@@ -206,7 +208,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	// Step 1: Verify pre-configured subsystem exists
-	klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
+	klog.V(4).Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
 	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
 	if err != nil {
 		timer.ObserveError()
@@ -216,14 +218,14 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				"with ports attached before provisioning volumes. Error: %v", subsystemNQN, err)
 	}
 
-	klog.Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
+	klog.V(4).Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
 
 	// Step 2: Create ZVOL (block device) or use existing if already created
 	var zvol *tnsapi.Dataset
 	if len(existingZvols) > 0 {
 		// ZVOL exists but no namespace - use existing ZVOL
 		zvol = &existingZvols[0]
-		klog.Infof("Using existing ZVOL: %s (ID: %s)", zvol.Name, zvol.ID)
+		klog.V(4).Infof("Using existing ZVOL: %s (ID: %s)", zvol.Name, zvol.ID)
 	} else {
 		// Create new ZVOL
 		newZvol, createErr := s.apiClient.CreateZvol(ctx, tnsapi.ZvolCreateParams{
@@ -237,14 +239,14 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 			return nil, status.Errorf(codes.Internal, "Failed to create ZVOL: %v", createErr)
 		}
 		zvol = newZvol
-		klog.Infof("Created ZVOL: %s (ID: %s)", zvol.Name, zvol.ID)
+		klog.V(4).Infof("Created ZVOL: %s (ID: %s)", zvol.Name, zvol.ID)
 	}
 
 	// Step 3: Create NVMe-oF namespace within pre-configured subsystem
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
 	devicePath := "zvol/" + zvolName
 
-	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d (ZVOL ID: %s)", devicePath, subsystem.ID, zvol.ID)
+	klog.V(4).Infof("Creating NVMe-oF namespace for device: %s in subsystem %d (ZVOL ID: %s)", devicePath, subsystem.ID, zvol.ID)
 
 	// Note: NSID is not specified (omitted) - TrueNAS will auto-assign the next available namespace ID
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
@@ -263,7 +265,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
 
-	klog.Infof("Successfully created NVMe-oF namespace: ID=%d, NSID=%d, device=%s, subsystem=%d, ZVOL=%s",
+	klog.V(4).Infof("Created NVMe-oF namespace: ID=%d, NSID=%d, device=%s, subsystem=%d, ZVOL=%s",
 		namespace.ID, namespace.NSID, devicePath, subsystem.ID, zvol.ID)
 
 	// Encode volume metadata into volumeID
@@ -302,9 +304,12 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
 		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
 		"nsid":              strconv.Itoa(namespace.NSID),
+		// Include expected capacity for device verification during staging
+		// This helps detect NSID reuse issues where TrueNAS presents a different ZVOL
+		"expectedCapacity": strconv.FormatInt(requestedCapacity, 10),
 	}
 
-	klog.Infof("Successfully created NVMe-oF volume with encoded ID: %s", encodedVolumeID)
+	klog.Infof("Created NVMe-oF volume: %s", volumeName)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requestedCapacity)
@@ -343,7 +348,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		klog.V(4).Infof("Subsystem ID %d is preserved (pre-configured infrastructure, not volume-specific)", meta.NVMeOFSubsystemID)
 	}
 
-	klog.Infof("Successfully deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
+	klog.Infof("Deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
 
 	// Remove volume capacity metric
 	// Note: We need to reconstruct the volumeID to delete the metric
@@ -361,13 +366,13 @@ func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *Vol
 		return nil
 	}
 
-	klog.Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
+	klog.V(4).Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
 		meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
 
 	if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
 		// Check if namespace already deleted (idempotency)
 		if isNotFoundError(err) {
-			klog.Infof("Namespace %d not found, assuming already deleted (idempotency)", meta.NVMeOFNamespaceID)
+			klog.V(4).Infof("Namespace %d not found, assuming already deleted (idempotency)", meta.NVMeOFNamespaceID)
 			return nil
 		}
 		// For other errors, fail and retry to prevent orphaned ZVOLs
@@ -378,7 +383,7 @@ func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *Vol
 		return e
 	}
 
-	klog.Infof("Successfully deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
+	klog.V(4).Infof("Deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
 
 	// Verify namespace is gone
 	return s.verifyNamespaceDeletion(ctx, meta, timer)
@@ -418,18 +423,18 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 		return nil
 	}
 
-	klog.Infof("Deleting ZVOL: %s", meta.DatasetID)
+	klog.V(4).Infof("Deleting ZVOL: %s", meta.DatasetID)
 	if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
 		// Check if dataset doesn't exist - this is OK (idempotency)
 		if isNotFoundError(err) {
-			klog.Infof("ZVOL %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+			klog.V(4).Infof("ZVOL %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 			return nil
 		}
 		// For other errors, return error to trigger retry and prevent orphaned ZVOLs
 		return status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 	}
 
-	klog.Infof("Successfully deleted ZVOL %s", meta.DatasetID)
+	klog.V(4).Infof("Deleted ZVOL %s", meta.DatasetID)
 	return nil
 }
 
@@ -439,7 +444,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	volumeName := req.GetName()
 
 	// Step 1: Verify pre-configured subsystem exists
-	klog.Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
+	klog.V(4).Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
 	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
 	if err != nil {
 		// Cleanup: delete the cloned ZVOL if subsystem verification fails
@@ -453,13 +458,13 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 				"with ports attached before provisioning volumes. Error: %v", subsystemNQN, err)
 	}
 
-	klog.Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
+	klog.V(4).Infof("Found pre-configured NVMe-oF subsystem: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
 
 	// Step 2: Create NVMe-oF namespace within pre-configured subsystem
 	// Device path should be zvol/<dataset-name> (without /dev/ prefix)
 	devicePath := "zvol/" + zvol.Name
 
-	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
+	klog.V(4).Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
 
 	// Note: NSID is not specified (omitted) - TrueNAS will auto-assign the next available namespace ID
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
@@ -477,7 +482,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
 
-	klog.Infof("Created NVMe-oF namespace with ID: %d (NSID: %d)", namespace.ID, namespace.NSID)
+	klog.V(4).Infof("Created NVMe-oF namespace with ID: %d (NSID: %d)", namespace.ID, namespace.NSID)
 
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
@@ -522,11 +527,14 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
+	// Include expected capacity for device verification during staging
+	volumeContext["expectedCapacity"] = strconv.FormatInt(requestedCapacity, 10)
+
 	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
 	// This signals to the node that the volume has existing data and should NEVER be formatted
 	volumeContext["clonedFromSnapshot"] = "true"
 
-	klog.Infof("Successfully created NVMe-oF volume from snapshot with encoded ID: %s", encodedVolumeID)
+	klog.Infof("Created NVMe-oF volume from snapshot: %s", volumeName)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requestedCapacity)
@@ -560,7 +568,7 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 	}
 
 	// For NVMe-oF volumes (ZVOLs), we update the volsize property
-	klog.Infof("Expanding NVMe-oF ZVOL - DatasetID: %s, DatasetName: %s, New Size: %d bytes",
+	klog.V(4).Infof("Expanding NVMe-oF ZVOL - DatasetID: %s, DatasetName: %s, New Size: %d bytes",
 		meta.DatasetID, meta.DatasetName, requiredBytes)
 
 	updateParams := tnsapi.DatasetUpdateParams{
@@ -578,7 +586,7 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 				"Error: %v", meta.DatasetID, meta.DatasetName, err)
 	}
 
-	klog.Infof("Successfully expanded NVMe-oF volume %s to %d bytes", meta.Name, requiredBytes)
+	klog.Infof("Expanded NVMe-oF volume: %s to %d bytes", meta.Name, requiredBytes)
 
 	// Update volume capacity metric
 	// Note: We need to reconstruct the volumeID to update the metric

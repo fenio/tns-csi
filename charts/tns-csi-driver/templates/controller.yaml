@@ -65,6 +65,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "tns-csi-driver.secretName" . }}
                   key: api-key
+            {{- if .Values.controller.debug }}
+            - name: DEBUG_CSI
+              value: "true"
+            {{- end }}
           {{- if .Values.controller.metrics.enabled }}
           ports:
             - name: metrics
@@ -87,6 +91,7 @@ spec:
             - "--timeout=60s"
             - "--leader-election"
             - "--default-fstype=nfs"
+            - "--extra-create-metadata"
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock

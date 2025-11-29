@@ -481,11 +481,15 @@ deploy_driver() {
     test_info "TrueNAS URL: ${truenas_url}"
     
     # Base Helm values
+    # Use CSI_IMAGE_TAG env var if set, otherwise default to 'latest'
+    local image_tag="${CSI_IMAGE_TAG:-latest}"
+    test_debug "Using image tag: ${image_tag}"
+    
     local base_args=(
         --namespace kube-system
         --create-namespace
         --set image.repository=bfenski/tns-csi
-        --set image.tag=latest
+        --set image.tag="${image_tag}"
         --set image.pullPolicy=Always
         --set truenas.url="${truenas_url}"
         --set truenas.apiKey="${TRUENAS_API_KEY}"

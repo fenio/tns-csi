@@ -65,6 +65,10 @@ spec:
                 secretKeyRef:
                   name: {{ include "tns-csi-driver.secretName" . }}
                   key: api-key
+            {{- if .Values.node.debug }}
+            - name: DEBUG_CSI
+              value: "true"
+            {{- end }}
           securityContext:
             privileged: true
             capabilities:

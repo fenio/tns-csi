@@ -96,7 +96,7 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
-	klog.Infof("Staging volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, stagingTargetPath)
+	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, stagingTargetPath)
 
 	// Stage volume based on protocol
 	switch meta.Protocol {
@@ -157,7 +157,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
-	klog.Infof("Unstaging volume %s (protocol: %s) from %s", meta.Name, meta.Protocol, stagingTargetPath)
+	klog.V(4).Infof("Unstaging volume %s (protocol: %s) from %s", meta.Name, meta.Protocol, stagingTargetPath)
 
 	// Unstage volume based on protocol
 	switch meta.Protocol {
@@ -224,7 +224,7 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		return resp, nil
 	}
 
-	klog.Infof("Publishing volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, targetPath)
+	klog.V(4).Infof("Publishing volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, targetPath)
 
 	// Publish volume based on protocol
 	switch meta.Protocol {
@@ -285,7 +285,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 	volumeID := req.GetVolumeId()
 	targetPath := req.GetTargetPath()
 
-	klog.Infof("Unmounting volume %s from %s", volumeID, targetPath)
+	klog.V(4).Infof("Unmounting volume %s from %s", volumeID, targetPath)
 
 	// In test mode, skip actual unmount operations
 	if s.testMode {
@@ -321,7 +321,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		klog.Warningf("Failed to remove target path %s: %v", targetPath, err)
 	}
 
-	klog.Infof("Successfully unmounted volume %s from %s", volumeID, targetPath)
+	klog.V(4).Infof("Unmounted volume %s from %s", volumeID, targetPath)
 	timer.ObserveSuccess()
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
@@ -425,7 +425,7 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 // For NVMe-oF block volumes, no action is needed.
 // For NVMe-oF filesystem volumes, we resize the filesystem.
 func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	klog.Infof("NodeExpandVolume called with request: %+v", req)
+	klog.V(4).Infof("NodeExpandVolume called with request: %+v", req)
 
 	// Validate request
 	if req.GetVolumeId() == "" {
@@ -468,7 +468,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
-	klog.Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)
+	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)
 
 	// For NFS volumes, no node-side expansion is needed
 	if volMeta.Protocol == "nfs" {
@@ -489,7 +489,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	// For filesystem volumes, we need to resize the filesystem
 	// The volume path for filesystem volumes is typically the staging path
-	klog.Infof("Resizing filesystem on volume path: %s", volumePath)
+	klog.V(4).Infof("Resizing filesystem on volume path: %s", volumePath)
 
 	// Detect filesystem type
 	fsType, err := detectFilesystemType(ctx, volumePath)
@@ -497,14 +497,14 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.Internal, "Failed to detect filesystem type: %v", err)
 	}
 
-	klog.Infof("Detected filesystem type: %s", fsType)
+	klog.V(4).Infof("Detected filesystem type: %s", fsType)
 
 	// Resize based on filesystem type
 	if err := resizeFilesystem(ctx, volumePath, fsType); err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to resize filesystem: %v", err)
 	}
 
-	klog.Infof("Successfully resized filesystem for volume %s", volMeta.Name)
+	klog.V(4).Infof("Resized filesystem for volume %s", volMeta.Name)
 
 	return &csi.NodeExpandVolumeResponse{
 		CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
@@ -605,25 +605,25 @@ func resizeFilesystem(ctx context.Context, mountPath, fsType string) error {
 			return status.Error(codes.Internal, "Empty device path returned from findmnt")
 		}
 
-		klog.Infof("Resizing ext filesystem on device %s", device)
+		klog.V(4).Infof("Resizing ext filesystem on device %s", device)
 		// #nosec G204 -- device path is validated via findmnt output
 		cmd = exec.CommandContext(ctx, "resize2fs", device)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			return status.Errorf(codes.Internal, "resize2fs failed: %v, output: %s", err, string(output))
 		}
-		klog.Infof("resize2fs output: %s", string(output))
+		klog.V(4).Infof("resize2fs output: %s", string(output))
 		return nil
 
 	case fsTypeXFS:
 		// For XFS, xfs_growfs operates on the mount point
-		klog.Infof("Resizing XFS filesystem at mount point %s", mountPath)
+		klog.V(4).Infof("Resizing XFS filesystem at mount point %s", mountPath)
 		cmd := exec.CommandContext(ctx, "xfs_growfs", mountPath)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return status.Errorf(codes.Internal, "xfs_growfs failed: %v, output: %s", err, string(output))
 		}
-		klog.Infof("xfs_growfs output: %s", string(output))
+		klog.V(4).Infof("xfs_growfs output: %s", string(output))
 		return nil
 
 	default:

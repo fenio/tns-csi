@@ -73,11 +73,11 @@ func (r *NVMeOFNamespaceRegistry) Unregister(nqn, nsid string) bool {
 		nqnCount--
 		if nqnCount <= 0 {
 			delete(r.nqnCounts, nqn)
-			klog.Infof("Last namespace for NQN=%s unregistered, safe to disconnect", nqn)
+			klog.V(4).Infof("Last namespace for NQN=%s unregistered, safe to disconnect", nqn)
 			return true
 		}
 		r.nqnCounts[nqn] = nqnCount
-		klog.Infof("NQN=%s still has %d active namespace(s), skipping disconnect", nqn, nqnCount)
+		klog.V(4).Infof("NQN=%s still has %d active namespace(s), skipping disconnect", nqn, nqnCount)
 	}
 
 	return false

@@ -19,11 +19,19 @@ var (
 	apiKey      = flag.String("api-key", "", "Storage system API key")
 	metricsAddr = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
 	showVersion = flag.Bool("show-version", false, "Show version and exit")
+	debug       = flag.Bool("debug", false, "Enable debug logging (equivalent to -v=4)")
 )
 
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
+
+	// Enable debug logging if --debug flag or DEBUG_CSI env var is set
+	if *debug || os.Getenv("DEBUG_CSI") == "true" || os.Getenv("DEBUG_CSI") == "1" {
+		if err := flag.Set("v", "4"); err != nil {
+			klog.Warningf("Failed to set verbosity level: %v", err)
+		}
+	}
 
 	if *showVersion {
 		fmt.Printf("%s version: %s\n", *driverName, *version)
@@ -42,10 +50,9 @@ func main() {
 		klog.Fatal("Storage API key must be provided")
 	}
 
-	klog.Infof("Starting TNS CSI Driver")
-	klog.Infof("Driver: %s", *driverName)
-	klog.Infof("Version: %s", *version)
-	klog.Infof("Node ID: %s", *nodeID)
+	klog.Infof("Starting TNS CSI Driver %s", *version)
+	klog.V(4).Infof("Driver: %s", *driverName)
+	klog.V(4).Infof("Node ID: %s", *nodeID)
 
 	drv, err := driver.NewDriver(driver.Config{
 		DriverName:  *driverName,

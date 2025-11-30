@@ -171,6 +171,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				NVMeOFNamespaceID: ns.ID,
 				NVMeOFNQN:         subsystem.NQN,
 				SubsystemNQN:      subsystem.NQN,
+				Capacity:          existingCapacity,
 			}
 
 			encodedVolumeID, encodeErr := encodeVolumeID(meta)
@@ -279,6 +280,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
 		SubsystemNQN:      subsystem.NQN,
+		Capacity:          requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -484,6 +486,12 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	klog.V(4).Infof("Created NVMe-oF namespace with ID: %d (NSID: %d)", namespace.ID, namespace.NSID)
 
+	// Get requested capacity (needed before creating metadata)
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
 		Name:              volumeName,
@@ -495,6 +503,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
 		SubsystemNQN:      subsystemNQN,
+		Capacity:          requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -519,12 +528,6 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
 		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
 		"nsid":              strconv.Itoa(namespace.NSID),
-	}
-
-	// Get requested capacity
-	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if requestedCapacity == 0 {
-		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
 	// Include expected capacity for device verification during staging

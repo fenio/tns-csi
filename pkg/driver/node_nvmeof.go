@@ -478,7 +478,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	// SAFETY CHECK: Verify device size matches expected capacity
 	// This helps detect NSID reuse issues where a different ZVOL is presented
 	// CRITICAL: If size mismatch is detected, fail the staging to prevent data corruption
-	if err := s.verifyDeviceSize(ctx, devicePath, volumeContext); err != nil {
+	if err := s.verifyDeviceSize(ctx, devicePath, volumeID, volumeContext); err != nil {
 		klog.Errorf("Device size verification FAILED for %s: %v", devicePath, err)
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"Device size mismatch detected - refusing to mount to prevent data corruption: %v", err)
@@ -751,10 +751,10 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	}
 }
 
-// verifyDeviceSize compares the actual device size with expected capacity from volume context.
+// verifyDeviceSize compares the actual device size with expected capacity from volume context or volumeID.
 // This helps detect NSID reuse issues where a stale ZVOL might be presented instead of the expected one.
 // Returns an error if the device size does not match the expected capacity (with tolerance for ZFS overhead).
-func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, volumeContext map[string]string) error {
+func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath, volumeID string, volumeContext map[string]string) error {
 	// Get actual device size
 	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer sizeCancel()
@@ -773,16 +773,32 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, v
 	datasetName := volumeContext["datasetName"]
 	klog.V(4).Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
 
-	// Get expected capacity from volume context
+	// Get expected capacity from volume context first
+	var expectedCapacity int64
 	expectedCapacityStr := volumeContext["expectedCapacity"]
-	if expectedCapacityStr == "" {
-		klog.V(4).Infof("No expectedCapacity in volume context for %s, skipping size verification", devicePath)
-		return nil
+	if expectedCapacityStr != "" {
+		expectedCapacity, err = strconv.ParseInt(expectedCapacityStr, 10, 64)
+		if err != nil {
+			klog.Warningf("Failed to parse expectedCapacity '%s' for %s: %v", expectedCapacityStr, devicePath, err)
+			expectedCapacity = 0
+		}
 	}
 
-	expectedCapacity, err := strconv.ParseInt(expectedCapacityStr, 10, 64)
-	if err != nil {
-		klog.Warningf("Failed to parse expectedCapacity '%s' for %s: %v", expectedCapacityStr, devicePath, err)
+	// If not in volumeContext, try to decode from volumeID
+	// The volumeID contains encoded VolumeMetadata with Capacity field
+	if expectedCapacity == 0 && volumeID != "" {
+		meta, decodeErr := decodeVolumeID(volumeID)
+		if decodeErr != nil {
+			klog.Warningf("Failed to decode volumeID for size verification: %v", decodeErr)
+		} else if meta.Capacity > 0 {
+			expectedCapacity = meta.Capacity
+			klog.V(4).Infof("Got expected capacity %d from volumeID metadata for %s", expectedCapacity, devicePath)
+		}
+	}
+
+	// If still no expected capacity, log warning and skip verification
+	if expectedCapacity == 0 {
+		klog.Warningf("No expectedCapacity available for device %s (not in volumeContext or volumeID), skipping size verification - this may allow NSID reuse issues to go undetected", devicePath)
 		return nil
 	}
 

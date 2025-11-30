@@ -40,6 +40,7 @@ type VolumeMetadata struct {
 	NFSShareID        int    `json:"nfsShareID,omitempty"`
 	NVMeOFSubsystemID int    `json:"nvmeofSubsystemID,omitempty"`
 	NVMeOFNamespaceID int    `json:"nvmeofNamespaceID,omitempty"`
+	Capacity          int64  `json:"capacity,omitempty"` // Volume capacity in bytes (for size verification)
 }
 
 // encodeVolumeID encodes volume metadata into a volumeID string.

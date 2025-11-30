@@ -62,28 +62,6 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Using image tag: $TAG (from branch: $BRANCH)"
 
-  pre-cleanup:
-    name: Pre-Test Cleanup
-    runs-on: self-hosted
-    timeout-minutes: 10
-    needs: compute-tag
-    steps:
-      - uses: actions/checkout@v6
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25.4'
-          cache: false
-      - name: Clean TrueNAS artifacts before tests
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          echo "=== Cleaning TrueNAS artifacts before test run ==="
-          ./scripts/cleanup-truenas-artifacts.sh
-          echo "=== Pre-test cleanup complete ==="
-
   # ==========================================
   # NFS Tests
   # ==========================================
@@ -91,7 +69,7 @@ jobs:
     name: "NFS: Basic"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
@@ -101,6 +79,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -113,7 +95,7 @@ jobs:
     name: "NFS: Snapshot"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
@@ -123,6 +105,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:
@@ -136,7 +122,7 @@ jobs:
     name: "NFS: Concurrent"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
@@ -146,6 +132,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -158,7 +148,7 @@ jobs:
     name: "NFS: Persistence"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
@@ -168,6 +158,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -180,7 +174,7 @@ jobs:
     name: "NFS: StatefulSet"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
@@ -190,6 +184,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -202,7 +200,7 @@ jobs:
     name: "NFS: Volume Expansion"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
@@ -212,6 +210,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -227,7 +229,7 @@ jobs:
     name: "NVMe-oF: Basic"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
@@ -237,6 +239,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -249,7 +255,7 @@ jobs:
     name: "NVMe-oF: Snapshot"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
@@ -259,6 +265,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:
@@ -272,7 +282,7 @@ jobs:
     name: "NVMe-oF: Concurrent"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
@@ -282,6 +292,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -294,7 +308,7 @@ jobs:
     name: "NVMe-oF: Persistence"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
@@ -304,6 +318,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -316,7 +334,7 @@ jobs:
     name: "NVMe-oF: StatefulSet"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
@@ -326,6 +344,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -338,7 +360,7 @@ jobs:
     name: "NVMe-oF: Volume Expansion"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
@@ -348,6 +370,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -363,7 +389,7 @@ jobs:
     name: "Shared: Dual Mount"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
     steps:
@@ -372,6 +398,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -384,7 +414,7 @@ jobs:
     name: "Shared: Connection Resilience"
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
     steps:
@@ -393,6 +423,10 @@ jobs:
         with:
           protocol: nfs
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -405,7 +439,7 @@ jobs:
     name: "Shared: Pod Restart"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
     steps:
@@ -414,6 +448,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -426,7 +464,7 @@ jobs:
     name: "Shared: Access Modes"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
     steps:
@@ -435,6 +473,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -447,7 +489,7 @@ jobs:
     name: "Shared: Snapshot Restore"
     runs-on: self-hosted
     timeout-minutes: 20
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
     steps:
@@ -456,6 +498,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:
@@ -469,7 +515,7 @@ jobs:
     name: "Shared: Volume Stress"
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, pre-cleanup]
+    needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
     steps:
@@ -478,6 +524,10 @@ jobs:
         with:
           protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
       - name: Run Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

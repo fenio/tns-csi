@@ -1,9 +1,34 @@
 name: Setup Fresh k3s Cluster
 description: Destroy existing k3s cluster and create a fresh one for testing
 
+inputs:
+  truenas_host:
+    description: 'TrueNAS host'
+    required: false
+  truenas_api_key:
+    description: 'TrueNAS API key'
+    required: false
+  truenas_pool:
+    description: 'TrueNAS pool'
+    required: false
+
 runs:
   using: composite
   steps:
+    - name: Clean TrueNAS artifacts
+      shell: bash
+      env:
+        TRUENAS_HOST: ${{ inputs.truenas_host }}
+        TRUENAS_API_KEY: ${{ inputs.truenas_api_key }}
+        TRUENAS_POOL: ${{ inputs.truenas_pool }}
+      run: |
+        echo "=== Cleaning TrueNAS artifacts before test ==="
+        if [[ -n "$TRUENAS_HOST" && -n "$TRUENAS_API_KEY" && -n "$TRUENAS_POOL" ]]; then
+          ./scripts/cleanup-truenas-artifacts.sh || echo "Cleanup failed, continuing anyway"
+        else
+          echo "TrueNAS credentials not provided, skipping cleanup"
+        fi
+
     - name: Destroy existing k3s cluster
       shell: bash
       run: |

@@ -478,7 +478,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	// SAFETY CHECK: Verify device size matches expected capacity
 	// This helps detect NSID reuse issues where a different ZVOL is presented
 	// CRITICAL: If size mismatch is detected, fail the staging to prevent data corruption
-	if err := s.verifyDeviceSize(ctx, devicePath, volumeID, volumeContext); err != nil {
+	if err := s.verifyDeviceSize(ctx, devicePath, volumeContext); err != nil {
 		klog.Errorf("Device size verification FAILED for %s: %v", devicePath, err)
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"Device size mismatch detected - refusing to mount to prevent data corruption: %v", err)
@@ -751,10 +751,10 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 	}
 }
 
-// verifyDeviceSize compares the actual device size with expected capacity from volume context or volumeID.
+// verifyDeviceSize compares the actual device size with expected capacity from volume context or TrueNAS API.
 // This helps detect NSID reuse issues where a stale ZVOL might be presented instead of the expected one.
 // Returns an error if the device size does not match the expected capacity (with tolerance for ZFS overhead).
-func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath, volumeID string, volumeContext map[string]string) error {
+func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, volumeContext map[string]string) error {
 	// Get actual device size
 	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer sizeCancel()
@@ -784,21 +784,25 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath, volumeID
 		}
 	}
 
-	// If not in volumeContext, try to decode from volumeID
-	// The volumeID contains encoded VolumeMetadata with Capacity field
-	if expectedCapacity == 0 && volumeID != "" {
-		meta, decodeErr := decodeVolumeID(volumeID)
-		if decodeErr != nil {
-			klog.Warningf("Failed to decode volumeID for size verification: %v", decodeErr)
-		} else if meta.Capacity > 0 {
-			expectedCapacity = meta.Capacity
-			klog.V(4).Infof("Got expected capacity %d from volumeID metadata for %s", expectedCapacity, devicePath)
+	// If not in volumeContext, query ZVOL size from TrueNAS API
+	// This is the authoritative source for what the volume size should be
+	if expectedCapacity == 0 && datasetName != "" && s.apiClient != nil {
+		klog.V(4).Infof("Querying TrueNAS API for ZVOL size of %s", datasetName)
+		dataset, apiErr := s.apiClient.GetDataset(ctx, datasetName)
+		if apiErr != nil {
+			klog.Warningf("Failed to query ZVOL size from TrueNAS API for %s: %v", datasetName, apiErr)
+		} else if dataset != nil && dataset.Volsize != nil {
+			// Extract the parsed volsize (in bytes)
+			if parsedSize, ok := dataset.Volsize["parsed"].(float64); ok {
+				expectedCapacity = int64(parsedSize)
+				klog.V(4).Infof("Got expected capacity %d bytes from TrueNAS API for %s", expectedCapacity, devicePath)
+			}
 		}
 	}
 
 	// If still no expected capacity, log warning and skip verification
 	if expectedCapacity == 0 {
-		klog.Warningf("No expectedCapacity available for device %s (not in volumeContext or volumeID), skipping size verification - this may allow NSID reuse issues to go undetected", devicePath)
+		klog.Warningf("No expectedCapacity available for device %s (not in volumeContext, API query failed), skipping size verification - this may allow NSID reuse issues to go undetected", devicePath)
 		return nil
 	}
 

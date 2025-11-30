@@ -171,7 +171,6 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 				NVMeOFNamespaceID: ns.ID,
 				NVMeOFNQN:         subsystem.NQN,
 				SubsystemNQN:      subsystem.NQN,
-				Capacity:          existingCapacity,
 			}
 
 			encodedVolumeID, encodeErr := encodeVolumeID(meta)
@@ -280,7 +279,6 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
 		SubsystemNQN:      subsystem.NQN,
-		Capacity:          requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -503,7 +501,6 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
 		SubsystemNQN:      subsystemNQN,
-		Capacity:          requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)

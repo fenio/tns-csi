@@ -82,12 +82,12 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 			existingShare := existingShares[0]
 			klog.V(4).Infof("NFS volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
 
-			// Parse capacity from comment (format: "CSI Volume: name, Capacity: bytes")
+			// Parse capacity from comment (format: "CSI Volume: name | Capacity: bytes")
 			// If comment doesn't contain capacity, assume it matches (backward compatibility)
 			var existingCapacity int64
 			if existingShare.Comment != "" {
 				var parsedCapacity int64
-				_, scanErr := fmt.Sscanf(existingShare.Comment, "CSI Volume: %s, Capacity: %d", new(string), &parsedCapacity)
+				_, scanErr := fmt.Sscanf(existingShare.Comment, "CSI Volume: %s | Capacity: %d", new(string), &parsedCapacity)
 				if scanErr == nil {
 					existingCapacity = parsedCapacity
 				}
@@ -113,7 +113,6 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 				DatasetName: existingDataset.Name,
 				Server:      server,
 				NFSShareID:  existingShare.ID,
-				Capacity:    existingCapacity,
 			}
 
 			encodedVolumeID, encodeErr := encodeVolumeID(meta)
@@ -202,7 +201,6 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		DatasetName: dataset.Name,
 		Server:      server,
 		NFSShareID:  nfsShare.ID,
-		Capacity:    requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -318,7 +316,6 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		DatasetName: dataset.Name,
 		Server:      server,
 		NFSShareID:  nfsShare.ID,
-		Capacity:    requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)

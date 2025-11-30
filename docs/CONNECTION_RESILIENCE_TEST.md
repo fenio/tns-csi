@@ -4,6 +4,8 @@
 **Test Objective:** Verify ping/pong loop and reconnection mechanism  
 **Following:** AGENTS.md - NO modifications to working WebSocket client
 
+> **Note:** This is a historical test report. Line number references are from the time of testing and may have shifted in the current codebase. The implementation behavior remains the same.
+
 ---
 
 ## Test Overview

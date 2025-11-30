@@ -586,14 +586,21 @@ This CSI driver supports multiple storage protocols:
 - **NFS** (Network File System): Shared filesystem storage with `ReadWriteMany` support
 - **NVMe-oF** (NVMe over Fabrics): High-performance block storage with `ReadWriteOnce` support
 
-## Next Steps
+## Current Capabilities
 
-Future enhancements planned:
+The following features are fully implemented and tested:
 
-- **Snapshots**: Implement CSI snapshot support using TrueNAS snapshots
-- **Volume Cloning**: Implement CSI volume cloning using TrueNAS clone features
-- **Metrics**: Add Prometheus metrics endpoint
+- **Volume Provisioning**: Dynamic creation and deletion of NFS and NVMe-oF volumes
+- **Volume Expansion**: Resize volumes dynamically (`allowVolumeExpansion: true` in StorageClass)
+- **Snapshots**: CSI snapshot support using TrueNAS snapshots (see [SNAPSHOTS.md](SNAPSHOTS.md))
+- **Volume Cloning**: Create new volumes from snapshots
+- **Metrics**: Prometheus metrics endpoint (see [METRICS.md](METRICS.md))
+
+## Future Enhancements
+
+Potential future enhancements:
+
 - **Topology**: Add topology awareness for multi-zone deployments
-- **Additional Protocols**: iSCSI and SMB support may be considered based on community demand
+- **Health Monitoring**: Enhanced volume health checks and reporting
 
-Note: Volume expansion is already supported via Kubernetes when `allowVolumeExpansion: true` is set in the StorageClass (enabled by default in the Helm chart for NFS).
+Note: iSCSI is intentionally not supported - NVMe-oF provides superior performance for block storage. SMB support is low priority.

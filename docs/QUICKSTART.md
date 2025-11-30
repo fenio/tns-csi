@@ -531,7 +531,7 @@ For complete snapshot documentation including prerequisites, advanced features, 
 
 For issues or questions:
 1. Check controller and node driver logs (see Troubleshooting section)
-2. Review [TESTING_RESULTS.md](TESTING_RESULTS.md) for known working configurations
+2. Review [TESTING.md](TESTING.md) for testing procedures and known working configurations
 3. Create an issue with:
    - Kubernetes version
    - TrueNAS version

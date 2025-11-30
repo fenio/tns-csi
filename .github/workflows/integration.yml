@@ -85,7 +85,7 @@ jobs:
           echo "=== Pre-test cleanup complete ==="
 
   # ==========================================
-  # NFS Test Track
+  # NFS Tests
   # ==========================================
   nfs-basic:
     name: "NFS: Basic"
@@ -113,10 +113,8 @@ jobs:
     name: "NFS: Snapshot"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-basic]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-basic.result == 'success' || needs.nfs-basic.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
@@ -138,10 +136,8 @@ jobs:
     name: "NFS: Concurrent"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-snapshot]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-snapshot.result == 'success' || needs.nfs-snapshot.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
@@ -162,10 +158,8 @@ jobs:
     name: "NFS: Persistence"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-concurrent]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-concurrent.result == 'success' || needs.nfs-concurrent.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
@@ -186,10 +180,8 @@ jobs:
     name: "NFS: StatefulSet"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-persistence]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-persistence.result == 'success' || needs.nfs-persistence.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
@@ -210,10 +202,8 @@ jobs:
     name: "NFS: Volume Expansion"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-statefulset]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-statefulset.result == 'success' || needs.nfs-statefulset.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
@@ -231,16 +221,14 @@ jobs:
         run: ./tests/integration/test-volume-expansion-nfs.sh
 
   # ==========================================
-  # NVMe-oF Test Track (starts after NFS track)
+  # NVMe-oF Tests
   # ==========================================
   nvmeof-basic:
     name: "NVMe-oF: Basic"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nfs-expansion]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nfs-expansion.result == 'success' || needs.nfs-expansion.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
     steps:
@@ -261,10 +249,8 @@ jobs:
     name: "NVMe-oF: Snapshot"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-basic]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-basic.result == 'success' || needs.nvmeof-basic.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
@@ -286,10 +272,8 @@ jobs:
     name: "NVMe-oF: Concurrent"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-snapshot]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-snapshot.result == 'success' || needs.nvmeof-snapshot.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
@@ -310,10 +294,8 @@ jobs:
     name: "NVMe-oF: Persistence"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-concurrent]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-concurrent.result == 'success' || needs.nvmeof-concurrent.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
@@ -334,10 +316,8 @@ jobs:
     name: "NVMe-oF: StatefulSet"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-persistence]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-persistence.result == 'success' || needs.nvmeof-persistence.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
@@ -358,10 +338,8 @@ jobs:
     name: "NVMe-oF: Volume Expansion"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-statefulset]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-statefulset.result == 'success' || needs.nvmeof-statefulset.result == 'skipped') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
@@ -379,16 +357,14 @@ jobs:
         run: ./tests/integration/test-volume-expansion-nvmeof.sh
 
   # ==========================================
-  # Shared Tests (after both protocol tracks)
+  # Shared Tests
   # ==========================================
   shared-dual-mount:
     name: "Shared: Dual Mount"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, nvmeof-expansion]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.nvmeof-expansion.result == 'success' || needs.nvmeof-expansion.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
     steps:
       - uses: actions/checkout@v6
@@ -408,10 +384,8 @@ jobs:
     name: "Shared: Connection Resilience"
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, shared-dual-mount]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.shared-dual-mount.result == 'success' || needs.shared-dual-mount.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
     steps:
       - uses: actions/checkout@v6
@@ -431,10 +405,8 @@ jobs:
     name: "Shared: Pod Restart"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, shared-connection-resilience]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.shared-connection-resilience.result == 'success' || needs.shared-connection-resilience.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
     steps:
       - uses: actions/checkout@v6
@@ -454,10 +426,8 @@ jobs:
     name: "Shared: Access Modes"
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [compute-tag, shared-pod-restart]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.shared-pod-restart.result == 'success' || needs.shared-pod-restart.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
     steps:
       - uses: actions/checkout@v6
@@ -477,10 +447,8 @@ jobs:
     name: "Shared: Snapshot Restore"
     runs-on: self-hosted
     timeout-minutes: 20
-    needs: [compute-tag, shared-access-modes]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.shared-access-modes.result == 'success' || needs.shared-access-modes.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
     steps:
       - uses: actions/checkout@v6
@@ -501,10 +469,8 @@ jobs:
     name: "Shared: Volume Stress"
     runs-on: self-hosted
     timeout-minutes: 15
-    needs: [compute-tag, shared-snapshot-restore]
+    needs: [compute-tag, pre-cleanup]
     if: |
-      always() &&
-      (needs.shared-snapshot-restore.result == 'success' || needs.shared-snapshot-restore.result == 'skipped') &&
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
     steps:
       - uses: actions/checkout@v6
@@ -547,7 +513,7 @@ jobs:
           echo "=== Cleanup complete ==="
 
   test-summary:
-    name: "📊 Test Summary"
+    name: "Test Summary"
     runs-on: self-hosted
     timeout-minutes: 5
     needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, cleanup]
@@ -614,20 +580,20 @@ jobs:
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
             const total = 18;
             
-            let summary = `# 🧪 Integration Test Results\n\n`;
+            let summary = `# Integration Test Results\n\n`;
             
             // Overall status banner
             if (totalFailed > 0) {
-              summary += `> ### ❌ ${totalFailed} test(s) failed\n\n`;
+              summary += `> ### ${totalFailed} test(s) failed\n\n`;
             } else if (totalPassed === total) {
-              summary += `> ### ✅ All ${total} tests passed!\n\n`;
+              summary += `> ### All ${total} tests passed!\n\n`;
             } else {
-              summary += `> ### ℹ️ ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
+              summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
             }
             
             // Quick stats
-            summary += `| ✅ Passed | ❌ Failed | ⏭️ Skipped | Total |\n`;
-            summary += `|:---------:|:---------:|:----------:|:-----:|\n`;
+            summary += `| Passed | Failed | Skipped | Total |\n`;
+            summary += `|:------:|:------:|:-------:|:-----:|\n`;
             summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${total} |\n\n`;
             
             // Side-by-side NFS and NVMe-oF tables

@@ -15,6 +15,8 @@ runs:
   steps:
     - name: Install system dependencies
       shell: bash
+      env:
+        INPUT_PROTOCOL: ${{ inputs.protocol }}
       run: |
         # Check if packages are already installed to avoid unnecessary apt-get update
         NEED_UPDATE=false
@@ -23,13 +25,13 @@ runs:
           NEED_UPDATE=true
         fi
         
-        if [[ "${{ inputs.protocol }}" == "nfs" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+        if [[ "$INPUT_PROTOCOL" == "nfs" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
           if ! dpkg -l | grep -q nfs-common; then
             NEED_UPDATE=true
           fi
         fi
         
-        if [[ "${{ inputs.protocol }}" == "nvmeof" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+        if [[ "$INPUT_PROTOCOL" == "nvmeof" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
           if ! command -v nvme &> /dev/null; then
             NEED_UPDATE=true
           fi
@@ -40,11 +42,11 @@ runs:
           sudo apt-get update
           sudo apt-get install -y curl wget git make jq
           
-          if [[ "${{ inputs.protocol }}" == "nfs" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+          if [[ "$INPUT_PROTOCOL" == "nfs" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
             sudo apt-get install -y nfs-common
           fi
           
-          if [[ "${{ inputs.protocol }}" == "nvmeof" ]] || [[ "${{ inputs.protocol }}" == "both" ]]; then
+          if [[ "$INPUT_PROTOCOL" == "nvmeof" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
             sudo apt-get install -y nvme-cli
             sudo modprobe nvme-tcp || echo "nvme-tcp module already loaded"
           fi

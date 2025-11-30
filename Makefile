@@ -1,4 +1,4 @@
-.PHONY: all build clean test docker-build docker-push lint lint-fix
+.PHONY: all build clean test docker-build docker-push lint lint-fix test-coverage
 
 DRIVER_NAME=tns-csi-driver
 IMAGE_NAME=bfenski/tns-csi
@@ -73,6 +73,13 @@ test-sanity:
 test-unit:
 	@echo "Running unit tests..."
 	$(GOTEST) -v -short ./pkg/...
+
+test-coverage:
+	@echo "Running tests with coverage (for SonarQube)..."
+	$(GOTEST) -v -short -coverprofile=coverage.out -covermode=atomic ./pkg/...
+	$(GOTEST) -v -short -json ./pkg/... > test-report.json || true
+	@echo "Coverage report: coverage.out"
+	@echo "Test report: test-report.json"
 
 test-all: test-unit test-sanity
 	@echo "All tests completed"

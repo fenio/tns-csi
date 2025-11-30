@@ -55,32 +55,12 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	klog.V(4).Infof("Staging NVMe-oF volume %s (block mode: %v): server=%s:%s, NQN=%s, NSID=%s, dataset=%s, namespace=%s",
 		volumeID, isBlockVolume, params.server, params.port, params.nqn, params.nsid, datasetName, namespaceID)
 
-	// Check if already connected
-	// CRITICAL: Following the pattern used by democratic-csi and iSCSI CSI drivers:
-	// If the device is already connected, REUSE the existing connection instead of
-	// disconnecting and reconnecting. Forced disconnect/reconnect was causing data loss
-	// because it confuses the kernel's device state.
-	//
-	// The proper approach is:
-	// 1. Find existing device path for the NQN/NSID
-	// 2. Rescan the namespace to ensure fresh data from the target
-	// 3. Proceed with staging using the existing device
-	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
-	if err == nil && devicePath != "" {
-		klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
-			devicePath, params.nqn, params.nsid)
-
-		// Rescan the namespace to ensure we have fresh data from the target
-		// This is what democratic-csi does to ensure the kernel has current device state
-		if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
-			klog.Warningf("Failed to rescan NVMe namespace %s: %v (continuing anyway)", devicePath, rescanErr)
-		}
-
-		// Register this namespace as active to prevent premature disconnect
-		s.namespaceRegistry.Register(params.nqn, params.nsid)
-
-		// Proceed directly to staging with the existing device
-		return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	// Try to reuse existing connection (idempotent staging)
+	if resp, devicePath := s.tryReuseExistingConnection(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); resp != nil {
+		return resp, nil
+	} else if devicePath != "" {
+		// Device found but staging failed - error already returned
+		return nil, nil
 	}
 
 	// Check if nvme-cli is installed
@@ -88,46 +68,94 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
 
-	// Check if subsystem is already connected but this specific namespace isn't visible yet.
-	// This happens when new namespaces are created on an already-connected subsystem
-	// (e.g., snapshot restore creates a new NSID while original volume is still mounted).
-	// We need to rescan the existing controller to discover new namespaces.
-	if existingController := s.findControllerByNQN(ctx, params.nqn); existingController != "" {
-		klog.V(4).Infof("Subsystem %s already connected via controller %s, rescanning to discover new namespace NSID=%s",
-			params.nqn, existingController, params.nsid)
-
-		// Rescan the controller to discover new namespaces
-		if rescanErr := s.rescanNVMeController(ctx, existingController); rescanErr != nil {
-			klog.Warningf("Failed to rescan controller %s: %v (will try connect anyway)", existingController, rescanErr)
-		} else {
-			// Wait for kernel to process the rescan
-			// This needs more time for cloned ZVOLs where the namespace was just created
-			// and the kernel needs to discover and initialize the new device
-			time.Sleep(5 * time.Second)
-
-			// Try to find the device again after rescan
-			// Use longer timeout for rescanned namespaces - cloned volumes may take
-			// additional time for filesystem metadata to propagate through NVMe-oF layers
-			devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
-			if err == nil && devicePath != "" {
-				klog.V(4).Infof("Found new namespace device %s after controller rescan", devicePath)
-
-				// Register this namespace as active to prevent premature disconnect
-				s.namespaceRegistry.Register(params.nqn, params.nsid)
-
-				return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
-			}
-			klog.Warningf("Device not found after rescan, will try full connect: %v", err)
-		}
+	// Try to discover device via controller rescan (for newly created namespaces)
+	if resp := s.tryDiscoverViaControllerRescan(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); resp != nil {
+		return resp, nil
 	}
 
+	// Connect to NVMe-oF target and stage device
+	return s.connectAndStageDevice(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext, datasetName)
+}
+
+// tryReuseExistingConnection attempts to reuse an existing NVMe-oF connection.
+// Returns the response if successful, or nil if no existing connection found.
+// CRITICAL: Following the pattern used by democratic-csi and iSCSI CSI drivers:
+// If the device is already connected, REUSE the existing connection instead of
+// disconnecting and reconnecting. Forced disconnect/reconnect was causing data loss
+// because it confuses the kernel's device state.
+func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, string) {
+	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
+	if err != nil || devicePath == "" {
+		return nil, ""
+	}
+
+	klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
+		devicePath, params.nqn, params.nsid)
+
+	// Rescan the namespace to ensure we have fresh data from the target
+	// This is what democratic-csi does to ensure the kernel has current device state
+	if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
+		klog.Warningf("Failed to rescan NVMe namespace %s: %v (continuing anyway)", devicePath, rescanErr)
+	}
+
+	// Register this namespace as active to prevent premature disconnect
+	s.namespaceRegistry.Register(params.nqn, params.nsid)
+
+	// Proceed directly to staging with the existing device
+	resp, _ := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	return resp, devicePath
+}
+
+// tryDiscoverViaControllerRescan attempts to discover a namespace by rescanning an existing controller.
+// This handles the case where new namespaces are created on an already-connected subsystem
+// (e.g., snapshot restore creates a new NSID while original volume is still mounted).
+func (s *NodeService) tryDiscoverViaControllerRescan(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) *csi.NodeStageVolumeResponse {
+	existingController := s.findControllerByNQN(ctx, params.nqn)
+	if existingController == "" {
+		return nil
+	}
+
+	klog.V(4).Infof("Subsystem %s already connected via controller %s, rescanning to discover new namespace NSID=%s",
+		params.nqn, existingController, params.nsid)
+
+	// Rescan the controller to discover new namespaces
+	if rescanErr := s.rescanNVMeController(ctx, existingController); rescanErr != nil {
+		klog.Warningf("Failed to rescan controller %s: %v (will try connect anyway)", existingController, rescanErr)
+		return nil
+	}
+
+	// Wait for kernel to process the rescan
+	// This needs more time for cloned ZVOLs where the namespace was just created
+	// and the kernel needs to discover and initialize the new device
+	time.Sleep(5 * time.Second)
+
+	// Try to find the device again after rescan
+	// Use longer timeout for rescanned namespaces - cloned volumes may take
+	// additional time for filesystem metadata to propagate through NVMe-oF layers
+	devicePath, err := s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
+	if err != nil || devicePath == "" {
+		klog.Warningf("Device not found after rescan, will try full connect: %v", err)
+		return nil
+	}
+
+	klog.V(4).Infof("Found new namespace device %s after controller rescan", devicePath)
+
+	// Register this namespace as active to prevent premature disconnect
+	s.namespaceRegistry.Register(params.nqn, params.nsid)
+
+	resp, _ := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	return resp
+}
+
+// connectAndStageDevice connects to the NVMe-oF target and stages the device.
+func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string, datasetName string) (*csi.NodeStageVolumeResponse, error) {
 	// Connect to NVMe-oF target (this handles both new connections and retries)
 	if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
 		return nil, connectErr
 	}
 
 	// Wait for device to appear
-	devicePath, err = s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
+	devicePath, err := s.waitForNVMeDevice(ctx, params.nqn, params.nsid, 30*time.Second)
 	if err != nil {
 		// Cleanup: disconnect on failure
 		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
@@ -564,57 +592,94 @@ func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
 }
 
 // findNVMeDeviceByNQNAndNSID finds the device path for a given NQN and namespace ID.
-//
-//nolint:gocognit // Complex NVMe device discovery - refactoring would risk stability of working code
 func (s *NodeService) findNVMeDeviceByNQNAndNSID(ctx context.Context, nqn, nsid string) (string, error) {
 	klog.V(4).Infof("Searching for NVMe device: NQN=%s, NSID=%s", nqn, nsid)
 
 	// Use nvme list-subsys which shows NQN
-	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	subsysCmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
-	subsysOutput, err := subsysCmd.CombinedOutput()
+	subsysOutput, err := s.runNVMeListSubsys(ctx)
 	if err != nil {
 		klog.V(4).Infof("nvme list-subsys failed: %v, falling back to sysfs", err)
-		// Fall back to checking /sys/class/nvme
 		return s.findNVMeDeviceByNQNAndNSIDFromSys(ctx, nqn, nsid)
 	}
 
-	// Parse output to find NQN and extract controller name
-	// The JSON format from nvme list-subsys has: "Name" : "nvmeX" under Paths
-	// We need to construct the device path as /dev/nvmeXn{nsid}
-	lines := strings.Split(string(subsysOutput), "\n")
+	// Try to parse the output and find the device
+	devicePath := s.parseNVMeListSubsysOutput(subsysOutput, nqn, nsid)
+	if devicePath != "" {
+		return devicePath, nil
+	}
+
+	// Fall back to checking /sys/class/nvme if parsing failed
+	return s.findNVMeDeviceByNQNAndNSIDFromSys(ctx, nqn, nsid)
+}
+
+// runNVMeListSubsys executes nvme list-subsys and returns the output.
+func (s *NodeService) runNVMeListSubsys(ctx context.Context) ([]byte, error) {
+	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	subsysCmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
+	return subsysCmd.CombinedOutput()
+}
+
+// parseNVMeListSubsysOutput parses nvme list-subsys JSON output to find device path.
+func (s *NodeService) parseNVMeListSubsysOutput(output []byte, nqn, nsid string) string {
+	lines := strings.Split(string(output), "\n")
 	foundNQN := false
+
 	for i, line := range lines {
-		// Look for the NQN line
-		if strings.Contains(line, nqn) {
-			foundNQN = true
-			// Now look ahead for the "Name" field in the Paths section
-			for j := i; j < len(lines) && j < i+20; j++ {
-				if strings.Contains(lines[j], "\"Name\"") && strings.Contains(lines[j], "nvme") {
-					// Extract controller name - format: "Name" : "nvme0"
-					parts := strings.Split(lines[j], "\"")
-					for k := range len(parts) - 1 {
-						if parts[k] == "Name" && k+2 < len(parts) {
-							controllerName := strings.TrimSpace(parts[k+2])
-							// Construct device path using provided nsid - typically nvme0 + nsid 2 -> /dev/nvme0n2
-							devicePath := fmt.Sprintf("/dev/%sn%s", controllerName, nsid)
-							klog.V(4).Infof("Found NVMe device from list-subsys: %s (controller: %s, NQN: %s, NSID: %s)",
-								devicePath, controllerName, nqn, nsid)
-							return devicePath, nil
-						}
-					}
-				}
-			}
+		if !strings.Contains(line, nqn) {
+			continue
+		}
+
+		foundNQN = true
+		devicePath := s.extractDevicePathFromLines(lines, i, nsid, nqn)
+		if devicePath != "" {
+			return devicePath
 		}
 	}
 
 	if foundNQN {
 		klog.Warningf("Found NQN but could not extract device name, falling back to sysfs")
 	}
+	return ""
+}
 
-	// Fall back to checking /sys/class/nvme if JSON parsing failed
-	return s.findNVMeDeviceByNQNAndNSIDFromSys(ctx, nqn, nsid)
+// extractDevicePathFromLines searches for controller name in lines after the NQN line.
+func (s *NodeService) extractDevicePathFromLines(lines []string, startIdx int, nsid, nqn string) string {
+	// Look ahead for the "Name" field in the Paths section (up to 20 lines)
+	endIdx := startIdx + 20
+	if endIdx > len(lines) {
+		endIdx = len(lines)
+	}
+
+	for j := startIdx; j < endIdx; j++ {
+		if !strings.Contains(lines[j], "\"Name\"") || !strings.Contains(lines[j], "nvme") {
+			continue
+		}
+
+		// Extract controller name - format: "Name" : "nvme0"
+		parts := strings.Split(lines[j], "\"")
+		controllerName := s.extractControllerFromParts(parts)
+		if controllerName == "" {
+			continue
+		}
+
+		// Construct device path using provided nsid
+		devicePath := fmt.Sprintf("/dev/%sn%s", controllerName, nsid)
+		klog.V(4).Infof("Found NVMe device from list-subsys: %s (controller: %s, NQN: %s, NSID: %s)",
+			devicePath, controllerName, nqn, nsid)
+		return devicePath
+	}
+	return ""
+}
+
+// extractControllerFromParts extracts controller name from parsed JSON parts.
+func (s *NodeService) extractControllerFromParts(parts []string) string {
+	for k := range len(parts) - 1 {
+		if parts[k] == "Name" && k+2 < len(parts) {
+			return strings.TrimSpace(parts[k+2])
+		}
+	}
+	return ""
 }
 
 // findNVMeDeviceByNQNAndNSIDFromSys finds NVMe device by checking /sys/class/nvme.

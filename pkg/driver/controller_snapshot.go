@@ -550,8 +550,6 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
-//
-//nolint:gocognit // TODO: refactor to reduce cognitive complexity
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)
@@ -559,109 +557,154 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	// Decode snapshot metadata
 	snapshotMeta, err := decodeSnapshotID(snapshotID)
 	if err != nil {
-		// Per CSI spec: if snapshot ID is invalid/malformed, treat it as not found
 		klog.Warningf("Failed to decode snapshot ID %s: %v. Treating as not found.", snapshotID, err)
 		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
 	}
 
-	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s",
-		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, req.GetName())
+	// Validate and extract clone parameters
+	cloneParams, err := s.validateCloneParameters(req, snapshotMeta)
+	if err != nil {
+		return nil, err
+	}
 
-	// Get parameters from storage class
+	// Clone the snapshot
+	clonedDataset, err := s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for ZFS metadata sync for NVMe-oF volumes
+	s.waitForZFSSyncIfNVMeOF(snapshotMeta.Protocol)
+
+	// Get server and subsystemNQN parameters
 	params := req.GetParameters()
 	if params == nil {
 		params = make(map[string]string)
 	}
-
-	// Required parameters
-	pool := params["pool"]
-	if pool == "" {
-		return nil, status.Error(codes.InvalidArgument, "pool parameter is required")
-	}
-
-	// Optional parameters
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
-
-	// Construct new dataset name for the cloned volume
-	newVolumeName := req.GetName()
-	newDatasetName := fmt.Sprintf("%s/%s", parentDataset, newVolumeName)
-
-	klog.Infof("Cloning snapshot %s to dataset %s", snapshotMeta.SnapshotName, newDatasetName)
-
-	// Clone the snapshot to a new dataset
-	cloneParams := tnsapi.CloneSnapshotParams{
-		Snapshot: snapshotMeta.SnapshotName,
-		Dataset:  newDatasetName,
-	}
-
-	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
-	if err != nil {
-		// Check if dataset was partially created despite the error
-		// This can happen if the clone operation succeeds but querying the dataset fails
-		klog.Errorf("Failed to clone snapshot: %v. Checking if dataset was created...", err)
-
-		// Try to cleanup any partially created dataset
-		if delErr := s.apiClient.DeleteDataset(ctx, newDatasetName); delErr != nil {
-			// If deletion fails with "not found", that's okay - dataset wasn't created
-			if !isNotFoundError(delErr) {
-				klog.Errorf("Failed to cleanup potentially partially-created dataset %s: %v", newDatasetName, delErr)
-			}
-		} else {
-			klog.Infof("Cleaned up partially-created dataset: %s", newDatasetName)
-		}
-
-		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
-	}
-
-	klog.Infof("Successfully cloned snapshot to dataset: %s", clonedDataset.Name)
-
-	// CRITICAL: Wait for ZFS metadata to fully sync before exposing the cloned volume
-	// ZFS clone operations can return before all metadata is written to disk.
-	// For NVMe-oF volumes, if the namespace is created immediately, the node may connect
-	// to a device where blkid cannot yet detect the existing filesystem, causing a reformat.
-	// This is especially critical for clones because the filesystem exists but isn't visible yet.
-	if snapshotMeta.Protocol == ProtocolNVMeOF {
-		const zfsSyncDelay = 5 * time.Second
-		klog.Infof("Waiting %v for ZFS metadata to sync before creating NVMe-oF namespace", zfsSyncDelay)
-		time.Sleep(zfsSyncDelay)
-		klog.V(4).Infof("ZFS sync delay complete, proceeding with NVMe-oF namespace creation")
-	}
-
-	// Get server and subsystemNQN parameters from StorageClass or source volume
 	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset)
 	if err != nil {
 		return nil, err
 	}
 
-	// Route to protocol-specific volume setup based on snapshot protocol
-	switch snapshotMeta.Protocol {
+	// Route to protocol-specific volume setup
+	return s.setupVolumeFromClone(ctx, req, clonedDataset, snapshotMeta.Protocol, server, subsystemNQN, snapshotID)
+}
+
+// cloneParameters holds validated parameters for snapshot cloning.
+type cloneParameters struct {
+	pool           string
+	parentDataset  string
+	newVolumeName  string
+	newDatasetName string
+}
+
+// validateCloneParameters validates and extracts parameters needed for cloning.
+func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest, snapshotMeta *SnapshotMetadata) (*cloneParameters, error) {
+	params := req.GetParameters()
+	if params == nil {
+		params = make(map[string]string)
+	}
+
+	pool := params["pool"]
+	if pool == "" {
+		return nil, status.Error(codes.InvalidArgument, "pool parameter is required")
+	}
+
+	parentDataset := params["parentDataset"]
+	if parentDataset == "" {
+		parentDataset = pool
+	}
+
+	newVolumeName := req.GetName()
+	newDatasetName := fmt.Sprintf("%s/%s", parentDataset, newVolumeName)
+
+	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s",
+		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, newVolumeName)
+
+	return &cloneParameters{
+		pool:           pool,
+		parentDataset:  parentDataset,
+		newVolumeName:  newVolumeName,
+		newDatasetName: newDatasetName,
+	}, nil
+}
+
+// executeSnapshotClone performs the actual snapshot clone operation.
+func (s *ControllerService) executeSnapshotClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
+	klog.Infof("Cloning snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
+
+	cloneParams := tnsapi.CloneSnapshotParams{
+		Snapshot: snapshotMeta.SnapshotName,
+		Dataset:  params.newDatasetName,
+	}
+
+	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
+	if err != nil {
+		klog.Errorf("Failed to clone snapshot: %v. Checking if dataset was created...", err)
+		s.cleanupPartialClone(ctx, params.newDatasetName)
+		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
+	}
+
+	klog.Infof("Successfully cloned snapshot to dataset: %s", clonedDataset.Name)
+	return clonedDataset, nil
+}
+
+// cleanupPartialClone attempts to clean up a partially created cloned dataset.
+func (s *ControllerService) cleanupPartialClone(ctx context.Context, datasetName string) {
+	if delErr := s.apiClient.DeleteDataset(ctx, datasetName); delErr != nil {
+		if !isNotFoundError(delErr) {
+			klog.Errorf("Failed to cleanup potentially partially-created dataset %s: %v", datasetName, delErr)
+		}
+	} else {
+		klog.Infof("Cleaned up partially-created dataset: %s", datasetName)
+	}
+}
+
+// waitForZFSSyncIfNVMeOF waits for ZFS metadata to sync for NVMe-oF volumes.
+func (s *ControllerService) waitForZFSSyncIfNVMeOF(protocol string) {
+	if protocol != ProtocolNVMeOF {
+		return
+	}
+	const zfsSyncDelay = 5 * time.Second
+	klog.Infof("Waiting %v for ZFS metadata to sync before creating NVMe-oF namespace", zfsSyncDelay)
+	time.Sleep(zfsSyncDelay)
+	klog.V(4).Infof("ZFS sync delay complete, proceeding with NVMe-oF namespace creation")
+}
+
+// setupVolumeFromClone routes to the appropriate protocol-specific volume setup.
+func (s *ControllerService) setupVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, clonedDataset *tnsapi.Dataset, protocol, server, subsystemNQN, snapshotID string) (*csi.CreateVolumeResponse, error) {
+	switch protocol {
 	case ProtocolNFS:
 		return s.setupNFSVolumeFromClone(ctx, req, clonedDataset, server, snapshotID)
 	case ProtocolNVMeOF:
-		// Validate subsystemNQN is available for NVMe-oF
-		if subsystemNQN == "" {
-			// Cleanup the cloned dataset
-			klog.Errorf("subsystemNQN parameter is required for NVMe-oF volumes, cleaning up")
-			if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-				klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-			}
-			return nil, status.Error(codes.InvalidArgument,
-				"subsystemNQN parameter is required for NVMe-oF volumes. "+
-					"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
-					"and provide its NQN in the StorageClass parameters.")
-		}
-		return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server, subsystemNQN, snapshotID)
+		return s.setupNVMeOFVolumeFromCloneWithValidation(ctx, req, clonedDataset, server, subsystemNQN, snapshotID)
 	default:
-		// Cleanup the cloned dataset if we can't determine protocol
-		klog.Errorf("Unknown protocol %s in snapshot metadata, cleaning up", snapshotMeta.Protocol)
+		return s.handleUnknownProtocol(ctx, clonedDataset, protocol)
+	}
+}
+
+// setupNVMeOFVolumeFromCloneWithValidation validates subsystemNQN and sets up NVMe-oF volume.
+func (s *ControllerService) setupNVMeOFVolumeFromCloneWithValidation(ctx context.Context, req *csi.CreateVolumeRequest, clonedDataset *tnsapi.Dataset, server, subsystemNQN, snapshotID string) (*csi.CreateVolumeResponse, error) {
+	if subsystemNQN == "" {
+		klog.Errorf("subsystemNQN parameter is required for NVMe-oF volumes, cleaning up")
 		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
 		}
-		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol in snapshot: %s", snapshotMeta.Protocol)
+		return nil, status.Error(codes.InvalidArgument,
+			"subsystemNQN parameter is required for NVMe-oF volumes. "+
+				"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
+				"and provide its NQN in the StorageClass parameters.")
 	}
+	return s.setupNVMeOFVolumeFromClone(ctx, req, clonedDataset, server, subsystemNQN, snapshotID)
+}
+
+// handleUnknownProtocol handles the case when protocol is not recognized.
+func (s *ControllerService) handleUnknownProtocol(ctx context.Context, clonedDataset *tnsapi.Dataset, protocol string) (*csi.CreateVolumeResponse, error) {
+	klog.Errorf("Unknown protocol %s in snapshot metadata, cleaning up", protocol)
+	if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
+		klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+	}
+	return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol in snapshot: %s", protocol)
 }
 
 // getVolumeParametersForSnapshot extracts server and subsystemNQN parameters

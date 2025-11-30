@@ -109,29 +109,12 @@ func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *Cont
 func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("CreateVolume called with request: %+v", req)
 
-	// Detailed debug logging for snapshot troubleshooting
-	klog.V(4).Infof("=== CreateVolume Debug Info ===")
-	klog.V(4).Infof("Volume Name: %s", req.GetName())
-	klog.V(4).Infof("VolumeContentSource: %+v", req.GetVolumeContentSource())
-	if req.GetVolumeContentSource() != nil {
-		klog.V(4).Infof("VolumeContentSource Type: %T", req.GetVolumeContentSource().GetType())
-		klog.V(4).Infof("VolumeContentSource.Snapshot: %+v", req.GetVolumeContentSource().GetSnapshot())
-		klog.V(4).Infof("VolumeContentSource.Volume: %+v", req.GetVolumeContentSource().GetVolume())
-	}
-	klog.V(4).Infof("Parameters: %+v", req.GetParameters())
-	klog.V(4).Infof("CapacityRange: %+v", req.GetCapacityRange())
-	klog.V(4).Infof("VolumeCapabilities: %+v", req.GetVolumeCapabilities())
-	klog.V(4).Infof("AccessibilityRequirements: %+v", req.GetAccessibilityRequirements())
-	klog.V(4).Infof("Secrets: [REDACTED - %d keys]", len(req.GetSecrets()))
-	klog.V(4).Infof("===============================")
+	// Log detailed debug info for troubleshooting
+	s.logCreateVolumeDebugInfo(req)
 
 	// Validate request
-	if req.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume name is required")
-	}
-
-	if req.GetVolumeCapabilities() == nil || len(req.GetVolumeCapabilities()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Volume capabilities are required")
+	if err := validateCreateVolumeRequest(req); err != nil {
+		return nil, err
 	}
 
 	// Parse storage class parameters
@@ -157,33 +140,82 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	// Check if creating from snapshot or volume clone
-	klog.V(4).Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), req.GetVolumeContentSource())
-	if req.GetVolumeContentSource() != nil {
-		klog.V(4).Infof("VolumeContentSource is NOT nil for volume %s", req.GetName())
-
-		// Check if creating from snapshot
-		if snapshot := req.GetVolumeContentSource().GetSnapshot(); snapshot != nil {
-			klog.V(4).Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
-				req.GetName(), snapshot.GetSnapshotId(), protocol)
-			return s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
-		}
-
-		// Check if creating from volume (cloning)
-		if volume := req.GetVolumeContentSource().GetVolume(); volume != nil {
-			sourceVolumeID := volume.GetVolumeId()
-			klog.V(4).Infof("=== VOLUME CLONE DETECTED === Creating volume %s from volume %s with protocol %s",
-				req.GetName(), sourceVolumeID, protocol)
-
-			return s.createVolumeFromVolume(ctx, req, sourceVolumeID)
-		}
-
-		klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
-	} else {
-		klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
+	if resp, handled := s.handleVolumeContentSource(ctx, req, protocol); handled {
+		return resp, nil
 	}
 
 	klog.V(4).Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
 
+	return s.createVolumeByProtocol(ctx, req, protocol)
+}
+
+// logCreateVolumeDebugInfo logs detailed debug information for CreateVolume troubleshooting.
+func (s *ControllerService) logCreateVolumeDebugInfo(req *csi.CreateVolumeRequest) {
+	klog.V(4).Infof("=== CreateVolume Debug Info ===")
+	klog.V(4).Infof("Volume Name: %s", req.GetName())
+	klog.V(4).Infof("VolumeContentSource: %+v", req.GetVolumeContentSource())
+	if req.GetVolumeContentSource() != nil {
+		klog.V(4).Infof("VolumeContentSource Type: %T", req.GetVolumeContentSource().GetType())
+		klog.V(4).Infof("VolumeContentSource.Snapshot: %+v", req.GetVolumeContentSource().GetSnapshot())
+		klog.V(4).Infof("VolumeContentSource.Volume: %+v", req.GetVolumeContentSource().GetVolume())
+	}
+	klog.V(4).Infof("Parameters: %+v", req.GetParameters())
+	klog.V(4).Infof("CapacityRange: %+v", req.GetCapacityRange())
+	klog.V(4).Infof("VolumeCapabilities: %+v", req.GetVolumeCapabilities())
+	klog.V(4).Infof("AccessibilityRequirements: %+v", req.GetAccessibilityRequirements())
+	klog.V(4).Infof("Secrets: [REDACTED - %d keys]", len(req.GetSecrets()))
+	klog.V(4).Infof("===============================")
+}
+
+// validateCreateVolumeRequest validates the CreateVolume request parameters.
+func validateCreateVolumeRequest(req *csi.CreateVolumeRequest) error {
+	if req.GetName() == "" {
+		return status.Error(codes.InvalidArgument, "Volume name is required")
+	}
+
+	if req.GetVolumeCapabilities() == nil || len(req.GetVolumeCapabilities()) == 0 {
+		return status.Error(codes.InvalidArgument, "Volume capabilities are required")
+	}
+
+	return nil
+}
+
+// handleVolumeContentSource handles creating volumes from snapshots or clones.
+// Returns (response, true) if handled, or (nil, false) if not a content source request.
+func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *csi.CreateVolumeRequest, protocol string) (*csi.CreateVolumeResponse, bool) {
+	contentSource := req.GetVolumeContentSource()
+	klog.V(4).Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), contentSource)
+
+	if contentSource == nil {
+		klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
+		return nil, false
+	}
+
+	klog.V(4).Infof("VolumeContentSource is NOT nil for volume %s", req.GetName())
+
+	// Check if creating from snapshot
+	if snapshot := contentSource.GetSnapshot(); snapshot != nil {
+		klog.V(4).Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
+			req.GetName(), snapshot.GetSnapshotId(), protocol)
+		resp, _ := s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
+		return resp, true
+	}
+
+	// Check if creating from volume (cloning)
+	if volume := contentSource.GetVolume(); volume != nil {
+		sourceVolumeID := volume.GetVolumeId()
+		klog.V(4).Infof("=== VOLUME CLONE DETECTED === Creating volume %s from volume %s with protocol %s",
+			req.GetName(), sourceVolumeID, protocol)
+		resp, _ := s.createVolumeFromVolume(ctx, req, sourceVolumeID)
+		return resp, true
+	}
+
+	klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
+	return nil, false
+}
+
+// createVolumeByProtocol creates a volume using the specified protocol.
+func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi.CreateVolumeRequest, protocol string) (*csi.CreateVolumeResponse, error) {
 	switch protocol {
 	case ProtocolNFS:
 		return s.createNFSVolume(ctx, req)
@@ -645,13 +677,13 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 		// Build volume metadata
 		meta := VolumeMetadata{
 			Name:        dataset.Name,
-			Protocol:    "nfs",
+			Protocol:    ProtocolNFS,
 			DatasetID:   dataset.ID,
 			DatasetName: dataset.Name,
 			NFSShareID:  share.ID,
 		}
 
-		entry := s.buildVolumeEntry(dataset, meta, "nfs")
+		entry := s.buildVolumeEntry(dataset, meta, ProtocolNFS)
 		if entry != nil {
 			entries = append(entries, entry)
 		}
@@ -686,13 +718,13 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 		// Build volume metadata
 		meta := VolumeMetadata{
 			Name:              zvol.Name,
-			Protocol:          "nvmeof",
+			Protocol:          ProtocolNVMeOF,
 			DatasetID:         zvol.ID,
 			DatasetName:       zvol.Name,
 			NVMeOFNamespaceID: ns.ID,
 		}
 
-		entry := s.buildVolumeEntry(zvol, meta, "nvmeof")
+		entry := s.buildVolumeEntry(zvol, meta, ProtocolNVMeOF)
 		if entry != nil {
 			entries = append(entries, entry)
 		}

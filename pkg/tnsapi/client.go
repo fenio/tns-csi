@@ -346,94 +346,114 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 }
 
 // readLoop reads responses from WebSocket.
-//
-//nolint:gocognit // Complex WebSocket handling with reconnection - refactoring would risk stability
 func (c *Client) readLoop() {
-	defer func() {
-		c.mu.Lock()
-		c.closed = true
-		for _, ch := range c.pending {
-			close(ch)
-		}
-		c.pending = make(map[string]chan *Response)
-		c.mu.Unlock()
-		close(c.closeCh)
-	}()
+	defer c.cleanupReadLoop()
 
 	for {
-		// Set read deadline to detect dead connections
-		// Since we send pings every 20s, use 40s timeout (2x ping interval)
-		// This gets reset every time we receive a message (response to our requests)
-		c.mu.Lock()
-		if c.conn != nil {
-			if err := c.conn.SetReadDeadline(time.Now().Add(40 * time.Second)); err != nil {
-				klog.Warningf("Failed to set read deadline: %v", err)
-			}
+		if err := c.setReadDeadlineIfConnected(); err != nil {
+			klog.Warningf("Failed to set read deadline: %v", err)
 		}
-		c.mu.Unlock()
 
-		// Read raw message first for logging
 		_, rawMsg, err := c.conn.ReadMessage()
-		//nolint:nestif // Complex WebSocket error handling with reconnection - necessary for stability
 		if err != nil {
-			// Check if client was intentionally closed before logging errors
-			c.mu.Lock()
-			if c.closed {
-				c.mu.Unlock()
-				return
+			if c.handleReadError(err) {
+				continue // Successfully handled, continue loop
 			}
-			c.mu.Unlock()
-
-			// Log error only if not a normal closure
-			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				klog.Errorf("WebSocket read error: %v", err)
-			}
-
-			// Attempt to reconnect
-			if c.reconnect() {
-				klog.Info("Successfully reconnected to storage WebSocket")
-				continue
-			}
-
-			// Reconnection failed after 5 attempts, reinitialize connection from scratch
-			klog.Warning("Failed to reconnect after 5 attempts, will reinitialize connection in 30 seconds...")
-			time.Sleep(30 * time.Second)
-
-			klog.Info("Reinitializing WebSocket connection from scratch...")
-			if err := c.connect(); err != nil {
-				klog.Errorf("Connection reinitialization failed: %v, will retry", err)
-				continue // Go back to top of loop, will retry reinitialization
-			}
-
-			// Use direct authentication since readLoop is still blocked here
-			if err := c.authenticateDirect(); err != nil {
-				klog.Errorf("Re-authentication after reinitialization failed: %v, will retry", err)
-				continue // Go back to top of loop, will retry reinitialization
-			}
-
-			klog.Info("Successfully reinitialized WebSocket connection")
-			continue
+			return // Unrecoverable error, exit loop
 		}
 
-		klog.V(5).Infof("Received raw response: %s", string(rawMsg))
-
-		// Unmarshal response
-		var resp Response
-		if err := json.Unmarshal(rawMsg, &resp); err != nil {
-			klog.Errorf("Failed to unmarshal response: %v", err)
-			continue
-		}
-
-		klog.V(5).Infof("Parsed response: %+v", resp)
-
-		c.mu.Lock()
-		if ch, ok := c.pending[resp.ID]; ok {
-			delete(c.pending, resp.ID)
-			ch <- &resp
-			close(ch)
-		}
-		c.mu.Unlock()
+		c.processResponse(rawMsg)
 	}
+}
+
+// cleanupReadLoop performs cleanup when readLoop exits.
+func (c *Client) cleanupReadLoop() {
+	c.mu.Lock()
+	c.closed = true
+	for _, ch := range c.pending {
+		close(ch)
+	}
+	c.pending = make(map[string]chan *Response)
+	c.mu.Unlock()
+	close(c.closeCh)
+}
+
+// setReadDeadlineIfConnected sets read deadline if connection is active.
+func (c *Client) setReadDeadlineIfConnected() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.SetReadDeadline(time.Now().Add(40 * time.Second))
+}
+
+// handleReadError handles WebSocket read errors with reconnection logic.
+// Returns true if error was handled and loop should continue, false if loop should exit.
+func (c *Client) handleReadError(err error) bool {
+	// Check if client was intentionally closed
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
+	c.mu.Unlock()
+
+	// Log error only if not a normal closure
+	if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		klog.Errorf("WebSocket read error: %v", err)
+	}
+
+	// Attempt to reconnect
+	if c.reconnect() {
+		klog.Info("Successfully reconnected to storage WebSocket")
+		return true
+	}
+
+	// Reconnection failed, attempt full reinitialization
+	return c.reinitializeConnection()
+}
+
+// reinitializeConnection performs full connection reinitialization after reconnect failures.
+// Returns true if reinitialization succeeded, false if it failed.
+func (c *Client) reinitializeConnection() bool {
+	klog.Warning("Failed to reconnect after 5 attempts, will reinitialize connection in 30 seconds...")
+	time.Sleep(30 * time.Second)
+
+	klog.Info("Reinitializing WebSocket connection from scratch...")
+	if err := c.connect(); err != nil {
+		klog.Errorf("Connection reinitialization failed: %v, will retry", err)
+		return true // Continue loop to retry
+	}
+
+	if err := c.authenticateDirect(); err != nil {
+		klog.Errorf("Re-authentication after reinitialization failed: %v, will retry", err)
+		return true // Continue loop to retry
+	}
+
+	klog.Info("Successfully reinitialized WebSocket connection")
+	return true
+}
+
+// processResponse unmarshals and dispatches a response to the waiting caller.
+func (c *Client) processResponse(rawMsg []byte) {
+	klog.V(5).Infof("Received raw response: %s", string(rawMsg))
+
+	var resp Response
+	if err := json.Unmarshal(rawMsg, &resp); err != nil {
+		klog.Errorf("Failed to unmarshal response: %v", err)
+		return
+	}
+
+	klog.V(5).Infof("Parsed response: %+v", resp)
+
+	c.mu.Lock()
+	if ch, ok := c.pending[resp.ID]; ok {
+		delete(c.pending, resp.ID)
+		ch <- &resp
+		close(ch)
+	}
+	c.mu.Unlock()
 }
 
 // reconnect attempts to reconnect to the WebSocket and re-authenticate.

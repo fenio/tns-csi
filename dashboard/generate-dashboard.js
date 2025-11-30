@@ -62,6 +62,99 @@ async function getWorkflowRunDetails(runId) {
   }
 }
 
+/**
+ * Determines if a job was skipped based on its status and duration.
+ * @param {Object} job - The job object
+ * @param {string} status - The job status
+ * @returns {boolean} - True if the job was skipped
+ */
+function isJobSkipped(job, status) {
+  if (status !== 'success' || !job.started_at || !job.completed_at) {
+    return false;
+  }
+  const duration = (new Date(job.completed_at) - new Date(job.started_at)) / 1000;
+  // If test completed in less than 30 seconds, it might have been skipped
+  return duration < 30;
+}
+
+/**
+ * Updates the results counters based on job status.
+ * @param {Object} counters - Object with total, passed, failed, cancelled, skipped counters
+ * @param {string} status - The job status
+ * @param {boolean} isSkipped - Whether the job was skipped
+ */
+function updateStatusCounters(counters, status, isSkipped) {
+  counters.total++;
+  if (isSkipped) {
+    counters.skipped++;
+  } else if (status === 'success') {
+    counters.passed++;
+  } else if (status === 'failure') {
+    counters.failed++;
+  } else if (status === 'cancelled') {
+    counters.cancelled++;
+  }
+}
+
+/**
+ * Parses the protocol from a job name.
+ * @param {string} jobName - The job name
+ * @returns {string|null} - 'nfs', 'nvmeof', or null if not found
+ */
+function parseProtocolFromJobName(jobName) {
+  if (jobName.includes('NFS')) return 'nfs';
+  if (jobName.includes('NVMe-oF')) return 'nvmeof';
+  return null;
+}
+
+/**
+ * Extracts the test type from a job name.
+ * @param {string} jobName - The job name
+ * @returns {string} - The test type (normalized to lowercase)
+ */
+function extractTestType(jobName) {
+  return jobName
+    .replace(/Integration Tests?/i, '')  // Remove "Integration Test(s)"
+    .replace(/\b(NFS|NVMe-oF)\b/i, '')   // Remove protocol names
+    .trim()
+    .toLowerCase() || 'basic';            // Default to 'basic' if empty
+}
+
+/**
+ * Tracks job duration for reporting.
+ * @param {Object} results - The results object
+ * @param {Object} job - The job object
+ * @param {string} status - The job status
+ * @param {boolean} isSkipped - Whether the job was skipped
+ */
+function trackJobDuration(results, job, status, isSkipped) {
+  if (!job.started_at || !job.completed_at) return;
+  
+  const duration = (new Date(job.completed_at) - new Date(job.started_at)) / 1000 / 60; // minutes
+  results.durations.push({
+    name: job.name,
+    duration: duration,
+    status: isSkipped ? 'skipped' : status
+  });
+}
+
+/**
+ * Tracks recent failures for reporting.
+ * @param {Object} results - The results object
+ * @param {Object} job - The job object
+ * @param {string} status - The job status
+ */
+function trackRecentFailure(results, job, status) {
+  if (status !== 'failure' || results.recentFailures.length >= 10) return;
+  
+  results.recentFailures.push({
+    name: job.name,
+    runId: job.run_id,
+    created: job.created_at || job.started_at,
+    htmlUrl: job.html_url
+  });
+}
+
 function parseTestResults(jobs) {
   const results = {
     total: 0,
@@ -81,82 +174,28 @@ function parseTestResults(jobs) {
   for (const job of jobs) {
     if (!job.name.includes('Integration Tests')) continue;
 
-    results.total++;
-
-    // Parse job status
     const status = job.conclusion || job.status;
-    
-    // Check if job was skipped (success but very short duration could indicate skip)
-    // Or check job logs for "SKIPPED" status if available
-    let isSkipped = false;
-    if (status === 'success' && job.started_at && job.completed_at) {
-      const duration = (new Date(job.completed_at) - new Date(job.started_at)) / 1000;
-      // If test completed in less than 30 seconds, it might have been skipped
-      if (duration < 30) {
-        isSkipped = true;
-      }
-    }
-    
-    if (isSkipped) {
-      results.skipped++;
-    } else if (status === 'success') {
-      results.passed++;
-    } else if (status === 'failure') {
-      results.failed++;
-    } else if (status === 'cancelled') {
-      results.cancelled++;
+    const isSkipped = isJobSkipped(job, status);
+
+    // Update overall counters
+    updateStatusCounters(results, status, isSkipped);
+
+    // Update protocol-specific counters
+    const protocol = parseProtocolFromJobName(job.name);
+    if (protocol) {
+      updateStatusCounters(results.byProtocol[protocol], status, isSkipped);
     }
 
-    // Parse protocol from job name
-    if (job.name.includes('NFS')) {
-      results.byProtocol.nfs.total++;
-      if (isSkipped) results.byProtocol.nfs.skipped++;
-      else if (status === 'success') results.byProtocol.nfs.passed++;
-      else if (status === 'failure') results.byProtocol.nfs.failed++;
-      else if (status === 'cancelled') results.byProtocol.nfs.cancelled++;
-    } else if (job.name.includes('NVMe-oF')) {
-      results.byProtocol.nvmeof.total++;
-      if (isSkipped) results.byProtocol.nvmeof.skipped++;
-      else if (status === 'success') results.byProtocol.nvmeof.passed++;
-      else if (status === 'failure') results.byProtocol.nvmeof.failed++;
-      else if (status === 'cancelled') results.byProtocol.nvmeof.cancelled++;
-    }
-
-    // Track test types
-    const testType = job.name
-      .replace(/Integration Tests?/i, '')  // Remove "Integration Test(s)"
-      .replace(/\b(NFS|NVMe-oF)\b/i, '')   // Remove protocol names
-      .trim()
-      .toLowerCase() || 'basic';            // Default to 'basic' if empty
-    
+    // Update test type counters
+    const testType = extractTestType(job.name);
     if (!results.byTestType[testType]) {
       results.byTestType[testType] = { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 };
     }
-    results.byTestType[testType].total++;
-    if (isSkipped) results.byTestType[testType].skipped++;
-    else if (status === 'success') results.byTestType[testType].passed++;
-    else if (status === 'failure') results.byTestType[testType].failed++;
-    else if (status === 'cancelled') results.byTestType[testType].cancelled++;
+    updateStatusCounters(results.byTestType[testType], status, isSkipped);
 
-    // Track duration
-    if (job.started_at && job.completed_at) {
-      const duration = (new Date(job.completed_at) - new Date(job.started_at)) / 1000 / 60; // minutes
-      results.durations.push({
-        name: job.name,
-        duration: duration,
-        status: isSkipped ? 'skipped' : status
-      });
-    }
-
-    // Track recent failures
-    if (status === 'failure' && results.recentFailures.length < 10) {
-      results.recentFailures.push({
-        name: job.name,
-        runId: job.run_id,
-        created: job.created_at || job.started_at,
-        htmlUrl: job.html_url
-      });
-    }
+    // Track duration and failures
+    trackJobDuration(results, job, status, isSkipped);
+    trackRecentFailure(results, job, status);
   }
 
   return results;

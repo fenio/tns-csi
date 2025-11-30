@@ -755,60 +755,76 @@ func (s *NodeService) logDeviceInfo(ctx context.Context, devicePath string) {
 // This helps detect NSID reuse issues where a stale ZVOL might be presented instead of the expected one.
 // Returns an error if the device size does not match the expected capacity (with tolerance for ZFS overhead).
 func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, volumeContext map[string]string) error {
-	// Get actual device size
-	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
-	defer sizeCancel()
-	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
-	sizeOutput, err := sizeCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to get device size: %w", err)
-	}
-
-	actualSize, err := strconv.ParseInt(strings.TrimSpace(string(sizeOutput)), 10, 64)
-	if err != nil {
-		return fmt.Errorf("failed to parse device size: %w", err)
-	}
-
-	// Log actual device size for debugging
 	datasetName := volumeContext["datasetName"]
+
+	// Get actual device size
+	actualSize, err := getBlockDeviceSize(ctx, devicePath)
+	if err != nil {
+		return err
+	}
 	klog.V(4).Infof("Device %s (dataset: %s) actual size: %d bytes (%d GiB)", devicePath, datasetName, actualSize, actualSize/(1024*1024*1024))
 
-	// Get expected capacity from volume context first
-	var expectedCapacity int64
-	expectedCapacityStr := volumeContext["expectedCapacity"]
-	if expectedCapacityStr != "" {
-		expectedCapacity, err = strconv.ParseInt(expectedCapacityStr, 10, 64)
-		if err != nil {
-			klog.Warningf("Failed to parse expectedCapacity '%s' for %s: %v", expectedCapacityStr, devicePath, err)
-			expectedCapacity = 0
-		}
-	}
+	// Get expected capacity from volume context or TrueNAS API
+	expectedCapacity := s.getExpectedCapacity(ctx, devicePath, datasetName, volumeContext)
 
-	// If not in volumeContext, query ZVOL size from TrueNAS API
-	// This is the authoritative source for what the volume size should be
-	if expectedCapacity == 0 && datasetName != "" && s.apiClient != nil {
-		klog.V(4).Infof("Querying TrueNAS API for ZVOL size of %s", datasetName)
-		dataset, apiErr := s.apiClient.GetDataset(ctx, datasetName)
-		if apiErr != nil {
-			klog.Warningf("Failed to query ZVOL size from TrueNAS API for %s: %v", datasetName, apiErr)
-		} else if dataset != nil && dataset.Volsize != nil {
-			// Extract the parsed volsize (in bytes)
-			if parsedSize, ok := dataset.Volsize["parsed"].(float64); ok {
-				expectedCapacity = int64(parsedSize)
-				klog.V(4).Infof("Got expected capacity %d bytes from TrueNAS API for %s", expectedCapacity, devicePath)
-			}
-		}
-	}
-
-	// If still no expected capacity, log warning and skip verification
+	// If no expected capacity available, skip verification
 	if expectedCapacity == 0 {
 		klog.Warningf("No expectedCapacity available for device %s (not in volumeContext, API query failed), skipping size verification - this may allow NSID reuse issues to go undetected", devicePath)
 		return nil
 	}
 
-	// CRITICAL: Verify the device size matches expected capacity
-	// Allow a tolerance of 10% to account for ZFS overhead and rounding
-	// But reject if the size is way off (e.g., completely different volume)
+	// Verify the device size matches expected capacity
+	return verifySizeMatch(devicePath, actualSize, expectedCapacity, datasetName, volumeContext)
+}
+
+// getBlockDeviceSize returns the size of a block device in bytes.
+func getBlockDeviceSize(ctx context.Context, devicePath string) (int64, error) {
+	sizeCtx, sizeCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer sizeCancel()
+	sizeCmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+	sizeOutput, err := sizeCmd.CombinedOutput()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get device size: %w", err)
+	}
+
+	actualSize, err := strconv.ParseInt(strings.TrimSpace(string(sizeOutput)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse device size: %w", err)
+	}
+	return actualSize, nil
+}
+
+// getExpectedCapacity retrieves the expected capacity from volumeContext or TrueNAS API.
+func (s *NodeService) getExpectedCapacity(ctx context.Context, devicePath, datasetName string, volumeContext map[string]string) int64 {
+	// Try volume context first
+	if expectedCapacityStr := volumeContext["expectedCapacity"]; expectedCapacityStr != "" {
+		if capacity, err := strconv.ParseInt(expectedCapacityStr, 10, 64); err == nil {
+			return capacity
+		}
+		klog.Warningf("Failed to parse expectedCapacity '%s' for %s", expectedCapacityStr, devicePath)
+	}
+
+	// Query TrueNAS API if not in volumeContext
+	if datasetName != "" && s.apiClient != nil {
+		klog.V(4).Infof("Querying TrueNAS API for ZVOL size of %s", datasetName)
+		dataset, err := s.apiClient.GetDataset(ctx, datasetName)
+		if err != nil {
+			klog.Warningf("Failed to query ZVOL size from TrueNAS API for %s: %v", datasetName, err)
+			return 0
+		}
+		if dataset != nil && dataset.Volsize != nil {
+			if parsedSize, ok := dataset.Volsize["parsed"].(float64); ok {
+				klog.V(4).Infof("Got expected capacity %d bytes from TrueNAS API for %s", int64(parsedSize), devicePath)
+				return int64(parsedSize)
+			}
+		}
+	}
+	return 0
+}
+
+// verifySizeMatch compares actual and expected sizes with tolerance.
+func verifySizeMatch(devicePath string, actualSize, expectedCapacity int64, datasetName string, volumeContext map[string]string) error {
+	// Calculate size difference
 	sizeDiff := actualSize - expectedCapacity
 	if sizeDiff < 0 {
 		sizeDiff = -sizeDiff
@@ -816,8 +832,9 @@ func (s *NodeService) verifyDeviceSize(ctx context.Context, devicePath string, v
 
 	// Calculate tolerance: 10% of expected capacity, minimum 100MB
 	tolerance := expectedCapacity / 10
-	if tolerance < 100*1024*1024 {
-		tolerance = 100 * 1024 * 1024
+	const minTolerance = 100 * 1024 * 1024
+	if tolerance < minTolerance {
+		tolerance = minTolerance
 	}
 
 	if sizeDiff > tolerance {

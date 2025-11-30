@@ -6,14 +6,13 @@
   "labels": ["dependencies"],
   "semanticCommits": "enabled",
   "commitMessagePrefix": "chore(deps):",
-  "schedule": ["before 6am on monday"],
+  "schedule": ["before 6am every day"],
   "timezone": "America/New_York",
   "packageRules": [
     {
       "description": "Group Go module updates together",
       "matchManagers": ["gomod"],
-      "groupName": "Go dependencies",
-      "schedule": ["before 6am on monday"]
+      "groupName": "Go dependencies"
     },
     {
       "description": "Group GitHub Actions updates",
@@ -24,14 +23,12 @@
     {
       "description": "Group Docker base image updates",
       "matchManagers": ["dockerfile"],
-      "groupName": "Docker base images",
-      "schedule": ["before 6am on monday"]
+      "groupName": "Docker base images"
     },
     {
       "description": "Group Helm dependencies",
       "matchFileNames": ["charts/**"],
-      "groupName": "Helm charts",
-      "schedule": ["before 6am on monday"]
+      "groupName": "Helm charts"
     },
     {
       "description": "Require approval for major Go version updates",

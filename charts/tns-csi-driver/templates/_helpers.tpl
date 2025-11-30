@@ -122,3 +122,26 @@ Create the CSI driver name
 {{- define "tns-csi-driver.driverName" -}}
 {{- .Values.driverName | default "tns.csi.io" }}
 {{- end }}
+
+{{/*
+Validate required TrueNAS configuration
+*/}}
+{{- define "tns-csi-driver.validateConfig" -}}
+{{- if not .Values.truenas.existingSecret }}
+  {{- if not .Values.truenas.url }}
+    {{- fail "\n\nCONFIGURATION ERROR: truenas.url is required.\nExample: --set truenas.url=\"wss://YOUR-TRUENAS-IP:443/api/current\"" }}
+  {{- end }}
+  {{- if not .Values.truenas.apiKey }}
+    {{- fail "\n\nCONFIGURATION ERROR: truenas.apiKey is required.\nCreate an API key in TrueNAS UI: Settings > API Keys\nExample: --set truenas.apiKey=\"1-xxxxxxxxxx\"" }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.storageClasses.nfs.enabled (not .Values.storageClasses.nfs.server) }}
+  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nfs.server is required when NFS is enabled.\nExample: --set storageClasses.nfs.server=\"YOUR-TRUENAS-IP\"" }}
+{{- end }}
+{{- if and .Values.storageClasses.nvmeof.enabled (not .Values.storageClasses.nvmeof.server) }}
+  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.server is required when NVMe-oF is enabled.\nExample: --set storageClasses.nvmeof.server=\"YOUR-TRUENAS-IP\"" }}
+{{- end }}
+{{- if and .Values.storageClasses.nvmeof.enabled (not .Values.storageClasses.nvmeof.subsystemNQN) }}
+  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.subsystemNQN is required when NVMe-oF is enabled.\nYou must pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) first.\nExample: --set storageClasses.nvmeof.subsystemNQN=\"nqn.2025-01.com.truenas:csi\"" }}
+{{- end }}
+{{- end }}

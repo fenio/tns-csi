@@ -2,6 +2,8 @@
 
 This guide shows how to test the TrueNAS CSI driver in a local Kind cluster with NFS support.
 
+> **Note:** This guide is for **local development only**. The project's CI/CD pipeline uses k3s on self-hosted runners for integration testing against real TrueNAS infrastructure. Kind is suitable for NFS development/testing but has limitations for NVMe-oF testing.
+
 ## Prerequisites
 
 1. **Docker**: Running and accessible

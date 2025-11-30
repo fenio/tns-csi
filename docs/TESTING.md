@@ -59,13 +59,15 @@ Every push to main triggers comprehensive integration tests:
 - Tests: Create PVC → Bind PV → Mount to pod → Write data → Verify → Cleanup
 
 **Volume Expansion:**
-- Included in basic tests
+- `test-volume-expansion-nfs.sh` - NFS volume resizing
+- `test-volume-expansion-nvmeof.sh` - NVMe-oF volume resizing
 - Tests dynamic volume resizing
 - Verifies both storage backend and filesystem expansion
 
 **Snapshot Operations (NFS & NVMe-oF):**
 - `test-snapshot-nfs.sh` - NFS snapshot creation and restoration
 - `test-snapshot-nvmeof.sh` - NVMe-oF snapshot creation and restoration
+- `test-snapshot-restore.sh` - Volume restoration from snapshots
 - Tests: Create volume → Write data → Snapshot → Restore from snapshot → Verify data
 
 **StatefulSet Support:**
@@ -76,13 +78,19 @@ Every push to main triggers comprehensive integration tests:
 **Data Persistence:**
 - `test-persistence-nfs.sh` - NFS data survives pod restarts
 - `test-persistence-nvmeof.sh` - NVMe-oF data survives pod restarts
+- `test-pod-restart.sh` - Pod restart behavior
 - Tests: Write data → Delete pod → Recreate pod → Verify data intact
+
+**Access Modes:**
+- `test-access-modes.sh` - RWO/RWX access mode testing
+- `test-dual-mount.sh` - Dual mount scenarios
 
 #### Stress & Reliability Tests
 
 **Concurrent Operations:**
 - `test-concurrent-nfs.sh` - 5 simultaneous NFS volume creations
 - `test-concurrent-nvmeof.sh` - 5 simultaneous NVMe-oF volume creations
+- `test-volume-stress.sh` - Volume stress testing
 - Tests: Race condition detection, concurrent API calls, resource locking
 
 **Connection Resilience:**

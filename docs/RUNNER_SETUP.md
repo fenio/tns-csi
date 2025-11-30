@@ -120,8 +120,8 @@ kubectl get nodes
 Required for running Go tests:
 
 ```bash
-# Download and install Go 1.21+
-GO_VERSION=1.21.5
+# Download and install Go 1.25+
+GO_VERSION=1.25.4
 wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
@@ -245,14 +245,14 @@ cd ~/actions-runner
 
 ## Networking Configuration
 
-See [WIREGUARD_SETUP.md](WIREGUARD_SETUP.md) for configuring secure VPN access to TrueNAS.
-
 **Network Requirements:**
 - Outbound HTTPS (443) to GitHub
 - Access to TrueNAS:
   - Port 443 (API/WebSocket)
   - Port 2049 (NFS)
   - Port 4420 (NVMe-oF)
+
+If your TrueNAS is on a private network, configure appropriate VPN or network routing to allow the runner to reach TrueNAS.
 
 ## Maintenance
 
@@ -372,9 +372,8 @@ sudo wg show
 
 ## Next Steps
 
-1. [Configure Wireguard VPN](WIREGUARD_SETUP.md)
-2. [Set up GitHub Actions workflows](../.github/workflows/)
-3. [Configure repository secrets](GITHUB_SECRETS.md)
+1. [Set up GitHub Actions workflows](../.github/workflows/)
+2. Configure repository secrets in GitHub Settings → Secrets and Variables → Actions
 
 ## References
 

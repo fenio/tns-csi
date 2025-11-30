@@ -113,6 +113,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 				DatasetName: existingDataset.Name,
 				Server:      server,
 				NFSShareID:  existingShare.ID,
+				Capacity:    existingCapacity,
 			}
 
 			encodedVolumeID, encodeErr := encodeVolumeID(meta)
@@ -201,6 +202,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 		DatasetName: dataset.Name,
 		Server:      server,
 		NFSShareID:  nfsShare.ID,
+		Capacity:    requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -302,6 +304,12 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 
 	klog.V(4).Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
 
+	// Get requested capacity (needed before creating metadata)
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
 	// Encode volume metadata into volumeID
 	meta := VolumeMetadata{
 		Name:        volumeName,
@@ -310,6 +318,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		DatasetName: dataset.Name,
 		Server:      server,
 		NFSShareID:  nfsShare.ID,
+		Capacity:    requestedCapacity,
 	}
 
 	encodedVolumeID, err := encodeVolumeID(meta)
@@ -335,12 +344,6 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		"datasetName":        dataset.Name,
 		"nfsShareID":         strconv.Itoa(nfsShare.ID),
 		"clonedFromSnapshot": "true",
-	}
-
-	// Get requested capacity
-	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if requestedCapacity == 0 {
-		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
 	klog.Infof("Created NFS volume from snapshot: %s", volumeName)

@@ -261,6 +261,7 @@ kubectl logs -n kube-system -l app=tns-csi,component=node
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind
 - [Security](docs/SECURITY-SANITIZATION.md) - Security considerations
+- [Comparison with Democratic-CSI](docs/COMPARISON.md) - Feature comparison with democratic-csi
 
 ## Development
 

@@ -26,7 +26,8 @@ sources:
   - https://github.com/fenio/tns-csi
 
 maintainers:
-  - name: TrueNAS CSI Driver Contributors
-    url: https://github.com/fenio/tns-csi
+  - name: Bartosz Fenski
+    email: fenio@debian.org
+    url: https://github.com/fenio
 
 icon: https://www.truenas.com/wp-content/uploads/2023/01/TrueNAS_Open_Storage.png

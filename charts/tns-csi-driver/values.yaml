@@ -226,7 +226,7 @@ storageClasses:
     # Additional parameters
     parameters: {}
   
-  # NVMe-oF storage class (UNTESTED - requires Linux with nvme-tcp kernel module)
+  # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
   nvmeof:
     enabled: false
     name: tns-csi-nvmeof
@@ -237,6 +237,10 @@ storageClasses:
     server: ""
     # Optional: Parent dataset
     parentDataset: ""
+    # REQUIRED: Pre-configured NVMe-oF subsystem NQN
+    # Create this in TrueNAS: Shares > NVMe-oF Subsystems before deploying
+    # Example: nqn.2025-01.com.truenas:csi
+    subsystemNQN: ""
     # NVMe-oF transport: tcp or rdma
     transport: "tcp"
     # NVMe-oF port

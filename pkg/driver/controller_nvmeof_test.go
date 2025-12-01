@@ -52,7 +52,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					// No existing ZVOLs - allow creation
 					return []tnsapi.Dataset{}, nil
 				}
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					if nqn != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
 						t.Errorf("Expected NQN nqn.2024-11.ai.truenas:nvme:test-subsystem, got %s", nqn)
 					}
@@ -148,7 +148,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					// No existing ZVOLs - allow creation
 					return []tnsapi.Dataset{}, nil
 				}
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
@@ -262,7 +262,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					// No existing ZVOLs - will proceed to subsystem check
 					return []tnsapi.Dataset{}, nil
 				}
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return nil, errors.New("subsystem not found")
 				}
 			},
@@ -288,7 +288,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
@@ -318,7 +318,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				zvolCreated := false
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
@@ -688,7 +688,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			server:       "192.168.1.100",
 			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:test-subsystem",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					if nqn != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
 						t.Errorf("Expected NQN nqn.2024-11.ai.truenas:nvme:test-subsystem, got %s", nqn)
 					}
@@ -744,7 +744,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			server:       "192.168.1.100",
 			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:nonexistent",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return nil, errors.New("subsystem not found")
 				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
@@ -770,7 +770,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			server:       "192.168.1.100",
 			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:test-subsystem",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetNVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
 				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {

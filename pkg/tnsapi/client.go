@@ -716,8 +716,8 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 	return nil
 }
 
-// GetDataset retrieves dataset information.
-func (c *Client) GetDataset(ctx context.Context, datasetID string) (*Dataset, error) {
+// Dataset retrieves dataset information.
+func (c *Client) Dataset(ctx context.Context, datasetID string) (*Dataset, error) {
 	klog.V(4).Infof("Getting dataset: %s", datasetID)
 
 	var result Dataset
@@ -939,9 +939,9 @@ func (c *Client) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOF
 	return result, nil
 }
 
-// GetNVMeOFSubsystemByNQN retrieves a single NVMe-oF subsystem by NQN.
+// NVMeOFSubsystemByNQN retrieves a single NVMe-oF subsystem by NQN.
 // Returns error if subsystem is not found or if multiple subsystems match.
-func (c *Client) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error) {
+func (c *Client) NVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error) {
 	klog.V(4).Infof("Getting NVMe-oF subsystem for NQN: %s", nqn)
 
 	subsystems, err := c.QueryNVMeOFSubsystem(ctx, nqn)

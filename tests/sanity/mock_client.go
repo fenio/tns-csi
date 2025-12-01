@@ -203,9 +203,9 @@ func (m *MockClient) DeleteDataset(ctx context.Context, id string) error {
 	return fmt.Errorf("dataset %s: %w", id, ErrDatasetNotFound)
 }
 
-// GetDataset mocks pool.dataset.query.
-func (m *MockClient) GetDataset(ctx context.Context, name string) (*tnsapi.Dataset, error) {
-	m.logCall("GetDataset", name)
+// Dataset mocks pool.dataset.query.
+func (m *MockClient) Dataset(ctx context.Context, name string) (*tnsapi.Dataset, error) {
+	m.logCall("Dataset", name)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -436,9 +436,9 @@ func (m *MockClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int)
 	return fmt.Errorf("subsystem %d: %w", subsystemID, ErrSubsystemNotFound)
 }
 
-// GetNVMeOFSubsystemByNQN mocks getting a subsystem by NQN.
-func (m *MockClient) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-	m.logCall("GetNVMeOFSubsystemByNQN", nqn)
+// NVMeOFSubsystemByNQN mocks getting a subsystem by NQN.
+func (m *MockClient) NVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+	m.logCall("NVMeOFSubsystemByNQN", nqn)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

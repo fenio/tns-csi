@@ -66,8 +66,8 @@ func (r *SnapshotRegistry) Unregister(snapshotName string) {
 	delete(r.snapshots, snapshotName)
 }
 
-// GetDataset returns the dataset name for a registered snapshot, or empty string if not found.
-func (r *SnapshotRegistry) GetDataset(snapshotName string) string {
+// Dataset returns the dataset name for a registered snapshot, or empty string if not found.
+func (r *SnapshotRegistry) Dataset(snapshotName string) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.snapshots[snapshotName]

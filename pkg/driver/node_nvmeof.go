@@ -469,7 +469,7 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 	// Unregister namespace and check if we should disconnect
 	isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
 	if !isLastNamespace {
-		activeCount := s.namespaceRegistry.GetNQNCount(nqn)
+		activeCount := s.namespaceRegistry.NQNCount(nqn)
 		klog.V(4).Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",
 			volumeID, nqn, nsid, activeCount)
 		return &csi.NodeUnstageVolumeResponse{}, nil
@@ -879,7 +879,7 @@ func (s *NodeService) getExpectedCapacity(ctx context.Context, devicePath, datas
 	// Query TrueNAS API if not in volumeContext
 	if datasetName != "" && s.apiClient != nil {
 		klog.V(4).Infof("Querying TrueNAS API for ZVOL size of %s", datasetName)
-		dataset, err := s.apiClient.GetDataset(ctx, datasetName)
+		dataset, err := s.apiClient.Dataset(ctx, datasetName)
 		if err != nil {
 			klog.Warningf("Failed to query ZVOL size from TrueNAS API for %s: %v", datasetName, err)
 			return 0

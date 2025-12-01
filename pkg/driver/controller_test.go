@@ -257,7 +257,7 @@ func (m *mockAPIClient) DeleteDataset(ctx context.Context, datasetID string) err
 	return nil
 }
 
-func (m *mockAPIClient) GetDataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
+func (m *mockAPIClient) Dataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
 	return nil, errNotImplemented
 }
 
@@ -289,7 +289,7 @@ func (m *mockAPIClient) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID i
 	return nil
 }
 
-func (m *mockAPIClient) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+func (m *mockAPIClient) NVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
 	return nil, errNotImplemented
 }
 

@@ -58,7 +58,7 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 
 	if req.GetVolumeId() == "" {
 		timer.ObserveError()
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetStagingTargetPath() == "" {
@@ -128,7 +128,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 	if req.GetVolumeId() == "" {
 		timer.ObserveError()
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetStagingTargetPath() == "" {
@@ -194,7 +194,7 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	if req.GetVolumeId() == "" {
 		timer.ObserveError()
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetTargetPath() == "" {
@@ -274,7 +274,7 @@ func (s *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 
 	if req.GetVolumeId() == "" {
 		timer.ObserveError()
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetTargetPath() == "" {
@@ -331,7 +331,7 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 	klog.V(4).Infof("NodeGetVolumeStats called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	volumePath := req.GetVolumePath()
@@ -429,7 +429,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	// Validate request
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetVolumePath() == "" {

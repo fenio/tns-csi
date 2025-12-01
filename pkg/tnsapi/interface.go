@@ -14,7 +14,7 @@ type ClientInterface interface {
 	// Dataset operations
 	CreateDataset(ctx context.Context, params DatasetCreateParams) (*Dataset, error)
 	DeleteDataset(ctx context.Context, datasetID string) error
-	GetDataset(ctx context.Context, datasetID string) (*Dataset, error)
+	Dataset(ctx context.Context, datasetID string) (*Dataset, error)
 	UpdateDataset(ctx context.Context, datasetID string, params DatasetUpdateParams) (*Dataset, error)
 	QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error)
 
@@ -30,7 +30,7 @@ type ClientInterface interface {
 	// NVMe-oF operations
 	CreateNVMeOFSubsystem(ctx context.Context, params NVMeOFSubsystemCreateParams) (*NVMeOFSubsystem, error)
 	DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) error
-	GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error)
+	NVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*NVMeOFSubsystem, error)
 	QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]NVMeOFSubsystem, error)
 	ListAllNVMeOFSubsystems(ctx context.Context) ([]NVMeOFSubsystem, error)
 

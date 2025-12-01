@@ -34,7 +34,7 @@ type MockAPIClientForSnapshots struct {
 	DeleteNVMeOFNamespaceFunc    func(ctx context.Context, namespaceID int) error
 	QueryNVMeOFPortsFunc         func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
 	AddSubsystemToPortFunc       func(ctx context.Context, subsystemID, portID int) error
-	GetNVMeOFSubsystemByNQNFunc  func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
+	NVMeOFSubsystemByNQNFunc     func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
 	QueryAllDatasetsFunc         func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
 	QueryAllNFSSharesFunc        func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
 	QueryAllNVMeOFNamespacesFunc func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
@@ -83,11 +83,11 @@ func (m *MockAPIClientForSnapshots) DeleteDataset(ctx context.Context, datasetID
 	return errors.New("DeleteDatasetFunc not implemented")
 }
 
-func (m *MockAPIClientForSnapshots) GetDataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
+func (m *MockAPIClientForSnapshots) Dataset(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
 	if m.GetDatasetFunc != nil {
 		return m.GetDatasetFunc(ctx, datasetID)
 	}
-	return nil, errors.New("GetDatasetFunc not implemented")
+	return nil, errors.New("DatasetFunc not implemented")
 }
 
 func (m *MockAPIClientForSnapshots) UpdateDataset(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
@@ -167,11 +167,11 @@ func (m *MockAPIClientForSnapshots) AddSubsystemToPort(ctx context.Context, subs
 	return errors.New("AddSubsystemToPortFunc not implemented")
 }
 
-func (m *MockAPIClientForSnapshots) GetNVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-	if m.GetNVMeOFSubsystemByNQNFunc != nil {
-		return m.GetNVMeOFSubsystemByNQNFunc(ctx, nqn)
+func (m *MockAPIClientForSnapshots) NVMeOFSubsystemByNQN(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
+	if m.NVMeOFSubsystemByNQNFunc != nil {
+		return m.NVMeOFSubsystemByNQNFunc(ctx, nqn)
 	}
-	return nil, errors.New("GetNVMeOFSubsystemByNQNFunc not implemented")
+	return nil, errors.New("NVMeOFSubsystemByNQNFunc not implemented")
 }
 
 func (m *MockAPIClientForSnapshots) QueryNVMeOFSubsystem(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error) {

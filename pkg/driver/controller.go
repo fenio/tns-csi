@@ -18,6 +18,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// Error message constants.
+const (
+	errMsgVolumeIDRequired = "Volume ID is required"
+)
+
 // Static errors for controller operations.
 var (
 	ErrVolumeIDNotEncoded = errors.New("volume ID is not in encoded format")
@@ -249,7 +254,7 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 	}
 
 	expectedDatasetName := fmt.Sprintf("%s/%s", parentDataset, req.GetName())
-	existingDataset, err := s.apiClient.GetDataset(ctx, expectedDatasetName)
+	existingDataset, err := s.apiClient.Dataset(ctx, expectedDatasetName)
 	if err != nil || existingDataset == nil {
 		// Dataset doesn't exist or error querying - continue with creation
 		if err != nil {
@@ -478,7 +483,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	klog.V(4).Infof("DeleteVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	volumeID := req.GetVolumeId()
@@ -513,7 +518,7 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 
 	// Validate required parameters per CSI spec
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetNodeId() == "" {
@@ -550,7 +555,7 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 
 	// Validate required parameters per CSI spec
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
@@ -561,7 +566,7 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 	klog.V(4).Infof("ValidateVolumeCapabilities called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetVolumeCapabilities() == nil || len(req.GetVolumeCapabilities()) == 0 {
@@ -883,7 +888,7 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	// Validate request
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	if req.GetCapacityRange() == nil {
@@ -925,7 +930,7 @@ func (s *ControllerService) ControllerModifyVolume(_ context.Context, req *csi.C
 	klog.V(4).Infof("ControllerModifyVolume called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "Volume ID is required")
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
 	return nil, status.Error(codes.Unimplemented, "ControllerModifyVolume not implemented")

@@ -83,15 +83,15 @@ func (r *NVMeOFNamespaceRegistry) Unregister(nqn, nsid string) bool {
 	return false
 }
 
-// GetNQNCount returns the number of active namespaces for a given NQN.
-func (r *NVMeOFNamespaceRegistry) GetNQNCount(nqn string) int {
+// NQNCount returns the number of active namespaces for a given NQN.
+func (r *NVMeOFNamespaceRegistry) NQNCount(nqn string) int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.nqnCounts[nqn]
 }
 
-// GetNamespaceCount returns the reference count for a specific namespace.
-func (r *NVMeOFNamespaceRegistry) GetNamespaceCount(nqn, nsid string) int {
+// NamespaceCount returns the reference count for a specific namespace.
+func (r *NVMeOFNamespaceRegistry) NamespaceCount(nqn, nsid string) int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	key := fmt.Sprintf("%s:%s", nqn, nsid)

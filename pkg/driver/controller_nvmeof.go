@@ -20,6 +20,7 @@ const (
 	msgSubsystemNotFound        = "Failed to find NVMe-oF subsystem with NQN '%s'. " +
 		"Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) " +
 		"with ports attached before provisioning volumes. Error: %v"
+	msgFailedCleanupClonedZVOL = "Failed to cleanup cloned ZVOL: %v"
 )
 
 // nvmeofVolumeParams holds validated parameters for NVMe-oF volume creation.
@@ -180,7 +181,7 @@ func (s *ControllerService) handleExistingNVMeOFVolume(ctx context.Context, para
 
 	// Verify subsystem exists
 	klog.V(4).Infof(msgVerifyingNVMeOFSubsystem, params.subsystemNQN)
-	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, params.subsystemNQN)
+	subsystem, err := s.apiClient.NVMeOFSubsystemByNQN(ctx, params.subsystemNQN)
 	if err != nil {
 		timer.ObserveError()
 		return nil, false, status.Errorf(codes.FailedPrecondition, msgSubsystemNotFound, params.subsystemNQN, err)
@@ -272,7 +273,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	// Verify pre-configured subsystem exists
 	klog.V(4).Infof(msgVerifyingNVMeOFSubsystem, params.subsystemNQN)
-	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, params.subsystemNQN)
+	subsystem, err := s.apiClient.NVMeOFSubsystemByNQN(ctx, params.subsystemNQN)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.FailedPrecondition, msgSubsystemNotFound, params.subsystemNQN, err)
@@ -491,12 +492,12 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	// Step 1: Verify pre-configured subsystem exists
 	klog.V(4).Infof("Verifying NVMe-oF subsystem exists with NQN: %s", subsystemNQN)
-	subsystem, err := s.apiClient.GetNVMeOFSubsystemByNQN(ctx, subsystemNQN)
+	subsystem, err := s.apiClient.NVMeOFSubsystemByNQN(ctx, subsystemNQN)
 	if err != nil {
 		// Cleanup: delete the cloned ZVOL if subsystem verification fails
 		klog.Errorf("Failed to find NVMe-oF subsystem, cleaning up cloned ZVOL: %v", err)
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+			klog.Errorf(msgFailedCleanupClonedZVOL, delErr)
 		}
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"Failed to find NVMe-oF subsystem with NQN '%s'. "+
@@ -523,7 +524,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		// Cleanup: delete cloned ZVOL
 		klog.Errorf("Failed to create NVMe-oF namespace, cleaning up cloned ZVOL: %v", err)
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+			klog.Errorf(msgFailedCleanupClonedZVOL, delErr)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
@@ -557,7 +558,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+			klog.Errorf(msgFailedCleanupClonedZVOL, delErr)
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID for cloned volume: %v", err)
 	}

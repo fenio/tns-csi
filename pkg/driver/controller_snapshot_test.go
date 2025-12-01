@@ -795,3 +795,206 @@ func TestIsNotFoundError(t *testing.T) {
 		})
 	}
 }
+
+func TestEncodeSnapshotToken(t *testing.T) {
+	tests := []struct {
+		name   string
+		offset int
+		want   string
+	}{
+		{
+			name:   "zero offset",
+			offset: 0,
+			want:   "0",
+		},
+		{
+			name:   "positive offset",
+			offset: 10,
+			want:   "10",
+		},
+		{
+			name:   "large offset",
+			offset: 1000000,
+			want:   "1000000",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := encodeSnapshotToken(tt.offset)
+			if got != tt.want {
+				t.Errorf("encodeSnapshotToken(%d) = %v, want %v", tt.offset, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSnapshotToken(t *testing.T) {
+	tests := []struct {
+		name    string
+		token   string
+		want    int
+		wantErr bool
+	}{
+		{
+			name:    "zero offset",
+			token:   "0",
+			want:    0,
+			wantErr: false,
+		},
+		{
+			name:    "positive offset",
+			token:   "10",
+			want:    10,
+			wantErr: false,
+		},
+		{
+			name:    "large offset",
+			token:   "1000000",
+			want:    1000000,
+			wantErr: false,
+		},
+		{
+			name:    "invalid token - non-numeric",
+			token:   "abc",
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name:    "invalid token - empty",
+			token:   "",
+			want:    0,
+			wantErr: true,
+		},
+		{
+			name:    "invalid token - mixed",
+			token:   "10abc",
+			want:    10, // Sscanf reads partial number
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseSnapshotToken(tt.token)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseSnapshotToken(%q) error = %v, wantErr %v", tt.token, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("parseSnapshotToken(%q) = %v, want %v", tt.token, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSnapshotTokenRoundtrip(t *testing.T) {
+	// Test that encode -> parse gives back the original value
+	offsets := []int{0, 1, 10, 100, 1000, 9999999}
+
+	for _, offset := range offsets {
+		token := encodeSnapshotToken(offset)
+		parsed, err := parseSnapshotToken(token)
+		if err != nil {
+			t.Errorf("Failed to parse token for offset %d: %v", offset, err)
+			continue
+		}
+		if parsed != offset {
+			t.Errorf("Roundtrip failed: offset %d -> token %q -> parsed %d", offset, token, parsed)
+		}
+	}
+}
+
+func TestSnapshotRegistry(t *testing.T) {
+	t.Run("basic operations", func(t *testing.T) {
+		registry := NewSnapshotRegistry()
+
+		// Register a snapshot
+		err := registry.Register("snap1", "tank/vol1")
+		if err != nil {
+			t.Errorf("Failed to register snapshot: %v", err)
+		}
+
+		// Get the dataset for the snapshot
+		dataset := registry.Dataset("snap1")
+		if dataset != "tank/vol1" {
+			t.Errorf("Expected dataset 'tank/vol1', got '%s'", dataset)
+		}
+
+		// Register same snapshot for same dataset should succeed (idempotent)
+		err = registry.Register("snap1", "tank/vol1")
+		if err != nil {
+			t.Errorf("Idempotent registration failed: %v", err)
+		}
+
+		// Register same snapshot for different dataset should fail
+		err = registry.Register("snap1", "tank/vol2")
+		if err == nil {
+			t.Error("Expected error when registering snapshot for different dataset")
+		}
+
+		// Unregister the snapshot
+		registry.Unregister("snap1")
+
+		// After unregister, Dataset should return empty
+		dataset = registry.Dataset("snap1")
+		if dataset != "" {
+			t.Errorf("Expected empty dataset after unregister, got '%s'", dataset)
+		}
+
+		// Should be able to register again after unregister
+		err = registry.Register("snap1", "tank/vol3")
+		if err != nil {
+			t.Errorf("Failed to re-register after unregister: %v", err)
+		}
+	})
+
+	t.Run("multiple snapshots", func(t *testing.T) {
+		registry := NewSnapshotRegistry()
+
+		// Register multiple snapshots
+		_ = registry.Register("snap1", "tank/vol1")
+		_ = registry.Register("snap2", "tank/vol2")
+		_ = registry.Register("snap3", "tank/vol3")
+
+		// Verify all are retrievable
+		if registry.Dataset("snap1") != "tank/vol1" {
+			t.Error("snap1 dataset mismatch")
+		}
+		if registry.Dataset("snap2") != "tank/vol2" {
+			t.Error("snap2 dataset mismatch")
+		}
+		if registry.Dataset("snap3") != "tank/vol3" {
+			t.Error("snap3 dataset mismatch")
+		}
+
+		// Unregister one
+		registry.Unregister("snap2")
+
+		// snap2 should be gone
+		if registry.Dataset("snap2") != "" {
+			t.Error("snap2 should be empty after unregister")
+		}
+
+		// Others should still be there
+		if registry.Dataset("snap1") != "tank/vol1" {
+			t.Error("snap1 should still exist")
+		}
+		if registry.Dataset("snap3") != "tank/vol3" {
+			t.Error("snap3 should still exist")
+		}
+	})
+
+	t.Run("nonexistent snapshot", func(t *testing.T) {
+		registry := NewSnapshotRegistry()
+
+		// Dataset for nonexistent snapshot should return empty
+		dataset := registry.Dataset("nonexistent")
+		if dataset != "" {
+			t.Errorf("Expected empty dataset for nonexistent snapshot, got '%s'", dataset)
+		}
+
+		// Unregister nonexistent should not panic
+		registry.Unregister("nonexistent")
+	})
+}

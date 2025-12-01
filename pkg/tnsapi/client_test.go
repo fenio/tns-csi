@@ -189,7 +189,7 @@ func TestNewClient(t *testing.T) {
 			server.expectAuthKey = tt.expectAuthKey
 			defer server.Close()
 
-			client, err := NewClient(server.URL(), tt.apiKey)
+			client, err := NewClient(server.URL(), tt.apiKey, false)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got nil")
@@ -214,7 +214,7 @@ func TestNewClient(t *testing.T) {
 
 func TestNewClientConnectionFailure(t *testing.T) {
 	// Try to connect to non-existent server
-	_, err := NewClient("ws://localhost:99999/invalid", "test-api-key")
+	_, err := NewClient("ws://localhost:99999/invalid", "test-api-key", false)
 	if err == nil {
 		t.Error("Expected connection error but got nil")
 	}
@@ -309,7 +309,7 @@ func TestClientCall(t *testing.T) {
 			}
 			defer server.Close()
 
-			client, err := NewClient(server.URL(), "test-api-key")
+			client, err := NewClient(server.URL(), "test-api-key", false)
 			if err != nil {
 				t.Fatalf("Failed to create client: %v", err)
 			}
@@ -359,7 +359,7 @@ func TestClientCallTimeout(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestClientCallAfterClose(t *testing.T) {
 	server := newMockWSServer()
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestClientPingPong(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -597,7 +597,7 @@ func TestClientClose(t *testing.T) {
 	server := newMockWSServer()
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestResponseIDMismatch(t *testing.T) {
 	}
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestConcurrentCalls(t *testing.T) {
 	server := newMockWSServer()
 	defer server.Close()
 
-	client, err := NewClient(server.URL(), "test-api-key")
+	client, err := NewClient(server.URL(), "test-api-key", false)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
@@ -844,7 +844,7 @@ func TestQueryPool(t *testing.T) {
 			}
 			defer server.Close()
 
-			client, err := NewClient(server.URL(), "test-api-key")
+			client, err := NewClient(server.URL(), "test-api-key", false)
 			if err != nil {
 				t.Fatalf("Failed to create client: %v", err)
 			}

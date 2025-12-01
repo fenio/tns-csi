@@ -35,6 +35,10 @@ on:
           - snapshot-restore
           - volume-stress
 
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
 # Ensure only one integration test runs at a time on the self-hosted runner
 concurrency:
   group: integration-tests

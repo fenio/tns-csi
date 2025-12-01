@@ -17,6 +17,11 @@ truenas:
   # If set, url and apiKey above will be ignored
   # Secret should contain keys: 'url' and 'api-key'
   existingSecret: ""
+  
+  # Skip TLS certificate verification
+  # Set to true if TrueNAS uses self-signed certificates
+  # WARNING: Only enable this in trusted networks
+  skipTLSVerify: false
 
 # Image configuration
 image:

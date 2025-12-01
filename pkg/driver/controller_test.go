@@ -361,6 +361,7 @@ func (m *mockAPIClient) Close() {
 }
 
 func TestValidateCreateVolumeRequest(t *testing.T) {
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name     string
 		req      *csi.CreateVolumeRequest
@@ -574,6 +575,7 @@ func TestControllerPublishVolume(t *testing.T) {
 		t.Fatalf("Failed to encode test volume ID: %v", err)
 	}
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name     string
 		req      *csi.ControllerPublishVolumeRequest
@@ -710,6 +712,7 @@ func TestControllerPublishVolume(t *testing.T) {
 func TestControllerUnpublishVolume(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name     string
 		req      *csi.ControllerUnpublishVolumeRequest
@@ -776,6 +779,7 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 		t.Fatalf("Failed to encode test volume ID: %v", err)
 	}
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name     string
 		req      *csi.ValidateVolumeCapabilitiesRequest
@@ -908,6 +912,7 @@ func TestControllerExpandVolume(t *testing.T) {
 		t.Fatalf("Failed to encode NVMe-oF volume ID: %v", err)
 	}
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name          string
 		req           *csi.ControllerExpandVolumeRequest
@@ -1407,6 +1412,7 @@ func TestNVMeOFNamespaceRegistry(t *testing.T) {
 func TestCreateVolumeRPC(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name          string
 		req           *csi.CreateVolumeRequest
@@ -1636,6 +1642,7 @@ func TestDeleteVolumeRPC(t *testing.T) {
 		t.Fatalf("Failed to encode NVMe-oF volume ID: %v", err)
 	}
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name      string
 		req       *csi.DeleteVolumeRequest
@@ -1750,6 +1757,7 @@ func TestDeleteVolumeRPC(t *testing.T) {
 func TestListVolumes(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name          string
 		req           *csi.ListVolumesRequest

@@ -797,6 +797,7 @@ func TestIsNotFoundError(t *testing.T) {
 }
 
 func TestEncodeSnapshotToken(t *testing.T) {
+	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name   string
 		offset int

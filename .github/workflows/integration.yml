@@ -570,7 +570,7 @@ jobs:
     if: always()
     steps:
       - name: Generate Test Summary
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const results = {

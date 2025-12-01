@@ -56,11 +56,10 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		volumeID, isBlockVolume, params.server, params.port, params.nqn, params.nsid, datasetName, namespaceID)
 
 	// Try to reuse existing connection (idempotent staging)
-	if resp, devicePath := s.tryReuseExistingConnection(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); resp != nil {
+	if resp, _, reuseErr := s.tryReuseExistingConnection(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); reuseErr != nil {
+		return nil, reuseErr
+	} else if resp != nil {
 		return resp, nil
-	} else if devicePath != "" {
-		// Device found but staging failed - error already returned
-		return nil, nil
 	}
 
 	// Check if nvme-cli is installed
@@ -83,10 +82,11 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 // If the device is already connected, REUSE the existing connection instead of
 // disconnecting and reconnecting. Forced disconnect/reconnect was causing data loss
 // because it confuses the kernel's device state.
-func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, string) {
-	devicePath, err := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
-	if err != nil || devicePath == "" {
-		return nil, ""
+func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (resp *csi.NodeStageVolumeResponse, devicePath string, err error) {
+	devicePath, findErr := s.findNVMeDeviceByNQNAndNSID(ctx, params.nqn, params.nsid)
+	if findErr != nil || devicePath == "" {
+		// Device not found is expected when not previously connected - return nil to try other methods
+		return nil, "", nil //nolint:nilerr // intentionally swallowing "device not found" as this is expected
 	}
 
 	klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s NSID=%s - reusing existing connection (idempotent)",
@@ -102,8 +102,12 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 	s.namespaceRegistry.Register(params.nqn, params.nsid)
 
 	// Proceed directly to staging with the existing device
-	resp, _ := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
-	return resp, devicePath
+	resp, err = s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	if err != nil {
+		klog.Errorf("Failed to stage existing NVMe device: %v", err)
+		return nil, devicePath, err
+	}
+	return resp, devicePath, nil
 }
 
 // tryDiscoverViaControllerRescan attempts to discover a namespace by rescanning an existing controller.
@@ -143,7 +147,10 @@ func (s *NodeService) tryDiscoverViaControllerRescan(ctx context.Context, params
 	// Register this namespace as active to prevent premature disconnect
 	s.namespaceRegistry.Register(params.nqn, params.nsid)
 
-	resp, _ := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	resp, err := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	if err != nil {
+		klog.Errorf("Failed to stage NVMe device after controller rescan: %v", err)
+	}
 	return resp
 }
 

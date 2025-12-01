@@ -64,7 +64,7 @@ func main() {
 	
 	fmt.Printf("Connecting to TrueNAS at %s...\n", url)
 	
-	client, err := tnsapi.NewClient(url, apiKey)
+	client, err := tnsapi.NewClient(url, apiKey, true)
 	if err != nil {
 		fmt.Printf("Failed to create client: %v\n", err)
 		os.Exit(1)

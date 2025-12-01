@@ -140,8 +140,8 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 
 	// Check if creating from snapshot or volume clone
-	if resp, handled := s.handleVolumeContentSource(ctx, req, protocol); handled {
-		return resp, nil
+	if resp, handled, err := s.handleVolumeContentSource(ctx, req, protocol); handled {
+		return resp, err
 	}
 
 	klog.V(4).Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
@@ -181,14 +181,15 @@ func validateCreateVolumeRequest(req *csi.CreateVolumeRequest) error {
 }
 
 // handleVolumeContentSource handles creating volumes from snapshots or clones.
-// Returns (response, true) if handled, or (nil, false) if not a content source request.
-func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *csi.CreateVolumeRequest, protocol string) (*csi.CreateVolumeResponse, bool) {
+// Returns (response, true, nil) if handled successfully, (nil, true, error) if handled with error,
+// or (nil, false, nil) if not a content source request.
+func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *csi.CreateVolumeRequest, protocol string) (*csi.CreateVolumeResponse, bool, error) {
 	contentSource := req.GetVolumeContentSource()
 	klog.V(4).Infof("Checking VolumeContentSource for volume %s: %+v", req.GetName(), contentSource)
 
 	if contentSource == nil {
 		klog.V(4).Infof("VolumeContentSource is nil for volume %s (normal volume creation)", req.GetName())
-		return nil, false
+		return nil, false, nil
 	}
 
 	klog.V(4).Infof("VolumeContentSource is NOT nil for volume %s", req.GetName())
@@ -200,8 +201,9 @@ func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *
 		resp, err := s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
 		if err != nil {
 			klog.Errorf("Failed to create volume from snapshot: %v", err)
+			return nil, true, err
 		}
-		return resp, true
+		return resp, true, nil
 	}
 
 	// Check if creating from volume (cloning)
@@ -212,12 +214,13 @@ func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *
 		resp, err := s.createVolumeFromVolume(ctx, req, sourceVolumeID)
 		if err != nil {
 			klog.Errorf("Failed to create volume from volume: %v", err)
+			return nil, true, err
 		}
-		return resp, true
+		return resp, true, nil
 	}
 
 	klog.Warningf("VolumeContentSource exists but both snapshot and volume are nil for volume %s", req.GetName())
-	return nil, false
+	return nil, false, nil
 }
 
 // createVolumeByProtocol creates a volume using the specified protocol.

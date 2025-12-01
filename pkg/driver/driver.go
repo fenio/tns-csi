@@ -20,14 +20,15 @@ import (
 
 // Config contains the configuration for the driver.
 type Config struct {
-	DriverName  string
-	Version     string
-	NodeID      string
-	Endpoint    string
-	APIURL      string
-	APIKey      string
-	MetricsAddr string // Address to expose Prometheus metrics (e.g., ":8080")
-	TestMode    bool   // Enable test mode for sanity tests (skips actual mounts)
+	DriverName    string
+	Version       string
+	NodeID        string
+	Endpoint      string
+	APIURL        string
+	APIKey        string
+	MetricsAddr   string // Address to expose Prometheus metrics (e.g., ":8080")
+	TestMode      bool   // Enable test mode for sanity tests (skips actual mounts)
+	SkipTLSVerify bool   // Skip TLS certificate verification (for self-signed certs)
 }
 
 // Driver is the TNS CSI driver.
@@ -44,10 +45,11 @@ type Driver struct {
 
 // NewDriver creates a new driver instance.
 func NewDriver(cfg Config) (*Driver, error) {
-	klog.V(4).Infof("Creating new driver with config: %+v", cfg)
+	klog.V(4).Infof("Creating new driver with config: DriverName=%s, NodeID=%s, Endpoint=%s, APIURL=%s, MetricsAddr=%s, TestMode=%v, SkipTLSVerify=%v",
+		cfg.DriverName, cfg.NodeID, cfg.Endpoint, cfg.APIURL, cfg.MetricsAddr, cfg.TestMode, cfg.SkipTLSVerify)
 
 	// Create API client
-	apiClient, err := tnsapi.NewClient(cfg.APIURL, cfg.APIKey)
+	apiClient, err := tnsapi.NewClient(cfg.APIURL, cfg.APIKey, cfg.SkipTLSVerify)
 	if err != nil {
 		return nil, err
 	}

@@ -47,6 +47,7 @@ type Client struct {
 	maxRetries    int
 	closed        bool
 	reconnecting  bool
+	skipTLSVerify bool // Skip TLS certificate verification
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
@@ -93,8 +94,9 @@ func (e *Error) Error() string {
 }
 
 // NewClient creates a new storage API client.
-func NewClient(url, apiKey string) (*Client, error) {
-	klog.V(4).Infof("Creating new storage API client for %s", url)
+// skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
+func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
+	klog.V(4).Infof("Creating new storage API client for %s (skipTLSVerify=%v)", url, skipTLSVerify)
 
 	// Trim whitespace from API key (common issue with secrets)
 	apiKey = strings.TrimSpace(apiKey)
@@ -107,6 +109,7 @@ func NewClient(url, apiKey string) (*Client, error) {
 		closeCh:       make(chan struct{}),
 		maxRetries:    5,
 		retryInterval: 5 * time.Second,
+		skipTLSVerify: skipTLSVerify,
 	}
 
 	// Connect to WebSocket
@@ -137,12 +140,20 @@ func (c *Client) connect() error {
 		HandshakeTimeout: 10 * time.Second,
 	}
 
-	// For wss:// connections, skip TLS verification (common for self-signed certs)
-	// TODO: Add option to provide custom CA certificate
+	// For wss:// connections, configure TLS based on skipTLSVerify setting
 	if strings.HasPrefix(c.url, "wss://") {
-		//nolint:gosec // TLS skip verify is intentional for self-signed TrueNAS certificates
-		dialer.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true,
+		if c.skipTLSVerify {
+			klog.V(4).Info("TLS certificate verification disabled (skipTLSVerify=true)")
+			//nolint:gosec // G402: TLS InsecureSkipVerify set true - intentional when user explicitly enables skipTLSVerify for self-signed certs
+			dialer.TLSClientConfig = &tls.Config{
+				InsecureSkipVerify: true,
+				MinVersion:         tls.VersionTLS12,
+			}
+		} else {
+			// Use secure TLS config with system CA pool
+			dialer.TLSClientConfig = &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			}
 		}
 	}
 
@@ -198,7 +209,7 @@ func (c *Client) authenticate() error {
 	}
 
 	if !authResult {
-		klog.Errorf("Storage system rejected API key (length: %d, prefix: %s...)", len(c.apiKey), c.apiKey[:min(10, len(c.apiKey))])
+		klog.Errorf("Storage system rejected API key (length: %d)", len(c.apiKey))
 		return ErrAuthenticationRejected
 	}
 
@@ -224,8 +235,8 @@ func (c *Client) authenticateDirect() error {
 		Params:  []interface{}{c.apiKey},
 	}
 
-	// Send request
-	klog.V(5).Infof("Sending request: %+v", req)
+	// Send request (log method only, not params which contain sensitive data)
+	klog.V(5).Infof("Sending authentication request: method=%s, id=%s", req.Method, req.ID)
 	if err := c.conn.WriteJSON(req); err != nil {
 		c.mu.Unlock()
 		return fmt.Errorf("failed to send authentication request: %w", err)
@@ -273,7 +284,7 @@ func (c *Client) authenticateDirect() error {
 	}
 
 	if !authResult {
-		klog.Errorf("Storage system rejected API key (length: %d, prefix: %s...)", len(c.apiKey), c.apiKey[:min(10, len(c.apiKey))])
+		klog.Errorf("Storage system rejected API key (length: %d)", len(c.apiKey))
 		return ErrAuthenticationRejected
 	}
 
@@ -308,8 +319,12 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	respCh := make(chan *Response, 1)
 	c.pending[id] = respCh
 
-	// Send request
-	klog.V(5).Infof("Sending request: %+v", req)
+	// Send request (sanitize log output for authentication methods to avoid logging sensitive data)
+	if strings.HasPrefix(method, "auth.") {
+		klog.V(5).Infof("Sending request: method=%s, id=%s", method, id)
+	} else {
+		klog.V(5).Infof("Sending request: %+v", req)
+	}
 	if err := c.conn.WriteJSON(req); err != nil {
 		delete(c.pending, id)
 		c.mu.Unlock()

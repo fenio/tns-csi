@@ -50,6 +50,9 @@ spec:
             - "--api-url=$(TNS_URL)"
             - "--api-key=$(TNS_API_KEY)"
             - "--v={{ .Values.node.logLevel }}"
+            {{- if .Values.truenas.skipTLSVerify }}
+            - "--skip-tls-verify"
+            {{- end }}
           env:
             - name: NODE_ID
               valueFrom:

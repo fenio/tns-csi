@@ -15,11 +15,13 @@ import (
 )
 
 // nfsVolumeParams holds validated parameters for NFS volume creation.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
 type nfsVolumeParams struct {
+	requestedCapacity int64
 	pool              string
 	server            string
 	parentDataset     string
-	requestedCapacity int64
 	volumeName        string
 	datasetName       string
 }
@@ -246,9 +248,9 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 	// Handle existing dataset (idempotency check)
 	if len(existingDatasets) > 0 {
-		resp, done, err := s.handleExistingNFSVolume(ctx, params, &existingDatasets[0], timer)
-		if err != nil {
-			return nil, err
+		resp, done, handleErr := s.handleExistingNFSVolume(ctx, params, &existingDatasets[0], timer)
+		if handleErr != nil {
+			return nil, handleErr
 		}
 		if done {
 			return resp, nil

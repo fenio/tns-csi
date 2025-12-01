@@ -197,7 +197,10 @@ func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *
 	if snapshot := contentSource.GetSnapshot(); snapshot != nil {
 		klog.V(4).Infof("=== SNAPSHOT RESTORE DETECTED === Creating volume %s from snapshot %s with protocol %s",
 			req.GetName(), snapshot.GetSnapshotId(), protocol)
-		resp, _ := s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
+		resp, err := s.createVolumeFromSnapshot(ctx, req, snapshot.GetSnapshotId())
+		if err != nil {
+			klog.Errorf("Failed to create volume from snapshot: %v", err)
+		}
 		return resp, true
 	}
 
@@ -206,7 +209,10 @@ func (s *ControllerService) handleVolumeContentSource(ctx context.Context, req *
 		sourceVolumeID := volume.GetVolumeId()
 		klog.V(4).Infof("=== VOLUME CLONE DETECTED === Creating volume %s from volume %s with protocol %s",
 			req.GetName(), sourceVolumeID, protocol)
-		resp, _ := s.createVolumeFromVolume(ctx, req, sourceVolumeID)
+		resp, err := s.createVolumeFromVolume(ctx, req, sourceVolumeID)
+		if err != nil {
+			klog.Errorf("Failed to create volume from volume: %v", err)
+		}
 		return resp, true
 	}
 

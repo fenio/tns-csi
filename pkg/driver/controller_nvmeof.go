@@ -23,12 +23,14 @@ const (
 )
 
 // nvmeofVolumeParams holds validated parameters for NVMe-oF volume creation.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
 type nvmeofVolumeParams struct {
+	requestedCapacity int64
 	pool              string
 	server            string
 	subsystemNQN      string
 	parentDataset     string
-	requestedCapacity int64
 	volumeName        string
 	zvolName          string
 }
@@ -109,7 +111,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 		}
 	}
 
-	return nil, nil
+	return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil namespace
 }
 
 // buildNVMeOFVolumeResponse builds the CreateVolumeResponse for an NVMe-oF volume.
@@ -258,9 +260,9 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 
 	// Handle existing ZVOL (idempotency check)
 	if len(existingZvols) > 0 {
-		resp, done, err := s.handleExistingNVMeOFVolume(ctx, params, &existingZvols[0], timer)
-		if err != nil {
-			return nil, err
+		resp, done, handleErr := s.handleExistingNVMeOFVolume(ctx, params, &existingZvols[0], timer)
+		if handleErr != nil {
+			return nil, handleErr
 		}
 		if done {
 			return resp, nil

@@ -319,12 +319,8 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	respCh := make(chan *Response, 1)
 	c.pending[id] = respCh
 
-	// Send request (sanitize log output for authentication methods to avoid logging sensitive data)
-	if strings.HasPrefix(method, "auth.") {
-		klog.V(5).Infof("Sending request: method=%s, id=%s", method, id)
-	} else {
-		klog.V(5).Infof("Sending request: %+v", req)
-	}
+	// Send request (log method and id only to avoid logging sensitive data in params)
+	klog.V(5).Infof("Sending request: method=%s, id=%s", method, id)
 	if err := c.conn.WriteJSON(req); err != nil {
 		delete(c.pending, id)
 		c.mu.Unlock()

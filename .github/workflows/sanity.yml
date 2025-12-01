@@ -21,6 +21,9 @@ on:
       - '.github/workflows/sanity.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   sanity:
     name: CSI Sanity Tests

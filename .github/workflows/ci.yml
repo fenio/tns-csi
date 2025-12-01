@@ -119,6 +119,8 @@ jobs:
     needs: [lint, test]
     # Only build (not push) on PRs
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
 

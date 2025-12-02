@@ -479,8 +479,8 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		// Block volume - still need to rescan device to detect new size
 		// Find the device from the staging path (volumePath is the published block device)
 		klog.V(4).Infof("Block volume expansion - rescanning device at %s", volumePath)
-		if err := RescanDevice(ctx, volumePath); err != nil {
-			klog.Warningf("Failed to rescan block device %s: %v (continuing anyway)", volumePath, err)
+		if rescanErr := RescanDevice(ctx, volumePath); rescanErr != nil {
+			klog.Warningf("Failed to rescan block device %s: %v (continuing anyway)", volumePath, rescanErr)
 		}
 		klog.Info("Block volume expansion, device rescanned, no filesystem resize needed")
 		return &csi.NodeExpandVolumeResponse{
@@ -504,8 +504,8 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	// Rescan the device to detect the new size from TrueNAS
 	// This is critical: TrueNAS expanded the ZVOL, but the node kernel
 	// may still see the old size until we rescan
-	if err := RescanDevice(ctx, device); err != nil {
-		klog.Warningf("Failed to rescan device %s: %v (continuing anyway)", device, err)
+	if rescanErr := RescanDevice(ctx, device); rescanErr != nil {
+		klog.Warningf("Failed to rescan device %s: %v (continuing anyway)", device, rescanErr)
 	}
 
 	// Detect filesystem type

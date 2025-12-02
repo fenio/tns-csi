@@ -23,7 +23,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 		wantErr       bool
 	}{
 		{
-			name: "successful NVMe-oF volume creation",
+			name: "successful NVMe-oF volume creation with independent subsystem",
 			req: &csi.CreateVolumeRequest{
 				Name: "test-nvmeof-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -41,7 +41,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					"pool":          "tank",
 					"server":        "192.168.1.100",
 					"parentDataset": "tank/nvme",
-					"subsystemNQN":  "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					// Note: subsystemNQN is NO LONGER required - generated automatically
 				},
 				CapacityRange: &csi.CapacityRange{
 					RequiredBytes: 10 * 1024 * 1024 * 1024, // 10GB
@@ -51,15 +51,6 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
 					// No existing ZVOLs - allow creation
 					return []tnsapi.Dataset{}, nil
-				}
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					if nqn != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
-						t.Errorf("Expected NQN nqn.2024-11.ai.truenas:nvme:test-subsystem, got %s", nqn)
-					}
-					return &tnsapi.NVMeOFSubsystem{
-						ID:  100,
-						NQN: nqn,
-					}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 					if params.Name != "tank/nvme/test-nvmeof-volume" {
@@ -74,6 +65,32 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 						Type: "VOLUME",
 					}, nil
 				}
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					expectedNQN := "nqn.2024-01.io.truenas.csi:test-nvmeof-volume"
+					if params.Name != expectedNQN {
+						t.Errorf("Expected NQN %s, got %s", expectedNQN, params.Name)
+					}
+					if !params.AllowAnyHost {
+						t.Error("Expected AllowAnyHost to be true")
+					}
+					return &tnsapi.NVMeOFSubsystem{
+						ID:   100,
+						Name: expectedNQN,
+						NQN:  expectedNQN,
+					}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100, got %d", subsystemID)
+					}
+					if portID != 1 {
+						t.Errorf("Expected port ID 1, got %d", portID)
+					}
+					return nil
+				}
 				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
 					if params.SubsysID != 100 {
 						t.Errorf("Expected subsystem ID 100, got %d", params.SubsysID)
@@ -83,6 +100,9 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					}
 					if params.DeviceType != "ZVOL" {
 						t.Errorf("Expected device type ZVOL, got %s", params.DeviceType)
+					}
+					if params.NSID != 1 {
+						t.Errorf("Expected NSID 1 for independent subsystem, got %d", params.NSID)
 					}
 					return &tnsapi.NVMeOFNamespace{
 						ID:   200,
@@ -107,8 +127,9 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				if resp.Volume.VolumeContext["server"] != "192.168.1.100" {
 					t.Errorf("Expected server 192.168.1.100, got %s", resp.Volume.VolumeContext["server"])
 				}
-				if resp.Volume.VolumeContext["nqn"] != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
-					t.Errorf("Expected NQN, got %s", resp.Volume.VolumeContext["nqn"])
+				expectedNQN := "nqn.2024-01.io.truenas.csi:test-nvmeof-volume"
+				if resp.Volume.VolumeContext["nqn"] != expectedNQN {
+					t.Errorf("Expected NQN %s, got %s", expectedNQN, resp.Volume.VolumeContext["nqn"])
 				}
 				if resp.Volume.VolumeContext["datasetName"] != "tank/nvme/test-nvmeof-volume" {
 					t.Errorf("Expected dataset name, got %s", resp.Volume.VolumeContext["datasetName"])
@@ -119,6 +140,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 				if resp.Volume.VolumeContext["nvmeofNamespaceID"] != "200" {
 					t.Errorf("Expected namespace ID 200, got %s", resp.Volume.VolumeContext["nvmeofNamespaceID"])
 				}
+				// NSID is always 1 with independent subsystem architecture
 				if resp.Volume.VolumeContext["nsid"] != "1" {
 					t.Errorf("Expected NSID 1, got %s", resp.Volume.VolumeContext["nsid"])
 				}
@@ -136,20 +158,15 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					},
 				},
 				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"pool":         "tank",
-					"server":       "192.168.1.100",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
 				},
 				// No capacity specified - should default to 1GB
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					// No existing ZVOLs - allow creation
 					return []tnsapi.Dataset{}, nil
-				}
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 					if params.Volsize != 1*1024*1024*1024 {
@@ -160,6 +177,15 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 						Name: "tank/test-nvmeof-volume-default",
 						Type: "VOLUME",
 					}, nil
+				}
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					return nil
 				}
 				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
 					return &tnsapi.NVMeOFNamespace{ID: 200, NSID: 1}, nil
@@ -185,9 +211,8 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					},
 				},
 				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"server":       "192.168.1.100",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					"protocol": "nvmeof",
+					"server":   "192.168.1.100",
 					// Missing pool parameter
 				},
 			},
@@ -207,9 +232,8 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					},
 				},
 				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"pool":         "tank",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					"protocol": "nvmeof",
+					"pool":     "tank",
 					// Missing server parameter
 				},
 			},
@@ -218,7 +242,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 			wantCode:  codes.InvalidArgument,
 		},
 		{
-			name: "missing subsystemNQN parameter",
+			name: "no NVMe-oF ports configured",
 			req: &csi.CreateVolumeRequest{
 				Name: "test-nvmeof-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -232,38 +256,32 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					"protocol": "nvmeof",
 					"pool":     "tank",
 					"server":   "192.168.1.100",
-					// Missing subsystemNQN parameter
-				},
-			},
-			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
-		},
-		{
-			name: "subsystem not found - pre-configuration required",
-			req: &csi.CreateVolumeRequest{
-				Name: "test-nvmeof-volume",
-				VolumeCapabilities: []*csi.VolumeCapability{
-					{
-						AccessType: &csi.VolumeCapability_Block{
-							Block: &csi.VolumeCapability_BlockVolume{},
-						},
-					},
-				},
-				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"pool":         "tank",
-					"server":       "192.168.1.100",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:nonexistent",
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					// No existing ZVOLs - will proceed to subsystem check
 					return []tnsapi.Dataset{}, nil
 				}
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return nil, errors.New("subsystem not found")
+				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+					return &tnsapi.Dataset{
+						ID:   "tank/test-nvmeof-volume",
+						Name: "tank/test-nvmeof-volume",
+						Type: "VOLUME",
+					}, nil
+				}
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					// No ports configured
+					return []tnsapi.NVMeOFPort{}, nil
+				}
+				// Cleanup mocks
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					return nil
 				}
 			},
 			wantErr:  true,
@@ -281,15 +299,14 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					},
 				},
 				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"pool":         "tank",
-					"server":       "192.168.1.100",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 					return nil, errors.New("insufficient space in pool")
@@ -299,7 +316,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 			wantCode: codes.Internal,
 		},
 		{
-			name: "namespace creation failure with cleanup",
+			name: "subsystem creation failure with cleanup",
 			req: &csi.CreateVolumeRequest{
 				Name: "test-nvmeof-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -310,16 +327,15 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					},
 				},
 				Parameters: map[string]string{
-					"protocol":     "nvmeof",
-					"pool":         "tank",
-					"server":       "192.168.1.100",
-					"subsystemNQN": "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				zvolCreated := false
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 					zvolCreated = true
@@ -329,8 +345,8 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 						Type: "VOLUME",
 					}, nil
 				}
-				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
-					return nil, errors.New("failed to create namespace")
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return nil, errors.New("failed to create subsystem")
 				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					if !zvolCreated {
@@ -339,6 +355,119 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					if datasetID != "tank/test-nvmeof-volume" {
 						t.Errorf("Expected dataset ID tank/test-nvmeof-volume, got %s", datasetID)
 					}
+					return nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.Internal,
+		},
+		{
+			name: "namespace creation failure with full cleanup",
+			req: &csi.CreateVolumeRequest{
+				Name: "test-nvmeof-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Block{
+							Block: &csi.VolumeCapability_BlockVolume{},
+						},
+					},
+				},
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
+				},
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				zvolCreated := false
+				subsystemCreated := false
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{}, nil
+				}
+				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+					zvolCreated = true
+					return &tnsapi.Dataset{
+						ID:   "tank/test-nvmeof-volume",
+						Name: "tank/test-nvmeof-volume",
+						Type: "VOLUME",
+					}, nil
+				}
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					subsystemCreated = true
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					return nil
+				}
+				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
+					return nil, errors.New("failed to create namespace")
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					if !subsystemCreated {
+						t.Error("DeleteNVMeOFSubsystem called before CreateNVMeOFSubsystem")
+					}
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100, got %d", subsystemID)
+					}
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					if !zvolCreated {
+						t.Error("DeleteDataset called before CreateZvol")
+					}
+					if datasetID != "tank/test-nvmeof-volume" {
+						t.Errorf("Expected dataset ID tank/test-nvmeof-volume, got %s", datasetID)
+					}
+					return nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.Internal,
+		},
+		{
+			name: "port binding failure with cleanup",
+			req: &csi.CreateVolumeRequest{
+				Name: "test-nvmeof-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Block{
+							Block: &csi.VolumeCapability_BlockVolume{},
+						},
+					},
+				},
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
+				},
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{}, nil
+				}
+				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+					return &tnsapi.Dataset{
+						ID:   "tank/test-nvmeof-volume",
+						Name: "tank/test-nvmeof-volume",
+						Type: "VOLUME",
+					}, nil
+				}
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					return errors.New("failed to bind subsystem to port")
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return nil
 				}
 			},
@@ -390,7 +519,7 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			name: "successful NVMe-oF volume deletion (namespace and ZVOL only)",
+			name: "successful NVMe-oF volume deletion (namespace, subsystem, and ZVOL)",
 			meta: &VolumeMetadata{
 				Name:              "test-nvmeof-volume",
 				Protocol:          ProtocolNVMeOF,
@@ -401,6 +530,7 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				namespaceDeleted := false
+				subsystemDeleted := false
 				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
 					if namespaceID != 200 {
 						t.Errorf("Expected namespace ID 200, got %d", namespaceID)
@@ -408,18 +538,27 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 					namespaceDeleted = true
 					return nil
 				}
-				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					// Namespace is deleted
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
 					if !namespaceDeleted {
-						t.Error("Expected namespace to be deleted before ZVOL")
+						t.Error("Expected namespace to be deleted before subsystem")
+					}
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100, got %d", subsystemID)
+					}
+					subsystemDeleted = true
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					if !subsystemDeleted {
+						t.Error("Expected subsystem to be deleted before ZVOL")
 					}
 					if datasetID != "tank/test-nvmeof-volume" {
 						t.Errorf("Expected dataset ID tank/test-nvmeof-volume, got %s", datasetID)
 					}
-					return nil
-				}
-				// Subsystem should NOT be deleted
-				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
-					t.Error("Subsystem should NOT be deleted - it's pre-configured infrastructure")
 					return nil
 				}
 			},
@@ -438,6 +577,35 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
 					return errors.New("namespace not found")
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					return nil
+				}
+			},
+			wantErr: false, // Should succeed due to idempotency
+		},
+		{
+			name: "idempotent deletion - subsystem not found",
+			meta: &VolumeMetadata{
+				Name:              "test-nvmeof-volume",
+				Protocol:          ProtocolNVMeOF,
+				DatasetID:         "tank/test-nvmeof-volume",
+				DatasetName:       "tank/test-nvmeof-volume",
+				NVMeOFSubsystemID: 100,
+				NVMeOFNamespaceID: 200,
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
+					return nil
+				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return errors.New("subsystem not found")
 				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return nil
@@ -459,6 +627,12 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
 					return nil
 				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return nil
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return errors.New("ZVOL does not exist")
 				}
@@ -476,36 +650,37 @@ func TestDeleteNVMeOFVolume(t *testing.T) {
 				NVMeOFNamespaceID: 0, // Missing namespace ID
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					return nil
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return nil
 				}
 			},
-			wantErr: false, // Should still delete ZVOL
+			wantErr: false, // Should still delete subsystem and ZVOL
 		},
 		{
-			name: "subsystem preserved during deletion",
+			name: "deletion with missing subsystem ID",
 			meta: &VolumeMetadata{
 				Name:              "test-nvmeof-volume",
 				Protocol:          ProtocolNVMeOF,
 				DatasetID:         "tank/test-nvmeof-volume",
 				DatasetName:       "tank/test-nvmeof-volume",
-				NVMeOFSubsystemID: 100, // Subsystem ID present but should NOT be deleted
+				NVMeOFSubsystemID: 0, // Missing subsystem ID
 				NVMeOFNamespaceID: 200,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
 					return nil
 				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return nil
 				}
-				// This should never be called
-				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
-					t.Error("Subsystem deletion was called but should not be - subsystems are pre-configured infrastructure")
-					return nil
-				}
 			},
-			wantErr: false,
+			wantErr: false, // Should still delete namespace and ZVOL
 		},
 	}
 
@@ -651,7 +826,6 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 		req           *csi.CreateVolumeRequest
 		zvol          *tnsapi.Dataset
 		server        string
-		subsystemNQN  string
 		mockSetup     func(*MockAPIClientForSnapshots)
 		checkResponse func(*testing.T, *csi.CreateVolumeResponse)
 		name          string
@@ -659,7 +833,7 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 		wantErr       bool
 	}{
 		{
-			name: "successful NVMe-oF volume setup from clone",
+			name: "successful NVMe-oF volume setup from clone with independent subsystem",
 			req: &csi.CreateVolumeRequest{
 				Name: "cloned-nvmeof-volume",
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -671,6 +845,11 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 				},
 				CapacityRange: &csi.CapacityRange{
 					RequiredBytes: 5 * 1024 * 1024 * 1024, // 5GB
+				},
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
 				},
 				VolumeContentSource: &csi.VolumeContentSource{
 					Type: &csi.VolumeContentSource_Snapshot{
@@ -685,17 +864,30 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 				Name: "tank/cloned-nvmeof-volume",
 				Type: "VOLUME",
 			},
-			server:       "192.168.1.100",
-			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+			server: "192.168.1.100",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					if nqn != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
-						t.Errorf("Expected NQN nqn.2024-11.ai.truenas:nvme:test-subsystem, got %s", nqn)
+				expectedNQN := "nqn.2024-01.io.truenas.csi:cloned-nvmeof-volume"
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					if params.Name != expectedNQN {
+						t.Errorf("Expected NQN %s, got %s", expectedNQN, params.Name)
+					}
+					if !params.AllowAnyHost {
+						t.Error("Expected AllowAnyHost to be true")
 					}
 					return &tnsapi.NVMeOFSubsystem{
-						ID:  100,
-						NQN: nqn,
+						ID:   100,
+						Name: expectedNQN,
+						NQN:  expectedNQN,
 					}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100, got %d", subsystemID)
+					}
+					return nil
 				}
 				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
 					if params.SubsysID != 100 {
@@ -704,9 +896,12 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 					if params.DevicePath != "zvol/tank/cloned-nvmeof-volume" {
 						t.Errorf("Expected device path zvol/tank/cloned-nvmeof-volume, got %s", params.DevicePath)
 					}
+					if params.NSID != 1 {
+						t.Errorf("Expected NSID 1 for independent subsystem, got %d", params.NSID)
+					}
 					return &tnsapi.NVMeOFNamespace{
 						ID:   200,
-						NSID: 2,
+						NSID: 1,
 					}, nil
 				}
 			},
@@ -720,11 +915,18 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 				if resp.Volume.VolumeContext["server"] != "192.168.1.100" {
 					t.Errorf("Expected server 192.168.1.100, got %s", resp.Volume.VolumeContext["server"])
 				}
-				if resp.Volume.VolumeContext["nqn"] != "nqn.2024-11.ai.truenas:nvme:test-subsystem" {
-					t.Errorf("Expected NQN, got %s", resp.Volume.VolumeContext["nqn"])
+				expectedNQN := "nqn.2024-01.io.truenas.csi:cloned-nvmeof-volume"
+				if resp.Volume.VolumeContext["nqn"] != expectedNQN {
+					t.Errorf("Expected NQN %s, got %s", expectedNQN, resp.Volume.VolumeContext["nqn"])
 				}
 				if resp.Volume.VolumeContext["datasetName"] != "tank/cloned-nvmeof-volume" {
 					t.Errorf("Expected dataset name, got %s", resp.Volume.VolumeContext["datasetName"])
+				}
+				if resp.Volume.VolumeContext["nsid"] != "1" {
+					t.Errorf("Expected NSID 1, got %s", resp.Volume.VolumeContext["nsid"])
+				}
+				if resp.Volume.VolumeContext["clonedFromSnapshot"] != "true" {
+					t.Error("Expected clonedFromSnapshot to be true")
 				}
 				if resp.Volume.ContentSource == nil {
 					t.Error("Expected ContentSource to be non-nil for cloned volume")
@@ -732,20 +934,24 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			},
 		},
 		{
-			name: "subsystem not found with cleanup",
+			name: "subsystem creation failure with cleanup",
 			req: &csi.CreateVolumeRequest{
 				Name: "cloned-nvmeof-volume",
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
+				},
 			},
 			zvol: &tnsapi.Dataset{
 				ID:   "tank/cloned-nvmeof-volume",
 				Name: "tank/cloned-nvmeof-volume",
 				Type: "VOLUME",
 			},
-			server:       "192.168.1.100",
-			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:nonexistent",
+			server: "192.168.1.100",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return nil, errors.New("subsystem not found")
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return nil, errors.New("subsystem creation failed")
 				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					if datasetID != "tank/cloned-nvmeof-volume" {
@@ -755,26 +961,84 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 				}
 			},
 			wantErr:  true,
-			wantCode: codes.FailedPrecondition,
+			wantCode: codes.Internal,
 		},
 		{
-			name: "namespace creation failure with cleanup",
+			name: "port binding failure with cleanup",
 			req: &csi.CreateVolumeRequest{
 				Name: "cloned-nvmeof-volume",
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
+				},
 			},
 			zvol: &tnsapi.Dataset{
 				ID:   "tank/cloned-nvmeof-volume",
 				Name: "tank/cloned-nvmeof-volume",
 				Type: "VOLUME",
 			},
-			server:       "192.168.1.100",
-			subsystemNQN: "nqn.2024-11.ai.truenas:nvme:test-subsystem",
+			server: "192.168.1.100",
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return &tnsapi.NVMeOFSubsystem{ID: 100, NQN: nqn}, nil
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					return errors.New("port binding failed")
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100 for cleanup, got %d", subsystemID)
+					}
+					return nil
+				}
+				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
+					if datasetID != "tank/cloned-nvmeof-volume" {
+						t.Errorf("Expected cleanup of dataset tank/cloned-nvmeof-volume, got %s", datasetID)
+					}
+					return nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.Internal,
+		},
+		{
+			name: "namespace creation failure with cleanup",
+			req: &csi.CreateVolumeRequest{
+				Name: "cloned-nvmeof-volume",
+				Parameters: map[string]string{
+					"protocol": "nvmeof",
+					"pool":     "tank",
+					"server":   "192.168.1.100",
+				},
+			},
+			zvol: &tnsapi.Dataset{
+				ID:   "tank/cloned-nvmeof-volume",
+				Name: "tank/cloned-nvmeof-volume",
+				Type: "VOLUME",
+			},
+			server: "192.168.1.100",
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+					return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+				}
+				m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+					return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+				}
+				m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+					return nil
 				}
 				m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
 					return nil, errors.New("failed to create namespace")
+				}
+				m.DeleteNVMeOFSubsystemFunc = func(ctx context.Context, subsystemID int) error {
+					if subsystemID != 100 {
+						t.Errorf("Expected subsystem ID 100 for cleanup, got %d", subsystemID)
+					}
+					return nil
 				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					if datasetID != "tank/cloned-nvmeof-volume" {
@@ -794,7 +1058,8 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 			tt.mockSetup(mockClient)
 
 			controller := NewControllerService(mockClient, NewNodeRegistry())
-			resp, err := controller.setupNVMeOFVolumeFromClone(ctx, tt.req, tt.zvol, tt.server, tt.subsystemNQN, "snapshot-id")
+			// Note: subsystemNQN parameter is ignored in the new architecture - NQN is generated from volume name
+			resp, err := controller.setupNVMeOFVolumeFromClone(ctx, tt.req, tt.zvol, tt.server, "", "snapshot-id")
 
 			if tt.wantErr {
 				if err == nil {
@@ -816,6 +1081,35 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 
 			if tt.checkResponse != nil {
 				tt.checkResponse(t, resp)
+			}
+		})
+	}
+}
+
+func TestGenerateNQN(t *testing.T) {
+	tests := []struct {
+		volumeName string
+		expected   string
+	}{
+		{
+			volumeName: "pvc-12345",
+			expected:   "nqn.2024-01.io.truenas.csi:pvc-12345",
+		},
+		{
+			volumeName: "my-volume",
+			expected:   "nqn.2024-01.io.truenas.csi:my-volume",
+		},
+		{
+			volumeName: "test-nvmeof-volume",
+			expected:   "nqn.2024-01.io.truenas.csi:test-nvmeof-volume",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.volumeName, func(t *testing.T) {
+			result := generateNQN(tt.volumeName)
+			if result != tt.expected {
+				t.Errorf("generateNQN(%s) = %s, want %s", tt.volumeName, result, tt.expected)
 			}
 		})
 	}

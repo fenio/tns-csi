@@ -79,6 +79,7 @@ type SnapshotMetadata struct {
 	SourceVolume string `json:"sourceVolume"` // Source volume ID
 	DatasetName  string `json:"datasetName"`  // Parent dataset name
 	Protocol     string `json:"protocol"`     // Protocol (nfs, nvmeof)
+	Detached     bool   `json:"detached"`     // Whether this is a detached snapshot (created via replication)
 	CreatedAt    int64  `json:"-"`            // Creation timestamp (Unix epoch) - excluded from ID encoding
 }
 
@@ -675,10 +676,11 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 
 // cloneParameters holds validated parameters for snapshot cloning.
 type cloneParameters struct {
-	pool           string
-	parentDataset  string
-	newVolumeName  string
-	newDatasetName string
+	pool                         string
+	parentDataset                string
+	newVolumeName                string
+	newDatasetName               string
+	detachedVolumesFromSnapshots bool // Create detached (independent) clone via zfs send/receive
 }
 
 // validateCloneParameters validates and extracts parameters needed for cloning.
@@ -698,23 +700,42 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 		parentDataset = pool
 	}
 
+	// Check if detached volumes from snapshots is enabled
+	// This creates independent clones using zfs send/receive instead of ZFS clone
+	detachedVolumesFromSnapshots := params["detachedVolumesFromSnapshots"] == "true"
+
 	newVolumeName := req.GetName()
 	newDatasetName := fmt.Sprintf("%s/%s", parentDataset, newVolumeName)
 
-	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s",
-		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, newVolumeName)
+	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s (detached: %v)",
+		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, newVolumeName, detachedVolumesFromSnapshots)
 
 	return &cloneParameters{
-		pool:           pool,
-		parentDataset:  parentDataset,
-		newVolumeName:  newVolumeName,
-		newDatasetName: newDatasetName,
+		pool:                         pool,
+		parentDataset:                parentDataset,
+		newVolumeName:                newVolumeName,
+		newDatasetName:               newDatasetName,
+		detachedVolumesFromSnapshots: detachedVolumesFromSnapshots,
 	}, nil
 }
 
+// Default timeout for detached clone operations (zfs send/receive can take a while for large volumes)
+const detachedCloneTimeout = 30 * time.Minute
+
 // executeSnapshotClone performs the actual snapshot clone operation.
+// If detachedVolumesFromSnapshots is enabled, it uses zfs send/receive to create an independent clone.
+// Otherwise, it uses the standard ZFS clone which maintains a parent-child relationship.
 func (s *ControllerService) executeSnapshotClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
-	klog.Infof("Cloning snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
+	if params.detachedVolumesFromSnapshots {
+		return s.executeDetachedClone(ctx, snapshotMeta, params)
+	}
+	return s.executeStandardClone(ctx, snapshotMeta, params)
+}
+
+// executeStandardClone performs a standard ZFS clone operation.
+// The resulting dataset maintains a parent-child relationship with the source snapshot.
+func (s *ControllerService) executeStandardClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
+	klog.Infof("Creating standard (dependent) clone from snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
 
 	cloneParams := tnsapi.CloneSnapshotParams{
 		Snapshot: snapshotMeta.SnapshotName,
@@ -728,7 +749,30 @@ func (s *ControllerService) executeSnapshotClone(ctx context.Context, snapshotMe
 		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
 	}
 
-	klog.Infof("Successfully cloned snapshot to dataset: %s", clonedDataset.Name)
+	klog.Infof("Successfully created standard clone: %s", clonedDataset.Name)
+	return clonedDataset, nil
+}
+
+// executeDetachedClone performs a detached clone operation using zfs send/receive.
+// The resulting dataset is completely independent with no parent-child relationship.
+// This is useful when you want to:
+// - Delete the source snapshot without affecting the clone
+// - Avoid ZFS clone dependency chains
+// - Create truly independent copies of volumes
+func (s *ControllerService) executeDetachedClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
+	klog.Infof("Creating detached (independent) clone from snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
+
+	// Use the TrueNAS replication API to perform zfs send/receive
+	// This creates an independent copy with no parent-child relationship
+	clonedDataset, err := s.apiClient.CreateDetachedClone(ctx, snapshotMeta.SnapshotName, params.newDatasetName, detachedCloneTimeout)
+	if err != nil {
+		klog.Errorf("Failed to create detached clone: %v", err)
+		// Try to cleanup any partially created dataset
+		s.cleanupPartialClone(ctx, params.newDatasetName)
+		return nil, status.Errorf(codes.Internal, "Failed to create detached clone: %v", err)
+	}
+
+	klog.Infof("Successfully created detached clone: %s", clonedDataset.Name)
 	return clonedDataset, nil
 }
 

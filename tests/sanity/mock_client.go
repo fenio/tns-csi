@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 )
@@ -749,6 +750,99 @@ func (m *MockClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnaps
 		Available:  map[string]any{"parsed": float64(107374182400)},
 		Mountpoint: "/mnt/" + params.Dataset,
 	}, nil
+}
+
+// CreateDetachedClone mocks creating a detached clone via zfs send/receive.
+func (m *MockClient) CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*tnsapi.Dataset, error) {
+	m.logCall("CreateDetachedClone", snapshotID, targetDataset, timeout)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check if snapshot exists
+	if _, exists := m.snapshots[snapshotID]; !exists {
+		return nil, fmt.Errorf("snapshot %s: %w", snapshotID, ErrSnapshotNotFound)
+	}
+
+	// Create detached dataset (same as regular clone in mock, but without dependency)
+	datasetID := fmt.Sprintf("dataset-%d", m.nextDatasetID)
+	m.nextDatasetID++
+
+	m.datasets[targetDataset] = mockDataset{
+		ID:         datasetID,
+		Name:       targetDataset,
+		Type:       "FILESYSTEM",
+		Used:       map[string]any{"parsed": float64(0)},
+		Available:  map[string]any{"parsed": float64(107374182400)},
+		Mountpoint: "/mnt/" + targetDataset,
+	}
+
+	return &tnsapi.Dataset{
+		ID:         datasetID,
+		Name:       targetDataset,
+		Type:       "FILESYSTEM",
+		Used:       map[string]any{"parsed": float64(0)},
+		Available:  map[string]any{"parsed": float64(107374182400)},
+		Mountpoint: "/mnt/" + targetDataset,
+	}, nil
+}
+
+// PromoteDataset mocks pool.dataset.promote.
+func (m *MockClient) PromoteDataset(ctx context.Context, datasetID string) error {
+	m.logCall("PromoteDataset", datasetID)
+	// Mock implementation - just return success
+	return nil
+}
+
+// DatasetDestroySnapshots mocks destroying all snapshots for a dataset.
+func (m *MockClient) DatasetDestroySnapshots(ctx context.Context, datasetID string) error {
+	m.logCall("DatasetDestroySnapshots", datasetID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find and delete all snapshots for this dataset
+	for snapID, snap := range m.snapshots {
+		if snap.Dataset == datasetID {
+			delete(m.snapshots, snapID)
+		}
+	}
+
+	return nil
+}
+
+// CoreGetJobs mocks core.get_jobs.
+func (m *MockClient) CoreGetJobs(ctx context.Context, filters []interface{}) ([]tnsapi.Job, error) {
+	m.logCall("CoreGetJobs", filters)
+	// Return empty job list for mock
+	return []tnsapi.Job{}, nil
+}
+
+// CoreGetJob mocks getting a specific job by ID.
+func (m *MockClient) CoreGetJob(ctx context.Context, jobID int) (*tnsapi.Job, error) {
+	m.logCall("CoreGetJob", jobID)
+	// Return a completed job for mock
+	return &tnsapi.Job{
+		ID:    jobID,
+		State: tnsapi.JobStateSuccess,
+	}, nil
+}
+
+// CoreWaitForJob mocks waiting for a job to complete.
+func (m *MockClient) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*tnsapi.Job, error) {
+	m.logCall("CoreWaitForJob", jobID, timeout)
+	// Return a completed job for mock
+	return &tnsapi.Job{
+		ID:    jobID,
+		State: tnsapi.JobStateSuccess,
+	}, nil
+}
+
+// ReplicationRunOnetime mocks replication.run_onetime.
+func (m *MockClient) ReplicationRunOnetime(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	m.logCall("ReplicationRunOnetime", params.SourceDatasets, params.TargetDataset)
+	// Return a mock job ID
+	return 1, nil
 }
 
 // GetCallLog returns the list of API calls made (for debugging).

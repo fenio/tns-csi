@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -173,6 +174,34 @@ func (m *mockAPIClient) QueryPool(ctx context.Context, poolName string) (*tnsapi
 
 func (m *mockAPIClient) Close() {
 	// Mock client doesn't need cleanup
+}
+
+func (m *mockAPIClient) PromoteDataset(ctx context.Context, datasetID string) error {
+	return nil
+}
+
+func (m *mockAPIClient) DatasetDestroySnapshots(ctx context.Context, datasetID string) error {
+	return nil
+}
+
+func (m *mockAPIClient) CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*tnsapi.Dataset, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockAPIClient) CoreGetJobs(ctx context.Context, filters []interface{}) ([]tnsapi.Job, error) {
+	return nil, nil
+}
+
+func (m *mockAPIClient) CoreGetJob(ctx context.Context, jobID int) (*tnsapi.Job, error) {
+	return nil, nil
+}
+
+func (m *mockAPIClient) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*tnsapi.Job, error) {
+	return nil, nil
+}
+
+func (m *mockAPIClient) ReplicationRunOnetime(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	return 0, nil
 }
 
 func TestValidateCreateVolumeRequest(t *testing.T) {

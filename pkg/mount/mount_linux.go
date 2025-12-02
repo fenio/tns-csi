@@ -14,6 +14,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// Static errors for mount operations.
+var (
+	ErrUnmountFailed = errors.New("unmount failed")
+)
+
 // IsMounted checks if a path is mounted.
 func IsMounted(ctx context.Context, targetPath string) (bool, error) {
 	// Use findmnt to check if path is mounted with timeout
@@ -94,7 +99,7 @@ func IsStaleNFSMount(ctx context.Context, targetPath string) (bool, error) {
 	_, statErr := statCmd.CombinedOutput()
 	if statErr != nil {
 		// Check if it's a context timeout (indicates stale mount)
-		if statCtx.Err() == context.DeadlineExceeded {
+		if errors.Is(statCtx.Err(), context.DeadlineExceeded) {
 			klog.Warningf("Detected stale NFS mount at %s (stat timed out)", targetPath)
 			return true, nil
 		}
@@ -103,6 +108,7 @@ func IsStaleNFSMount(ctx context.Context, targetPath string) (bool, error) {
 		if strings.Contains(statErr.Error(), "Stale file handle") ||
 			strings.Contains(statErr.Error(), "No route to host") ||
 			strings.Contains(statErr.Error(), "Connection timed out") {
+
 			klog.Warningf("Detected stale NFS mount at %s: %v", targetPath, statErr)
 			return true, nil
 		}
@@ -144,8 +150,8 @@ func ForceUnmount(ctx context.Context, targetPath string) error {
 	bothCmd := exec.CommandContext(bothCtx, "umount", "-l", "-f", targetPath)
 	bothOutput, bothErr := bothCmd.CombinedOutput()
 	if bothErr != nil {
-		return fmt.Errorf("all unmount attempts failed for %s: lazy=%v, force=%v, both=%v (output: %s)",
-			targetPath, lazyErr, forceErr, bothErr, string(bothOutput))
+		return fmt.Errorf("%w for %s: lazy=%w, force=%w, both=%w (output: %s)",
+			ErrUnmountFailed, targetPath, lazyErr, forceErr, bothErr, string(bothOutput))
 	}
 
 	klog.Infof("Force+lazy unmount succeeded for %s", targetPath)
@@ -157,7 +163,7 @@ func ForceUnmount(ctx context.Context, targetPath string) error {
 func UnmountWithRetry(ctx context.Context, targetPath string, maxRetries int) error {
 	var lastErr error
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		if attempt > 0 {
 			klog.V(4).Infof("Unmount retry %d/%d for %s", attempt+1, maxRetries, targetPath)
 			time.Sleep(time.Duration(attempt) * time.Second) // Exponential backoff
@@ -178,11 +184,11 @@ func UnmountWithRetry(ctx context.Context, targetPath string, maxRetries int) er
 
 		if isStale {
 			klog.Warningf("Detected stale NFS mount at %s, attempting force unmount", targetPath)
-			if forceErr := ForceUnmount(ctx, targetPath); forceErr == nil {
+			forceErr := ForceUnmount(ctx, targetPath)
+			if forceErr == nil {
 				return nil
-			} else {
-				lastErr = forceErr
 			}
+			lastErr = forceErr
 		}
 
 		// Check if mount point still exists

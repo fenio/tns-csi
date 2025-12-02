@@ -192,10 +192,12 @@ func (m *mockAPIClient) CoreGetJobs(ctx context.Context, filters []interface{}) 
 	return nil, nil
 }
 
+//nolint:nilnil // Mock method - nil return is acceptable for unused mock
 func (m *mockAPIClient) CoreGetJob(ctx context.Context, jobID int) (*tnsapi.Job, error) {
 	return nil, nil
 }
 
+//nolint:nilnil // Mock method - nil return is acceptable for unused mock
 func (m *mockAPIClient) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*tnsapi.Job, error) {
 	return nil, nil
 }

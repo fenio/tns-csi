@@ -38,12 +38,14 @@ const (
 )
 
 // DeviceInfo contains information about a block device.
+//
+//nolint:govet // fieldalignment: struct field order optimized for readability over memory layout
 type DeviceInfo struct {
 	Path         string   // Device path (e.g., /dev/nvme0n1)
-	Size         int64    // Device size in bytes
-	HasPartition bool     // Whether the device has partitions
 	Partitions   []string // List of partition paths
 	FSType       string   // Filesystem type if detected
+	Size         int64    // Device size in bytes
+	HasPartition bool     // Whether the device has partitions
 	IsMultipath  bool     // Whether this is a multipath device
 }
 
@@ -782,6 +784,7 @@ func rescanNVMeDevice(ctx context.Context, devicePath string) error {
 	rescanCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	//nolint:gosec // G204: controller is validated to match /dev/nvme[0-9]+ pattern above
 	cmd := exec.CommandContext(rescanCtx, "nvme", "ns-rescan", controller)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

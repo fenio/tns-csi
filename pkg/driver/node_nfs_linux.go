@@ -16,7 +16,7 @@ func getNFSMountOptions() []string {
 
 // parseNFSMountOptions parses custom NFS mount options from volume context.
 // It merges custom options with defaults, with custom options taking precedence.
-// Format: comma-separated list of options, e.g., "vers=4.1,soft,timeo=30"
+// Format: comma-separated list of options, e.g., "vers=4.1,soft,timeo=30".
 func parseNFSMountOptions(volumeContext map[string]string) []string {
 	customOptions := volumeContext["nfsMountOptions"]
 	if customOptions == "" {

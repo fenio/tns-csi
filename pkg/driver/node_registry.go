@@ -15,6 +15,13 @@ type NodeRegistry struct {
 	mu    sync.RWMutex
 }
 
+// NVMeOFVolumeMetadata stores the NQN and NSID for a volume.
+// This is used to look up connection info during unstage.
+type NVMeOFVolumeMetadata struct {
+	NQN  string
+	NSID string
+}
+
 // NVMeOFNamespaceRegistry tracks active NVMe-oF namespaces per subsystem (NQN).
 // This prevents premature disconnection of shared subsystems when multiple
 // volumes (namespaces) are using the same NVMe-oF target.
@@ -26,14 +33,17 @@ type NVMeOFNamespaceRegistry struct {
 	namespaces map[string]int
 	// nqnCounts tracks total namespace count per NQN for quick lookup
 	nqnCounts map[string]int
-	mu        sync.RWMutex
+	// volumeMetadata maps volumeID to NQN+NSID for lookup during unstage
+	volumeMetadata map[string]NVMeOFVolumeMetadata
+	mu             sync.RWMutex
 }
 
 // NewNVMeOFNamespaceRegistry creates a new namespace registry.
 func NewNVMeOFNamespaceRegistry() *NVMeOFNamespaceRegistry {
 	return &NVMeOFNamespaceRegistry{
-		namespaces: make(map[string]int),
-		nqnCounts:  make(map[string]int),
+		namespaces:     make(map[string]int),
+		nqnCounts:      make(map[string]int),
+		volumeMetadata: make(map[string]NVMeOFVolumeMetadata),
 	}
 }
 
@@ -96,6 +106,35 @@ func (r *NVMeOFNamespaceRegistry) NamespaceCount(nqn, nsid string) int {
 	defer r.mu.RUnlock()
 	key := fmt.Sprintf("%s:%s", nqn, nsid)
 	return r.namespaces[key]
+}
+
+// RegisterVolume registers a volume with its NQN and NSID for lookup during unstage.
+// This should be called during stage to store the metadata.
+func (r *NVMeOFNamespaceRegistry) RegisterVolume(volumeID, nqn, nsid string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.volumeMetadata[volumeID] = NVMeOFVolumeMetadata{NQN: nqn, NSID: nsid}
+	klog.V(4).Infof("Registered NVMe-oF volume metadata: volumeID=%s, NQN=%s, NSID=%s", volumeID, nqn, nsid)
+}
+
+// UnregisterVolume removes the volume metadata mapping.
+// This should be called during unstage after successful disconnection.
+func (r *NVMeOFNamespaceRegistry) UnregisterVolume(volumeID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if meta, exists := r.volumeMetadata[volumeID]; exists {
+		delete(r.volumeMetadata, volumeID)
+		klog.V(4).Infof("Unregistered NVMe-oF volume metadata: volumeID=%s, NQN=%s, NSID=%s", volumeID, meta.NQN, meta.NSID)
+	}
+}
+
+// GetVolumeMetadata retrieves the NQN and NSID for a volume.
+// Returns empty metadata if not found.
+func (r *NVMeOFNamespaceRegistry) GetVolumeMetadata(volumeID string) (NVMeOFVolumeMetadata, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	meta, exists := r.volumeMetadata[volumeID]
+	return meta, exists
 }
 
 // NewNodeRegistry creates a new node registry.

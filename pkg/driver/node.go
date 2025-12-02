@@ -75,36 +75,14 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	stagingTargetPath := req.GetStagingTargetPath()
 	volumeContext := req.GetVolumeContext()
 
-	// Decode volume metadata to determine protocol
-	meta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		klog.Warningf("Failed to decode volume ID %s: %v, checking volume context for protocol", volumeID, err)
-		// Try to determine protocol from volume context if metadata decode fails
-		// This handles backwards compatibility
-		if nqn := volumeContext["nqn"]; nqn != "" {
-			resp, err := s.stageNVMeOFVolume(ctx, req, volumeContext)
-			if err != nil {
-				timer.ObserveError()
-				return nil, err
-			}
-			timer.ObserveSuccess()
-			return resp, nil
-		}
-		// Default to NFS for backwards compatibility
-		klog.V(4).Infof("Volume appears to be NFS, staging NFS volume")
-		resp, err := s.stageNFSVolume(ctx, req, volumeContext)
-		if err != nil {
-			timer.ObserveError()
-			return nil, err
-		}
-		timer.ObserveSuccess()
-		return resp, nil
-	}
+	// Determine protocol from VolumeContext
+	// With plain volume IDs (just the volume name), all metadata is passed via VolumeContext
+	protocol := getProtocolFromVolumeContext(volumeContext)
 
-	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, stagingTargetPath)
+	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", volumeID, protocol, stagingTargetPath)
 
 	// Stage volume based on protocol
-	switch meta.Protocol {
+	switch protocol {
 	case ProtocolNFS:
 		resp, err := s.stageNFSVolume(ctx, req, volumeContext)
 		if err != nil {
@@ -125,7 +103,7 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 
 	default:
 		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", protocol)
 	}
 }
 
@@ -147,42 +125,15 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
-	// Decode volume metadata to determine protocol
-	meta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		klog.Warningf("Failed to decode volume ID %s: %v, attempting unstage anyway", volumeID, err)
-		// Try to unmount staging path if it exists
-		mounted, err := mount.IsMounted(ctx, stagingTargetPath)
-		if err != nil {
-			klog.Warningf("Failed to check if staging path is mounted: %v", err)
-		}
-		if mounted {
-			if err := mount.Unmount(ctx, stagingTargetPath); err != nil {
-				klog.Warningf("Failed to unmount staging path: %v", err)
-			}
-		}
-		timer.ObserveSuccess()
-		return &csi.NodeUnstageVolumeResponse{}, nil
-	}
+	// Check if this is an NVMe-oF volume by looking up the namespace registry
+	// The registry stores NQN/NSID during stage for lookup during unstage
+	if meta, found := s.namespaceRegistry.GetVolumeMetadata(volumeID); found {
+		klog.V(4).Infof("Unstaging NVMe-oF volume %s (NQN: %s, NSID: %s) from %s", volumeID, meta.NQN, meta.NSID, stagingTargetPath)
 
-	klog.V(4).Infof("Unstaging volume %s (protocol: %s) from %s", meta.Name, meta.Protocol, stagingTargetPath)
-
-	// Unstage volume based on protocol
-	switch meta.Protocol {
-	case ProtocolNFS:
-		resp, err := s.unstageNFSVolume(ctx, req)
-		if err != nil {
-			timer.ObserveError()
-			return nil, err
-		}
-		timer.ObserveSuccess()
-		return resp, nil
-
-	case ProtocolNVMeOF:
-		// For unstageNVMeOFVolume, we need volume context but don't have it in UnstageVolume request
-		// We'll use metadata from volumeID instead
+		// Create volume context from registry metadata
 		volumeContext := map[string]string{
-			"nqn": meta.NVMeOFNQN,
+			"nqn":  meta.NQN,
+			"nsid": meta.NSID,
 		}
 		resp, err := s.unstageNVMeOFVolume(ctx, req, volumeContext)
 		if err != nil {
@@ -191,11 +142,17 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		}
 		timer.ObserveSuccess()
 		return resp, nil
-
-	default:
-		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", meta.Protocol)
 	}
+
+	// Not found in NVMe-oF registry - treat as NFS volume
+	klog.V(4).Infof("Unstaging NFS volume %s from %s", volumeID, stagingTargetPath)
+	resp, err := s.unstageNFSVolume(ctx, req)
+	if err != nil {
+		timer.ObserveError()
+		return nil, err
+	}
+	timer.ObserveSuccess()
+	return resp, nil
 }
 
 // NodePublishVolume mounts the volume to the target path.
@@ -220,25 +177,15 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	volumeID := req.GetVolumeId()
 	targetPath := req.GetTargetPath()
+	volumeContext := req.GetVolumeContext()
 
-	// Determine protocol from volume metadata or context
-	meta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		klog.Warningf("Failed to decode volume ID %s: %v, assuming NFS", volumeID, err)
-		// Fall back to NFS behavior for backwards compatibility
-		resp, respErr := s.publishNFSVolume(ctx, req)
-		if respErr != nil {
-			timer.ObserveError()
-			return nil, respErr
-		}
-		timer.ObserveSuccess()
-		return resp, nil
-	}
+	// Determine protocol from VolumeContext
+	protocol := getProtocolFromVolumeContext(volumeContext)
 
-	klog.V(4).Infof("Publishing volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, targetPath)
+	klog.V(4).Infof("Publishing volume %s (protocol: %s) to %s", volumeID, protocol, targetPath)
 
 	// Publish volume based on protocol
-	switch meta.Protocol {
+	switch protocol {
 	case ProtocolNFS:
 		resp, respErr := s.publishNFSVolume(ctx, req)
 		if respErr != nil {
@@ -258,6 +205,7 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 		// Check volume capability to determine how to publish
 		var resp *csi.NodePublishVolumeResponse
+		var err error
 		if req.GetVolumeCapability().GetBlock() != nil {
 			// Block volume: staging path is a device file, bind mount it
 			resp, err = s.publishBlockVolume(ctx, stagingTargetPath, targetPath, req.GetReadonly())
@@ -274,7 +222,7 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 
 	default:
 		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", meta.Protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol: %s", protocol)
 	}
 }
 
@@ -450,13 +398,6 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	volumeID := req.GetVolumeId()
 	volumePath := req.GetVolumePath()
 
-	// Parse volume metadata using decodeVolumeID helper
-	// Per CSI spec: return NotFound if volume doesn't exist
-	volMeta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "volume %s not found", volumeID)
-	}
-
 	// Check if volume path exists
 	if _, statErr := os.Stat(volumePath); os.IsNotExist(statErr) {
 		return nil, status.Errorf(codes.NotFound, "volume path %s does not exist", volumePath)
@@ -479,10 +420,19 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
-	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volMeta.Name, volMeta.Protocol, volumePath)
+	// Determine protocol by checking namespace registry
+	// If found in NVMe-oF registry, it's NVMe-oF; otherwise treat as NFS
+	var protocol string
+	if _, found := s.namespaceRegistry.GetVolumeMetadata(volumeID); found {
+		protocol = ProtocolNVMeOF
+	} else {
+		protocol = ProtocolNFS
+	}
+
+	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volumeID, protocol, volumePath)
 
 	// For NFS volumes, no node-side expansion is needed
-	if volMeta.Protocol == "nfs" {
+	if protocol == ProtocolNFS {
 		klog.Info("NFS volume expansion handled by controller, no node-side action needed")
 		return &csi.NodeExpandVolumeResponse{
 			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
@@ -515,7 +465,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.Internal, "Failed to resize filesystem: %v", err)
 	}
 
-	klog.V(4).Infof("Resized filesystem for volume %s", volMeta.Name)
+	klog.V(4).Infof("Resized filesystem for volume %s", volumeID)
 
 	return &csi.NodeExpandVolumeResponse{
 		CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),

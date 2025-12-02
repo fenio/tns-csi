@@ -126,31 +126,22 @@ func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, 
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
-		SubsystemNQN:      subsystem.NQN,
 	}
 
-	encodedVolumeID, err := encodeVolumeID(meta)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID: %v", err)
-	}
+	// Volume ID is just the volume name (CSI spec compliant, max 128 bytes)
+	volumeID := volumeName
 
-	volumeContext := map[string]string{
-		"server":            server,
-		"nqn":               subsystem.NQN,
-		"datasetID":         zvol.ID,
-		"datasetName":       zvol.Name,
-		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
-		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
-		"nsid":              strconv.Itoa(namespace.NSID),
-		"expectedCapacity":  strconv.FormatInt(capacity, 10),
-	}
+	// Build volume context with all necessary metadata
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyNSID] = strconv.Itoa(namespace.NSID)
+	volumeContext[VolumeContextKeyExpectedCapacity] = strconv.FormatInt(capacity, 10)
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, capacity)
+	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNVMeOF, capacity)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      encodedVolumeID,
+			VolumeId:      volumeID,
 			CapacityBytes: capacity,
 			VolumeContext: volumeContext,
 		},
@@ -397,11 +388,8 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	klog.Infof("Deleted NVMe-oF volume: %s (namespace and ZVOL only)", meta.Name)
 
-	// Remove volume capacity metric
-	// Note: We need to reconstruct the volumeID to delete the metric
-	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
-		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF)
-	}
+	// Remove volume capacity metric using plain volume name
+	metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF)
 
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
@@ -537,7 +525,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	// Encode volume metadata into volumeID
+	// Build volume metadata
 	meta := VolumeMetadata{
 		Name:              volumeName,
 		Protocol:          ProtocolNVMeOF,
@@ -547,48 +535,27 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
 		NVMeOFNQN:         subsystem.NQN,
-		SubsystemNQN:      subsystemNQN,
 	}
 
-	encodedVolumeID, err := encodeVolumeID(meta)
-	if err != nil {
-		// Cleanup: delete namespace and cloned ZVOL (do NOT delete subsystem)
-		klog.Errorf("Failed to encode volume ID for cloned volume, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNVMeOFNamespace(ctx, namespace.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf(msgFailedCleanupClonedZVOL, delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID for cloned volume: %v", err)
-	}
+	// Volume ID is just the volume name (CSI spec compliant)
+	volumeID := volumeName
 
 	// Construct volume context with metadata for node plugin
-	volumeContext := map[string]string{
-		"server":            server,
-		"nqn":               subsystem.NQN,
-		"datasetID":         zvol.ID,
-		"datasetName":       zvol.Name,
-		"nvmeofSubsystemID": strconv.Itoa(subsystem.ID),
-		"nvmeofNamespaceID": strconv.Itoa(namespace.ID),
-		"nsid":              strconv.Itoa(namespace.NSID),
-	}
-
-	// Include expected capacity for device verification during staging
-	volumeContext["expectedCapacity"] = strconv.FormatInt(requestedCapacity, 10)
-
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyNSID] = strconv.Itoa(namespace.NSID)
+	volumeContext[VolumeContextKeyExpectedCapacity] = strconv.FormatInt(requestedCapacity, 10)
 	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
 	// This signals to the node that the volume has existing data and should NEVER be formatted
-	volumeContext["clonedFromSnapshot"] = "true"
+	volumeContext[VolumeContextKeyClonedFromSnap] = "true"
 
 	klog.Infof("Created NVMe-oF volume from snapshot: %s", volumeName)
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requestedCapacity)
+	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNVMeOF, requestedCapacity)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      encodedVolumeID,
+			VolumeId:      volumeID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: volumeContext,
 			ContentSource: &csi.VolumeContentSource{
@@ -635,11 +602,8 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 
 	klog.Infof("Expanded NVMe-oF volume: %s to %d bytes", meta.Name, requiredBytes)
 
-	// Update volume capacity metric
-	// Note: We need to reconstruct the volumeID to update the metric
-	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
-		metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNVMeOF, requiredBytes)
-	}
+	// Update volume capacity metric using plain volume name
+	metrics.SetVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF, requiredBytes)
 
 	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{

@@ -311,18 +311,8 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 func TestCreateSnapshot(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a valid encoded volume ID for testing
-	volumeMeta := VolumeMetadata{
-		Name:        "test-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "dataset-123",
-		DatasetName: "tank/test-volume",
-		NFSShareID:  42,
-	}
-	volumeID, err := encodeVolumeID(volumeMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode test volume ID: %v", err)
-	}
+	// Use plain volume ID (CSI spec compliant - under 128 bytes)
+	volumeID := "test-volume"
 
 	tests := []struct {
 		req           *csi.CreateSnapshotRequest
@@ -337,6 +327,10 @@ func TestCreateSnapshot(t *testing.T) {
 			req: &csi.CreateSnapshotRequest{
 				Name:           "test-snapshot",
 				SourceVolumeId: volumeID,
+				Parameters: map[string]string{
+					"protocol":      ProtocolNFS,
+					"parentDataset": "tank/csi",
+				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
@@ -344,8 +338,8 @@ func TestCreateSnapshot(t *testing.T) {
 				}
 				m.CreateSnapshotFunc = func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
 					return &tnsapi.Snapshot{
-						ID:      "tank/test-volume@test-snapshot",
-						Dataset: "tank/test-volume",
+						ID:      "tank/csi/test-volume@test-snapshot",
+						Dataset: "tank/csi/test-volume",
 					}, nil
 				}
 			},
@@ -372,13 +366,17 @@ func TestCreateSnapshot(t *testing.T) {
 			req: &csi.CreateSnapshotRequest{
 				Name:           "existing-snapshot",
 				SourceVolumeId: volumeID,
+				Parameters: map[string]string{
+					"protocol":      ProtocolNFS,
+					"parentDataset": "tank/csi",
+				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
 					return []tnsapi.Snapshot{
 						{
-							ID:      "tank/test-volume@existing-snapshot",
-							Dataset: "tank/test-volume",
+							ID:      "tank/csi/test-volume@existing-snapshot",
+							Dataset: "tank/csi/test-volume",
 						},
 					}, nil
 				}
@@ -416,20 +414,33 @@ func TestCreateSnapshot(t *testing.T) {
 			wantCode:  codes.InvalidArgument,
 		},
 		{
-			name: "invalid source volume ID",
+			name: "volume not found - no parentDataset and not in TrueNAS",
 			req: &csi.CreateSnapshotRequest{
 				Name:           "test-snapshot",
-				SourceVolumeId: "invalid-id",
+				SourceVolumeId: volumeID,
+				Parameters:     map[string]string{},
 			},
-			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Return empty results - volume not found
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{}, nil
+				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.NotFound,
 		},
 		{
 			name: "TrueNAS API error during creation",
 			req: &csi.CreateSnapshotRequest{
 				Name:           "test-snapshot",
 				SourceVolumeId: volumeID,
+				Parameters: map[string]string{
+					"protocol":      ProtocolNFS,
+					"parentDataset": "tank/csi",
+				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
@@ -587,18 +598,8 @@ func TestDeleteSnapshot(t *testing.T) {
 func TestListSnapshots(t *testing.T) {
 	ctx := context.Background()
 
-	// Create test volume and snapshot metadata
-	volumeMeta := VolumeMetadata{
-		Name:        "test-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "dataset-123",
-		DatasetName: "tank/test-volume",
-		NFSShareID:  42,
-	}
-	volumeID, err := encodeVolumeID(volumeMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode test volume ID: %v", err)
-	}
+	// Use plain volume ID (CSI spec compliant - under 128 bytes)
+	volumeID := "test-volume"
 
 	snapshotMeta := SnapshotMetadata{
 		SnapshotName: "tank/test-volume@test-snapshot",
@@ -665,10 +666,29 @@ func TestListSnapshots(t *testing.T) {
 				SourceVolumeId: volumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock finding the NFS share for the volume
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{
+						{
+							ID:   42,
+							Path: "/mnt/tank/csi/" + volumeID,
+						},
+					}, nil
+				}
+				// Mock finding the dataset
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{
+						{
+							ID:   "tank/csi/" + volumeID,
+							Name: "tank/csi/" + volumeID,
+						},
+					}, nil
+				}
+				// Mock finding snapshots for this dataset
 				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
 					return []tnsapi.Snapshot{
-						{ID: "tank/test-volume@snap1", Dataset: "tank/test-volume"},
-						{ID: "tank/test-volume@snap2", Dataset: "tank/test-volume"},
+						{ID: "tank/csi/test-volume@snap1", Dataset: "tank/csi/test-volume"},
+						{ID: "tank/csi/test-volume@snap2", Dataset: "tank/csi/test-volume"},
 					}, nil
 				}
 			},

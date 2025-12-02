@@ -18,7 +18,7 @@ func getNFSMountOptions() []string {
 // It merges custom options with defaults, with custom options taking precedence.
 // Format: comma-separated list of options, e.g., "vers=4.1,soft,timeo=30".
 func parseNFSMountOptions(volumeContext map[string]string) []string {
-	customOptions := volumeContext["nfsMountOptions"]
+	customOptions := volumeContext[VolumeContextKeyNFSMountOptions]
 	if customOptions == "" {
 		return getNFSMountOptions()
 	}

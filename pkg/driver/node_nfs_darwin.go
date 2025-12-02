@@ -17,7 +17,7 @@ func getNFSMountOptions() []string {
 // parseNFSMountOptions parses custom NFS mount options from volume context.
 // This is a stub for building on macOS - the actual driver runs on Linux.
 func parseNFSMountOptions(volumeContext map[string]string) []string {
-	customOptions := volumeContext["nfsMountOptions"]
+	customOptions := volumeContext[VolumeContextKeyNFSMountOptions]
 	if customOptions == "" {
 		return getNFSMountOptions()
 	}

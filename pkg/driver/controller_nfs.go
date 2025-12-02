@@ -23,6 +23,7 @@ type nfsVolumeParams struct {
 	parentDataset     string
 	volumeName        string
 	datasetName       string
+	nfsMountOptions   string // Custom NFS mount options from StorageClass
 }
 
 // validateNFSParams validates and extracts NFS volume parameters from the request.
@@ -54,6 +55,9 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	volumeName := req.GetName()
 	datasetName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
+	// Extract custom NFS mount options (optional)
+	nfsMountOptions := params[VolumeContextKeyNFSMountOptions]
+
 	return &nfsVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -61,6 +65,7 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		requestedCapacity: requestedCapacity,
 		volumeName:        volumeName,
 		datasetName:       datasetName,
+		nfsMountOptions:   nfsMountOptions,
 	}, nil
 }
 
@@ -79,7 +84,7 @@ func parseCapacityFromComment(comment string) int64 {
 }
 
 // buildNFSVolumeResponse builds the CreateVolumeResponse for an NFS volume.
-func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, nfsShare *tnsapi.NFSShare, capacity int64) *csi.CreateVolumeResponse {
+func buildNFSVolumeResponse(volumeName, server, nfsMountOptions string, dataset *tnsapi.Dataset, nfsShare *tnsapi.NFSShare, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:        volumeName,
 		Protocol:    ProtocolNFS,
@@ -95,6 +100,11 @@ func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 	// Build volume context with all necessary metadata
 	volumeContext := buildVolumeContext(meta)
 	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
+
+	// Pass through custom NFS mount options if specified
+	if nfsMountOptions != "" {
+		volumeContext[VolumeContextKeyNFSMountOptions] = nfsMountOptions
+	}
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNFS, capacity)
@@ -148,7 +158,7 @@ func (s *ControllerService) handleExistingNFSVolume(ctx context.Context, params 
 		capacityToReturn = existingCapacity
 	}
 
-	resp := buildNFSVolumeResponse(params.volumeName, params.server, existingDataset, &existingShare, capacityToReturn)
+	resp := buildNFSVolumeResponse(params.volumeName, params.server, params.nfsMountOptions, existingDataset, &existingShare, capacityToReturn)
 
 	timer.ObserveSuccess()
 	return resp, true, nil
@@ -245,7 +255,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	}
 
 	// Build and return response
-	resp := buildNFSVolumeResponse(params.volumeName, params.server, dataset, nfsShare, params.requestedCapacity)
+	resp := buildNFSVolumeResponse(params.volumeName, params.server, params.nfsMountOptions, dataset, nfsShare, params.requestedCapacity)
 
 	klog.Infof("Created NFS volume: %s", params.volumeName)
 	timer.ObserveSuccess()
@@ -290,6 +300,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	klog.V(4).Infof("Setting up NFS share for cloned dataset: %s", dataset.Name)
 
 	volumeName := req.GetName()
+	params := req.GetParameters()
 
 	// Create NFS share for the cloned dataset
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
@@ -335,6 +346,11 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	volumeContext := buildVolumeContext(meta)
 	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
 	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
+
+	// Pass through custom NFS mount options if specified
+	if nfsMountOptions := params[VolumeContextKeyNFSMountOptions]; nfsMountOptions != "" {
+		volumeContext[VolumeContextKeyNFSMountOptions] = nfsMountOptions
+	}
 
 	klog.Infof("Created NFS volume from snapshot: %s", volumeName)
 

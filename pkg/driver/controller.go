@@ -29,6 +29,7 @@ const (
 	VolumeContextKeyDatasetID         = "datasetID"
 	VolumeContextKeyDatasetName       = "datasetName"
 	VolumeContextKeyNFSShareID        = "nfsShareID"
+	VolumeContextKeyNFSMountOptions   = "nfsMountOptions"
 	VolumeContextKeyNQN               = "nqn"
 	VolumeContextKeyNVMeOFSubsystemID = "nvmeofSubsystemID"
 	VolumeContextKeyNVMeOFNamespaceID = "nvmeofNamespaceID"
@@ -392,6 +393,11 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 		"datasetID":   existingDataset.ID,
 		"datasetName": expectedDatasetName,
 		"nfsShareID":  strconv.Itoa(shares[0].ID),
+	}
+
+	// Pass through custom NFS mount options if specified
+	if nfsMountOptions := params[VolumeContextKeyNFSMountOptions]; nfsMountOptions != "" {
+		volumeContext[VolumeContextKeyNFSMountOptions] = nfsMountOptions
 	}
 
 	return volumeMeta, volumeContext, nil

@@ -120,6 +120,12 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 	klog.V(4).Infof("NVMe-oF device connected at %s (NQN: %s, dataset: %s)",
 		devicePath, params.nqn, datasetName)
 
+	// Rescan the namespace to ensure kernel has fresh device data
+	// This is critical to avoid stale size information from previous connections
+	if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
+		klog.Warningf("Failed to rescan NVMe namespace %s after connect: %v (continuing anyway)", devicePath, rescanErr)
+	}
+
 	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 }
 
@@ -239,6 +245,12 @@ func (s *NodeService) stageNVMeDevice(ctx context.Context, volumeID, devicePath,
 		// First, wait for device to report non-zero size (indicates device is initialized)
 		if err := waitForDeviceInitialization(ctx, devicePath); err != nil {
 			return nil, status.Errorf(codes.Internal, "Device initialization timeout: %v", err)
+		}
+
+		// Rescan NVMe namespace to ensure kernel has fresh device metadata
+		// This is critical to avoid stale size information from previous connections
+		if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
+			klog.Warningf("NVMe namespace rescan warning for %s: %v (continuing anyway)", devicePath, rescanErr)
 		}
 
 		// Force the kernel to completely re-read the device identity

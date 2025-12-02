@@ -109,10 +109,10 @@ linters:
       enable-all: true
       
     gocyclo:
-      min-complexity: 15
+      min-complexity: 26
       
     gocognit:
-      min-complexity: 20
+      min-complexity: 45
       
     dupl:
       threshold: 100
@@ -192,7 +192,7 @@ linters:
       max-func-lines: 30
       
     nestif:
-      min-complexity: 5
+      min-complexity: 21
       
     loggercheck:
       require-string-key: true

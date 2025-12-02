@@ -1088,7 +1088,7 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 
 	// Check if detached volumes from snapshots is enabled
 	// This creates independent clones using zfs send/receive instead of ZFS clone
-	detachedVolumesFromSnapshots := params["detachedVolumesFromSnapshots"] == "true"
+	detachedVolumesFromSnapshots := params["detachedVolumesFromSnapshots"] == VolumeContextValueTrue
 
 	newVolumeName := req.GetName()
 	newDatasetName := fmt.Sprintf("%s/%s", parentDataset, newVolumeName)

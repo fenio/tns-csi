@@ -21,7 +21,10 @@ tests/integration/
 ├── test-nfs.sh             # NFS integration test
 ├── test-nvmeof.sh          # NVMe-oF integration test (filesystem)
 ├── test-nvmeof-block.sh    # NVMe-oF integration test (block)
-└── test-dual-mount.sh      # Dual-mount test (NFS + NVMe-oF)
+├── test-dual-mount.sh      # Dual-mount test (NFS + NVMe-oF)
+├── test-detached-clone.sh  # Detached clone test (zfs send/receive)
+├── test-nfs-mount-options.sh # Custom NFS mount options test
+└── test-btrfs-filesystem.sh  # Btrfs filesystem test (NVMe-oF)
 ```
 
 ## Test Workflow
@@ -79,6 +82,15 @@ export TRUENAS_POOL="your-pool-name"
 
 # Dual-mount test (NFS + NVMe-oF simultaneously)
 ./tests/integration/test-dual-mount.sh
+
+# Detached clone test (zfs send/receive independence)
+./tests/integration/test-detached-clone.sh
+
+# Custom NFS mount options test
+./tests/integration/test-nfs-mount-options.sh
+
+# Btrfs filesystem test (NVMe-oF with btrfs)
+./tests/integration/test-btrfs-filesystem.sh
 ```
 
 ### Run All Tests
@@ -258,6 +270,35 @@ set -x  # Enable bash debug output
   - The CSI driver can handle multiple protocols simultaneously
   - There are no conflicts between NFS and NVMe-oF volume attachment/mounting
   - Both storage backends remain fully functional when used together
+
+### Detached Clone Test
+
+- Tests snapshot clones created with `detachedVolumesFromSnapshots=true`
+- Uses zfs send/receive instead of zfs clone for true independence
+- Validates that clones survive parent volume deletion
+- Key test steps:
+  1. Create parent volume and write data
+  2. Create snapshot with detached VolumeSnapshotClass
+  3. Restore snapshot to new PVC (uses zfs send/receive)
+  4. Delete parent volume
+  5. Verify clone still works after parent deletion
+- This proves the clone has no dependency on the parent dataset
+
+### NFS Mount Options Test
+
+- Tests custom NFS mount options via StorageClass parameters
+- Validates that `nfsMountOptions` parameter works correctly
+- Example options tested: `vers=4.1,hard,timeo=600,retrans=5,rsize=1048576,wsize=1048576`
+- Verifies mount options are applied and I/O works correctly
+- Useful for tuning NFS performance for specific workloads
+
+### Btrfs Filesystem Test
+
+- Tests NVMe-oF volumes formatted with btrfs filesystem
+- Validates btrfs format, mount, and I/O operations
+- Tests volume expansion with btrfs (uses `btrfs filesystem resize`)
+- Requires NVMe-oF to be configured on TrueNAS
+- Skips gracefully if NVMe-oF is not available
 
 ## Contributing
 

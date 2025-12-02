@@ -34,6 +34,11 @@ on:
           - access-modes
           - snapshot-restore
           - volume-stress
+          - detached-snapshot
+          - detached-clone
+          - btrfs-filesystem
+          - nfs-mount-options
+          - orphaned-resources
 
 # Restrict permissions to minimum required
 permissions:
@@ -226,6 +231,86 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-volume-expansion-nfs.sh
 
+  nfs-detached-snapshot:
+    name: "NFS: Detached Snapshot"
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'detached-snapshot')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-detached-snapshot.sh
+
+  nfs-detached-clone:
+    name: "NFS: Detached Clone"
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'detached-clone')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-detached-clone.sh
+
+  nfs-mount-options:
+    name: "NFS: Mount Options"
+    runs-on: self-hosted
+    timeout-minutes: 10
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'nfs-mount-options')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-nfs-mount-options.sh
+
   # ==========================================
   # NVMe-oF Tests
   # ==========================================
@@ -386,6 +471,32 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-volume-expansion-nvmeof.sh
 
+  nvmeof-btrfs:
+    name: "NVMe-oF: Btrfs Filesystem"
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'btrfs-filesystem')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-btrfs-filesystem.sh
+
   # ==========================================
   # Shared Tests
   # ==========================================
@@ -540,6 +651,31 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-volume-stress.sh
 
+  shared-orphaned-resources:
+    name: "Shared: Orphaned Resources"
+    runs-on: self-hosted
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'orphaned-resources')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-orphaned-resources.sh
+
   # ==========================================
   # Cleanup & Summary
   # ==========================================
@@ -547,7 +683,7 @@ jobs:
     name: Cleanup
     runs-on: self-hosted
     timeout-minutes: 10
-    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
+    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-detached-snapshot, nfs-detached-clone, nfs-mount-options, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-btrfs, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-orphaned-resources]
     if: always()
     steps:
       - uses: actions/checkout@v6
@@ -570,7 +706,7 @@ jobs:
     name: "Test Summary"
     runs-on: self-hosted
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, cleanup]
+    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-detached-snapshot, nfs-detached-clone, nfs-mount-options, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-btrfs, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-orphaned-resources, cleanup]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -585,6 +721,9 @@ jobs:
               'Persistence': '${{ needs.nfs-persistence.result }}',
               'StatefulSet': '${{ needs.nfs-statefulset.result }}',
               'Volume Expansion': '${{ needs.nfs-expansion.result }}',
+              'Detached Snapshot': '${{ needs.nfs-detached-snapshot.result }}',
+              'Detached Clone': '${{ needs.nfs-detached-clone.result }}',
+              'Mount Options': '${{ needs.nfs-mount-options.result }}',
             };
             
             const nvmeofResults = {
@@ -594,6 +733,7 @@ jobs:
               'Persistence': '${{ needs.nvmeof-persistence.result }}',
               'StatefulSet': '${{ needs.nvmeof-statefulset.result }}',
               'Volume Expansion': '${{ needs.nvmeof-expansion.result }}',
+              'Btrfs Filesystem': '${{ needs.nvmeof-btrfs.result }}',
             };
             
             const sharedResults = {
@@ -603,6 +743,7 @@ jobs:
               'Access Modes': '${{ needs.shared-access-modes.result }}',
               'Snapshot Restore': '${{ needs.shared-snapshot-restore.result }}',
               'Volume Stress': '${{ needs.shared-volume-stress.result }}',
+              'Orphaned Resources': '${{ needs.shared-orphaned-resources.result }}',
             };
             
             const getIcon = (result) => {
@@ -632,7 +773,7 @@ jobs:
             const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
             const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 18;
+            const total = 23;
             
             let summary = `# Integration Test Results\n\n`;
             
@@ -655,11 +796,30 @@ jobs:
             summary += `| Test | NFS | NVMe-oF |\n`;
             summary += `|------|:---:|:-------:|\n`;
             
-            const testNames = ['Basic', 'Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion'];
-            for (const test of testNames) {
+            // Common tests for both protocols
+            const commonTests = ['Basic', 'Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion'];
+            for (const test of commonTests) {
               const nfsResult = results[test];
               const nvmeofResult = nvmeofResults[test];
               summary += `| ${test} | ${getIcon(nfsResult)} | ${getIcon(nvmeofResult)} |\n`;
+            }
+            
+            // NFS-only tests
+            summary += `\n## NFS-Only Tests\n\n`;
+            summary += `| Test | Status |\n`;
+            summary += `|------|:------:|\n`;
+            const nfsOnlyTests = ['Detached Snapshot', 'Detached Clone', 'Mount Options'];
+            for (const test of nfsOnlyTests) {
+              summary += `| ${test} | ${getIcon(results[test])} |\n`;
+            }
+            
+            // NVMe-oF-only tests
+            summary += `\n## NVMe-oF-Only Tests\n\n`;
+            summary += `| Test | Status |\n`;
+            summary += `|------|:------:|\n`;
+            const nvmeofOnlyTests = ['Btrfs Filesystem'];
+            for (const test of nvmeofOnlyTests) {
+              summary += `| ${test} | ${getIcon(nvmeofResults[test])} |\n`;
             }
             
             // Shared tests

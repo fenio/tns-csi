@@ -13,6 +13,16 @@ metadata:
   {{- end }}
 driver: {{ .Values.csiDriverName }}
 deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+parameters:
+  pool: {{ .Values.storageClasses.nfs.pool | quote }}
+  parentDataset: {{ .Values.storageClasses.nfs.parentDataset | default .Values.storageClasses.nfs.pool | quote }}
+  protocol: "nfs"
+  {{- if .Values.snapshots.detachedSnapshots }}
+  detachedSnapshots: "true"
+  {{- if .Values.snapshots.snapshotParentDataset }}
+  snapshotParentDataset: {{ .Values.snapshots.snapshotParentDataset | quote }}
+  {{- end }}
+  {{- end }}
 {{- end }}
 
 {{- if .Values.storageClasses.nvmeof.enabled }}
@@ -29,5 +39,15 @@ metadata:
   {{- end }}
 driver: {{ .Values.csiDriverName }}
 deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+parameters:
+  pool: {{ .Values.storageClasses.nvmeof.pool | quote }}
+  parentDataset: {{ .Values.storageClasses.nvmeof.parentDataset | default .Values.storageClasses.nvmeof.pool | quote }}
+  protocol: "nvmeof"
+  {{- if .Values.snapshots.detachedSnapshots }}
+  detachedSnapshots: "true"
+  {{- if .Values.snapshots.snapshotParentDataset }}
+  snapshotParentDataset: {{ .Values.snapshots.snapshotParentDataset | quote }}
+  {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}

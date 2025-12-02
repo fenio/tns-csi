@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,21 +34,19 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient         tnsapi.ClientInterface
-	nodeRegistry      *NodeRegistry
-	namespaceRegistry *NVMeOFNamespaceRegistry
-	nodeID            string
-	testMode          bool // Test mode flag to skip actual mounts
+	apiClient    tnsapi.ClientInterface
+	nodeRegistry *NodeRegistry
+	nodeID       string
+	testMode     bool // Test mode flag to skip actual mounts
 }
 
 // NewNodeService creates a new node service.
 func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bool, nodeRegistry *NodeRegistry) *NodeService {
 	return &NodeService{
-		nodeID:            nodeID,
-		apiClient:         apiClient,
-		testMode:          testMode,
-		nodeRegistry:      nodeRegistry,
-		namespaceRegistry: NewNVMeOFNamespaceRegistry(),
+		nodeID:       nodeID,
+		apiClient:    apiClient,
+		testMode:     testMode,
+		nodeRegistry: nodeRegistry,
 	}
 }
 
@@ -125,15 +124,18 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
 
-	// Check if this is an NVMe-oF volume by looking up the namespace registry
-	// The registry stores NQN/NSID during stage for lookup during unstage
-	if meta, found := s.namespaceRegistry.GetVolumeMetadata(volumeID); found {
-		klog.V(4).Infof("Unstaging NVMe-oF volume %s (NQN: %s, NSID: %s) from %s", volumeID, meta.NQN, meta.NSID, stagingTargetPath)
+	// With independent subsystems, we determine the protocol by checking the staging path
+	// NVMe-oF volumes use block devices, NFS volumes use NFS mounts
+	// Try to detect the mount type from the staging path
+	protocol := s.detectProtocolFromStagingPath(ctx, stagingTargetPath)
 
-		// Create volume context from registry metadata
+	klog.V(4).Infof("Unstaging volume %s (protocol: %s) from %s", volumeID, protocol, stagingTargetPath)
+
+	if protocol == ProtocolNVMeOF {
+		// For NVMe-oF, we need to pass the NQN which is derived from the volume ID
+		// With independent subsystems, NQN format is: nqn.2024-01.io.truenas.csi:<volumeID>
 		volumeContext := map[string]string{
-			"nqn":  meta.NQN,
-			"nsid": meta.NSID,
+			"nqn": fmt.Sprintf("nqn.2024-01.io.truenas.csi:%s", volumeID),
 		}
 		resp, err := s.unstageNVMeOFVolume(ctx, req, volumeContext)
 		if err != nil {
@@ -144,7 +146,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return resp, nil
 	}
 
-	// Not found in NVMe-oF registry - treat as NFS volume
+	// Default to NFS volume unstaging
 	klog.V(4).Infof("Unstaging NFS volume %s from %s", volumeID, stagingTargetPath)
 	resp, err := s.unstageNFSVolume(ctx, req)
 	if err != nil {
@@ -153,6 +155,45 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	}
 	timer.ObserveSuccess()
 	return resp, nil
+}
+
+// detectProtocolFromStagingPath attempts to detect whether the staging path is NVMe-oF or NFS.
+// It checks the mount source to determine if it's a block device or NFS mount.
+func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, stagingPath string) string {
+	// Check if the path exists first
+	if _, err := os.Stat(stagingPath); os.IsNotExist(err) {
+		// Path doesn't exist, default to NFS (most common case for cleanup)
+		return ProtocolNFS
+	}
+
+	// Check if it's mounted
+	mounted, err := mount.IsMounted(ctx, stagingPath)
+	if err != nil || !mounted {
+		// Not mounted or error - check if there's an NVMe device symlink
+		// For block volumes, the staging path is a symlink to the device
+		if info, statErr := os.Lstat(stagingPath); statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				// It's a symlink, likely a block device - NVMe-oF
+				return ProtocolNVMeOF
+			}
+		}
+		return ProtocolNFS
+	}
+
+	// It's mounted - check the filesystem type using findmnt
+	fsType, err := detectFilesystemType(ctx, stagingPath)
+	if err != nil {
+		// Default to NFS if we can't detect
+		return ProtocolNFS
+	}
+
+	// NFS mounts will show "nfs" or "nfs4" as filesystem type
+	if strings.HasPrefix(fsType, "nfs") {
+		return ProtocolNFS
+	}
+
+	// ext4, xfs etc. are typically from block devices (NVMe-oF)
+	return ProtocolNVMeOF
 }
 
 // NodePublishVolume mounts the volume to the target path.
@@ -420,14 +461,8 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
-	// Determine protocol by checking namespace registry
-	// If found in NVMe-oF registry, it's NVMe-oF; otherwise treat as NFS
-	var protocol string
-	if _, found := s.namespaceRegistry.GetVolumeMetadata(volumeID); found {
-		protocol = ProtocolNVMeOF
-	} else {
-		protocol = ProtocolNFS
-	}
+	// Determine protocol by detecting filesystem type at the mount path
+	protocol := s.detectProtocolFromStagingPath(ctx, volumePath)
 
 	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volumeID, protocol, volumePath)
 
@@ -449,7 +484,6 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	}
 
 	// For filesystem volumes, we need to resize the filesystem
-	// The volume path for filesystem volumes is typically the staging path
 	klog.V(4).Infof("Resizing filesystem on volume path: %s", volumePath)
 
 	// Detect filesystem type

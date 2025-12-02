@@ -670,8 +670,6 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 }
 
 // matchesSnapshotFilters checks if a snapshot matches the provided filters.
-//
-//nolint:gocognit,gocyclo // Complex filter matching logic for test mock
 func matchesSnapshotFilters(snap mockSnapshot, filters []any) bool {
 	if len(filters) == 0 {
 		return true

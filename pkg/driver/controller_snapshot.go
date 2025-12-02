@@ -132,8 +132,8 @@ type snapshotParameters struct {
 	pool                  string
 	parentDataset         string
 	protocol              string
-	detachedSnapshots     bool   // Create detached (independent) snapshot via zfs send/receive
 	snapshotParentDataset string // Parent dataset for storing detached snapshots
+	detachedSnapshots     bool   // Create detached (independent) snapshot via zfs send/receive
 }
 
 // parseSnapshotParameters extracts and validates parameters from VolumeSnapshotClass.
@@ -151,7 +151,7 @@ func parseSnapshotParameters(params map[string]string) *snapshotParameters {
 
 	// Check if detached snapshots are enabled
 	// This creates independent snapshot datasets using zfs send/receive instead of ZFS native snapshots
-	detachedSnapshots := params["detachedSnapshots"] == "true"
+	detachedSnapshots := params["detachedSnapshots"] == VolumeContextValueTrue
 
 	// Get snapshot parent dataset for detached snapshots
 	// Default: {parentDataset}/snapshots
@@ -249,16 +249,15 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	// Route to appropriate snapshot creation method
 	if snapParams.detachedSnapshots {
-		return s.createDetachedSnapshot(ctx, req, datasetName, snapshotName, sourceVolumeID, snapParams, timer)
+		return s.createDetachedSnapshot(ctx, datasetName, snapshotName, sourceVolumeID, snapParams, timer)
 	}
-	return s.createNativeSnapshot(ctx, req, datasetName, snapshotName, sourceVolumeID, snapParams, timer)
+	return s.createNativeSnapshot(ctx, datasetName, snapshotName, sourceVolumeID, snapParams, timer)
 }
 
 // createNativeSnapshot creates a standard ZFS snapshot (dataset@snapshot).
 // The snapshot maintains a parent-child relationship with the source dataset.
 func (s *ControllerService) createNativeSnapshot(
 	ctx context.Context,
-	req *csi.CreateSnapshotRequest,
 	datasetName, snapshotName, sourceVolumeID string,
 	snapParams *snapshotParameters,
 	timer *metrics.OperationTimer,
@@ -372,10 +371,9 @@ func (s *ControllerService) createNativeSnapshot(
 // 1. Create a temporary ZFS snapshot on the source dataset
 // 2. Use zfs send/receive to replicate to snapshot storage location
 // 3. Delete the temporary snapshot from both source and target
-// 4. The resulting dataset is a point-in-time copy, fully independent
+// 4. The resulting dataset is a point-in-time copy, fully independent.
 func (s *ControllerService) createDetachedSnapshot(
 	ctx context.Context,
-	req *csi.CreateSnapshotRequest,
 	datasetName, snapshotName, sourceVolumeID string,
 	snapParams *snapshotParameters,
 	timer *metrics.OperationTimer,
@@ -879,7 +877,20 @@ func (s *ControllerService) listDetachedSnapshotsBySourceVolume(ctx context.Cont
 	// Format: .../snapshots/{sourceVolumeID}/{snapshotName}
 	searchPattern := "/snapshots/" + sourceVolumeID + "/"
 
-	var entries []*csi.ListSnapshotsResponse_Entry
+	// Pre-count matching datasets to pre-allocate the slice
+	matchCount := 0
+	for _, dataset := range allDatasets {
+		idx := strings.Index(dataset.Name, searchPattern)
+		if idx == -1 {
+			continue
+		}
+		afterPattern := dataset.Name[idx+len(searchPattern):]
+		if !strings.Contains(afterPattern, "/") {
+			matchCount++
+		}
+	}
+
+	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, matchCount)
 	for _, dataset := range allDatasets {
 		// Check if this dataset matches the detached snapshot pattern
 		idx := strings.Index(dataset.Name, searchPattern)
@@ -1094,7 +1105,7 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 	}, nil
 }
 
-// Default timeout for detached clone operations (zfs send/receive can take a while for large volumes)
+// Default timeout for detached clone operations (zfs send/receive can take a while for large volumes).
 const detachedCloneTimeout = 30 * time.Minute
 
 // executeSnapshotClone performs the actual snapshot clone operation.
@@ -1202,7 +1213,7 @@ func (s *ControllerService) executeStandardClone(ctx context.Context, snapshotMe
 // This is useful when you want to:
 // - Delete the source snapshot without affecting the clone
 // - Avoid ZFS clone dependency chains
-// - Create truly independent copies of volumes
+// - Create truly independent copies of volumes.
 func (s *ControllerService) executeDetachedClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
 	klog.Infof("Creating detached (independent) clone from snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
 

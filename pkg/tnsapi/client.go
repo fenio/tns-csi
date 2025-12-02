@@ -20,15 +20,20 @@ import (
 
 // Static errors for client operations.
 var (
-	ErrAuthenticationRejected = errors.New("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
-	ErrResponseIDMismatch     = errors.New("authentication response ID mismatch")
-	ErrClientClosed           = errors.New("client is closed")
-	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
-	ErrCloneFailed            = errors.New("clone operation returned false (unsuccessful)")
-	ErrClonedDatasetNotFound  = errors.New("cloned dataset not found after successful clone")
-	ErrSubsystemNotFound      = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
-	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
-	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
+	ErrAuthenticationRejected  = errors.New("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
+	ErrResponseIDMismatch      = errors.New("authentication response ID mismatch")
+	ErrClientClosed            = errors.New("client is closed")
+	ErrConnectionClosed        = errors.New("connection closed while waiting for response")
+	ErrCloneFailed             = errors.New("clone operation returned false (unsuccessful)")
+	ErrClonedDatasetNotFound   = errors.New("cloned dataset not found after successful clone")
+	ErrSubsystemNotFound       = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
+	ErrMultipleSubsystems      = errors.New("multiple subsystems found with same NQN")
+	ErrListSubsystemsFailed    = errors.New("failed to list NVMe-oF subsystems with all methods")
+	ErrJobNotFound             = errors.New("job not found")
+	ErrJobFailed               = errors.New("job failed")
+	ErrInvalidSnapshotIDFormat = errors.New("invalid snapshot ID format")
+	ErrInvalidTargetDataset    = errors.New("invalid target dataset format")
+	ErrDetachedCloneNotFound   = errors.New("detached clone dataset not found after replication")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1272,6 +1277,7 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 // JobState represents the state of an async job.
 type JobState string
 
+// JobState constants for TrueNAS async job states.
 const (
 	JobStateWaiting JobState = "WAITING"
 	JobStateRunning JobState = "RUNNING"
@@ -1284,6 +1290,8 @@ const (
 )
 
 // Job represents a TrueNAS async job.
+//
+//nolint:govet // fieldalignment: struct field order matches JSON API for readability
 type Job struct {
 	Arguments   []interface{}          `json:"arguments"`
 	Result      interface{}            `json:"result"`
@@ -1338,7 +1346,7 @@ func (c *Client) CoreGetJob(ctx context.Context, jobID int) (*Job, error) {
 	}
 
 	if len(jobs) == 0 {
-		return nil, fmt.Errorf("job %d not found", jobID)
+		return nil, fmt.Errorf("%w: %d", ErrJobNotFound, jobID)
 	}
 
 	return &jobs[0], nil
@@ -1379,7 +1387,7 @@ func (c *Client) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Dur
 			if errMsg == "" {
 				errMsg = job.Exception
 			}
-			return job, fmt.Errorf("job %d failed with state %s: %s", jobID, job.State, errMsg)
+			return job, fmt.Errorf("%w: job %d with state %s: %s", ErrJobFailed, jobID, job.State, errMsg)
 		}
 
 		klog.V(5).Infof("Job %d still in progress (state: %s), waiting %v", jobID, job.State, pollInterval)
@@ -1395,6 +1403,8 @@ func (c *Client) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Dur
 // Replication API methods for detached snapshots/clones
 
 // ReplicationRunOnetimeParams represents parameters for one-time replication.
+//
+//nolint:govet // fieldalignment: struct field order matches TrueNAS API for readability
 type ReplicationRunOnetimeParams struct {
 	Direction               string                   `json:"direction"`                            // PUSH or PULL
 	Transport               string                   `json:"transport"`                            // LOCAL, SSH, SSH+NETCAT, LEGACY
@@ -1486,7 +1496,7 @@ func (c *Client) DatasetDestroySnapshots(ctx context.Context, datasetID string) 
 // 1. Create a temporary snapshot if needed
 // 2. Use replication.run_onetime with LOCAL transport to zfs send/receive
 // 3. Wait for the replication job to complete
-// 4. The resulting dataset is fully independent
+// 4. The resulting dataset is fully independent.
 func (c *Client) CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*Dataset, error) {
 	klog.V(4).Infof("Creating detached clone from snapshot %s to %s", snapshotID, targetDataset)
 
@@ -1494,7 +1504,7 @@ func (c *Client) CreateDetachedClone(ctx context.Context, snapshotID, targetData
 	// Format: "pool/dataset@snapshotname"
 	parts := strings.SplitN(snapshotID, "@", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid snapshot ID format: %s (expected dataset@snapshot)", snapshotID)
+		return nil, fmt.Errorf("%w: %s (expected dataset@snapshot)", ErrInvalidSnapshotIDFormat, snapshotID)
 	}
 	sourceDataset := parts[0]
 	snapshotName := parts[1]
@@ -1502,7 +1512,7 @@ func (c *Client) CreateDetachedClone(ctx context.Context, snapshotID, targetData
 	// Parse target to get parent dataset
 	targetParts := strings.Split(targetDataset, "/")
 	if len(targetParts) < 2 {
-		return nil, fmt.Errorf("invalid target dataset format: %s", targetDataset)
+		return nil, fmt.Errorf("%w: %s", ErrInvalidTargetDataset, targetDataset)
 	}
 	// The parent is everything except the last component
 	targetParent := strings.Join(targetParts[:len(targetParts)-1], "/")
@@ -1561,7 +1571,7 @@ func (c *Client) CreateDetachedClone(ctx context.Context, snapshotID, targetData
 	}
 
 	if len(datasets) == 0 {
-		return nil, fmt.Errorf("detached clone dataset not found after replication")
+		return nil, ErrDetachedCloneNotFound
 	}
 
 	// Destroy the replicated snapshot to make the dataset fully independent

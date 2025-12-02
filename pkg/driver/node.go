@@ -476,14 +476,37 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 	// For NVMe-oF volumes, check if this is a block or filesystem volume
 	volumeCap := req.GetVolumeCapability()
 	if volumeCap != nil && volumeCap.GetBlock() != nil {
-		klog.Info("Block volume expansion, no filesystem resize needed")
+		// Block volume - still need to rescan device to detect new size
+		// Find the device from the staging path (volumePath is the published block device)
+		klog.V(4).Infof("Block volume expansion - rescanning device at %s", volumePath)
+		if err := RescanDevice(ctx, volumePath); err != nil {
+			klog.Warningf("Failed to rescan block device %s: %v (continuing anyway)", volumePath, err)
+		}
+		klog.Info("Block volume expansion, device rescanned, no filesystem resize needed")
 		return &csi.NodeExpandVolumeResponse{
 			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
 		}, nil
 	}
 
-	// For filesystem volumes, we need to resize the filesystem
+	// For filesystem volumes, we need to:
+	// 1. Find the underlying block device
+	// 2. Rescan the device to detect the new size from TrueNAS
+	// 3. Resize the filesystem
 	klog.V(4).Infof("Resizing filesystem on volume path: %s", volumePath)
+
+	// Find the underlying device for this mount
+	device, err := getDeviceFromMountPath(ctx, volumePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to find device for mount path: %v", err)
+	}
+	klog.V(4).Infof("Found device %s for volume path %s", device, volumePath)
+
+	// Rescan the device to detect the new size from TrueNAS
+	// This is critical: TrueNAS expanded the ZVOL, but the node kernel
+	// may still see the old size until we rescan
+	if err := RescanDevice(ctx, device); err != nil {
+		klog.Warningf("Failed to rescan device %s: %v (continuing anyway)", device, err)
+	}
 
 	// Detect filesystem type
 	fsType, err := detectFilesystemType(ctx, volumePath)
@@ -561,6 +584,25 @@ func safeUint64ToInt64(val uint64) int64 {
 		return maxInt64
 	}
 	return int64(val)
+}
+
+// getDeviceFromMountPath finds the underlying block device for a mount path.
+// This is used during volume expansion to rescan the device before resizing the filesystem.
+func getDeviceFromMountPath(ctx context.Context, mountPath string) (string, error) {
+	// Use findmnt to get the source device
+	// -n = no headings, -o SOURCE = only output source device
+	cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "Failed to find device for mount path: %v, output: %s", err, string(output))
+	}
+
+	device := strings.TrimSpace(string(output))
+	if device == "" {
+		return "", status.Error(codes.Internal, "Empty device path returned from findmnt")
+	}
+
+	return device, nil
 }
 
 // detectFilesystemType detects the filesystem type at the given mount point.

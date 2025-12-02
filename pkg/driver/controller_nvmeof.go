@@ -40,7 +40,7 @@ type nvmeofVolumeParams struct {
 }
 
 // generateNQN creates a unique NQN for a volume's dedicated subsystem.
-// Format: nqn.2024-01.io.truenas.csi:<volume-name>
+// Format: nqn.2024-01.io.truenas.csi:<volume-name>.
 func generateNQN(volumeName string) string {
 	return fmt.Sprintf("%s:%s", nqnPrefix, volumeName)
 }
@@ -295,16 +295,16 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	// Step 3: Bind subsystem to port (if portID specified or use first available port)
-	if err := s.bindSubsystemToPort(ctx, subsystem.ID, params.portID, timer); err != nil {
+	if bindErr := s.bindSubsystemToPort(ctx, subsystem.ID, params.portID, timer); bindErr != nil {
 		// Cleanup: delete subsystem and ZVOL
-		klog.Errorf("Failed to bind subsystem to port, cleaning up: %v", err)
+		klog.Errorf("Failed to bind subsystem to port, cleaning up: %v", bindErr)
 		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
 		}
-		return nil, err
+		return nil, bindErr
 	}
 
 	// Step 4: Create NVMe-oF namespace (NSID will be 1 since this is a new subsystem)
@@ -600,16 +600,16 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	klog.V(4).Infof("Created NVMe-oF subsystem: ID=%d, Name=%s", subsystem.ID, subsystem.Name)
 
 	// Step 2: Bind subsystem to port
-	if err := s.bindSubsystemToPort(ctx, subsystem.ID, portID, timer); err != nil {
+	if bindErr := s.bindSubsystemToPort(ctx, subsystem.ID, portID, timer); bindErr != nil {
 		// Cleanup: delete subsystem and cloned ZVOL
-		klog.Errorf("Failed to bind subsystem to port, cleaning up: %v", err)
+		klog.Errorf("Failed to bind subsystem to port, cleaning up: %v", bindErr)
 		if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup subsystem: %v", delErr)
 		}
 		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
 			klog.Errorf(msgFailedCleanupClonedZVOL, delErr)
 		}
-		return nil, err
+		return nil, bindErr
 	}
 
 	// Step 3: Create NVMe-oF namespace (NSID = 1)

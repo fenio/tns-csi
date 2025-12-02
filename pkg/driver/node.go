@@ -2,7 +2,6 @@ package driver
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -135,7 +134,7 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		// For NVMe-oF, we need to pass the NQN which is derived from the volume ID
 		// With independent subsystems, NQN format is: nqn.2024-01.io.truenas.csi:<volumeID>
 		volumeContext := map[string]string{
-			"nqn": fmt.Sprintf("nqn.2024-01.io.truenas.csi:%s", volumeID),
+			"nqn": nqnPrefix + ":" + volumeID,
 		}
 		resp, err := s.unstageNVMeOFVolume(ctx, req, volumeContext)
 		if err != nil {

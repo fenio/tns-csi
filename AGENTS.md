@@ -103,7 +103,12 @@ When investigating issues:
 
 ### 6. **Code Quality Standards**
 
+**STRICT REQUIREMENT: All code must pass the linter before committing.**
+
+Run `golangci-lint run` (or `make lint`) before every commit. The CI pipeline will reject any code that fails linting. Do not commit code with linter errors or warnings.
+
 Before suggesting changes:
+- **Does it pass the linter?** (run `golangci-lint run` - this is mandatory)
 - **Is there evidence of a problem?** (logs, error reports, failed tests)
 - **Will this affect working functionality?** (run integration tests)
 - **Is this solving a real issue?** (not theoretical improvements)

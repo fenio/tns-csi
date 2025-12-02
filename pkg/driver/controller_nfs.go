@@ -79,7 +79,7 @@ func parseCapacityFromComment(comment string) int64 {
 }
 
 // buildNFSVolumeResponse builds the CreateVolumeResponse for an NFS volume.
-func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, nfsShare *tnsapi.NFSShare, capacity int64) (*csi.CreateVolumeResponse, error) {
+func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, nfsShare *tnsapi.NFSShare, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:        volumeName,
 		Protocol:    ProtocolNFS,
@@ -105,7 +105,7 @@ func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 			CapacityBytes: capacity,
 			VolumeContext: volumeContext,
 		},
-	}, nil
+	}
 }
 
 // handleExistingNFSVolume handles the case when a dataset already exists (idempotency).
@@ -148,11 +148,7 @@ func (s *ControllerService) handleExistingNFSVolume(ctx context.Context, params 
 		capacityToReturn = existingCapacity
 	}
 
-	resp, err := buildNFSVolumeResponse(params.volumeName, params.server, existingDataset, &existingShare, capacityToReturn)
-	if err != nil {
-		timer.ObserveError()
-		return nil, false, err
-	}
+	resp := buildNFSVolumeResponse(params.volumeName, params.server, existingDataset, &existingShare, capacityToReturn)
 
 	timer.ObserveSuccess()
 	return resp, true, nil
@@ -203,21 +199,6 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	return nfsShare, nil
 }
 
-// cleanupNFSResources cleans up NFS share and dataset on failure.
-func (s *ControllerService) cleanupNFSResources(ctx context.Context, nfsShareID int, datasetID string) {
-	klog.Errorf("Cleaning up NFS resources due to failure")
-	if nfsShareID > 0 {
-		if delErr := s.apiClient.DeleteNFSShare(ctx, nfsShareID); delErr != nil {
-			klog.Errorf("Failed to cleanup NFS share: %v", delErr)
-		}
-	}
-	if datasetID != "" {
-		if delErr := s.apiClient.DeleteDataset(ctx, datasetID); delErr != nil {
-			klog.Errorf("Failed to cleanup dataset: %v", delErr)
-		}
-	}
-}
-
 // createNFSVolume creates an NFS volume with a ZFS dataset and NFS share.
 func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "create")
@@ -264,13 +245,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	}
 
 	// Build and return response
-	resp, err := buildNFSVolumeResponse(params.volumeName, params.server, dataset, nfsShare, params.requestedCapacity)
-	if err != nil {
-		// Cleanup on failure
-		s.cleanupNFSResources(ctx, nfsShare.ID, dataset.ID)
-		timer.ObserveError()
-		return nil, err
-	}
+	resp := buildNFSVolumeResponse(params.volumeName, params.server, dataset, nfsShare, params.requestedCapacity)
 
 	klog.Infof("Created NFS volume: %s", params.volumeName)
 	timer.ObserveSuccess()
@@ -359,7 +334,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	// ZFS clones inherit filesystems from snapshots, but detection may fail due to caching
 	volumeContext := buildVolumeContext(meta)
 	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
-	volumeContext[VolumeContextKeyClonedFromSnap] = "true"
+	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
 
 	klog.Infof("Created NFS volume from snapshot: %s", volumeName)
 

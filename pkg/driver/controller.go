@@ -35,6 +35,7 @@ const (
 	VolumeContextKeyNSID              = "nsid"
 	VolumeContextKeyExpectedCapacity  = "expectedCapacity"
 	VolumeContextKeyClonedFromSnap    = "clonedFromSnapshot"
+	VolumeContextValueTrue            = "true"
 )
 
 // Static errors for controller operations.

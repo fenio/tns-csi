@@ -116,7 +116,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 }
 
 // buildNVMeOFVolumeResponse builds the CreateVolumeResponse for an NVMe-oF volume.
-func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, subsystem *tnsapi.NVMeOFSubsystem, namespace *tnsapi.NVMeOFNamespace, capacity int64) (*csi.CreateVolumeResponse, error) {
+func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, subsystem *tnsapi.NVMeOFSubsystem, namespace *tnsapi.NVMeOFNamespace, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:              volumeName,
 		Protocol:          ProtocolNVMeOF,
@@ -145,7 +145,7 @@ func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, 
 			CapacityBytes: capacity,
 			VolumeContext: volumeContext,
 		},
-	}, nil
+	}
 }
 
 // handleExistingNVMeOFVolume handles the case when a ZVOL already exists (idempotency).
@@ -191,11 +191,7 @@ func (s *ControllerService) handleExistingNVMeOFVolume(ctx context.Context, para
 		klog.V(4).Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d), returning existing volume",
 			namespace.ID, namespace.NSID)
 
-		resp, err := buildNVMeOFVolumeResponse(params.volumeName, params.server, existingZvol, subsystem, namespace, existingCapacity)
-		if err != nil {
-			timer.ObserveError()
-			return nil, false, err
-		}
+		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, existingZvol, subsystem, namespace, existingCapacity)
 		timer.ObserveSuccess()
 		return resp, true, nil
 	}
@@ -285,13 +281,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	// Build and return response
-	resp, err := buildNVMeOFVolumeResponse(params.volumeName, params.server, zvol, subsystem, namespace, params.requestedCapacity)
-	if err != nil {
-		// Cleanup on failure
-		s.cleanupNVMeOFResources(ctx, namespace.ID, zvol.ID)
-		timer.ObserveError()
-		return nil, err
-	}
+	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, zvol, subsystem, namespace, params.requestedCapacity)
 
 	klog.Infof("Created NVMe-oF volume: %s", params.volumeName)
 	timer.ObserveSuccess()
@@ -345,21 +335,6 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 	klog.V(4).Infof("Created NVMe-oF namespace: ID=%d, NSID=%d, device=%s, subsystem=%d, ZVOL=%s",
 		namespace.ID, namespace.NSID, devicePath, subsystem.ID, zvol.ID)
 	return namespace, nil
-}
-
-// cleanupNVMeOFResources cleans up NVMe-oF namespace and ZVOL on failure.
-func (s *ControllerService) cleanupNVMeOFResources(ctx context.Context, namespaceID int, zvolID string) {
-	klog.Errorf("Cleaning up NVMe-oF resources due to failure")
-	if namespaceID > 0 {
-		if delErr := s.apiClient.DeleteNVMeOFNamespace(ctx, namespaceID); delErr != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", delErr)
-		}
-	}
-	if zvolID != "" {
-		if delErr := s.apiClient.DeleteDataset(ctx, zvolID); delErr != nil {
-			klog.Errorf("Failed to cleanup ZVOL: %v", delErr)
-		}
-	}
 }
 
 // deleteNVMeOFVolume deletes an NVMe-oF volume.
@@ -546,7 +521,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	volumeContext[VolumeContextKeyExpectedCapacity] = strconv.FormatInt(requestedCapacity, 10)
 	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
 	// This signals to the node that the volume has existing data and should NEVER be formatted
-	volumeContext[VolumeContextKeyClonedFromSnap] = "true"
+	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
 
 	klog.Infof("Created NVMe-oF volume from snapshot: %s", volumeName)
 

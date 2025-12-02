@@ -532,7 +532,7 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	// takes additional time to propagate through NVMe-oF layers and become visible to the kernel.
 	// The device size may be correct, but filesystem signatures (ext4 superblock) need more time.
 	isClone := false
-	if cloned, exists := volumeContext["clonedFromSnapshot"]; exists && cloned == "true" {
+	if cloned, exists := volumeContext[VolumeContextKeyClonedFromSnap]; exists && cloned == VolumeContextValueTrue {
 		isClone = true
 		klog.V(4).Infof("Volume %s was cloned from snapshot - adding extra stabilization delay before filesystem check", volumeID)
 		const cloneStabilizationDelay = 15 * time.Second

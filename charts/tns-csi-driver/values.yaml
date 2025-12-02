@@ -285,6 +285,30 @@ snapshots:
   # Default: false (use standard ZFS clones for instant, space-efficient cloning)
   detachedVolumesFromSnapshots: false
   
+  # Detached snapshots
+  # When enabled, snapshots are created as independent datasets using zfs send/receive
+  # instead of native ZFS snapshots (dataset@snapshot).
+  # 
+  # Benefits of detached snapshots:
+  # - Source volume can be deleted without affecting the snapshot
+  # - Snapshots are fully independent datasets
+  # - No dependency chain between volume and snapshot
+  # 
+  # Trade-offs:
+  # - Snapshot creation takes longer (full data copy vs. instant snapshot)
+  # - Uses more storage (no block sharing with source volume)
+  # - Higher I/O during snapshot creation
+  #
+  # Storage location: {snapshotParentDataset}/{sourceVolumeID}/{snapshotName}
+  # Default: false (use standard ZFS snapshots for instant, space-efficient snapshots)
+  detachedSnapshots: false
+  
+  # Parent dataset for storing detached snapshots
+  # Only used when detachedSnapshots is enabled.
+  # Default: {storageClass.parentDataset}/snapshots
+  # Example: "tank/k8s-snapshots" or "storage/csi-snapshots"
+  snapshotParentDataset: ""
+  
   # VolumeSnapshotClass configuration
   # VolumeSnapshotClass resources will be created for enabled storage classes
   volumeSnapshotClass:

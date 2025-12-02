@@ -19,6 +19,8 @@ The TrueNAS CSI driver supports creating, deleting, and restoring from volume sn
 - ✅ **NFS support** - Snapshot operations implemented (validation needed)
 - ✅ **NVMe-oF support** - Snapshot operations implemented (validation needed)
 - ✅ **Idempotent operations** - Safe to retry create/delete operations
+- ✅ **Detached snapshots** - Independent snapshots via zfs send/receive (testing in progress)
+- ✅ **Detached clones** - Independent clones from snapshots via zfs send/receive (testing in progress)
 
 **Note:** While snapshot functionality is implemented, it requires comprehensive testing before production use.
 
@@ -342,6 +344,208 @@ spec:
     namespace: default
 ```
 
+## Detached Snapshots
+
+By default, the CSI driver creates native ZFS snapshots (`dataset@snapshot`), which are highly efficient (instant creation, copy-on-write) but maintain a parent-child relationship with the source volume. If you delete the source volume, you cannot delete its snapshots.
+
+**Detached snapshots** solve this by storing snapshots as independent datasets using `zfs send/receive`. This creates a full copy of the data, allowing the source volume to be deleted independently.
+
+### When to Use Detached Snapshots
+
+Use detached snapshots when:
+- You need to delete source volumes but retain their snapshots
+- You want snapshots that are completely independent of the source
+- You're implementing disaster recovery and need portable snapshot data
+- Your workflow requires decoupled lifecycle management of volumes and snapshots
+
+Use native snapshots (default) when:
+- You need instant, space-efficient snapshots
+- Source volumes will persist for the lifetime of their snapshots
+- Storage efficiency is a priority over independence
+
+### Enabling Detached Snapshots
+
+Configure via Helm chart `values.yaml`:
+
+```yaml
+snapshots:
+  enabled: true
+  detachedSnapshots: true
+  # Optional: Custom parent dataset for storing detached snapshots
+  # Default: {parentDataset}/snapshots
+  snapshotParentDataset: "tank/k8s-snapshots"
+```
+
+Or create a VolumeSnapshotClass manually:
+
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: truenas-detached-snapclass
+driver: tns.csi.io
+deletionPolicy: Delete
+parameters:
+  detachedSnapshots: "true"
+  pool: "tank"
+  parentDataset: "tank/k8s"
+  protocol: "nfs"
+  # Optional: Custom snapshot storage location
+  snapshotParentDataset: "tank/k8s-snapshots"
+```
+
+### Detached Snapshot Storage Layout
+
+Detached snapshots are stored as datasets at:
+```
+{snapshotParentDataset}/{sourceVolumeID}/{snapshotName}
+```
+
+For example:
+```
+tank/k8s-snapshots/pvc-abc123/my-daily-snapshot
+tank/k8s-snapshots/pvc-abc123/my-weekly-snapshot
+tank/k8s-snapshots/pvc-def456/pre-upgrade-snapshot
+```
+
+This structure allows:
+- Easy discovery of all snapshots for a given volume
+- Independent deletion of source volumes
+- Clear organization of snapshot data
+
+### Detached Snapshot Workflow Example
+
+```bash
+# 1. Create a source PVC
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: source-data
+spec:
+  storageClassName: tns-csi-nfs
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 10Gi
+EOF
+
+# 2. Create VolumeSnapshotClass with detached mode
+kubectl apply -f - <<EOF
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: detached-snapclass
+driver: tns.csi.io
+deletionPolicy: Delete
+parameters:
+  detachedSnapshots: "true"
+  pool: "tank"
+  parentDataset: "tank/k8s"
+  protocol: "nfs"
+EOF
+
+# 3. Write some data to the volume
+kubectl run writer --image=busybox --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"writer","image":"busybox","command":["sh","-c","echo important > /data/file.txt; sleep 3600"],"volumeMounts":[{"name":"vol","mountPath":"/data"}]}],"volumes":[{"name":"vol","persistentVolumeClaim":{"claimName":"source-data"}}]}}'
+
+# 4. Create a detached snapshot
+kubectl apply -f - <<EOF
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: backup-snapshot
+spec:
+  volumeSnapshotClassName: detached-snapclass
+  source:
+    persistentVolumeClaimName: source-data
+EOF
+
+# 5. Wait for snapshot (may take longer than native snapshots)
+kubectl wait --for=jsonpath='{.status.readyToUse}'=true volumesnapshot/backup-snapshot --timeout=300s
+
+# 6. Delete the source PVC (snapshot survives!)
+kubectl delete pod writer
+kubectl delete pvc source-data
+
+# 7. Restore from detached snapshot
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: restored-data
+spec:
+  storageClassName: tns-csi-nfs
+  dataSource:
+    name: backup-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 10Gi
+EOF
+
+# 8. Verify data is restored
+kubectl run reader --image=busybox --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"reader","image":"busybox","command":["cat","/data/file.txt"],"volumeMounts":[{"name":"vol","mountPath":"/data"}]}],"volumes":[{"name":"vol","persistentVolumeClaim":{"claimName":"restored-data"}}]}}'
+kubectl logs reader  # Should show: important
+```
+
+### Performance Considerations for Detached Snapshots
+
+| Aspect | Native Snapshots | Detached Snapshots |
+|--------|------------------|-------------------|
+| Creation time | Instant | Proportional to data size |
+| Storage usage | Copy-on-write (minimal) | Full copy |
+| I/O during creation | Minimal | High (data transfer) |
+| Source deletion | Blocked by snapshots | Independent |
+| Restore performance | Same | Same |
+
+**Recommendation**: Use native snapshots for frequent, short-term backups. Use detached snapshots for long-term retention where source volume independence is required.
+
+## Detached Clones (Volumes from Snapshots)
+
+Similar to detached snapshots, you can also create **detached clones** when restoring a volume from a snapshot. This creates a completely independent copy using `zfs send/receive` instead of `zfs clone`.
+
+### Enabling Detached Clones
+
+Configure via Helm chart `values.yaml`:
+
+```yaml
+snapshots:
+  enabled: true
+  detachedVolumesFromSnapshots: true
+```
+
+Or set in your StorageClass parameters:
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tns-csi-nfs-detached
+provisioner: tns.csi.io
+parameters:
+  pool: "tank"
+  parentDataset: "tank/k8s"
+  server: "10.0.0.1"
+  protocol: "nfs"
+  detachedVolumesFromSnapshots: "true"
+```
+
+### When to Use Detached Clones
+
+Use detached clones when:
+- You want to delete the source snapshot after cloning
+- You need completely independent volumes without ZFS clone dependency chains
+- You're migrating data and want clean, standalone datasets
+
+Use standard clones (default) when:
+- You want instant clone creation
+- Storage efficiency is important (clones share blocks with source)
+- The source snapshot will persist
+
 ## Troubleshooting
 
 ### Snapshot Stuck in Pending
@@ -577,6 +781,8 @@ Snapshots inherit the encryption settings of the parent ZFS dataset. If your Tru
 - **Size changes**: Restored PVC must be same size or larger than original
 - **Cross-pool cloning**: Snapshots must be restored to the same ZFS pool
 - **Namespace isolation**: Snapshots are namespace-scoped (cannot restore across namespaces without VolumeSnapshotContent)
+- **Detached snapshot timing**: Detached snapshots take longer to create (proportional to data size)
+- **Native snapshot deletion**: Native snapshots block deletion of their source volume until all snapshots are removed
 
 ## See Also
 

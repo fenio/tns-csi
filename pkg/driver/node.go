@@ -91,9 +91,14 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 			return resp, nil
 		}
 		// Default to NFS for backwards compatibility
-		klog.V(4).Infof("Volume appears to be NFS (no staging required)")
+		klog.V(4).Infof("Volume appears to be NFS, staging NFS volume")
+		resp, err := s.stageNFSVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
 		timer.ObserveSuccess()
-		return &csi.NodeStageVolumeResponse{}, nil
+		return resp, nil
 	}
 
 	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", meta.Name, meta.Protocol, stagingTargetPath)
@@ -101,10 +106,13 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	// Stage volume based on protocol
 	switch meta.Protocol {
 	case ProtocolNFS:
-		// NFS volumes don't need staging - mounting happens in NodePublishVolume
-		klog.V(4).Infof("NFS volume, no staging required")
+		resp, err := s.stageNFSVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
 		timer.ObserveSuccess()
-		return &csi.NodeStageVolumeResponse{}, nil
+		return resp, nil
 
 	case ProtocolNVMeOF:
 		resp, err := s.stageNVMeOFVolume(ctx, req, volumeContext)
@@ -162,10 +170,13 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	// Unstage volume based on protocol
 	switch meta.Protocol {
 	case ProtocolNFS:
-		// NFS volumes don't need unstaging
-		klog.V(4).Infof("NFS volume, no unstaging required")
+		resp, err := s.unstageNFSVolume(ctx, req)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
 		timer.ObserveSuccess()
-		return &csi.NodeUnstageVolumeResponse{}, nil
+		return resp, nil
 
 	case ProtocolNVMeOF:
 		// For unstageNVMeOFVolume, we need volume context but don't have it in UnstageVolume request

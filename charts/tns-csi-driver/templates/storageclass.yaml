@@ -31,6 +31,9 @@ parameters:
   csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
   {{- end }}
   {{- end }}
+  {{- if $.Values.snapshots.detachedVolumesFromSnapshots }}
+  detachedVolumesFromSnapshots: "true"
+  {{- end }}
   {{- if $sc.parameters }}
   {{- range $key, $value := $sc.parameters }}
   {{ $key }}: {{ $value | quote }}

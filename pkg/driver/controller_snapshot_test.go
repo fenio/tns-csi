@@ -39,6 +39,13 @@ type MockAPIClientForSnapshots struct {
 	QueryAllNFSSharesFunc        func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
 	QueryAllNVMeOFNamespacesFunc func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
 	QueryPoolFunc                func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
+	PromoteDatasetFunc           func(ctx context.Context, datasetID string) error
+	DatasetDestroySnapshotsFunc  func(ctx context.Context, datasetID string) error
+	CreateDetachedCloneFunc      func(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*tnsapi.Dataset, error)
+	CoreGetJobsFunc              func(ctx context.Context, filters []interface{}) ([]tnsapi.Job, error)
+	CoreGetJobFunc               func(ctx context.Context, jobID int) (*tnsapi.Job, error)
+	CoreWaitForJobFunc           func(ctx context.Context, jobID int, timeout time.Duration) (*tnsapi.Job, error)
+	ReplicationRunOnetimeFunc    func(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -218,6 +225,55 @@ func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName stri
 
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
+}
+
+func (m *MockAPIClientForSnapshots) PromoteDataset(ctx context.Context, datasetID string) error {
+	if m.PromoteDatasetFunc != nil {
+		return m.PromoteDatasetFunc(ctx, datasetID)
+	}
+	return errors.New("PromoteDatasetFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) DatasetDestroySnapshots(ctx context.Context, datasetID string) error {
+	if m.DatasetDestroySnapshotsFunc != nil {
+		return m.DatasetDestroySnapshotsFunc(ctx, datasetID)
+	}
+	return errors.New("DatasetDestroySnapshotsFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*tnsapi.Dataset, error) {
+	if m.CreateDetachedCloneFunc != nil {
+		return m.CreateDetachedCloneFunc(ctx, snapshotID, targetDataset, timeout)
+	}
+	return nil, errors.New("CreateDetachedCloneFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) CoreGetJobs(ctx context.Context, filters []interface{}) ([]tnsapi.Job, error) {
+	if m.CoreGetJobsFunc != nil {
+		return m.CoreGetJobsFunc(ctx, filters)
+	}
+	return nil, errors.New("CoreGetJobsFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) CoreGetJob(ctx context.Context, jobID int) (*tnsapi.Job, error) {
+	if m.CoreGetJobFunc != nil {
+		return m.CoreGetJobFunc(ctx, jobID)
+	}
+	return nil, errors.New("CoreGetJobFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*tnsapi.Job, error) {
+	if m.CoreWaitForJobFunc != nil {
+		return m.CoreWaitForJobFunc(ctx, jobID, timeout)
+	}
+	return nil, errors.New("CoreWaitForJobFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) ReplicationRunOnetime(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	if m.ReplicationRunOnetimeFunc != nil {
+		return m.ReplicationRunOnetimeFunc(ctx, params)
+	}
+	return 0, errors.New("ReplicationRunOnetimeFunc not implemented")
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {

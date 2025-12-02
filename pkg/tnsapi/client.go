@@ -1266,3 +1266,312 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 
 	return result, nil
 }
+
+// Job API methods for async operations
+
+// JobState represents the state of an async job.
+type JobState string
+
+const (
+	JobStateWaiting JobState = "WAITING"
+	JobStateRunning JobState = "RUNNING"
+	JobStateSuccess JobState = "SUCCESS"
+	JobStateFailed  JobState = "FAILED"
+	JobStateAborted JobState = "ABORTED"
+	JobStatePending JobState = "PENDING"
+	JobStateHold    JobState = "HOLD"
+	JobStateLocked  JobState = "LOCKED"
+)
+
+// Job represents a TrueNAS async job.
+type Job struct {
+	Arguments   []interface{}          `json:"arguments"`
+	Result      interface{}            `json:"result"`
+	Exception   string                 `json:"exception"`
+	ExcInfo     interface{}            `json:"exc_info"`
+	Error       string                 `json:"error"`
+	Description string                 `json:"description"`
+	Method      string                 `json:"method"`
+	State       JobState               `json:"state"`
+	Progress    map[string]interface{} `json:"progress"`
+	ID          int                    `json:"id"`
+	Abortable   bool                   `json:"abortable"`
+	LogsPath    string                 `json:"logs_path"`
+	LogsExcerpt string                 `json:"logs_excerpt"`
+	TimeStarted interface{}            `json:"time_started"`
+	TimeFinish  interface{}            `json:"time_finished"`
+}
+
+// IsComplete returns true if the job has finished (success, failed, or aborted).
+func (j *Job) IsComplete() bool {
+	return j.State == JobStateSuccess || j.State == JobStateFailed || j.State == JobStateAborted
+}
+
+// IsSuccess returns true if the job completed successfully.
+func (j *Job) IsSuccess() bool {
+	return j.State == JobStateSuccess
+}
+
+// CoreGetJobs queries jobs with optional filters.
+func (c *Client) CoreGetJobs(ctx context.Context, filters []interface{}) ([]Job, error) {
+	klog.V(4).Infof("Querying jobs with filters: %+v", filters)
+
+	var result []Job
+	err := c.Call(ctx, "core.get_jobs", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query jobs: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d jobs", len(result))
+	return result, nil
+}
+
+// CoreGetJob retrieves a specific job by ID.
+func (c *Client) CoreGetJob(ctx context.Context, jobID int) (*Job, error) {
+	klog.V(4).Infof("Getting job: %d", jobID)
+
+	jobs, err := c.CoreGetJobs(ctx, []interface{}{
+		[]interface{}{"id", "=", jobID},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(jobs) == 0 {
+		return nil, fmt.Errorf("job %d not found", jobID)
+	}
+
+	return &jobs[0], nil
+}
+
+// CoreWaitForJob waits for a job to complete with a timeout.
+// Returns the completed job or an error if the job fails or times out.
+func (c *Client) CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*Job, error) {
+	klog.V(4).Infof("Waiting for job %d to complete (timeout: %v)", jobID, timeout)
+
+	// Create a context with timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Poll interval - start with 1 second, increase up to 5 seconds
+	pollInterval := 1 * time.Second
+	maxPollInterval := 5 * time.Second
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return nil, fmt.Errorf("timeout waiting for job %d: %w", jobID, timeoutCtx.Err())
+		default:
+		}
+
+		job, err := c.CoreGetJob(ctx, jobID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get job status: %w", err)
+		}
+
+		if job.IsComplete() {
+			if job.IsSuccess() {
+				klog.V(4).Infof("Job %d completed successfully", jobID)
+				return job, nil
+			}
+			// Job failed or was aborted
+			errMsg := job.Error
+			if errMsg == "" {
+				errMsg = job.Exception
+			}
+			return job, fmt.Errorf("job %d failed with state %s: %s", jobID, job.State, errMsg)
+		}
+
+		klog.V(5).Infof("Job %d still in progress (state: %s), waiting %v", jobID, job.State, pollInterval)
+		time.Sleep(pollInterval)
+
+		// Increase poll interval up to max
+		if pollInterval < maxPollInterval {
+			pollInterval += 1 * time.Second
+		}
+	}
+}
+
+// Replication API methods for detached snapshots/clones
+
+// ReplicationRunOnetimeParams represents parameters for one-time replication.
+type ReplicationRunOnetimeParams struct {
+	Direction               string                   `json:"direction"`                            // PUSH or PULL
+	Transport               string                   `json:"transport"`                            // LOCAL, SSH, SSH+NETCAT, LEGACY
+	SourceDatasets          []string                 `json:"source_datasets"`                      // Source dataset paths
+	TargetDataset           string                   `json:"target_dataset"`                       // Target dataset path
+	Recursive               bool                     `json:"recursive"`                            // Include child datasets
+	ExcludeDatasets         []string                 `json:"exclude,omitempty"`                    // Datasets to exclude
+	Properties              bool                     `json:"properties"`                           // Replicate properties
+	Replicate               bool                     `json:"replicate"`                            // Full replication
+	Encryption              bool                     `json:"encryption"`                           // Encrypt stream
+	PropertiesOverride      map[string]string        `json:"properties_override,omitempty"`        // Override properties
+	PropertiesExclude       []string                 `json:"properties_exclude,omitempty"`         // Properties to exclude
+	AlsoIncludeNamingSchema []string                 `json:"also_include_naming_schema,omitempty"` // Include snapshots matching schema
+	OnlyMatchingSchedule    bool                     `json:"only_matching_schedule,omitempty"`     // Only matching snapshots
+	AllowFromScratch        bool                     `json:"allow_from_scratch"`                   // Allow full send if incremental fails
+	HoldPendingSnapshots    bool                     `json:"hold_pending_snapshots,omitempty"`     // Hold pending snapshots
+	Retention               string                   `json:"retention_policy"`                     // NONE, SOURCE, CUSTOM
+	Lifetimes               []map[string]interface{} `json:"lifetime,omitempty"`                   // Retention lifetimes
+	Readonly                string                   `json:"readonly,omitempty"`                   // SET, REQUIRE, IGNORE
+	// SSH-specific fields (not needed for LOCAL transport)
+	SSHCredentials interface{} `json:"ssh_credentials,omitempty"`
+	Netcat         interface{} `json:"netcat_active_side,omitempty"`
+	// Naming
+	NamingSchema []string `json:"naming_schema,omitempty"`
+}
+
+// ReplicationRunOnetime runs a one-time replication job.
+// This is used to create detached snapshots/clones via zfs send/receive.
+// Returns the job ID for tracking the async operation.
+func (c *Client) ReplicationRunOnetime(ctx context.Context, params ReplicationRunOnetimeParams) (int, error) {
+	klog.V(4).Infof("Running one-time replication: %s -> %s", params.SourceDatasets, params.TargetDataset)
+
+	var jobID int
+	err := c.Call(ctx, "replication.run_onetime", []interface{}{params}, &jobID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to start replication: %w", err)
+	}
+
+	klog.V(4).Infof("Started replication job: %d", jobID)
+	return jobID, nil
+}
+
+// PromoteDataset promotes a cloned dataset, breaking the parent-child relationship.
+// This makes the clone independent of the source snapshot.
+func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
+	klog.V(4).Infof("Promoting dataset: %s", datasetID)
+
+	var result bool
+	err := c.Call(ctx, "pool.dataset.promote", []interface{}{datasetID}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to promote dataset: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully promoted dataset: %s", datasetID)
+	return nil
+}
+
+// DatasetDestroySnapshots destroys all snapshots for a dataset.
+// This is useful for cleaning up after creating detached clones.
+func (c *Client) DatasetDestroySnapshots(ctx context.Context, datasetID string) error {
+	klog.V(4).Infof("Destroying all snapshots for dataset: %s", datasetID)
+
+	// Query all snapshots for this dataset
+	snapshots, err := c.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{"dataset", "=", datasetID},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to query snapshots: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d snapshots to destroy for dataset %s", len(snapshots), datasetID)
+
+	// Delete each snapshot
+	for _, snap := range snapshots {
+		if err := c.DeleteSnapshot(ctx, snap.ID); err != nil {
+			klog.Warningf("Failed to delete snapshot %s: %v", snap.ID, err)
+			// Continue trying to delete other snapshots
+		} else {
+			klog.V(4).Infof("Deleted snapshot: %s", snap.ID)
+		}
+	}
+
+	return nil
+}
+
+// CreateDetachedClone creates a detached clone from a snapshot using zfs send/receive.
+// Unlike CloneSnapshot, this creates an independent dataset with no parent-child relationship.
+// The process:
+// 1. Create a temporary snapshot if needed
+// 2. Use replication.run_onetime with LOCAL transport to zfs send/receive
+// 3. Wait for the replication job to complete
+// 4. The resulting dataset is fully independent
+func (c *Client) CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*Dataset, error) {
+	klog.V(4).Infof("Creating detached clone from snapshot %s to %s", snapshotID, targetDataset)
+
+	// Parse snapshot ID to get dataset and snapshot name
+	// Format: "pool/dataset@snapshotname"
+	parts := strings.SplitN(snapshotID, "@", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid snapshot ID format: %s (expected dataset@snapshot)", snapshotID)
+	}
+	sourceDataset := parts[0]
+	snapshotName := parts[1]
+
+	// Parse target to get parent dataset
+	targetParts := strings.Split(targetDataset, "/")
+	if len(targetParts) < 2 {
+		return nil, fmt.Errorf("invalid target dataset format: %s", targetDataset)
+	}
+	// The parent is everything except the last component
+	targetParent := strings.Join(targetParts[:len(targetParts)-1], "/")
+
+	klog.V(4).Infof("Source dataset: %s, Snapshot: %s, Target parent: %s", sourceDataset, snapshotName, targetParent)
+
+	// Set up replication parameters for LOCAL transport (zfs send | zfs receive)
+	replicationParams := ReplicationRunOnetimeParams{
+		Direction:               "PUSH",
+		Transport:               "LOCAL",
+		SourceDatasets:          []string{sourceDataset},
+		TargetDataset:           targetParent,
+		Recursive:               false,
+		Properties:              true,
+		Replicate:               false, // Not full replication, just the snapshot
+		Encryption:              false,
+		AllowFromScratch:        true,
+		Retention:               "NONE",
+		NamingSchema:            []string{snapshotName}, // Only replicate this specific snapshot
+		AlsoIncludeNamingSchema: []string{snapshotName},
+	}
+
+	// Start the replication job
+	jobID, err := c.ReplicationRunOnetime(ctx, replicationParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start detached clone replication: %w", err)
+	}
+
+	klog.V(4).Infof("Replication job %d started, waiting for completion...", jobID)
+
+	// Wait for the job to complete
+	job, err := c.CoreWaitForJob(ctx, jobID, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("detached clone replication failed: %w", err)
+	}
+
+	klog.V(4).Infof("Replication job %d completed with state: %s", jobID, job.State)
+
+	// The replicated dataset will be at targetParent/sourceDatasetBasename
+	// We need to find it - replication preserves the source dataset's basename
+	sourceParts := strings.Split(sourceDataset, "/")
+	sourceBasename := sourceParts[len(sourceParts)-1]
+	replicatedDataset := fmt.Sprintf("%s/%s", targetParent, sourceBasename)
+
+	// Log the expected dataset name
+	klog.V(4).Infof("Replication created dataset at: %s (target was: %s)", replicatedDataset, targetDataset)
+
+	// Query the newly created dataset
+	datasets, err := c.queryDatasets(ctx, replicatedDataset)
+	if err != nil {
+		// Try the target dataset name as fallback
+		datasets, err = c.queryDatasets(ctx, targetDataset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query created dataset: %w", err)
+		}
+	}
+
+	if len(datasets) == 0 {
+		return nil, fmt.Errorf("detached clone dataset not found after replication")
+	}
+
+	// Destroy the replicated snapshot to make the dataset fully independent
+	// The snapshot was transferred as part of replication
+	replicatedSnapshotID := fmt.Sprintf("%s@%s", datasets[0].ID, snapshotName)
+	klog.V(4).Infof("Destroying replicated snapshot %s to complete detachment", replicatedSnapshotID)
+	if err := c.DeleteSnapshot(ctx, replicatedSnapshotID); err != nil {
+		klog.Warningf("Failed to delete replicated snapshot %s: %v (dataset is still usable)", replicatedSnapshotID, err)
+	}
+
+	klog.V(4).Infof("Successfully created detached clone: %s", datasets[0].Name)
+	return &datasets[0], nil
+}

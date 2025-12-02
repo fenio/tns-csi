@@ -1,7 +1,10 @@
 // Package tnsapi provides a WebSocket client for TrueNAS Scale API.
 package tnsapi
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ClientInterface defines the interface for TrueNAS API operations.
 // This allows for dependency injection and easier testing.
@@ -17,6 +20,8 @@ type ClientInterface interface {
 	Dataset(ctx context.Context, datasetID string) (*Dataset, error)
 	UpdateDataset(ctx context.Context, datasetID string, params DatasetUpdateParams) (*Dataset, error)
 	QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error)
+	PromoteDataset(ctx context.Context, datasetID string) error
+	DatasetDestroySnapshots(ctx context.Context, datasetID string) error
 
 	// NFS share operations
 	CreateNFSShare(ctx context.Context, params NFSShareCreateParams) (*NFSShare, error)
@@ -46,6 +51,15 @@ type ClientInterface interface {
 	DeleteSnapshot(ctx context.Context, snapshotID string) error
 	QuerySnapshots(ctx context.Context, filters []interface{}) ([]Snapshot, error)
 	CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error)
+	CreateDetachedClone(ctx context.Context, snapshotID, targetDataset string, timeout time.Duration) (*Dataset, error)
+
+	// Job operations (for async tasks like replication)
+	CoreGetJobs(ctx context.Context, filters []interface{}) ([]Job, error)
+	CoreGetJob(ctx context.Context, jobID int) (*Job, error)
+	CoreWaitForJob(ctx context.Context, jobID int, timeout time.Duration) (*Job, error)
+
+	// Replication operations (for detached snapshots/clones)
+	ReplicationRunOnetime(ctx context.Context, params ReplicationRunOnetimeParams) (int, error)
 
 	// Connection management
 	Close()

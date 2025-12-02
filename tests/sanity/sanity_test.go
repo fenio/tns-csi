@@ -82,6 +82,7 @@ func TestSanity(t *testing.T) {
 	sanityCfg.TestVolumeParameters = map[string]string{
 		"protocol": "nfs",
 		"pool":     "tank",
+		"server":   "truenas.local",
 	}
 
 	// Configure custom cleanup functions to properly remove test directories

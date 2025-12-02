@@ -257,6 +257,10 @@ func (m *MockClient) UpdateDataset(ctx context.Context, datasetID string, params
 }
 
 // QueryAllDatasets mocks pool.dataset.query (all datasets).
+// The prefix parameter is used for filtering:
+// - If empty, returns all datasets
+// - If starts with "/mnt/", matches datasets by mountpoint
+// - Otherwise, does prefix matching on dataset name
 func (m *MockClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
 	m.logCall("QueryAllDatasets", prefix)
 
@@ -265,7 +269,17 @@ func (m *MockClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tns
 
 	var result []tnsapi.Dataset
 	for _, ds := range m.datasets {
-		if prefix == "" || len(ds.Name) >= len(prefix) && ds.Name[:len(prefix)] == prefix {
+		match := false
+		if prefix == "" {
+			match = true
+		} else if len(prefix) > 4 && prefix[:5] == "/mnt/" {
+			// Match by mountpoint
+			match = ds.Mountpoint == prefix
+		} else {
+			// Prefix matching on dataset name
+			match = len(ds.Name) >= len(prefix) && ds.Name[:len(prefix)] == prefix
+		}
+		if match {
 			result = append(result, tnsapi.Dataset{
 				ID:         ds.ID,
 				Name:       ds.Name,
@@ -344,6 +358,10 @@ func (m *MockClient) QueryNFSShare(ctx context.Context, path string) ([]tnsapi.N
 }
 
 // QueryAllNFSShares mocks sharing.nfs.query (all shares).
+// The pathPrefix parameter is used for filtering:
+// - If empty, returns all shares
+// - If starts with "/", does prefix matching on the path
+// - Otherwise, checks if the path ends with "/" + pathPrefix (for volume name lookup)
 func (m *MockClient) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
 	m.logCall("QueryAllNFSShares", pathPrefix)
 
@@ -352,7 +370,18 @@ func (m *MockClient) QueryAllNFSShares(ctx context.Context, pathPrefix string) (
 
 	var result []tnsapi.NFSShare
 	for _, share := range m.nfsShares {
-		if pathPrefix == "" || len(share.Path) >= len(pathPrefix) && share.Path[:len(pathPrefix)] == pathPrefix {
+		match := false
+		if pathPrefix == "" {
+			match = true
+		} else if len(pathPrefix) > 0 && pathPrefix[0] == '/' {
+			// Prefix matching for absolute paths
+			match = len(share.Path) >= len(pathPrefix) && share.Path[:len(pathPrefix)] == pathPrefix
+		} else {
+			// Suffix matching for volume name lookup (path ends with /volumeName)
+			suffix := "/" + pathPrefix
+			match = len(share.Path) >= len(suffix) && share.Path[len(share.Path)-len(suffix):] == suffix
+		}
+		if match {
 			result = append(result, tnsapi.NFSShare{
 				ID:      share.ID,
 				Path:    share.Path,

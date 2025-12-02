@@ -100,6 +100,8 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 
 	// Register this namespace as active to prevent premature disconnect
 	s.namespaceRegistry.Register(params.nqn, params.nsid)
+	// Also register volume metadata for lookup during unstage
+	s.namespaceRegistry.RegisterVolume(volumeID, params.nqn, params.nsid)
 
 	// Proceed directly to staging with the existing device
 	resp, err = s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
@@ -146,6 +148,8 @@ func (s *NodeService) tryDiscoverViaControllerRescan(ctx context.Context, params
 
 	// Register this namespace as active to prevent premature disconnect
 	s.namespaceRegistry.Register(params.nqn, params.nsid)
+	// Also register volume metadata for lookup during unstage
+	s.namespaceRegistry.RegisterVolume(volumeID, params.nqn, params.nsid)
 
 	resp, err := s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	if err != nil {
@@ -177,6 +181,8 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 
 	// Register this namespace as active to prevent premature disconnect
 	s.namespaceRegistry.Register(params.nqn, params.nsid)
+	// Also register volume metadata for lookup during unstage
+	s.namespaceRegistry.RegisterVolume(volumeID, params.nqn, params.nsid)
 
 	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 }
@@ -420,16 +426,23 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 
 	klog.V(4).Infof("Unstaging NVMe-oF volume %s from %s", volumeID, stagingTargetPath)
 
-	// Get NQN from volume context
+	// Get NQN and NSID from volume context first
 	nqn := volumeContext["nqn"]
-	if nqn == "" {
-		// Try to decode from volumeID
-		meta, err := decodeVolumeID(volumeID)
-		if err != nil {
-			klog.Warningf("Failed to get NQN for volume %s: %v", volumeID, err)
-			return &csi.NodeUnstageVolumeResponse{}, nil
+	nsid := volumeContext["nsid"]
+
+	// If not in volumeContext, try to get from namespace registry (stored during stage)
+	if nqn == "" || nsid == "" {
+		if meta, found := s.namespaceRegistry.GetVolumeMetadata(volumeID); found {
+			if nqn == "" {
+				nqn = meta.NQN
+			}
+			if nsid == "" {
+				nsid = meta.NSID
+			}
+			klog.V(4).Infof("Retrieved NVMe-oF metadata from registry: volumeID=%s, NQN=%s, NSID=%s", volumeID, nqn, nsid)
+		} else {
+			klog.Warningf("NVMe-oF metadata not found in registry for volume %s", volumeID)
 		}
-		nqn = meta.NVMeOFNQN
 	}
 
 	// Check if mounted and unmount if necessary
@@ -445,29 +458,17 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 		}
 	}
 
-	// Get NSID from volume context first
-	nsid := volumeContext["nsid"]
-
-	// If NSID is not in volumeContext, decode it from volumeID
-	// CSI spec doesn't guarantee volumeContext is passed to NodeUnstageVolume
-	if nsid == "" {
-		meta, err := decodeVolumeID(volumeID)
-		if err != nil {
-			klog.Errorf("Failed to get NSID for volume %s: cannot decode volumeID: %v", volumeID, err)
-			klog.Errorf("Cannot safely disconnect - NSID required to avoid affecting other volumes sharing NQN=%s", nqn)
-			return nil, status.Errorf(codes.Internal, "Cannot determine NSID for volume: %v", err)
-		}
-		nsid = strconv.Itoa(meta.NVMeOFNamespaceID)
-		klog.V(4).Infof("Decoded NSID=%s from volumeID for volume %s", nsid, volumeID)
-	}
-
-	// Disconnect from NVMe-oF target ONLY if this is the last namespace for this NQN
-	if nqn == "" {
+	// If we still don't have NQN or NSID, we can't safely disconnect
+	if nqn == "" || nsid == "" {
+		klog.Warningf("Cannot determine NQN/NSID for volume %s - skipping NVMe-oF disconnect", volumeID)
 		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
 	// Unregister namespace and check if we should disconnect
 	isLastNamespace := s.namespaceRegistry.Unregister(nqn, nsid)
+	// Also unregister the volume metadata
+	s.namespaceRegistry.UnregisterVolume(volumeID)
+
 	if !isLastNamespace {
 		activeCount := s.namespaceRegistry.NQNCount(nqn)
 		klog.V(4).Infof("Unstaging volume %s: Skipping disconnect for NQN=%s (NSID=%s) - still has %d active namespace(s)",

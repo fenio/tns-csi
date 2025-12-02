@@ -4,7 +4,6 @@ package driver
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
@@ -90,25 +89,19 @@ func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 		NFSShareID:  nfsShare.ID,
 	}
 
-	encodedVolumeID, err := encodeVolumeID(meta)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID: %v", err)
-	}
+	// Volume ID is now just the volume name (CSI spec compliant, max 128 bytes)
+	volumeID := volumeName
 
-	volumeContext := map[string]string{
-		"server":      server,
-		"share":       dataset.Mountpoint,
-		"datasetID":   dataset.ID,
-		"datasetName": dataset.Name,
-		"nfsShareID":  strconv.Itoa(nfsShare.ID),
-	}
+	// Build volume context with all necessary metadata
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, capacity)
+	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNFS, capacity)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      encodedVolumeID,
+			VolumeId:      volumeID,
 			CapacityBytes: capacity,
 			VolumeContext: volumeContext,
 		},
@@ -310,11 +303,8 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 
 	klog.Infof("Deleted NFS volume: %s", meta.Name)
 
-	// Remove volume capacity metric
-	// Note: We need to reconstruct the volumeID to delete the metric
-	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
-		metrics.DeleteVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS)
-	}
+	// Remove volume capacity metric using plain volume name
+	metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNFS)
 
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
@@ -351,7 +341,7 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	// Encode volume metadata into volumeID
+	// Build volume metadata
 	meta := VolumeMetadata{
 		Name:        volumeName,
 		Protocol:    ProtocolNFS,
@@ -361,39 +351,24 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		NFSShareID:  nfsShare.ID,
 	}
 
-	encodedVolumeID, err := encodeVolumeID(meta)
-	if err != nil {
-		// Cleanup: delete NFS share and dataset
-		klog.Errorf("Failed to encode volume ID for cloned volume, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteNFSShare(ctx, nfsShare.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup NFS share: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to encode volume ID for cloned volume: %v", err)
-	}
+	// Volume ID is just the volume name (CSI spec compliant)
+	volumeID := volumeName
 
 	// Construct volume context with metadata for node plugin
 	// CRITICAL: Add clonedFromSnapshot flag to prevent reformatting of cloned volumes
 	// ZFS clones inherit filesystems from snapshots, but detection may fail due to caching
-	volumeContext := map[string]string{
-		"server":             server,
-		"share":              dataset.Mountpoint,
-		"datasetID":          dataset.ID,
-		"datasetName":        dataset.Name,
-		"nfsShareID":         strconv.Itoa(nfsShare.ID),
-		"clonedFromSnapshot": "true",
-	}
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
+	volumeContext[VolumeContextKeyClonedFromSnap] = "true"
 
 	klog.Infof("Created NFS volume from snapshot: %s", volumeName)
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requestedCapacity)
+	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNFS, requestedCapacity)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      encodedVolumeID,
+			VolumeId:      volumeID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: volumeContext,
 			ContentSource: &csi.VolumeContentSource{
@@ -442,11 +417,8 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 
 	klog.Infof("Expanded NFS volume: %s to %d bytes", meta.Name, requiredBytes)
 
-	// Update volume capacity metric
-	// Note: We need to reconstruct the volumeID to update the metric
-	if encodedVolumeID, err := encodeVolumeID(*meta); err == nil {
-		metrics.SetVolumeCapacity(encodedVolumeID, metrics.ProtocolNFS, requiredBytes)
-	}
+	// Update volume capacity metric using plain volume name
+	metrics.SetVolumeCapacity(meta.Name, metrics.ProtocolNFS, requiredBytes)
 
 	timer.ObserveSuccess()
 	return &csi.ControllerExpandVolumeResponse{

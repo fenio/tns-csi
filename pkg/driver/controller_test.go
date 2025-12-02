@@ -11,191 +11,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestEncodeDecodeVolumeID(t *testing.T) {
-	tests := []struct {
-		name    string
-		meta    VolumeMetadata
-		wantErr bool
-	}{
-		{
-			name: "NFS volume metadata",
-			meta: VolumeMetadata{
-				Name:        "test-nfs-volume",
-				Protocol:    "nfs",
-				DatasetID:   "dataset-123",
-				DatasetName: "tank/test-nfs-volume",
-				NFSShareID:  42,
-			},
-			wantErr: false,
-		},
-		{
-			name: "NVMe-oF volume metadata",
-			meta: VolumeMetadata{
-				Name:              "test-nvmeof-volume",
-				Protocol:          "nvmeof",
-				DatasetID:         "zvol-456",
-				DatasetName:       "tank/test-nvmeof-volume",
-				NVMeOFSubsystemID: 10,
-				NVMeOFNamespaceID: 20,
-				NVMeOFNQN:         "nqn.2014-08.org.nvmexpress:uuid:test-uuid",
-			},
-			wantErr: false,
-		},
-		{
-			name: "Minimal metadata",
-			meta: VolumeMetadata{
-				Name:     "minimal",
-				Protocol: "nfs",
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Encode the metadata
-			encoded, err := encodeVolumeID(tt.meta)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("encodeVolumeID() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr {
-				return
-			}
-
-			// Verify encoded string is not empty
-			if encoded == "" {
-				t.Errorf("encodeVolumeID() returned empty string")
-				return
-			}
-
-			// Decode the encoded string
-			decoded, err := decodeVolumeID(encoded)
-			if err != nil {
-				t.Errorf("decodeVolumeID() error = %v", err)
-				return
-			}
-
-			// Verify decoded metadata matches original
-			if decoded.Name != tt.meta.Name {
-				t.Errorf("Name = %v, want %v", decoded.Name, tt.meta.Name)
-			}
-			if decoded.Protocol != tt.meta.Protocol {
-				t.Errorf("Protocol = %v, want %v", decoded.Protocol, tt.meta.Protocol)
-			}
-			if decoded.DatasetID != tt.meta.DatasetID {
-				t.Errorf("DatasetID = %v, want %v", decoded.DatasetID, tt.meta.DatasetID)
-			}
-			if decoded.DatasetName != tt.meta.DatasetName {
-				t.Errorf("DatasetName = %v, want %v", decoded.DatasetName, tt.meta.DatasetName)
-			}
-			if decoded.NFSShareID != tt.meta.NFSShareID {
-				t.Errorf("NFSShareID = %v, want %v", decoded.NFSShareID, tt.meta.NFSShareID)
-			}
-			if decoded.NVMeOFSubsystemID != tt.meta.NVMeOFSubsystemID {
-				t.Errorf("NVMeOFSubsystemID = %v, want %v", decoded.NVMeOFSubsystemID, tt.meta.NVMeOFSubsystemID)
-			}
-			if decoded.NVMeOFNamespaceID != tt.meta.NVMeOFNamespaceID {
-				t.Errorf("NVMeOFNamespaceID = %v, want %v", decoded.NVMeOFNamespaceID, tt.meta.NVMeOFNamespaceID)
-			}
-			if decoded.NVMeOFNQN != tt.meta.NVMeOFNQN {
-				t.Errorf("NVMeOFNQN = %v, want %v", decoded.NVMeOFNQN, tt.meta.NVMeOFNQN)
-			}
-		})
-	}
-}
-
-func TestDecodeVolumeID_InvalidInput(t *testing.T) {
-	tests := []struct {
-		name     string
-		volumeID string
-		wantErr  bool
-	}{
-		{
-			name:     "Invalid base64",
-			volumeID: "!!!invalid!!!",
-			wantErr:  true,
-		},
-		{
-			name:     "Valid base64 but invalid JSON",
-			volumeID: "bm90LWpzb24",
-			wantErr:  true,
-		},
-		{
-			name:     "Empty string",
-			volumeID: "",
-			wantErr:  true,
-		},
-		{
-			name:     "Legacy format (with slashes)",
-			volumeID: "tank/my-volume",
-			wantErr:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := decodeVolumeID(tt.volumeID)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("decodeVolumeID() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
-func TestIsEncodedVolumeID(t *testing.T) {
-	tests := []struct {
-		name     string
-		volumeID string
-		want     bool
-	}{
-		{
-			name:     "Valid base64 URL-safe string",
-			volumeID: "eyJuYW1lIjoidGVzdCJ9",
-			want:     true,
-		},
-		{
-			name:     "Contains invalid characters",
-			volumeID: "tank/volume",
-			want:     false,
-		},
-		{
-			name:     "Contains spaces",
-			volumeID: "test volume",
-			want:     false,
-		},
-		{
-			name:     "Empty string",
-			volumeID: "",
-			want:     true, // Empty string is technically valid base64
-		},
-		{
-			name:     "Alphanumeric only",
-			volumeID: "abc123",
-			want:     true,
-		},
-		{
-			name:     "With URL-safe characters",
-			volumeID: "abc-123_def",
-			want:     true,
-		},
-		{
-			name:     "With standard base64 padding (not URL-safe)",
-			volumeID: "abc123==",
-			want:     false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isEncodedVolumeID(tt.volumeID)
-			if got != tt.want {
-				t.Errorf("isEncodedVolumeID() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestControllerGetCapabilities(t *testing.T) {
 	service := NewControllerService(nil, NewNodeRegistry())
 
@@ -562,18 +377,8 @@ func TestValidateCapacityCompatibility(t *testing.T) {
 func TestControllerPublishVolume(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a valid encoded volume ID for testing
-	volumeMeta := VolumeMetadata{
-		Name:        "test-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "dataset-123",
-		DatasetName: "tank/test-volume",
-		NFSShareID:  42,
-	}
-	volumeID, err := encodeVolumeID(volumeMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode test volume ID: %v", err)
-	}
+	// Use plain volume ID (CSI spec compliant - under 128 bytes)
+	volumeID := "test-volume"
 
 	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
@@ -592,6 +397,9 @@ func TestControllerPublishVolume(t *testing.T) {
 					AccessType: &csi.VolumeCapability_Mount{
 						Mount: &csi.VolumeCapability_MountVolume{},
 					},
+				},
+				VolumeContext: map[string]string{
+					VolumeContextKeyProtocol: ProtocolNFS,
 				},
 			},
 			nodeReg: func() *NodeRegistry {
@@ -658,25 +466,6 @@ func TestControllerPublishVolume(t *testing.T) {
 				},
 			},
 			nodeReg:  NewNodeRegistry(),
-			wantErr:  true,
-			wantCode: codes.NotFound,
-		},
-		{
-			name: "invalid volume ID",
-			req: &csi.ControllerPublishVolumeRequest{
-				VolumeId: "invalid-volume-id",
-				NodeId:   "test-node",
-				VolumeCapability: &csi.VolumeCapability{
-					AccessType: &csi.VolumeCapability_Mount{
-						Mount: &csi.VolumeCapability_MountVolume{},
-					},
-				},
-			},
-			nodeReg: func() *NodeRegistry {
-				r := NewNodeRegistry()
-				r.Register("test-node")
-				return r
-			}(),
 			wantErr:  true,
 			wantCode: codes.NotFound,
 		},
@@ -766,18 +555,8 @@ func TestControllerUnpublishVolume(t *testing.T) {
 func TestValidateVolumeCapabilities(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a valid encoded volume ID for testing
-	volumeMeta := VolumeMetadata{
-		Name:        "test-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "dataset-123",
-		DatasetName: "tank/test-volume",
-		NFSShareID:  42,
-	}
-	volumeID, err := encodeVolumeID(volumeMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode test volume ID: %v", err)
-	}
+	// Use plain volume ID (CSI spec compliant - under 128 bytes)
+	volumeID := "test-volume"
 
 	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
@@ -796,6 +575,9 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 							Mount: &csi.VolumeCapability_MountVolume{},
 						},
 					},
+				},
+				VolumeContext: map[string]string{
+					VolumeContextKeyProtocol: ProtocolNFS,
 				},
 			},
 			wantErr: false,
@@ -832,21 +614,6 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 			},
 			wantErr:  true,
 			wantCode: codes.InvalidArgument,
-		},
-		{
-			name: "invalid volume ID",
-			req: &csi.ValidateVolumeCapabilitiesRequest{
-				VolumeId: "invalid-id",
-				VolumeCapabilities: []*csi.VolumeCapability{
-					{
-						AccessType: &csi.VolumeCapability_Mount{
-							Mount: &csi.VolumeCapability_MountVolume{},
-						},
-					},
-				},
-			},
-			wantErr:  true,
-			wantCode: codes.NotFound,
 		},
 	}
 
@@ -885,38 +652,15 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 func TestControllerExpandVolume(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a valid encoded volume ID for NFS testing
-	nfsMeta := VolumeMetadata{
-		Name:        "test-nfs-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "tank/test-nfs-volume",
-		DatasetName: "tank/test-nfs-volume",
-		NFSShareID:  42,
-	}
-	nfsVolumeID, err := encodeVolumeID(nfsMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode NFS volume ID: %v", err)
-	}
-
-	// Create a valid encoded volume ID for NVMe-oF testing
-	nvmeofMeta := VolumeMetadata{
-		Name:              "test-nvmeof-volume",
-		Protocol:          ProtocolNVMeOF,
-		DatasetID:         "tank/test-nvmeof-volume",
-		DatasetName:       "tank/test-nvmeof-volume",
-		NVMeOFSubsystemID: 100,
-		NVMeOFNamespaceID: 200,
-	}
-	nvmeofVolumeID, err := encodeVolumeID(nvmeofMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode NVMe-oF volume ID: %v", err)
-	}
+	// Use plain volume IDs (CSI spec compliant - under 128 bytes)
+	nfsVolumeID := "test-nfs-volume"
+	nvmeofVolumeID := "test-nvmeof-volume"
 
 	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
 		name          string
 		req           *csi.ControllerExpandVolumeRequest
-		mockSetup     func(*mockAPIClient)
+		mockSetup     func(*MockAPIClientForSnapshots)
 		checkResponse func(*testing.T, *csi.ControllerExpandVolumeResponse)
 		wantErr       bool
 		wantCode      codes.Code
@@ -927,7 +671,7 @@ func TestControllerExpandVolume(t *testing.T) {
 				VolumeId:      "",
 				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
 			},
-			mockSetup: func(m *mockAPIClient) {},
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
 			wantErr:   true,
 			wantCode:  codes.InvalidArgument,
 		},
@@ -937,17 +681,7 @@ func TestControllerExpandVolume(t *testing.T) {
 				VolumeId:      nfsVolumeID,
 				CapacityRange: nil,
 			},
-			mockSetup: func(m *mockAPIClient) {},
-			wantErr:   true,
-			wantCode:  codes.InvalidArgument,
-		},
-		{
-			name: "invalid volume ID",
-			req: &csi.ControllerExpandVolumeRequest{
-				VolumeId:      "invalid-id",
-				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
-			},
-			mockSetup: func(m *mockAPIClient) {},
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
 			wantErr:   true,
 			wantCode:  codes.InvalidArgument,
 		},
@@ -956,9 +690,35 @@ func TestControllerExpandVolume(t *testing.T) {
 			req: &csi.ControllerExpandVolumeRequest{
 				VolumeId:      nfsVolumeID,
 				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				},
 			},
-			mockSetup: func(m *mockAPIClient) {
-				m.updateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock finding the NFS share
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{
+						{
+							ID:   42,
+							Path: "/mnt/tank/csi/" + nfsVolumeID,
+						},
+					}, nil
+				}
+				// Mock finding the dataset
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{
+						{
+							ID:   "tank/csi/" + nfsVolumeID,
+							Name: "tank/csi/" + nfsVolumeID,
+						},
+					}, nil
+				}
+				m.UpdateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
 						ID:   datasetID,
 						Name: datasetID,
@@ -981,9 +741,40 @@ func TestControllerExpandVolume(t *testing.T) {
 			req: &csi.ControllerExpandVolumeRequest{
 				VolumeId:      nvmeofVolumeID,
 				CapacityRange: &csi.CapacityRange{RequiredBytes: 10 * 1024 * 1024 * 1024},
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Block{
+						Block: &csi.VolumeCapability_BlockVolume{},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+					},
+				},
 			},
-			mockSetup: func(m *mockAPIClient) {
-				m.updateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock NFS shares returning nothing for NVMe-oF volume
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{}, nil
+				}
+				// Mock finding the NVMe-oF namespace
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{
+						{
+							ID:        200,
+							Subsystem: 100,
+							Device:    "/dev/zvol/tank/csi/" + nvmeofVolumeID,
+						},
+					}, nil
+				}
+				// Mock finding the subsystem
+				m.ListAllNVMeOFSubsystemsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
+					return []tnsapi.NVMeOFSubsystem{
+						{
+							ID:  100,
+							NQN: "nqn.2005-03.org.truenas:test",
+						},
+					}, nil
+				}
+				m.UpdateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
 						ID:   datasetID,
 						Name: datasetID,
@@ -1001,11 +792,28 @@ func TestControllerExpandVolume(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "volume not found",
+			req: &csi.ControllerExpandVolumeRequest{
+				VolumeId:      "nonexistent-volume",
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{}, nil
+				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.NotFound,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &mockAPIClient{}
+			mockClient := &MockAPIClientForSnapshots{}
 			tt.mockSetup(mockClient)
 			service := NewControllerService(mockClient, NewNodeRegistry())
 
@@ -1614,33 +1422,9 @@ func TestCreateVolumeRPC(t *testing.T) {
 func TestDeleteVolumeRPC(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a valid NFS volume ID
-	nfsMeta := VolumeMetadata{
-		Name:        "test-delete-volume",
-		Protocol:    ProtocolNFS,
-		DatasetID:   "tank/csi/test-delete-volume",
-		DatasetName: "tank/csi/test-delete-volume",
-		NFSShareID:  42,
-	}
-	nfsVolumeID, err := encodeVolumeID(nfsMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode volume ID: %v", err)
-	}
-
-	// Create a valid NVMe-oF volume ID
-	nvmeofMeta := VolumeMetadata{
-		Name:              "test-delete-nvmeof",
-		Protocol:          ProtocolNVMeOF,
-		DatasetID:         "tank/csi/test-delete-nvmeof",
-		DatasetName:       "tank/csi/test-delete-nvmeof",
-		NVMeOFSubsystemID: 10,
-		NVMeOFNamespaceID: 20,
-		NVMeOFNQN:         "nqn.2005-03.org.truenas:test",
-	}
-	nvmeofVolumeID, err := encodeVolumeID(nvmeofMeta)
-	if err != nil {
-		t.Fatalf("Failed to encode NVMe-oF volume ID: %v", err)
-	}
+	// Use plain volume IDs (CSI spec compliant - under 128 bytes)
+	nfsVolumeID := "test-delete-volume"
+	nvmeofVolumeID := "test-delete-nvmeof"
 
 	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
@@ -1654,6 +1438,11 @@ func TestDeleteVolumeRPC(t *testing.T) {
 			name: "successful NFS volume deletion",
 			req: &csi.DeleteVolumeRequest{
 				VolumeId: nfsVolumeID,
+				Secrets: map[string]string{
+					VolumeContextKeyProtocol:    ProtocolNFS,
+					VolumeContextKeyDatasetName: "tank/csi/test-delete-volume",
+					VolumeContextKeyNFSShareID:  "42",
+				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
@@ -1672,6 +1461,13 @@ func TestDeleteVolumeRPC(t *testing.T) {
 			name: "successful NVMe-oF volume deletion",
 			req: &csi.DeleteVolumeRequest{
 				VolumeId: nvmeofVolumeID,
+				Secrets: map[string]string{
+					VolumeContextKeyProtocol:          ProtocolNVMeOF,
+					VolumeContextKeyDatasetName:       "tank/csi/test-delete-nvmeof",
+					VolumeContextKeyNVMeOFSubsystemID: "10",
+					VolumeContextKeyNVMeOFNamespaceID: "20",
+					VolumeContextKeyNQN:               "nqn.2005-03.org.truenas:test",
+				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.DeleteNVMeOFNamespaceFunc = func(ctx context.Context, namespaceID int) error {
@@ -1700,29 +1496,12 @@ func TestDeleteVolumeRPC(t *testing.T) {
 			wantCode:  codes.InvalidArgument,
 		},
 		{
-			name: "invalid volume ID format - idempotent success",
+			name: "volume deletion with missing secrets - idempotent success",
 			req: &csi.DeleteVolumeRequest{
-				VolumeId: "invalid-id",
+				VolumeId: "unknown-volume",
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {},
-			wantErr:   false, // DeleteVolume is idempotent - returns success for invalid/non-existent volumes
-		},
-		{
-			name: "idempotent - volume already deleted",
-			req: &csi.DeleteVolumeRequest{
-				VolumeId: nfsVolumeID,
-			},
-			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
-					// Simulate share already deleted - not found
-					return errors.New("share not found")
-				}
-				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
-					// Simulate dataset already deleted - not found
-					return errors.New("dataset does not exist")
-				}
-			},
-			wantErr: false, // DeleteVolume should be idempotent
+			wantErr:   false, // DeleteVolume is idempotent - returns success for volumes without metadata
 		},
 	}
 

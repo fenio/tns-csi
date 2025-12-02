@@ -142,19 +142,67 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	snapshotName := req.GetName()
 	sourceVolumeID := req.GetSourceVolumeId()
 
-	// Decode source volume metadata
-	volumeMeta, err := decodeVolumeID(sourceVolumeID)
-	if err != nil {
+	// With plain volume IDs (just the volume name), we need to look up the volume in TrueNAS.
+	// We need to find the dataset name and protocol for the source volume.
+	params := req.GetParameters()
+	pool := params["pool"]
+	parentDataset := params["parentDataset"]
+	if parentDataset == "" {
+		parentDataset = pool
+	}
+
+	// Determine protocol from parameters (default to NFS)
+	protocol := params["protocol"]
+	if protocol == "" {
+		protocol = ProtocolNFS
+	}
+
+	// Try to find the volume's dataset
+	var datasetName string
+	if parentDataset != "" {
+		datasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+	} else {
+		// If no parent dataset specified, try to find the volume
+		// First try NFS shares
+		shares, err := s.apiClient.QueryAllNFSShares(ctx, sourceVolumeID)
+		if err == nil && len(shares) > 0 {
+			for _, share := range shares {
+				if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
+					datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+					if dsErr == nil && len(datasets) > 0 {
+						datasetName = datasets[0].Name
+						protocol = ProtocolNFS
+						break
+					}
+				}
+			}
+		}
+		// If not found as NFS, try NVMe-oF namespaces
+		if datasetName == "" {
+			namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+			if err == nil {
+				for _, ns := range namespaces {
+					if strings.Contains(ns.Device, sourceVolumeID) {
+						datasetName = strings.TrimPrefix(ns.Device, "zvol/")
+						protocol = ProtocolNVMeOF
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if datasetName == "" {
 		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode source volume ID: %v", err)
+		return nil, status.Errorf(codes.NotFound, "Source volume %s not found", sourceVolumeID)
 	}
 
 	klog.Infof("Creating snapshot %s for volume %s (dataset: %s, protocol: %s)",
-		snapshotName, volumeMeta.Name, volumeMeta.DatasetName, volumeMeta.Protocol)
+		snapshotName, sourceVolumeID, datasetName, protocol)
 
 	// CRITICAL: Check snapshot name registry FIRST to enforce global uniqueness
 	// This is required by CSI spec - snapshot names must be globally unique across all volumes
-	if regErr := s.snapshotRegistry.Register(snapshotName, volumeMeta.DatasetName); regErr != nil {
+	if regErr := s.snapshotRegistry.Register(snapshotName, datasetName); regErr != nil {
 		// Snapshot name already exists for a different dataset
 		timer.ObserveError()
 		return nil, status.Errorf(codes.AlreadyExists,
@@ -163,7 +211,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	// Check if snapshot already exists (idempotency)
 	existingSnapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
-		[]interface{}{"id", "=", fmt.Sprintf("%s@%s", volumeMeta.DatasetName, snapshotName)},
+		[]interface{}{"id", "=", fmt.Sprintf("%s@%s", datasetName, snapshotName)},
 	})
 	if err != nil {
 		klog.Warningf("Failed to query existing snapshots: %v", err)
@@ -182,11 +230,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 		// Verify the existing snapshot is for the same source volume
 		// by comparing dataset names
-		if existingDataset != volumeMeta.DatasetName {
+		if existingDataset != datasetName {
 			timer.ObserveError()
 			return nil, status.Errorf(codes.AlreadyExists,
 				"snapshot %s already exists but for different source volume (dataset: %s vs %s)",
-				snapshotName, existingDataset, volumeMeta.DatasetName)
+				snapshotName, existingDataset, datasetName)
 		}
 
 		// Create snapshot metadata
@@ -194,8 +242,8 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 		snapshotMeta := SnapshotMetadata{
 			SnapshotName: snapshot.ID,
 			SourceVolume: sourceVolumeID,
-			DatasetName:  volumeMeta.DatasetName,
-			Protocol:     volumeMeta.Protocol,
+			DatasetName:  datasetName,
+			Protocol:     protocol,
 			CreatedAt:    createdAt,
 		}
 
@@ -218,7 +266,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	// Create snapshot using TrueNAS API
 	snapshotParams := tnsapi.SnapshotCreateParams{
-		Dataset:   volumeMeta.DatasetName,
+		Dataset:   datasetName,
 		Name:      snapshotName,
 		Recursive: false,
 	}
@@ -238,8 +286,8 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	snapshotMeta := SnapshotMetadata{
 		SnapshotName: snapshot.ID,
 		SourceVolume: sourceVolumeID,
-		DatasetName:  volumeMeta.DatasetName,
-		Protocol:     volumeMeta.Protocol,
+		DatasetName:  datasetName,
+		Protocol:     protocol,
 		CreatedAt:    createdAt,
 	}
 
@@ -383,10 +431,45 @@ func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListS
 
 // listSnapshotsBySourceVolume handles listing snapshots for a specific source volume.
 func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	volumeMeta, err := decodeVolumeID(req.GetSourceVolumeId())
-	if err != nil {
-		// If source volume ID is malformed, return empty list
-		klog.V(4).Infof("Invalid source volume ID %q: %v - returning empty list", req.GetSourceVolumeId(), err)
+	sourceVolumeID := req.GetSourceVolumeId()
+
+	// With plain volume IDs, we need to look up the volume in TrueNAS
+	// Try to find the dataset name by searching for NFS shares or NVMe-oF namespaces
+	var datasetName string
+	var protocol string
+
+	// First try NFS shares
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, sourceVolumeID)
+	if err == nil && len(shares) > 0 {
+		for _, share := range shares {
+			if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				if dsErr == nil && len(datasets) > 0 {
+					datasetName = datasets[0].Name
+					protocol = ProtocolNFS
+					break
+				}
+			}
+		}
+	}
+
+	// If not found as NFS, try NVMe-oF namespaces
+	if datasetName == "" {
+		namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+		if nsErr == nil {
+			for _, ns := range namespaces {
+				if strings.Contains(ns.Device, sourceVolumeID) {
+					datasetName = strings.TrimPrefix(ns.Device, "zvol/")
+					protocol = ProtocolNVMeOF
+					break
+				}
+			}
+		}
+	}
+
+	if datasetName == "" {
+		// If we can't find the volume, return empty list
+		klog.V(4).Infof("Source volume %q not found in TrueNAS - returning empty list", sourceVolumeID)
 		return &csi.ListSnapshotsResponse{
 			Entries: []*csi.ListSnapshotsResponse_Entry{},
 		}, nil
@@ -394,7 +477,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 
 	// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", volumeMeta.DatasetName},
+		[]interface{}{"dataset", "=", datasetName},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
@@ -438,7 +521,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 			SnapshotName: snapshot.ID,
 			SourceVolume: req.GetSourceVolumeId(),
 			DatasetName:  snapshot.Dataset,
-			Protocol:     volumeMeta.Protocol,
+			Protocol:     protocol,
 			CreatedAt:    time.Now().Unix(),
 		}
 
@@ -728,32 +811,61 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 
 	klog.V(4).Infof("Server or subsystemNQN not in parameters, extracting from source volume: %s", snapshotMeta.SourceVolume)
 
-	// Decode source volume metadata
-	sourceVolumeMeta, decodeErr := decodeVolumeID(snapshotMeta.SourceVolume)
-	if decodeErr != nil {
-		// Cleanup the cloned dataset
-		klog.Errorf("Failed to decode source volume ID from snapshot, cleaning up: %v", decodeErr)
+	// With plain volume IDs, we need to look up the source volume in TrueNAS
+	// to find the server and NQN information.
+	sourceVolumeID := snapshotMeta.SourceVolume
+
+	// For NFS, server should be provided in StorageClass parameters
+	// For NVMe-oF, we can try to find the subsystem NQN from TrueNAS
+	if server == "" {
+		// Server must come from StorageClass - we can't discover it
+		klog.Errorf("Server parameter is required but not provided in StorageClass, cleaning up")
 		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
 		}
-		return "", "", status.Errorf(codes.Internal, "Failed to decode source volume metadata: %v", decodeErr)
+		return "", "", status.Error(codes.InvalidArgument,
+			"server parameter is required in StorageClass for restoring from snapshot")
 	}
 
-	// Use server from source volume if not provided
-	if server == "" {
-		server = sourceVolumeMeta.Server
-		klog.V(4).Infof("Using server from source volume: %s", server)
-	}
-
-	// Use subsystem NQN from source volume if not provided (for NVMe-oF)
+	// For NVMe-oF, try to find subsystemNQN from the source volume
 	if subsystemNQN == "" && snapshotMeta.Protocol == ProtocolNVMeOF {
-		// Try SubsystemNQN first, fallback to NVMeOFNQN
-		if sourceVolumeMeta.SubsystemNQN != "" {
-			subsystemNQN = sourceVolumeMeta.SubsystemNQN
+		// Try to find the NVMe-oF namespace for the source volume
+		namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+		if nsErr != nil {
+			klog.Warningf("Failed to query NVMe-oF namespaces to find subsystemNQN: %v", nsErr)
 		} else {
-			subsystemNQN = sourceVolumeMeta.NVMeOFNQN
+			for _, ns := range namespaces {
+				if strings.Contains(ns.Device, sourceVolumeID) {
+					// Found the namespace - get its subsystem by ID
+					subsystemID := ns.Subsystem
+					if subsystemID > 0 {
+						// Query all subsystems and find the matching one
+						allSubsystems, subsysErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
+						if subsysErr != nil {
+							klog.Warningf("Failed to query NVMe-oF subsystems: %v", subsysErr)
+						} else {
+							for _, subsys := range allSubsystems {
+								if subsys.ID == subsystemID {
+									subsystemNQN = subsys.NQN
+									klog.V(4).Infof("Found subsystemNQN %s from source volume namespace", subsystemNQN)
+									break
+								}
+							}
+						}
+					}
+					break
+				}
+			}
 		}
-		klog.V(4).Infof("Using subsystemNQN from source volume: %s", subsystemNQN)
+		if subsystemNQN == "" {
+			// subsystemNQN is required for NVMe-oF
+			klog.Errorf("subsystemNQN not found for NVMe-oF source volume %s, cleaning up", sourceVolumeID)
+			if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
+				klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
+			}
+			return "", "", status.Error(codes.InvalidArgument,
+				"subsystemNQN parameter is required in StorageClass for NVMe-oF snapshot restore, or source volume must still exist in TrueNAS")
+		}
 	}
 
 	return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)

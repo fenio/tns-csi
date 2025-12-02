@@ -3,8 +3,6 @@ package driver
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -23,10 +21,25 @@ const (
 	errMsgVolumeIDRequired = "Volume ID is required"
 )
 
+// VolumeContext key constants - these are used consistently across the driver.
+const (
+	VolumeContextKeyProtocol          = "protocol"
+	VolumeContextKeyServer            = "server"
+	VolumeContextKeyShare             = "share"
+	VolumeContextKeyDatasetID         = "datasetID"
+	VolumeContextKeyDatasetName       = "datasetName"
+	VolumeContextKeyNFSShareID        = "nfsShareID"
+	VolumeContextKeyNQN               = "nqn"
+	VolumeContextKeyNVMeOFSubsystemID = "nvmeofSubsystemID"
+	VolumeContextKeyNVMeOFNamespaceID = "nvmeofNamespaceID"
+	VolumeContextKeyNSID              = "nsid"
+	VolumeContextKeyExpectedCapacity  = "expectedCapacity"
+	VolumeContextKeyClonedFromSnap    = "clonedFromSnapshot"
+)
+
 // Static errors for controller operations.
 var (
-	ErrVolumeIDNotEncoded = errors.New("volume ID is not in encoded format")
-	ErrVolumeNotFound     = errors.New("volume not found")
+	ErrVolumeNotFound = errors.New("volume not found")
 )
 
 // APIClient is an alias for the TrueNAS API client interface.
@@ -34,63 +47,74 @@ var (
 type APIClient = tnsapi.ClientInterface
 
 // VolumeMetadata contains information needed to manage a volume.
+// This is used internally and for building VolumeContext.
+// Note: Volume ID is now just the volume name (CSI spec compliant, max 128 bytes).
+// All metadata is passed via VolumeContext.
 type VolumeMetadata struct {
-	Name              string `json:"name"`
-	Protocol          string `json:"protocol"`
-	DatasetID         string `json:"datasetID,omitempty"`
-	DatasetName       string `json:"datasetName,omitempty"`
-	Server            string `json:"server,omitempty"`       // TrueNAS server address
-	NVMeOFNQN         string `json:"nvmeofNQN,omitempty"`    // NVMe-oF subsystem NQN
-	SubsystemNQN      string `json:"subsystemNQN,omitempty"` // Alias for NVMeOFNQN (for compatibility)
-	NFSShareID        int    `json:"nfsShareID,omitempty"`
-	NVMeOFSubsystemID int    `json:"nvmeofSubsystemID,omitempty"`
-	NVMeOFNamespaceID int    `json:"nvmeofNamespaceID,omitempty"`
+	Name              string
+	Protocol          string
+	DatasetID         string
+	DatasetName       string
+	Server            string // TrueNAS server address
+	NVMeOFNQN         string // NVMe-oF subsystem NQN
+	NFSShareID        int
+	NVMeOFSubsystemID int
+	NVMeOFNamespaceID int
 }
 
-// encodeVolumeID encodes volume metadata into a volumeID string.
-func encodeVolumeID(meta VolumeMetadata) (string, error) {
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal volume metadata: %w", err)
-	}
-	// Use base64 URL-safe encoding (no padding) to create a valid volumeID
-	encoded := base64.RawURLEncoding.EncodeToString(data)
-	return encoded, nil
-}
-
-// decodeVolumeID decodes a volumeID string into volume metadata.
-func decodeVolumeID(volumeID string) (*VolumeMetadata, error) {
-	// Handle legacy volume IDs that might not be encoded
-	if !isEncodedVolumeID(volumeID) {
-		klog.Warningf("Volume ID %s appears to be a legacy format, cannot decode metadata", volumeID)
-		return nil, ErrVolumeIDNotEncoded
+// buildVolumeContext creates a VolumeContext map from VolumeMetadata.
+// This is the standard way to pass volume metadata through CSI.
+func buildVolumeContext(meta VolumeMetadata) map[string]string {
+	ctx := map[string]string{
+		VolumeContextKeyProtocol: meta.Protocol,
 	}
 
-	data, err := base64.RawURLEncoding.DecodeString(volumeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode volume ID: %w", err)
+	if meta.Server != "" {
+		ctx[VolumeContextKeyServer] = meta.Server
+	}
+	if meta.DatasetID != "" {
+		ctx[VolumeContextKeyDatasetID] = meta.DatasetID
+	}
+	if meta.DatasetName != "" {
+		ctx[VolumeContextKeyDatasetName] = meta.DatasetName
 	}
 
-	var meta VolumeMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal volume metadata: %w", err)
-	}
-
-	return &meta, nil
-}
-
-// isEncodedVolumeID checks if a volumeID appears to be base64 encoded.
-func isEncodedVolumeID(volumeID string) bool {
-	// Base64 URL-safe encoding uses A-Z, a-z, 0-9, -, and _
-	// If it contains characters outside this set, it's not our encoding
-	for _, c := range volumeID {
-		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') &&
-			(c < '0' || c > '9') && c != '-' && c != '_' {
-
-			return false
+	// Protocol-specific fields
+	switch meta.Protocol {
+	case ProtocolNFS:
+		if meta.NFSShareID != 0 {
+			ctx[VolumeContextKeyNFSShareID] = strconv.Itoa(meta.NFSShareID)
+		}
+	case ProtocolNVMeOF:
+		if meta.NVMeOFNQN != "" {
+			ctx[VolumeContextKeyNQN] = meta.NVMeOFNQN
+		}
+		if meta.NVMeOFSubsystemID != 0 {
+			ctx[VolumeContextKeyNVMeOFSubsystemID] = strconv.Itoa(meta.NVMeOFSubsystemID)
+		}
+		if meta.NVMeOFNamespaceID != 0 {
+			ctx[VolumeContextKeyNVMeOFNamespaceID] = strconv.Itoa(meta.NVMeOFNamespaceID)
 		}
 	}
-	return true
+
+	return ctx
+}
+
+// getProtocolFromVolumeContext determines the protocol from volume context.
+// Falls back to NFS if protocol is not specified (for backwards compatibility).
+func getProtocolFromVolumeContext(ctx map[string]string) string {
+	if protocol := ctx[VolumeContextKeyProtocol]; protocol != "" {
+		return protocol
+	}
+	// Infer protocol from context keys
+	if ctx[VolumeContextKeyNQN] != "" {
+		return ProtocolNVMeOF
+	}
+	if ctx[VolumeContextKeyShare] != "" || ctx[VolumeContextKeyNFSShareID] != "" {
+		return ProtocolNFS
+	}
+	// Default to NFS for backwards compatibility
+	return ProtocolNFS
 }
 
 // ControllerService implements the CSI Controller service.
@@ -300,16 +324,20 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		return nil, ErrVolumeNotFound
 	}
 
-	volumeID, encodeErr := encodeVolumeID(volumeMeta)
-	if encodeErr != nil {
-		klog.Errorf("Failed to encode volume ID: %v", encodeErr)
-		return nil, ErrVolumeNotFound
-	}
+	// Volume ID is now just the volume name (CSI spec compliant)
+	volumeID := req.GetName()
 
 	// Return capacity from request if specified, otherwise use a default
 	capacity := reqCapacity
 	if capacity <= 0 {
 		capacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	// Ensure volume context includes protocol
+	if volumeContext == nil {
+		volumeContext = buildVolumeContext(volumeMeta)
+	} else {
+		volumeContext[VolumeContextKeyProtocol] = protocol
 	}
 
 	klog.V(4).Infof("Returning existing volume %s (idempotent)", req.GetName())
@@ -421,20 +449,38 @@ func validateCapacityCompatibility(volumeName string, existingCapacity, reqCapac
 func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID string) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("=== createVolumeFromVolume CALLED === New volume: %s, Source volume: %s", req.GetName(), sourceVolumeID)
 
-	// Decode source volume metadata to validate it exists
-	sourceVolumeMeta, err := decodeVolumeID(sourceVolumeID)
-	if err != nil {
-		klog.Warningf("Failed to decode source volume ID %s: %v", sourceVolumeID, err)
+	// With plain volume IDs, we need to look up the source volume's metadata from TrueNAS
+	// The sourceVolumeID is now just the volume name, we need to find its dataset
+	params := req.GetParameters()
+	pool := params["pool"]
+	parentDataset := params["parentDataset"]
+	if parentDataset == "" {
+		parentDataset = pool
+	}
+
+	// Determine protocol from parameters (default to NFS)
+	protocol := params["protocol"]
+	if protocol == "" {
+		protocol = ProtocolNFS
+	}
+
+	// Build expected dataset name for source volume
+	sourceDatasetName := fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+
+	// Verify source volume exists
+	sourceDataset, err := s.apiClient.Dataset(ctx, sourceDatasetName)
+	if err != nil || sourceDataset == nil {
+		klog.Warningf("Source volume %s not found (dataset: %s): %v", sourceVolumeID, sourceDatasetName, err)
 		return nil, status.Errorf(codes.NotFound, "Source volume not found: %s", sourceVolumeID)
 	}
 
 	klog.V(4).Infof("Cloning from source volume %s (dataset: %s, protocol: %s)",
-		sourceVolumeMeta.Name, sourceVolumeMeta.DatasetName, sourceVolumeMeta.Protocol)
+		sourceVolumeID, sourceDatasetName, protocol)
 
 	// Create a temporary snapshot of the source volume
 	tempSnapshotName := "clone-temp-" + req.GetName()
 	snapshotParams := tnsapi.SnapshotCreateParams{
-		Dataset:   sourceVolumeMeta.DatasetName,
+		Dataset:   sourceDatasetName,
 		Name:      tempSnapshotName,
 		Recursive: false,
 	}
@@ -450,8 +496,8 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	snapshotMeta := SnapshotMetadata{
 		SnapshotName: snapshot.ID,
 		SourceVolume: sourceVolumeID,
-		DatasetName:  sourceVolumeMeta.DatasetName,
-		Protocol:     sourceVolumeMeta.Protocol,
+		DatasetName:  sourceDatasetName,
+		Protocol:     protocol,
 		CreatedAt:    time.Now().Unix(),
 	}
 
@@ -489,27 +535,62 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	volumeID := req.GetVolumeId()
 	klog.V(4).Infof("Deleting volume %s", volumeID)
 
-	// Decode volume metadata from volumeID
-	meta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		// If we can't decode the volume ID, log a warning but return success
-		// per CSI spec (DeleteVolume should be idempotent)
-		klog.Warningf("Failed to decode volume ID %s: %v. Assuming volume doesn't exist.", volumeID, err)
-		return &csi.DeleteVolumeResponse{}, nil
+	// With plain volume IDs, we need to look up the volume in TrueNAS to find its metadata.
+	// We try to find it as both NFS and NVMe-oF volume since we don't have the protocol info.
+	// First, try to find NFS shares matching this volume name
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
+	if err == nil && len(shares) > 0 {
+		// Found as NFS volume - find the matching dataset
+		for _, share := range shares {
+			if strings.HasSuffix(share.Path, "/"+volumeID) {
+				// Query the dataset for this share
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				if dsErr == nil && len(datasets) > 0 {
+					meta := VolumeMetadata{
+						Name:        volumeID,
+						Protocol:    ProtocolNFS,
+						DatasetID:   datasets[0].ID,
+						DatasetName: datasets[0].Name,
+						NFSShareID:  share.ID,
+					}
+					klog.V(4).Infof("Deleting NFS volume %s with dataset %s", volumeID, meta.DatasetName)
+					return s.deleteNFSVolume(ctx, &meta)
+				}
+			}
+		}
 	}
 
-	klog.V(4).Infof("Deleting volume %s with protocol %s, dataset %s", meta.Name, meta.Protocol, meta.DatasetName)
-
-	// Delete volume based on protocol
-	switch meta.Protocol {
-	case ProtocolNFS:
-		return s.deleteNFSVolume(ctx, meta)
-	case ProtocolNVMeOF:
-		return s.deleteNVMeOFVolume(ctx, meta)
-	default:
-		klog.Warningf("Unknown protocol %s for volume %s, skipping deletion", meta.Protocol, volumeID)
-		return &csi.DeleteVolumeResponse{}, nil
+	// Try to find NVMe-oF namespaces matching this volume name
+	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	if err == nil {
+		for _, ns := range namespaces {
+			// Check if the namespace device path contains the volume name
+			if strings.Contains(ns.Device, volumeID) {
+				// Find the subsystem for this namespace
+				subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
+				if subErr == nil {
+					for _, sub := range subsystems {
+						if sub.ID == ns.Subsystem {
+							meta := VolumeMetadata{
+								Name:              volumeID,
+								Protocol:          ProtocolNVMeOF,
+								DatasetName:       ns.Device, // Device path is the zvol path
+								NVMeOFNQN:         sub.NQN,
+								NVMeOFSubsystemID: sub.ID,
+								NVMeOFNamespaceID: ns.ID,
+							}
+							klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s", volumeID, meta.DatasetName)
+							return s.deleteNVMeOFVolume(ctx, &meta)
+						}
+					}
+				}
+			}
+		}
 	}
+
+	// Volume not found in either protocol - return success per CSI spec (idempotent delete)
+	klog.V(4).Infof("Volume %s not found, returning success (idempotent)", volumeID)
+	return &csi.DeleteVolumeResponse{}, nil
 }
 
 // ControllerPublishVolume attaches a volume to a node.
@@ -537,13 +618,10 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Errorf(codes.NotFound, "node %s not found", nodeID)
 	}
 
-	// Verify volume exists by attempting to decode the volume ID
-	// Per CSI spec: return NotFound if volume doesn't exist
-	if _, err := decodeVolumeID(req.GetVolumeId()); err != nil {
-		// Treat any decode failure as volume not found
-		// This covers both malformed IDs and volumes that don't exist
-		return nil, status.Errorf(codes.NotFound, "volume %s not found", req.GetVolumeId())
-	}
+	// With plain volume IDs (just the volume name), we cannot verify volume existence
+	// from the ID alone. The volume context should contain the necessary metadata.
+	// Trust that the CO (Kubernetes) has validated the volume exists.
+	klog.V(4).Infof("ControllerPublishVolume: volume %s on node %s", req.GetVolumeId(), nodeID)
 
 	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerPublishVolumeResponse{}, nil
@@ -573,12 +651,9 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 		return nil, status.Error(codes.InvalidArgument, "Volume capabilities are required")
 	}
 
-	// Validate that the volume exists by decoding the volume ID
-	_, err := decodeVolumeID(req.GetVolumeId())
-	if err != nil {
-		// Per CSI spec: return NotFound error if volume doesn't exist
-		return nil, status.Errorf(codes.NotFound, "Volume not found: %s", req.GetVolumeId())
-	}
+	// With plain volume IDs (just the volume name), we trust that the CO has validated
+	// the volume exists. Volume context from CreateVolume provides the metadata.
+	klog.V(4).Infof("ValidateVolumeCapabilities: validating volume %s", req.GetVolumeId())
 
 	// Basic validation: we accept all requested capabilities since TrueNAS supports both filesystem and block modes
 	return &csi.ValidateVolumeCapabilitiesResponse{
@@ -697,7 +772,7 @@ func (s *ControllerService) listNFSVolumes(ctx context.Context) ([]*csi.ListVolu
 			NFSShareID:  share.ID,
 		}
 
-		entry := s.buildVolumeEntry(dataset, meta, ProtocolNFS)
+		entry := s.buildVolumeEntry(dataset, meta)
 		if entry != nil {
 			entries = append(entries, entry)
 		}
@@ -738,7 +813,7 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 			NVMeOFNamespaceID: ns.ID,
 		}
 
-		entry := s.buildVolumeEntry(zvol, meta, ProtocolNVMeOF)
+		entry := s.buildVolumeEntry(zvol, meta)
 		if entry != nil {
 			entries = append(entries, entry)
 		}
@@ -749,13 +824,11 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 }
 
 // buildVolumeEntry constructs a ListVolumesResponse_Entry from dataset and metadata.
-func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta VolumeMetadata, protocol string) *csi.ListVolumesResponse_Entry {
-	// Encode volume ID
-	volumeID, err := encodeVolumeID(meta)
-	if err != nil {
-		klog.Warningf("Failed to encode volume ID for dataset %s: %v", dataset.Name, err)
-		return nil
-	}
+func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta VolumeMetadata) *csi.ListVolumesResponse_Entry {
+	// Volume ID is just the volume name (CSI spec compliant)
+	// Extract volume name from dataset name (last path component)
+	parts := strings.Split(dataset.Name, "/")
+	volumeID := parts[len(parts)-1]
 
 	// Determine capacity from dataset
 	var capacityBytes int64
@@ -769,10 +842,7 @@ func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta Volume
 		Volume: &csi.Volume{
 			VolumeId:      volumeID,
 			CapacityBytes: capacityBytes,
-			VolumeContext: map[string]string{
-				"protocol":    protocol,
-				"datasetName": dataset.Name,
-			},
+			VolumeContext: buildVolumeContext(meta),
 		},
 	}
 }
@@ -900,23 +970,60 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	klog.V(4).Infof("Expanding volume %s to %d bytes", volumeID, requiredBytes)
 
-	// Decode volume metadata from volumeID
-	meta, err := decodeVolumeID(volumeID)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "Failed to decode volume ID: %v", err)
+	// With plain volume IDs, we need to look up the volume in TrueNAS to find its metadata.
+	// First, try to find NFS shares matching this volume name
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
+	if err == nil && len(shares) > 0 {
+		for _, share := range shares {
+			if strings.HasSuffix(share.Path, "/"+volumeID) {
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				if dsErr == nil && len(datasets) > 0 {
+					meta := &VolumeMetadata{
+						Name:        volumeID,
+						Protocol:    ProtocolNFS,
+						DatasetID:   datasets[0].ID,
+						DatasetName: datasets[0].Name,
+						NFSShareID:  share.ID,
+					}
+					klog.V(4).Infof("Expanding NFS volume %s with dataset %s", volumeID, meta.DatasetName)
+					return s.expandNFSVolume(ctx, meta, requiredBytes)
+				}
+			}
+		}
 	}
 
-	klog.V(4).Infof("Expanding volume %s with protocol %s, dataset %s", meta.Name, meta.Protocol, meta.DatasetName)
-
-	// Expand volume based on protocol
-	switch meta.Protocol {
-	case ProtocolNFS:
-		return s.expandNFSVolume(ctx, meta, requiredBytes)
-	case ProtocolNVMeOF:
-		return s.expandNVMeOFVolume(ctx, meta, requiredBytes)
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol for expansion: %s", meta.Protocol)
+	// Try to find NVMe-oF namespaces matching this volume name
+	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	if err == nil {
+		for _, ns := range namespaces {
+			if strings.Contains(ns.Device, volumeID) {
+				subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
+				if subErr == nil {
+					for _, sub := range subsystems {
+						if sub.ID == ns.Subsystem {
+							// Extract the dataset ID from the device path
+							// Device path is like /dev/zvol/tank/csi/volume-name
+							// Dataset ID is tank/csi/volume-name
+							datasetID := strings.TrimPrefix(ns.Device, "/dev/zvol/")
+							meta := &VolumeMetadata{
+								Name:              volumeID,
+								Protocol:          ProtocolNVMeOF,
+								DatasetID:         datasetID,
+								DatasetName:       datasetID,
+								NVMeOFNQN:         sub.NQN,
+								NVMeOFSubsystemID: sub.ID,
+								NVMeOFNamespaceID: ns.ID,
+							}
+							klog.V(4).Infof("Expanding NVMe-oF volume %s with dataset %s", volumeID, meta.DatasetName)
+							return s.expandNVMeOFVolume(ctx, meta, requiredBytes)
+						}
+					}
+				}
+			}
+		}
 	}
+
+	return nil, status.Errorf(codes.NotFound, "Volume %s not found for expansion", volumeID)
 }
 
 // ControllerGetVolume gets volume information.

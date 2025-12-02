@@ -560,13 +560,14 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 
 	//nolint:govet // Field alignment not critical for test structs
 	tests := []struct {
-		name     string
-		req      *csi.ValidateVolumeCapabilitiesRequest
-		wantErr  bool
-		wantCode codes.Code
+		name      string
+		req       *csi.ValidateVolumeCapabilitiesRequest
+		mockSetup func(m *MockAPIClientForSnapshots)
+		wantErr   bool
+		wantCode  codes.Code
 	}{
 		{
-			name: "valid capabilities",
+			name: "valid capabilities - volume exists",
 			req: &csi.ValidateVolumeCapabilitiesRequest{
 				VolumeId: volumeID,
 				VolumeCapabilities: []*csi.VolumeCapability{
@@ -580,7 +581,42 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 					VolumeContextKeyProtocol: ProtocolNFS,
 				},
 			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock finding the NFS share
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{
+						{
+							ID:   1,
+							Path: "/mnt/tank/" + volumeID,
+						},
+					}, nil
+				}
+			},
 			wantErr: false,
+		},
+		{
+			name: "volume not found",
+			req: &csi.ValidateVolumeCapabilitiesRequest{
+				VolumeId: "non-existent-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+					},
+				},
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock returning empty results - volume not found
+				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
+					return []tnsapi.NFSShare{}, nil
+				}
+				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
+					return []tnsapi.NVMeOFNamespace{}, nil
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.NotFound,
 		},
 		{
 			name: "missing volume ID",
@@ -594,8 +630,9 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 					},
 				},
 			},
-			wantErr:  true,
-			wantCode: codes.InvalidArgument,
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
+			wantErr:   true,
+			wantCode:  codes.InvalidArgument,
 		},
 		{
 			name: "missing capabilities",
@@ -603,8 +640,9 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 				VolumeId:           volumeID,
 				VolumeCapabilities: nil,
 			},
-			wantErr:  true,
-			wantCode: codes.InvalidArgument,
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
+			wantErr:   true,
+			wantCode:  codes.InvalidArgument,
 		},
 		{
 			name: "empty capabilities",
@@ -612,14 +650,16 @@ func TestValidateVolumeCapabilities(t *testing.T) {
 				VolumeId:           volumeID,
 				VolumeCapabilities: []*csi.VolumeCapability{},
 			},
-			wantErr:  true,
-			wantCode: codes.InvalidArgument,
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
+			wantErr:   true,
+			wantCode:  codes.InvalidArgument,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &mockAPIClient{}
+			mockClient := &MockAPIClientForSnapshots{}
+			tt.mockSetup(mockClient)
 			service := NewControllerService(mockClient, NewNodeRegistry())
 
 			resp, err := service.ValidateVolumeCapabilities(ctx, tt.req)

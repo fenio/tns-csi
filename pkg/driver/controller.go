@@ -640,7 +640,7 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 }
 
 // ValidateVolumeCapabilities validates volume capabilities.
-func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
+func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	klog.V(4).Infof("ValidateVolumeCapabilities called with request: %+v", req)
 
 	if req.GetVolumeId() == "" {
@@ -651,9 +651,39 @@ func (s *ControllerService) ValidateVolumeCapabilities(_ context.Context, req *c
 		return nil, status.Error(codes.InvalidArgument, "Volume capabilities are required")
 	}
 
-	// With plain volume IDs (just the volume name), we trust that the CO has validated
-	// the volume exists. Volume context from CreateVolume provides the metadata.
-	klog.V(4).Infof("ValidateVolumeCapabilities: validating volume %s", req.GetVolumeId())
+	volumeID := req.GetVolumeId()
+	klog.V(4).Infof("ValidateVolumeCapabilities: validating volume %s", volumeID)
+
+	// Check if volume exists by searching for it in TrueNAS
+	volumeExists := false
+
+	// Check NFS volumes
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
+	if err == nil {
+		for _, share := range shares {
+			if strings.HasSuffix(share.Path, "/"+volumeID) {
+				volumeExists = true
+				break
+			}
+		}
+	}
+
+	// Check NVMe-oF volumes if not found as NFS
+	if !volumeExists {
+		namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+		if err == nil {
+			for _, ns := range namespaces {
+				if strings.Contains(ns.Device, volumeID) {
+					volumeExists = true
+					break
+				}
+			}
+		}
+	}
+
+	if !volumeExists {
+		return nil, status.Errorf(codes.NotFound, "Volume %s not found", volumeID)
+	}
 
 	// Basic validation: we accept all requested capabilities since TrueNAS supports both filesystem and block modes
 	return &csi.ValidateVolumeCapabilitiesResponse{

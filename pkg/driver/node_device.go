@@ -551,7 +551,7 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 func runFsck(ctx context.Context, devicePath, fsType string, volumeContext map[string]string) error {
 	// Check if fsck is enabled via volume context
 	fsckEnabled := volumeContext["fsckBeforeMount"]
-	if fsckEnabled != "true" && fsckEnabled != "1" {
+	if fsckEnabled != VolumeContextValueTrue && fsckEnabled != "1" {
 		klog.V(4).Infof("fsck before mount not enabled for device %s", devicePath)
 		return nil
 	}
@@ -573,7 +573,7 @@ func runFsck(ctx context.Context, devicePath, fsType string, volumeContext map[s
 		// -n: no-modify mode (check only, don't repair)
 		// For repair, we'd use xfs_repair without -n
 		checkOnly := volumeContext["fsckCheckOnly"]
-		if checkOnly == "true" || checkOnly == "1" {
+		if checkOnly == VolumeContextValueTrue || checkOnly == "1" {
 			cmd = exec.CommandContext(fsckCtx, "xfs_repair", "-n", devicePath)
 		} else {
 			cmd = exec.CommandContext(fsckCtx, "xfs_repair", devicePath)
@@ -582,7 +582,7 @@ func runFsck(ctx context.Context, devicePath, fsType string, volumeContext map[s
 		// btrfs check for btrfs filesystems
 		// --readonly: check only, don't repair
 		checkOnly := volumeContext["fsckCheckOnly"]
-		if checkOnly == "true" || checkOnly == "1" {
+		if checkOnly == VolumeContextValueTrue || checkOnly == "1" {
 			cmd = exec.CommandContext(fsckCtx, "btrfs", "check", "--readonly", devicePath)
 		} else {
 			cmd = exec.CommandContext(fsckCtx, "btrfs", "check", "--repair", devicePath)
@@ -741,7 +741,7 @@ func GetDeviceToUse(ctx context.Context, devicePath string, volumeContext map[st
 
 	// Check if partition handling is enabled
 	handlePartitions := volumeContext["handlePartitions"]
-	if handlePartitions != "true" && handlePartitions != "1" {
+	if handlePartitions != VolumeContextValueTrue && handlePartitions != "1" {
 		// Partition handling not enabled, use device as-is
 		if info.HasPartition {
 			klog.Warningf("Device %s has partitions but partition handling is disabled, using device as-is", devicePath)

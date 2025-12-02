@@ -81,3 +81,50 @@ func Unmount(ctx context.Context, targetPath string) error {
 	klog.V(4).Infof("Successfully unmounted %s", targetPath)
 	return nil
 }
+
+// IsStaleNFSMount checks if a path has a stale NFS mount.
+// On macOS, this is a simplified implementation for testing purposes.
+func IsStaleNFSMount(ctx context.Context, targetPath string) (bool, error) {
+	// macOS stub - always return false for testing
+	klog.V(5).Infof("IsStaleNFSMount called for %s (macOS stub)", targetPath)
+	return false, nil
+}
+
+// ForceUnmount forcefully unmounts a path.
+// On macOS, this is a simplified implementation for testing purposes.
+func ForceUnmount(ctx context.Context, targetPath string) error {
+	klog.V(4).Infof("ForceUnmount called for %s (macOS stub)", targetPath)
+
+	// On macOS, try regular unmount with force flag
+	umountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(umountCtx, "umount", "-f", targetPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("Force unmount failed: %v, output: %s (non-fatal on macOS)", err, string(output))
+		return nil
+	}
+
+	return nil
+}
+
+// UnmountWithRetry unmounts a path with retry logic.
+// On macOS, this is a simplified implementation for testing purposes.
+func UnmountWithRetry(ctx context.Context, targetPath string, maxRetries int) error {
+	klog.V(4).Infof("UnmountWithRetry called for %s with %d retries (macOS stub)", targetPath, maxRetries)
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		err := Unmount(ctx, targetPath)
+		if err == nil {
+			return nil
+		}
+
+		if attempt < maxRetries-1 {
+			time.Sleep(time.Duration(attempt+1) * time.Second)
+		}
+	}
+
+	// On macOS for testing, don't fail
+	return nil
+}

@@ -340,6 +340,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 		return nil, err
 	}
 
+	// Run filesystem check if enabled (before mounting)
+	if err := runFsck(ctx, devicePath, fsType, volumeContext); err != nil {
+		return nil, status.Errorf(codes.Internal, "Filesystem check failed: %v", err)
+	}
+
 	// Create staging target path if it doesn't exist
 	if mkdirErr := os.MkdirAll(stagingTargetPath, 0o750); mkdirErr != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", mkdirErr)

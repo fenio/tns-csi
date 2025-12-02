@@ -57,7 +57,7 @@ func (s *NodeService) stageNFSVolume(ctx context.Context, req *csi.NodeStageVolu
 
 	// Mount NFS share to staging path
 	nfsSource := fmt.Sprintf("%s:%s", server, share)
-	mountOptions := getNFSMountOptions()
+	mountOptions := parseNFSMountOptions(volumeContext)
 
 	// Construct mount command
 	args := []string{"-t", "nfs", "-o", mount.JoinMountOptions(mountOptions), nfsSource, stagingTargetPath}
@@ -101,11 +101,37 @@ func (s *NodeService) unstageNFSVolume(ctx context.Context, req *csi.NodeUnstage
 
 	if mounted {
 		klog.V(4).Infof("Unmounting NFS staging path: %s", stagingTargetPath)
-		if err := mount.Unmount(ctx, stagingTargetPath); err != nil {
-			return nil, status.Errorf(codes.Internal, "Failed to unmount NFS staging path: %v", err)
+		// Use UnmountWithRetry for better stale mount handling
+		if err := mount.UnmountWithRetry(ctx, stagingTargetPath, 3); err != nil {
+			// Check if this is a stale mount and try force unmount
+			isStale, staleErr := mount.IsStaleNFSMount(ctx, stagingTargetPath)
+			if staleErr != nil {
+				klog.V(4).Infof("Failed to check for stale mount: %v", staleErr)
+			}
+			if isStale {
+				klog.Warningf("Detected stale NFS mount at %s, attempting force unmount", stagingTargetPath)
+				if forceErr := mount.ForceUnmount(ctx, stagingTargetPath); forceErr != nil {
+					return nil, status.Errorf(codes.Internal, "Failed to force unmount stale NFS staging path: %v", forceErr)
+				}
+			} else {
+				return nil, status.Errorf(codes.Internal, "Failed to unmount NFS staging path: %v", err)
+			}
 		}
 	} else {
-		klog.V(4).Infof("Staging path %s is not mounted, skipping unmount", stagingTargetPath)
+		// Check if there's a stale mount even though IsMounted returned false
+		// (IsMounted can return false for unresponsive stale mounts)
+		isStale, staleErr := mount.IsStaleNFSMount(ctx, stagingTargetPath)
+		if staleErr != nil {
+			klog.V(4).Infof("Failed to check for stale mount: %v", staleErr)
+		}
+		if isStale {
+			klog.Warningf("Detected stale NFS mount at %s (not detected by findmnt), attempting force unmount", stagingTargetPath)
+			if forceErr := mount.ForceUnmount(ctx, stagingTargetPath); forceErr != nil {
+				klog.Warningf("Failed to force unmount stale mount: %v", forceErr)
+			}
+		} else {
+			klog.V(4).Infof("Staging path %s is not mounted, skipping unmount", stagingTargetPath)
+		}
 	}
 
 	// Remove the staging directory (best effort)

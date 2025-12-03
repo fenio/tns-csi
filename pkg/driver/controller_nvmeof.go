@@ -132,7 +132,8 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 
 // buildNVMeOFVolumeResponse builds the CreateVolumeResponse for an NVMe-oF volume.
 // With independent subsystem architecture, NSID is always 1.
-func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, subsystem *tnsapi.NVMeOFSubsystem, namespace *tnsapi.NVMeOFNamespace, capacity int64) *csi.CreateVolumeResponse {
+// The nqn parameter should be the NQN we generated, not what TrueNAS returns (which may include a UUID prefix).
+func buildNVMeOFVolumeResponse(volumeName, server, nqn string, zvol *tnsapi.Dataset, subsystem *tnsapi.NVMeOFSubsystem, namespace *tnsapi.NVMeOFNamespace, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:              volumeName,
 		Protocol:          ProtocolNVMeOF,
@@ -141,7 +142,7 @@ func buildNVMeOFVolumeResponse(volumeName, server string, zvol *tnsapi.Dataset, 
 		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
-		NVMeOFNQN:         subsystem.Name, // Use Name (short NQN) for lookup
+		NVMeOFNQN:         nqn, // Use the NQN we generated, not subsystem.Name
 	}
 
 	// Volume ID is just the volume name (CSI spec compliant, max 128 bytes)
@@ -209,7 +210,7 @@ func (s *ControllerService) handleExistingNVMeOFVolume(ctx context.Context, para
 		klog.V(4).Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d), returning existing volume",
 			namespace.ID, namespace.NSID)
 
-		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, existingZvol, subsystem, namespace, existingCapacity)
+		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, params.subsystemNQN, existingZvol, subsystem, namespace, existingCapacity)
 		timer.ObserveSuccess()
 		return resp, true, nil
 	}
@@ -322,9 +323,9 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	// Build and return response
-	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, zvol, subsystem, namespace, params.requestedCapacity)
+	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, params.subsystemNQN, zvol, subsystem, namespace, params.requestedCapacity)
 
-	klog.Infof("Created NVMe-oF volume: %s (subsystem: %s, NSID: 1)", params.volumeName, subsystem.Name)
+	klog.Infof("Created NVMe-oF volume: %s (subsystem: %s, NSID: 1)", params.volumeName, params.subsystemNQN)
 	timer.ObserveSuccess()
 	return resp, nil
 }
@@ -652,7 +653,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
-		NVMeOFNQN:         subsystem.Name,
+		NVMeOFNQN:         subsystemNQN, // Use the NQN we generated, not subsystem.Name
 	}
 
 	// Volume ID is just the volume name (CSI spec compliant)
@@ -666,7 +667,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	// This signals to the node that the volume has existing data and should NEVER be formatted
 	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
 
-	klog.Infof("Created NVMe-oF volume from snapshot: %s (subsystem: %s, NSID: 1)", volumeName, subsystem.Name)
+	klog.Infof("Created NVMe-oF volume from snapshot: %s (subsystem: %s, NSID: 1)", volumeName, subsystemNQN)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNVMeOF, requestedCapacity)

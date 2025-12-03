@@ -1229,14 +1229,21 @@ func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset
 	return result, nil
 }
 
-// QueryAllNFSShares queries all NFS shares with optional path filter.
-// Uses regex match ("~") to find shares where the path contains the filter value.
-// This allows finding shares by volume name (e.g., "pvc-xxx") even when the full
-// path is "/mnt/tank/csi/pvc-xxx".
+// QueryAllNFSShares queries all NFS shares.
+// The pathFilter parameter is ignored - all shares are returned and callers
+// should filter client-side. This is more reliable than server-side regex
+// filtering which may have inconsistent behavior across TrueNAS versions.
 func (c *Client) QueryAllNFSShares(ctx context.Context, pathFilter string) ([]NFSShare, error) {
+	// Always query all shares - ignore pathFilter parameter
+	// Callers filter client-side using strings.HasSuffix or similar
+	_ = pathFilter // Explicitly ignore - kept for API compatibility
+
+	klog.V(5).Info("Querying all NFS shares")
+
 	var result []NFSShare
-	if err := c.queryWithOptionalFilter(ctx, "sharing.nfs.query", "path", pathFilter, "~", "NFS shares", &result); err != nil {
-		return nil, err
+	err := c.Call(ctx, "sharing.nfs.query", []interface{}{[]interface{}{}}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
 	}
 
 	klog.V(5).Infof("Found %d NFS shares", len(result))

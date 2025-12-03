@@ -132,7 +132,8 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 
 // buildNVMeOFVolumeResponse builds the CreateVolumeResponse for an NVMe-oF volume.
 // With independent subsystem architecture, NSID is always 1.
-// The nqn parameter should be the NQN we generated, not what TrueNAS returns (which may include a UUID prefix).
+// The nqn parameter should be the NQN returned by TrueNAS (subsystem.NQN), which may differ
+// from what we requested. TrueNAS generates its own NQN with a different prefix.
 func buildNVMeOFVolumeResponse(volumeName, server, nqn string, zvol *tnsapi.Dataset, subsystem *tnsapi.NVMeOFSubsystem, namespace *tnsapi.NVMeOFNamespace, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:              volumeName,
@@ -142,7 +143,7 @@ func buildNVMeOFVolumeResponse(volumeName, server, nqn string, zvol *tnsapi.Data
 		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
-		NVMeOFNQN:         nqn, // Use the NQN we generated, not subsystem.Name
+		NVMeOFNQN:         nqn, // Use the NQN from TrueNAS (subsystem.NQN), not what we requested
 	}
 
 	// Volume ID is just the volume name (CSI spec compliant, max 128 bytes)
@@ -210,7 +211,8 @@ func (s *ControllerService) handleExistingNVMeOFVolume(ctx context.Context, para
 		klog.V(4).Infof("NVMe-oF volume already exists (namespace ID: %d, NSID: %d), returning existing volume",
 			namespace.ID, namespace.NSID)
 
-		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, params.subsystemNQN, existingZvol, subsystem, namespace, existingCapacity)
+		// Use subsystem.NQN (what TrueNAS actually has) not params.subsystemNQN (what we would request)
+		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, subsystem.NQN, existingZvol, subsystem, namespace, existingCapacity)
 		timer.ObserveSuccess()
 		return resp, true, nil
 	}
@@ -323,9 +325,11 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	}
 
 	// Build and return response
-	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, params.subsystemNQN, zvol, subsystem, namespace, params.requestedCapacity)
+	// Use subsystem.NQN (what TrueNAS actually created) not params.subsystemNQN (what we requested)
+	// TrueNAS may assign a different NQN prefix than what we requested
+	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, subsystem.NQN, zvol, subsystem, namespace, params.requestedCapacity)
 
-	klog.Infof("Created NVMe-oF volume: %s (subsystem: %s, NSID: 1)", params.volumeName, params.subsystemNQN)
+	klog.Infof("Created NVMe-oF volume: %s (subsystem: %s, NSID: 1)", params.volumeName, subsystem.NQN)
 	timer.ObserveSuccess()
 	return resp, nil
 }

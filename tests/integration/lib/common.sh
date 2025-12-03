@@ -426,7 +426,7 @@ verify_cluster() {
     if ! kubectl cluster-info &>/dev/null; then
         stop_test_timer "verify_cluster" "FAILED"
         test_error "Cannot access cluster"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     test_success "Cluster is accessible"
@@ -461,19 +461,19 @@ deploy_driver() {
     if [[ -z "${TRUENAS_HOST}" ]]; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_HOST environment variable not set"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     if [[ -z "${TRUENAS_API_KEY}" ]]; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_API_KEY environment variable not set"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     if [[ -z "${TRUENAS_POOL}" ]]; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "TRUENAS_POOL environment variable not set"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     # Construct TrueNAS WebSocket URL
@@ -532,7 +532,7 @@ deploy_driver() {
         *)
             stop_test_timer "deploy_driver" "FAILED"
             test_error "Unknown protocol: ${protocol}"
-            return 1
+            false  # Trigger ERR trap
             ;;
     esac
     
@@ -559,7 +559,7 @@ deploy_driver() {
         --wait --timeout 5m; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "Helm deployment failed"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     test_success "CSI driver deployed"
@@ -649,7 +649,7 @@ wait_for_driver() {
         --timeout="${TIMEOUT_DRIVER}"; then
         stop_test_timer "wait_for_driver" "FAILED"
         test_error "CSI driver failed to become ready"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     test_success "CSI driver is ready"
@@ -727,7 +727,7 @@ create_pvc() {
             --timeout="${TIMEOUT_PVC}"; then
             stop_test_timer "create_pvc" "FAILED"
             test_error "PVC failed to bind"
-            return 1
+            false  # Trigger ERR trap
         fi
         
         test_success "PVC is bound"
@@ -799,7 +799,8 @@ create_test_pod() {
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
             --tail=50 || true
         
-        return 1
+        # Use false to trigger ERR trap (return 1 doesn't work with set -e inside if blocks)
+        false
     fi
     
     test_success "Pod is ready"
@@ -877,7 +878,7 @@ test_io_operations() {
         else
             stop_test_timer "test_io_operations" "FAILED"
             test_error "Read verification failed: expected 'CSI Test Data', got '${content}'"
-            return 1
+            false  # Trigger ERR trap
         fi
         
         echo ""
@@ -910,7 +911,7 @@ test_io_operations() {
     else
         stop_test_timer "test_io_operations" "FAILED"
         test_error "Unknown test type: ${test_type}"
-        return 1
+        false  # Trigger ERR trap
     fi
     stop_test_timer "test_io_operations" "PASSED"
 }
@@ -1091,7 +1092,7 @@ test_volume_expansion() {
         kubectl logs -n kube-system \
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
             --tail=50 || true
-        return 1
+        false  # Trigger ERR trap
     fi
     
     # Verify filesystem expansion (if applicable)
@@ -1139,7 +1140,7 @@ test_volume_expansion() {
         else
             stop_test_timer "test_volume_expansion" "FAILED"
             test_error "I/O verification failed after expansion"
-            return 1
+            false  # Trigger ERR trap
         fi
     fi
     
@@ -1211,7 +1212,7 @@ verify_metrics() {
     if [[ ${found_count} -eq 0 ]]; then
         stop_test_timer "verify_metrics" "FAILED"
         test_error "No custom metrics found - metrics collection may not be working"
-        return 1
+        false  # Trigger ERR trap
     fi
     
     if [[ ${#missing_metrics[@]} -gt 0 ]]; then

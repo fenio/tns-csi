@@ -40,7 +40,7 @@ type nvmeofVolumeParams struct {
 }
 
 // generateNQN creates a unique NQN for a volume's dedicated subsystem.
-// Format: nqn.2024-01.io.truenas.csi:<volume-name>.
+// Format: nqn.2137.csi.tns:<volume-name>.
 func generateNQN(volumeName string) string {
 	return fmt.Sprintf("%s:%s", nqnPrefix, volumeName)
 }

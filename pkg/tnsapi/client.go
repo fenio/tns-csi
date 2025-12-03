@@ -1195,9 +1195,9 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 
 // queryWithOptionalFilter is a helper function to reduce duplication in query methods.
 // The operator parameter specifies the filter operator:
-// - "^" for starts-with (prefix match)
-// - "~" for regex/contains match
-// - "$" for ends-with (suffix match)
+// - "^" for starts-with (prefix match).
+// - "~" for regex/contains match.
+// - "$" for ends-with (suffix match).
 func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, operator, resourceType string, result interface{}) error {
 	klog.V(5).Infof("Querying all %s with filter: %s (operator: %s)", resourceType, filterValue, operator)
 

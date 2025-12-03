@@ -132,9 +132,9 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 	if protocol == ProtocolNVMeOF {
 		// For NVMe-oF, we need to pass the NQN which is derived from the volume ID
-		// With independent subsystems, NQN format is: nqn.2024-01.io.truenas.csi:<volumeID>
+		// With independent subsystems, NQN format is: nqn.2137.csi.tns:<volumeID>
 		volumeContext := map[string]string{
-			"nqn": "nqn.2024-01.io.truenas.csi:" + volumeID,
+			"nqn": "nqn.2137.csi.tns:" + volumeID,
 		}
 		resp, err := s.unstageNVMeOFVolume(ctx, req, volumeContext)
 		if err != nil {

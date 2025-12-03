@@ -76,15 +76,34 @@ When working on this project, prioritize:
 
 Standard development cycle:
 1. Make changes locally
-2. Push to repository (triggers CI/CD automatically)
-3. Monitor GitHub Actions workflow runs
-4. Review integration test results (NFS and NVMe-oF)
-5. Iterate based on test feedback
+2. **Run unit tests and linter locally before committing** (see Pre-Commit Checklist below)
+3. Push to repository (triggers CI/CD automatically)
+4. Monitor GitHub Actions workflow runs
+5. Review integration test results (NFS and NVMe-oF)
+6. Iterate based on test feedback
+
+#### Pre-Commit Checklist
+
+**ALWAYS run these commands before committing or pushing changes:**
+
+```bash
+# Run unit tests
+go test ./pkg/... -count=1
+
+# Run linter
+golangci-lint run
+
+# Build to verify compilation
+go build ./...
+```
+
+**All three must pass before pushing.** Failing to run these locally wastes CI/CD resources and delays development.
 
 **Do not suggest:**
 - Local testing setups that bypass CI/CD
 - Manual deployment scripts (use Helm charts)
 - Skipping integration tests to save time
+- Pushing without running local tests first
 
 ### 5. **Debugging Approach**
 

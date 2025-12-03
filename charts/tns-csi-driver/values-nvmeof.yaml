@@ -2,6 +2,10 @@
 # This configuration creates a TrueNAS CSI driver with NVMe-oF support
 # NOTE: NVMe-oF requires Linux kernel modules (nvme-tcp) on worker nodes
 
+# IMPORTANT: Before deploying, ensure you have configured an NVMe-oF port
+# in TrueNAS (Shares > NVMe-oF Targets > Ports). The CSI driver automatically
+# creates a dedicated subsystem for each volume - no pre-configured subsystem needed.
+
 truenas:
   # Your TrueNAS server configuration
   host: "YOUR-TRUENAS-IP"
@@ -22,9 +26,6 @@ storageClasses:
     parameters:
       # NVMe-oF specific parameters
       transport: "tcp"
-      # REQUIRED: Pre-configured NVMe-oF subsystem NQN
-      # Create this in TrueNAS: Shares > NVMe-oF Subsystems before deploying
-      subsystemNQN: "nqn.2005-03.org.truenas:subsystem0"
       # Optional: specify portal IP if different from truenas.host
       # portal: "YOUR-TRUENAS-IP"
 

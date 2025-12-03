@@ -1194,15 +1194,19 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 }
 
 // queryWithOptionalFilter is a helper function to reduce duplication in query methods.
-func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, resourceType string, result interface{}) error {
-	klog.V(5).Infof("Querying all %s with filter: %s", resourceType, filterValue)
+// The operator parameter specifies the filter operator:
+// - "^" for starts-with (prefix match)
+// - "~" for regex/contains match
+// - "$" for ends-with (suffix match)
+func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, operator, resourceType string, result interface{}) error {
+	klog.V(5).Infof("Querying all %s with filter: %s (operator: %s)", resourceType, filterValue, operator)
 
 	var filters []interface{}
 
 	// If filter value is specified, apply the filter
 	if filterValue != "" {
 		filters = []interface{}{
-			[]interface{}{filterField, "^", filterValue},
+			[]interface{}{filterField, operator, filterValue},
 		}
 	}
 
@@ -1217,7 +1221,7 @@ func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterFiel
 // QueryAllDatasets queries all datasets with optional prefix filter.
 func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
 	var result []Dataset
-	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "datasets", &result); err != nil {
+	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "^", "datasets", &result); err != nil {
 		return nil, err
 	}
 
@@ -1225,10 +1229,13 @@ func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset
 	return result, nil
 }
 
-// QueryAllNFSShares queries all NFS shares with optional path prefix filter.
-func (c *Client) QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]NFSShare, error) {
+// QueryAllNFSShares queries all NFS shares with optional path filter.
+// Uses regex match ("~") to find shares where the path contains the filter value.
+// This allows finding shares by volume name (e.g., "pvc-xxx") even when the full
+// path is "/mnt/tank/csi/pvc-xxx".
+func (c *Client) QueryAllNFSShares(ctx context.Context, pathFilter string) ([]NFSShare, error) {
 	var result []NFSShare
-	if err := c.queryWithOptionalFilter(ctx, "sharing.nfs.query", "path", pathPrefix, "NFS shares", &result); err != nil {
+	if err := c.queryWithOptionalFilter(ctx, "sharing.nfs.query", "path", pathFilter, "~", "NFS shares", &result); err != nil {
 		return nil, err
 	}
 

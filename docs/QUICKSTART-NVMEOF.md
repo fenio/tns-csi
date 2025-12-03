@@ -23,7 +23,7 @@ NVMe-oF requires real kernel modules and block device support that isn't availab
 - ✅ Native performance on Apple Silicon
 
 **What's tested:**
-- Volume provisioning (ZVOL → Namespace)
+- Volume provisioning (ZVOL → Subsystem → Namespace)
 - NVMe-oF target discovery and connection
 - Block device mounting in pods
 - I/O operations
@@ -55,12 +55,14 @@ NFS works perfectly in containers and doesn't require special kernel modules.
    - **Network:** Bridged (to access TrueNAS)
 3. **TrueNAS Scale 25.10 or later** server with:
    - NVMe-oF service enabled
-   - **⚠️ IMPORTANT: At least one NVMe-oF subsystem with TCP port configured** (see below)
+   - **⚠️ IMPORTANT: At least one NVMe-oF TCP port configured** (see below)
 4. **Docker Desktop** for building images
 
-#### ⚠️ Required: Configure NVMe-oF on TrueNAS
+#### ⚠️ Required: Configure NVMe-oF Port on TrueNAS
 
-**Before provisioning NVMe-oF volumes**, you must complete these configuration steps on TrueNAS 25.10+:
+**Before provisioning NVMe-oF volumes**, you must configure an NVMe-oF port on TrueNAS 25.10+.
+
+The CSI driver uses an **independent subsystem architecture** where each volume gets its own dedicated NVMe-oF subsystem. The driver automatically creates and deletes subsystems, but **ports must be pre-configured** by the administrator.
 
 ##### Step 1: Configure Static IP Address (REQUIRED)
 
@@ -75,66 +77,45 @@ TrueNAS requires a static IP - DHCP interfaces won't appear in NVMe-oF configura
    - **DNS:** DNS servers (e.g., `8.8.8.8`)
 4. **Test Changes** and **Save Changes**
 
-##### Step 2: Create Initial ZVOL (REQUIRED)
+##### Step 2: Create NVMe-oF Port (REQUIRED)
 
-Subsystems require at least one namespace with a ZVOL:
-
-1. **Navigate to:** Datasets
-2. **Click:** Add Dataset → Create Zvol
-3. **Configure:**
-   - **Name:** `nvmeof-init`
-   - **Size:** `1 GiB`
-   - **Block size:** `16K`
-4. **Save**
-
-##### Step 3: Create Subsystem with Namespace and Port (REQUIRED)
-
-**⚠️ IMPORTANT:** The CSI driver does NOT create or delete NVMe-oF subsystems. Subsystems are **pre-configured infrastructure** that serve multiple volumes. You must create the subsystem once before deploying the CSI driver.
-
-1. **Navigate to:** Shares → NVMe-oF Subsystems
-
-2. **Click "Add"** to create a new subsystem
-
-3. **Configure subsystem:**
-   - **Subsystem Name:** `nqn.2025-01.com.truenas:csi`
-   - **Namespace:** Select the ZVOL you created (e.g., `pool1/nvmeof-init`)
-
-4. **Save** the subsystem
-
-5. **Click "Add Port"** on your new subsystem
-
-6. **Configure port:**
-   - **Address:** Select your interface with static IP (should now appear in dropdown)
+1. **Navigate to:** Shares → NVMe-oF Targets → Ports
+2. **Click "Add"** to create a new port
+3. **Configure port:**
+   - **Address:** Select your interface with static IP
    - **Port:** `4420` (default NVMe-oF TCP port)
    - **Transport:** `TCP`
+4. **Save** the port configuration
 
-7. **Save** the port configuration
+That's it! The CSI driver will automatically:
+- Create a dedicated subsystem for each volume (NQN: `nqn.2137.csi.tns:<volume-name>`)
+- Bind the subsystem to the first available port
+- Create a namespace with the ZVOL
+- Clean up everything when the volume is deleted
 
-8. **Verify:** The subsystem shows:
-   - At least one namespace (your ZVOL)
-   - At least one TCP port
-
-9. **Note the subsystem NQN** - you'll need this for your StorageClass configuration (e.g., `nqn.2025-01.com.truenas:csi`)
-
-**Why is this required?**
+**Why only a port is required?**
 
 - **Static IP:** TrueNAS only allows NVMe-oF on interfaces with static IPs (prevents storage outages from IP changes)
-- **Initial Namespace:** Empty subsystems are invalid - must have at least one ZVOL namespace
-- **Port:** CSI driver cannot create ports - must be pre-configured
-- **Shared Infrastructure:** One subsystem serves multiple volumes (namespaces). The CSI driver creates/deletes only namespaces, not subsystems.
+- **Port:** The CSI driver cannot create ports - they must be pre-configured infrastructure
+- **Subsystems/Namespaces:** Automatically managed by the CSI driver (one subsystem per volume)
 
 **Architecture:**
-- **Subsystem:** Pre-configured infrastructure (created by administrator, never deleted by CSI driver)
-- **Namespaces:** Dynamically created/deleted by CSI driver for each PVC
-- **1 Subsystem → Many Namespaces (Volumes)**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TrueNAS NVMe-oF                              │
+├─────────────────────────────────────────────────────────────────┤
+│  Port (pre-configured)          ← Admin creates once            │
+│    └── Subsystem (per volume)   ← CSI driver creates/deletes   │
+│          └── Namespace (NSID=1) ← CSI driver creates/deletes   │
+│                └── ZVOL         ← CSI driver creates/deletes   │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-**What happens if not configured?**
+**What happens if port is not configured?**
 
 Volume provisioning will fail with:
 ```
-Failed to find NVMe-oF subsystem with NQN '<your-nqn>'.
-Pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems)
-with ports attached before provisioning volumes.
+No NVMe-oF ports configured. Create a port in TrueNAS (Shares > NVMe-oF Targets > Ports) first.
 ```
 
 ### VM Setup
@@ -204,11 +185,8 @@ helm install tns-csi ./charts/tns-csi-driver \
   --set truenas.apiKey=<your-api-key> \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool=<your-pool-name> \
-  --set storageClasses.nvmeof.server=YOUR-TRUENAS-IP \
-  --set storageClasses.nvmeof.subsystemNQN=nqn.2025-01.com.truenas:csi
+  --set storageClasses.nvmeof.server=YOUR-TRUENAS-IP
 ```
-
-**Important:** Replace `nqn.2025-01.com.truenas:csi` with the actual subsystem NQN you created in Step 3 (line 99).
 
 ### Test NVMe-oF Volume
 
@@ -375,6 +353,11 @@ kubectl apply -f deploy/example-pvc.yaml
 - Restart Docker Desktop if cluster won't start
 - Reload image if changes aren't reflected
 - Check logs: `kubectl logs -n kube-system <pod-name>`
+
+### NVMe-oF Volume Issues
+- Verify port exists: Check TrueNAS UI → Shares → NVMe-oF Targets → Ports
+- Check controller logs: `kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin`
+- Verify connectivity: `nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420`
 
 ---
 

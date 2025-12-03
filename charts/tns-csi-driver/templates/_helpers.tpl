@@ -141,7 +141,4 @@ Validate required TrueNAS configuration
 {{- if and .Values.storageClasses.nvmeof.enabled (not .Values.storageClasses.nvmeof.server) }}
   {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.server is required when NVMe-oF is enabled.\nExample: --set storageClasses.nvmeof.server=\"YOUR-TRUENAS-IP\"" }}
 {{- end }}
-{{- if and .Values.storageClasses.nvmeof.enabled (not .Values.storageClasses.nvmeof.subsystemNQN) }}
-  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.subsystemNQN is required when NVMe-oF is enabled.\nYou must pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) first.\nExample: --set storageClasses.nvmeof.subsystemNQN=\"nqn.2025-01.com.truenas:csi\"" }}
-{{- end }}
 {{- end }}

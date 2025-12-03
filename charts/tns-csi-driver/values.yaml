@@ -232,6 +232,9 @@ storageClasses:
     parameters: {}
   
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
+  # IMPORTANT: Before enabling, ensure you have configured an NVMe-oF port
+  # in TrueNAS (Shares > NVMe-oF Targets > Ports). The CSI driver automatically
+  # creates a dedicated subsystem for each volume - no pre-configured subsystem needed.
   nvmeof:
     enabled: false
     name: tns-csi-nvmeof
@@ -242,13 +245,9 @@ storageClasses:
     server: ""
     # Optional: Parent dataset
     parentDataset: ""
-    # REQUIRED: Pre-configured NVMe-oF subsystem NQN
-    # Create this in TrueNAS: Shares > NVMe-oF Subsystems before deploying
-    # Example: nqn.2025-01.com.truenas:csi
-    subsystemNQN: ""
     # NVMe-oF transport: tcp or rdma
     transport: "tcp"
-    # NVMe-oF port
+    # NVMe-oF port number
     port: "4420"
     # Filesystem type for formatted volumes (ext4, ext3, xfs)
     fsType: "ext4"

@@ -18,9 +18,9 @@ import (
 const (
 	msgFailedCleanupClonedZVOL = "Failed to cleanup cloned ZVOL: %v"
 	// NQN prefix for CSI-managed subsystems.
-	// Format: nqn.2024-01.io.truenas.csi:<volume-name>
+	// Format: nqn.2137.csi.tns:<volume-name>
 	// Each volume gets its own subsystem with NSID=1 (independent subsystem architecture).
-	nqnPrefix = "nqn.2024-01.io.truenas.csi"
+	nqnPrefix = "nqn.2137.csi.tns"
 )
 
 // nvmeofVolumeParams holds validated parameters for NVMe-oF volume creation.

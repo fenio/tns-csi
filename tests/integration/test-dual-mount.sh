@@ -95,10 +95,9 @@ fi
 truenas_url="wss://${TRUENAS_HOST}/api/current"
 test_info "TrueNAS URL: ${truenas_url}"
 
-# NVMe-oF subsystem NQN
-subsystem_nqn="${NVMEOF_SUBSYSTEM_NQN:-nqn.2005-03.org.truenas:csi-test}"
-test_info "NVMe-oF subsystem NQN: ${subsystem_nqn}"
-test_warning "IMPORTANT: The NVMe-oF subsystem must be pre-configured in TrueNAS"
+# NVMe-oF uses independent subsystem architecture - subsystems are auto-created per volume
+# Only the NVMe-oF port needs to be pre-configured in TrueNAS
+test_info "NVMe-oF subsystems will be auto-created per volume"
 
 # Deploy with Helm - enable BOTH NFS and NVMe-oF
 if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
@@ -119,7 +118,6 @@ if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
     --set storageClasses.nvmeof.server="${TRUENAS_HOST}" \
     --set storageClasses.nvmeof.transport=tcp \
     --set storageClasses.nvmeof.port=4420 \
-    --set storageClasses.nvmeof.subsystemNQN="${subsystem_nqn}" \
     --wait --timeout 5m; then
     stop_test_timer "deploy_driver_dual" "FAILED"
     test_error "Helm deployment failed"

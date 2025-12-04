@@ -1240,7 +1240,8 @@ func (c *Client) QueryAllNFSShares(ctx context.Context, pathFilter string) ([]NF
 	klog.V(5).Info("Querying all NFS shares")
 
 	var result []NFSShare
-	err := c.Call(ctx, "sharing.nfs.query", []interface{}{[]interface{}{}}, &result)
+	// Pass empty params to get all shares - TrueNAS API expects either no filter or a valid filter array
+	err := c.Call(ctx, "sharing.nfs.query", []interface{}{}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
 	}
@@ -1254,7 +1255,8 @@ func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespac
 	klog.V(5).Info("Querying all NVMe-oF namespaces")
 
 	var result []NVMeOFNamespace
-	err := c.Call(ctx, "nvmeof.namespace.query", []interface{}{[]interface{}{}}, &result)
+	// Pass empty params to get all namespaces
+	err := c.Call(ctx, "nvmeof.namespace.query", []interface{}{}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
 	}

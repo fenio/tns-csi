@@ -1013,12 +1013,16 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	// With plain volume IDs, we need to look up the volume in TrueNAS to find its metadata.
 	// First, try to find NFS shares matching this volume name
 	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
+	klog.V(4).Infof("QueryAllNFSShares returned %d shares, err=%v", len(shares), err)
 	if err == nil && len(shares) > 0 {
 		for _, share := range shares {
+			klog.V(4).Infof("Checking share path=%s for suffix /%s", share.Path, volumeID)
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
 				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
 				datasetID := mountpointToDatasetID(share.Path)
+				klog.V(4).Infof("Converted mountpoint %s to datasetID %s", share.Path, datasetID)
 				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
+				klog.V(4).Infof("QueryAllDatasets(%s) returned %d datasets, err=%v", datasetID, len(datasets), dsErr)
 				if dsErr == nil && len(datasets) > 0 {
 					meta := &VolumeMetadata{
 						Name:        volumeID,

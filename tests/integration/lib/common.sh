@@ -797,7 +797,7 @@ create_test_pod() {
         echo "=== Node Logs ==="
         kubectl logs -n kube-system \
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
-            --tail=50 || true
+            --tail=200 || true
         
         # Use false to trigger ERR trap (return 1 doesn't work with set -e inside if blocks)
         false
@@ -1091,7 +1091,7 @@ test_volume_expansion() {
         echo "=== Controller Driver Logs ==="
         kubectl logs -n kube-system \
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
-            --tail=50 || true
+            --tail=200 || true
         false  # Trigger ERR trap
     fi
     

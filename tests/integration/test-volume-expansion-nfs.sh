@@ -142,6 +142,9 @@ done
 if [[ $elapsed -ge $timeout ]]; then
     test_error "Expansion timed out"
     kubectl describe pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}"
+    show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
+    cleanup_test "${POD_NAME}" "${PVC_NAME}"
+    test_summary "${PROTOCOL}" "FAILED"
     exit 1
 fi
 

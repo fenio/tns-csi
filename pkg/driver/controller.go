@@ -1012,30 +1012,31 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	// With plain volume IDs, we need to look up the volume in TrueNAS to find its metadata.
 	// First, try to find NFS shares matching this volume name
+	klog.Infof("ControllerExpandVolume: Looking up volume %s in NFS shares", volumeID)
 	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
-	klog.V(2).Infof("ControllerExpandVolume: QueryAllNFSShares returned %d shares, err=%v", len(shares), err)
+	klog.Infof("ControllerExpandVolume: QueryAllNFSShares returned %d shares, err=%v", len(shares), err)
 
 	switch {
 	case err != nil:
-		klog.Warningf("ControllerExpandVolume: Failed to query NFS shares: %v", err)
+		klog.Errorf("ControllerExpandVolume: Failed to query NFS shares: %v", err)
 	case len(shares) == 0:
-		klog.Warningf("ControllerExpandVolume: No NFS shares found at all")
+		klog.Errorf("ControllerExpandVolume: No NFS shares found at all")
 	default:
 		// Log all shares for debugging
 		for i, share := range shares {
-			klog.V(2).Infof("ControllerExpandVolume: Share[%d] id=%d path=%s comment=%s", i, share.ID, share.Path, share.Comment)
+			klog.Infof("ControllerExpandVolume: Share[%d] id=%d path=%s comment=%s", i, share.ID, share.Path, share.Comment)
 		}
 
 		for _, share := range shares {
-			klog.V(2).Infof("ControllerExpandVolume: Checking share path=%s for suffix /%s", share.Path, volumeID)
+			klog.Infof("ControllerExpandVolume: Checking share path=%s for suffix /%s", share.Path, volumeID)
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
 				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
 				datasetID := mountpointToDatasetID(share.Path)
-				klog.V(2).Infof("ControllerExpandVolume: Found matching share, converted mountpoint %s to datasetID %s", share.Path, datasetID)
+				klog.Infof("ControllerExpandVolume: Found matching share, converted mountpoint %s to datasetID %s", share.Path, datasetID)
 				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
-				klog.V(2).Infof("ControllerExpandVolume: QueryAllDatasets(%s) returned %d datasets, err=%v", datasetID, len(datasets), dsErr)
+				klog.Infof("ControllerExpandVolume: QueryAllDatasets(%s) returned %d datasets, err=%v", datasetID, len(datasets), dsErr)
 				if dsErr == nil && len(datasets) > 0 {
-					klog.V(2).Infof("ControllerExpandVolume: Found dataset: ID=%s Name=%s", datasets[0].ID, datasets[0].Name)
+					klog.Infof("ControllerExpandVolume: Found dataset: ID=%s Name=%s", datasets[0].ID, datasets[0].Name)
 					meta := &VolumeMetadata{
 						Name:        volumeID,
 						Protocol:    ProtocolNFS,
@@ -1048,18 +1049,18 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 				}
 			}
 		}
-		klog.Warningf("ControllerExpandVolume: No NFS share found with path suffix /%s", volumeID)
+		klog.Errorf("ControllerExpandVolume: No NFS share found with path suffix /%s", volumeID)
 	}
 
 	// Try to find NVMe-oF namespaces matching this volume name
-	klog.V(2).Infof("ControllerExpandVolume: Trying NVMe-oF lookup for volume %s", volumeID)
+	klog.Infof("ControllerExpandVolume: Trying NVMe-oF lookup for volume %s", volumeID)
 	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
 	if err != nil {
-		klog.V(2).Infof("ControllerExpandVolume: Failed to query NVMe-oF namespaces: %v", err)
+		klog.Infof("ControllerExpandVolume: Failed to query NVMe-oF namespaces: %v", err)
 	} else {
-		klog.V(2).Infof("ControllerExpandVolume: Found %d NVMe-oF namespaces", len(namespaces))
+		klog.Infof("ControllerExpandVolume: Found %d NVMe-oF namespaces", len(namespaces))
 		for i, ns := range namespaces {
-			klog.V(2).Infof("ControllerExpandVolume: Namespace[%d] id=%d device=%s subsystem=%d", i, ns.ID, ns.Device, ns.Subsystem)
+			klog.Infof("ControllerExpandVolume: Namespace[%d] id=%d device=%s subsystem=%d", i, ns.ID, ns.Device, ns.Subsystem)
 			if strings.Contains(ns.Device, volumeID) {
 				subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
 				if subErr == nil {

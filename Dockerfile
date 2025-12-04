@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.25.4-alpine AS builder
+FROM golang:1.25.5-alpine AS builder
 
 WORKDIR /workspace
 
@@ -17,7 +17,7 @@ COPY . .
 RUN make build
 
 # Final stage
-FROM alpine:3.22
+FROM alpine:3.23
 
 # Install runtime dependencies
 RUN apk add --no-cache \

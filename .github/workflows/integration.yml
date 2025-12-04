@@ -36,7 +36,7 @@ on:
 permissions:
   contents: read
 
-# Ensure only one integration test runs at a time on the self-hosted runner
+# Ensure only one integration test runs at a time on the generic runner
 concurrency:
   group: integration-tests
   cancel-in-progress: false
@@ -47,7 +47,7 @@ jobs:
   # ==========================================
   compute-tag:
     name: Compute Image Tag
-    runs-on: self-hosted
+    runs-on: generic
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -68,7 +68,7 @@ jobs:
   # ==========================================
   nfs-basic:
     name: "NFS: Basic"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -94,7 +94,7 @@ jobs:
 
   nfs-snapshot:
     name: "NFS: Snapshot"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -121,7 +121,7 @@ jobs:
 
   nfs-concurrent:
     name: "NFS: Concurrent"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -147,7 +147,7 @@ jobs:
 
   nfs-persistence:
     name: "NFS: Persistence"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -173,7 +173,7 @@ jobs:
 
   nfs-statefulset:
     name: "NFS: StatefulSet"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -199,7 +199,7 @@ jobs:
 
   nfs-expansion:
     name: "NFS: Volume Expansion"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -228,7 +228,7 @@ jobs:
   # ==========================================
   nvmeof-basic:
     name: "NVMe-oF: Basic"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -254,7 +254,7 @@ jobs:
 
   nvmeof-snapshot:
     name: "NVMe-oF: Snapshot"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -281,7 +281,7 @@ jobs:
 
   nvmeof-concurrent:
     name: "NVMe-oF: Concurrent"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -307,7 +307,7 @@ jobs:
 
   nvmeof-persistence:
     name: "NVMe-oF: Persistence"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -333,7 +333,7 @@ jobs:
 
   nvmeof-statefulset:
     name: "NVMe-oF: StatefulSet"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -359,7 +359,7 @@ jobs:
 
   nvmeof-expansion:
     name: "NVMe-oF: Volume Expansion"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -388,7 +388,7 @@ jobs:
   # ==========================================
   shared-dual-mount:
     name: "Shared: Dual Mount"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -413,7 +413,7 @@ jobs:
 
   shared-connection-resilience:
     name: "Shared: Connection Resilience"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -438,7 +438,7 @@ jobs:
 
   shared-pod-restart:
     name: "Shared: Pod Restart"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -463,7 +463,7 @@ jobs:
 
   shared-access-modes:
     name: "Shared: Access Modes"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: compute-tag
     if: |
@@ -488,7 +488,7 @@ jobs:
 
   shared-snapshot-restore:
     name: "Shared: Snapshot Restore"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 20
     needs: compute-tag
     if: |
@@ -514,7 +514,7 @@ jobs:
 
   shared-volume-stress:
     name: "Shared: Volume Stress"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -542,7 +542,7 @@ jobs:
   # ==========================================
   cleanup:
     name: Cleanup
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 10
     needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
     if: always()
@@ -565,7 +565,7 @@ jobs:
 
   test-summary:
     name: "Test Summary"
-    runs-on: self-hosted
+    runs-on: generic
     timeout-minutes: 5
     needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, cleanup]
     if: always()

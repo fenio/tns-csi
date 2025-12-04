@@ -1,5 +1,5 @@
-name: Setup Fresh k3s Cluster
-description: Destroy existing k3s cluster and create a fresh one for testing
+name: Setup k3s Cluster
+description: Install k3s cluster on pristine VM runner
 
 inputs:
   truenas_host:
@@ -15,53 +15,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Clean TrueNAS artifacts
-      shell: bash
-      env:
-        TRUENAS_HOST: ${{ inputs.truenas_host }}
-        TRUENAS_API_KEY: ${{ inputs.truenas_api_key }}
-        TRUENAS_POOL: ${{ inputs.truenas_pool }}
-      run: |
-        echo "=== Cleaning TrueNAS artifacts before test ==="
-        if [[ -n "$TRUENAS_HOST" && -n "$TRUENAS_API_KEY" && -n "$TRUENAS_POOL" ]]; then
-          ./scripts/cleanup-truenas-artifacts.sh || echo "Cleanup failed, continuing anyway"
-        else
-          echo "TrueNAS credentials not provided, skipping cleanup"
-        fi
-
-    - name: Destroy existing k3s cluster
+    - name: Install k3s
       shell: bash
       run: |
-        echo "=== Destroying existing k3s cluster for clean state ==="
-        if command -v k3s-uninstall.sh &> /dev/null; then
-          sudo k3s-uninstall.sh || true
-        fi
-        sudo rm -rf /etc/rancher/k3s /var/lib/rancher/k3s ~/.kube/config || true
-        echo "k3s cluster destroyed"
-        
-        echo "=== Disconnecting all NVMe-oF connections ==="
-        # Disconnect all NVMe-oF TCP connections to ensure clean state between tests
-        # This prevents stale device state from previous tests affecting new tests
-        if command -v nvme &> /dev/null; then
-          sudo nvme disconnect-all || echo "No NVMe-oF connections to disconnect (or disconnect failed)"
-        else
-          echo "nvme-cli not installed, skipping NVMe disconnect"
-        fi
-        
-        echo "=== Flushing any remaining block device caches ==="
-        # Flush caches for any remaining block devices to prevent stale data
-        for dev in /dev/nvme*n* /dev/sd*; do
-          if [ -b "$dev" ]; then
-            sudo blockdev --flushbufs "$dev" 2>/dev/null || true
-          fi
-        done
-        
-        echo "=== Cleanup complete ==="
-
-    - name: Install k3s (fresh cluster)
-      shell: bash
-      run: |
-        echo "=== Installing fresh k3s cluster ==="
+        echo "=== Installing k3s cluster on pristine VM ==="
         curl -sfL https://get.k3s.io | sh -s - \
           --write-kubeconfig-mode 644 \
           --disable traefik \
@@ -70,13 +27,12 @@ runs:
         echo "Waiting for k3s service to start..."
         sleep 15
         
-        echo "Waiting for cluster nodes to register and become ready..."
+        echo "Waiting for cluster to become ready..."
         retries=0
         while [[ $retries -lt 24 ]]; do
           if sudo k3s kubectl get nodes &>/dev/null; then
-            echo "Node registered, checking Ready condition..."
             if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
-              echo "Fresh k3s cluster ready"
+              echo "k3s cluster ready"
               sudo k3s kubectl get nodes
               exit 0
             fi
@@ -100,9 +56,8 @@ runs:
         echo "=== Cluster version ==="
         kubectl version
 
-    - name: Configure k3s for registry pulls
+    - name: Verify cluster
       shell: bash
       run: |
-        echo "=== k3s cluster ready for registry-based image pulls ==="
-        echo "All images will be pulled directly from registries (no sideloading)"
+        echo "=== k3s cluster ready ==="
         kubectl get nodes

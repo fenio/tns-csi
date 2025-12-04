@@ -28,7 +28,7 @@ runs:
         
         if [[ "$INPUT_PROTOCOL" == "nvmeof" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
           sudo apt-get install -y nvme-cli
-          sudo modprobe nvme-tcp
+          sudo modprobe nvme-tcp || echo "nvme-tcp kernel module not available (may require kernel rebuild or different runner image)"
         fi
 
     - name: Install Docker

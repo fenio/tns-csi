@@ -1,7 +1,15 @@
 name: Integration Tests
 
 on:
- workflow_dispatch:
+  # Automatically run after CI workflow completes successfully on main
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+  # Keep manual trigger for testing specific protocols/tests
+  workflow_dispatch:
     inputs:
       protocol:
         description: 'Protocol to test'
@@ -48,6 +56,8 @@ jobs:
   compute-tag:
     name: Compute Image Tag
     runs-on: generic
+    # Skip if triggered by workflow_run and CI failed
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

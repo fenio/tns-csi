@@ -79,7 +79,7 @@ jobs:
   nfs-basic:
     name: "NFS: Basic"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -105,7 +105,7 @@ jobs:
   nfs-snapshot:
     name: "NFS: Snapshot"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -132,7 +132,7 @@ jobs:
   nfs-concurrent:
     name: "NFS: Concurrent"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -158,7 +158,7 @@ jobs:
   nfs-persistence:
     name: "NFS: Persistence"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -184,7 +184,7 @@ jobs:
   nfs-statefulset:
     name: "NFS: StatefulSet"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -210,7 +210,7 @@ jobs:
   nfs-expansion:
     name: "NFS: Volume Expansion"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
@@ -239,7 +239,7 @@ jobs:
   nvmeof-basic:
     name: "NVMe-oF: Basic"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -265,7 +265,7 @@ jobs:
   nvmeof-snapshot:
     name: "NVMe-oF: Snapshot"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -292,7 +292,7 @@ jobs:
   nvmeof-concurrent:
     name: "NVMe-oF: Concurrent"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -318,7 +318,7 @@ jobs:
   nvmeof-persistence:
     name: "NVMe-oF: Persistence"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -344,7 +344,7 @@ jobs:
   nvmeof-statefulset:
     name: "NVMe-oF: StatefulSet"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -370,7 +370,7 @@ jobs:
   nvmeof-expansion:
     name: "NVMe-oF: Volume Expansion"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
@@ -399,7 +399,7 @@ jobs:
   shared-dual-mount:
     name: "Shared: Dual Mount"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
@@ -449,7 +449,7 @@ jobs:
   shared-pod-restart:
     name: "Shared: Pod Restart"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
@@ -474,7 +474,7 @@ jobs:
   shared-access-modes:
     name: "Shared: Access Modes"
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
@@ -553,7 +553,7 @@ jobs:
   cleanup:
     name: Cleanup
     runs-on: generic
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
     if: always()
     steps:

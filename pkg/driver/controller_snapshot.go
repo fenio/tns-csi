@@ -168,7 +168,9 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 		if err == nil && len(shares) > 0 {
 			for _, share := range shares {
 				if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
-					datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+					// Convert mountpoint to dataset ID (strip /mnt/ prefix)
+					datasetID := mountpointToDatasetID(share.Path)
+					datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 					if dsErr == nil && len(datasets) > 0 {
 						datasetName = datasets[0].Name
 						protocol = ProtocolNFS
@@ -443,7 +445,9 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 	if err == nil && len(shares) > 0 {
 		for _, share := range shares {
 			if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
+				datasetID := mountpointToDatasetID(share.Path)
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					datasetName = datasets[0].Name
 					protocol = ProtocolNFS

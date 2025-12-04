@@ -492,7 +492,6 @@ func (c *Client) reconnect() bool {
 		// Record reconnection attempt
 		metrics.RecordWSReconnection()
 		// Exponential backoff: 2^(attempt-1) * retryInterval, max 60s
-		//nolint:gosec // Integer conversion is safe here - attempt is small positive int
 		backoff := time.Duration(1<<uint(attempt-1)) * c.retryInterval
 		if backoff > 60*time.Second {
 			backoff = 60 * time.Second

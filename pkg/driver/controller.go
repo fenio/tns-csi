@@ -43,6 +43,13 @@ var (
 	ErrVolumeNotFound = errors.New("volume not found")
 )
 
+// mountpointToDatasetID converts a ZFS mountpoint to a dataset ID.
+// ZFS datasets are mounted at /mnt/<dataset_name>, so we strip the /mnt/ prefix.
+// Example: /mnt/tank/csi/pvc-xxx -> tank/csi/pvc-xxx.
+func mountpointToDatasetID(mountpoint string) string {
+	return strings.TrimPrefix(mountpoint, "/mnt/")
+}
+
 // APIClient is an alias for the TrueNAS API client interface.
 // Kept for backwards compatibility with existing tests.
 type APIClient = tnsapi.ClientInterface
@@ -545,7 +552,9 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		for _, share := range shares {
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
 				// Query the dataset for this share
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
+				datasetID := mountpointToDatasetID(share.Path)
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					meta := VolumeMetadata{
 						Name:        volumeID,
@@ -1007,7 +1016,9 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	if err == nil && len(shares) > 0 {
 		for _, share := range shares {
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, share.Path)
+				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
+				datasetID := mountpointToDatasetID(share.Path)
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					meta := &VolumeMetadata{
 						Name:        volumeID,

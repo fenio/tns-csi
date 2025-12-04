@@ -84,7 +84,7 @@ jobs:
           # Sanitize branch name for docker tag (replace / with -)
           TAG=$(echo "$BRANCH" | sed 's/\//-/g')
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "is_main=$([[ '$BRANCH' == 'main' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          echo "is_main=$([[ "$BRANCH" == 'main' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
       - name: Build and push images
         uses: docker/build-push-action@v6

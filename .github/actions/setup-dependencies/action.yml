@@ -28,7 +28,19 @@ runs:
         
         if [[ "$INPUT_PROTOCOL" == "nvmeof" ]] || [[ "$INPUT_PROTOCOL" == "both" ]]; then
           sudo apt-get install -y nvme-cli
-          sudo modprobe nvme-tcp || echo "nvme-tcp kernel module not available (may require kernel rebuild or different runner image)"
+          
+          # Install linux-modules-extra for nvme-tcp kernel module
+          KERNEL_VERSION=$(uname -r)
+          echo "Installing linux-modules-extra for kernel ${KERNEL_VERSION}"
+          sudo apt-get install -y linux-modules-extra-${KERNEL_VERSION} || echo "linux-modules-extra not available, trying to load module anyway"
+          
+          # Load nvme-tcp kernel module (required for NVMe-oF)
+          sudo modprobe nvme-tcp || {
+            echo "ERROR: Failed to load nvme-tcp kernel module"
+            echo "NVMe-oF tests will fail without this module"
+            exit 1
+          }
+          echo "nvme-tcp kernel module loaded successfully"
         fi
 
     - name: Install Docker

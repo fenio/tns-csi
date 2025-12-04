@@ -1,14 +1,14 @@
 name: Integration Tests
 
 on:
-  # Automatically run after CI workflow completes successfully on main
-  workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
-    branches:
-      - main
-  # Keep manual trigger for testing specific protocols/tests
+  # Automatic trigger disabled - run manually until volume expansion issues are fixed
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types:
+  #     - completed
+  #   branches:
+  #     - main
+  # Manual trigger for testing specific protocols/tests
   workflow_dispatch:
     inputs:
       protocol:

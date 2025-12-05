@@ -1068,10 +1068,13 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 				return nil, fmt.Errorf("failed to query NVMe-oF subsystems: %w", subErr)
 			}
 
-			klog.Infof("lookupNVMeOFVolume: Found %d subsystems, looking for subsystem ID %d", len(subsystems), ns.Subsystem)
+			klog.Infof("lookupNVMeOFVolume: Found %d subsystems, looking for subsystem with volumeID %s in NQN (fallback: subsystem ID %d)", len(subsystems), volumeID, ns.Subsystem)
 			for _, sub := range subsystems {
 				klog.Infof("lookupNVMeOFVolume: Checking subsystem ID=%d, NQN=%s", sub.ID, sub.NQN)
-				if sub.ID == ns.Subsystem {
+				// TrueNAS API bug: namespace.subsystem field is always 0
+				// Workaround: match by checking if volumeID appears in the subsystem NQN
+				// Expected NQN format: nqn.2011-06.com.truenas:uuid:xxx:nqn.2137.csi.tns:pvc-<volumeID>
+				if sub.ID == ns.Subsystem || strings.Contains(sub.NQN, volumeID) {
 					// Extract the dataset ID from the device path
 					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
 					// Dataset ID should be "tank/csi/volume-name"
@@ -1089,7 +1092,7 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 					}, nil
 				}
 			}
-			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but no matching subsystem for volume %s (namespace subsystem ID: %d)", volumeID, ns.Subsystem)
+			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but no matching subsystem for volume %s (namespace subsystem ID: %d, searched %d subsystems)", volumeID, ns.Subsystem, len(subsystems))
 		}
 	}
 

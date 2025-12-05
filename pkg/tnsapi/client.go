@@ -1256,7 +1256,8 @@ func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespac
 
 	var result []NVMeOFNamespace
 	// Pass empty params to get all namespaces
-	err := c.Call(ctx, "nvmeof.namespace.query", []interface{}{}, &result)
+	// Use nvmet.namespace.query to match the API naming used for create/delete
+	err := c.Call(ctx, "nvmet.namespace.query", []interface{}{}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
 	}

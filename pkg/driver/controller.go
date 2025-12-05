@@ -1058,9 +1058,10 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 	klog.Infof("lookupNVMeOFVolume: Found %d NVMe-oF namespaces, searching for volume %s", len(namespaces), volumeID)
 
 	for _, ns := range namespaces {
-		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, Subsystem=%d", ns.ID, ns.Device, ns.Subsystem)
-		if strings.Contains(ns.Device, volumeID) {
-			klog.Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", ns.Device)
+		device := ns.GetDevice()
+		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, DevicePath=%s, Subsystem=%d", ns.ID, ns.Device, ns.DevicePath, ns.Subsystem)
+		if strings.Contains(device, volumeID) {
+			klog.Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", device)
 
 			subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
 			if subErr != nil {
@@ -1074,7 +1075,7 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 					// Extract the dataset ID from the device path
 					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
 					// Dataset ID should be "tank/csi/volume-name"
-					datasetID := strings.TrimPrefix(ns.Device, "/dev/zvol/")
+					datasetID := strings.TrimPrefix(device, "/dev/zvol/")
 					datasetID = strings.TrimPrefix(datasetID, "zvol/")
 					klog.Infof("lookupNVMeOFVolume: Found NVMe-oF volume %s with dataset %s, NQN %s", volumeID, datasetID, sub.NQN)
 					return &VolumeMetadata{

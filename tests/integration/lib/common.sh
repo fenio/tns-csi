@@ -559,6 +559,24 @@ deploy_driver() {
         --wait --timeout 5m; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "Helm deployment failed"
+        
+        # Show diagnostic info about what went wrong
+        echo ""
+        echo "=== DIAGNOSTIC: Pod Status After Helm Failure ==="
+        kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide || true
+        
+        echo ""
+        echo "=== DIAGNOSTIC: Pod Descriptions ==="
+        kubectl describe pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver || true
+        
+        echo ""
+        echo "=== DIAGNOSTIC: Controller Logs ==="
+        kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --all-containers --tail=50 || true
+        
+        echo ""
+        echo "=== DIAGNOSTIC: Node Logs ==="
+        kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node --all-containers --tail=50 || true
+        
         false  # Trigger ERR trap
     fi
     

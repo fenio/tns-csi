@@ -1002,21 +1002,22 @@ func (s *ControllerService) lookupNFSVolume(ctx context.Context, volumeID string
 	}
 
 	if len(shares) == 0 {
-		klog.V(4).Infof("lookupNFSVolume: No NFS shares found")
+		klog.Infof("lookupNFSVolume: No NFS shares found")
 		return nil, ErrVolumeNotFound
 	}
 
-	klog.V(4).Infof("lookupNFSVolume: Found %d NFS shares, searching for volume %s", len(shares), volumeID)
+	klog.Infof("lookupNFSVolume: Found %d NFS shares, searching for volume %s", len(shares), volumeID)
 
 	// Try to find a matching share for this volume
 	for _, share := range shares {
+		klog.Infof("lookupNFSVolume: Checking NFS share ID=%d, Path=%s", share.ID, share.Path)
 		if !strings.HasSuffix(share.Path, "/"+volumeID) {
 			continue
 		}
 
 		// Convert mountpoint to dataset ID (strip /mnt/ prefix)
 		datasetID := mountpointToDatasetID(share.Path)
-		klog.V(4).Infof("lookupNFSVolume: Found matching NFS share, mountpoint=%s, datasetID=%s", share.Path, datasetID)
+		klog.Infof("lookupNFSVolume: Found matching NFS share, mountpoint=%s, datasetID=%s", share.Path, datasetID)
 
 		datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 		if dsErr != nil {
@@ -1037,7 +1038,7 @@ func (s *ControllerService) lookupNFSVolume(ctx context.Context, volumeID string
 		}, nil
 	}
 
-	klog.V(4).Infof("lookupNFSVolume: No NFS share found with path suffix /%s", volumeID)
+	klog.Warningf("lookupNFSVolume: No NFS share found with path suffix /%s after checking %d shares", volumeID, len(shares))
 	return nil, ErrVolumeNotFound
 }
 
@@ -1054,23 +1055,27 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 		return nil, ErrVolumeNotFound
 	}
 
-	klog.V(4).Infof("lookupNVMeOFVolume: Found %d NVMe-oF namespaces, searching for volume %s", len(namespaces), volumeID)
+	klog.Infof("lookupNVMeOFVolume: Found %d NVMe-oF namespaces, searching for volume %s", len(namespaces), volumeID)
 
 	for _, ns := range namespaces {
+		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, Subsystem=%d", ns.ID, ns.Device, ns.Subsystem)
 		if strings.Contains(ns.Device, volumeID) {
-			klog.V(4).Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", ns.Device)
+			klog.Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", ns.Device)
 
 			subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
 			if subErr != nil {
 				return nil, fmt.Errorf("failed to query NVMe-oF subsystems: %w", subErr)
 			}
 
+			klog.Infof("lookupNVMeOFVolume: Found %d subsystems, looking for subsystem ID %d", len(subsystems), ns.Subsystem)
 			for _, sub := range subsystems {
+				klog.Infof("lookupNVMeOFVolume: Checking subsystem ID=%d, NQN=%s", sub.ID, sub.NQN)
 				if sub.ID == ns.Subsystem {
 					// Extract the dataset ID from the device path
-					// Device path is like /dev/zvol/tank/csi/volume-name
-					// Dataset ID is tank/csi/volume-name
+					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
+					// Dataset ID should be "tank/csi/volume-name"
 					datasetID := strings.TrimPrefix(ns.Device, "/dev/zvol/")
+					datasetID = strings.TrimPrefix(datasetID, "zvol/")
 					klog.Infof("lookupNVMeOFVolume: Found NVMe-oF volume %s with dataset %s, NQN %s", volumeID, datasetID, sub.NQN)
 					return &VolumeMetadata{
 						Name:              volumeID,
@@ -1083,10 +1088,11 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 					}, nil
 				}
 			}
+			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but no matching subsystem for volume %s (namespace subsystem ID: %d)", volumeID, ns.Subsystem)
 		}
 	}
 
-	klog.V(4).Infof("lookupNVMeOFVolume: No NVMe-oF namespace found for volume %s", volumeID)
+	klog.Warningf("lookupNVMeOFVolume: No NVMe-oF namespace found for volume %s after checking %d namespaces", volumeID, len(namespaces))
 	return nil, ErrVolumeNotFound
 }
 

@@ -95,7 +95,7 @@ spec:
 EOF
     BG_PIDS+=($!)
     # Small delay to avoid overwhelming the API server
-    sleep 0.5
+    sleep 2
 done
 
 # Wait for all background jobs to complete and check exit status

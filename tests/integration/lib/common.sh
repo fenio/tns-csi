@@ -493,6 +493,7 @@ deploy_driver() {
         --set image.pullPolicy=Always
         --set truenas.url="${truenas_url}"
         --set truenas.apiKey="${TRUENAS_API_KEY}"
+        --set truenas.skipTLSVerify=true
     )
     
     # Protocol-specific configuration

@@ -109,3 +109,35 @@ runs:
         echo "=== Verifying API server responsiveness ==="
         kubectl get --raw /readyz
         kubectl get --raw /healthz
+        
+        echo ""
+        echo "=== Warming up API server with concurrent requests ==="
+        # Make 10 concurrent requests to warm up TLS session cache and connection handling
+        for i in {1..10}; do
+          kubectl get nodes &>/dev/null &
+        done
+        wait
+        echo "Warmup complete"
+        
+        echo ""
+        echo "=== Verifying concurrent connection handling ==="
+        # Test that 5 concurrent kubectl commands work
+        FAIL=0
+        for i in {1..5}; do
+          kubectl get ns &>/dev/null &
+        done
+        for job in $(jobs -p); do
+          wait $job || FAIL=1
+        done
+        if [ $FAIL -eq 1 ]; then
+          echo "WARNING: Concurrent kubectl test failed, waiting 30s for API server"
+          sleep 30
+          # Retry
+          for i in {1..5}; do
+            kubectl get ns &>/dev/null &
+          done
+          for job in $(jobs -p); do
+            wait $job || { echo "ERROR: API server cannot handle concurrent connections"; exit 1; }
+          done
+        fi
+        echo "API server handles concurrent connections successfully"

@@ -131,7 +131,7 @@ spec:
       claimName: ${PVC_NAMES[$i]}
 EOF
     BG_PIDS+=($!)
-    # Delay to avoid overwhelming the API server (especially important for k3s)
+    # Small delay to avoid overwhelming the API server
     sleep 2
 done
 

@@ -161,7 +161,8 @@ spec:
             - "--timeout=120s"
             - "--leader-election-lease-duration=30s"
             - "--leader-election-renew-deadline=20s"
-            - "--leader-election-retry-period=5s"          env:
+            - "--leader-election-retry-period=5s"
+          env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:

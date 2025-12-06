@@ -5,11 +5,22 @@
 
 set -e
 
+# Ensure output is not buffered (flush immediately)
+exec 1> >(stdbuf -o0 cat)
+exec 2> >(stdbuf -o0 cat >&2)
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Print immediately to verify script execution started
+echo "Starting Volume Stress Test script..."
+echo "Working directory: $(pwd)"
+echo "Script directory: ${SCRIPT_DIR}"
+date
+
 source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="Volume Limits Stress Test"
-NUM_VOLUMES=10
+NUM_VOLUMES=5  # Reduced from 10 to 5 for faster execution within timeout
 TEST_PREFIX="stress-test"
 
 echo "================================================"

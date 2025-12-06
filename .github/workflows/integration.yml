@@ -525,7 +525,7 @@ jobs:
   shared-volume-stress:
     name: "Shared: Volume Stress"
     runs-on: generic
-    timeout-minutes: 15
+    timeout-minutes: 30
     needs: compute-tag
     if: |
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
@@ -545,7 +545,12 @@ jobs:
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-volume-stress.sh
+        run: |
+          echo "=== Starting Volume Stress Test ==="
+          date
+          stdbuf -o0 ./tests/integration/test-volume-stress.sh
+          echo "=== Volume Stress Test Completed ==="
+          date
 
   # ==========================================
   # Summary

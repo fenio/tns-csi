@@ -5,10 +5,6 @@
 
 set -e
 
-# Ensure output is not buffered (flush immediately)
-exec 1> >(stdbuf -o0 cat)
-exec 2> >(stdbuf -o0 cat >&2)
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Print immediately to verify script execution started

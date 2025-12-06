@@ -32,7 +32,7 @@ echo "  • Source volume unchanged after snapshot operations"
 echo "================================================"
 
 # Trap errors and cleanup
-trap 'show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"; cleanup_test "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"; cleanup_test "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"; cleanup_test "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"; kubectl delete volumesnapshot ${SNAPSHOT_NAME_1} ${SNAPSHOT_NAME_2} -n "${TEST_NAMESPACE}" --ignore-not-found=true; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
+trap 'save_diagnostic_logs "snapshot-restore" "/tmp/test-logs"; show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"; cleanup_test "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"; cleanup_test "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"; cleanup_test "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"; kubectl delete volumesnapshot ${SNAPSHOT_NAME_1} ${SNAPSHOT_NAME_2} -n "${TEST_NAMESPACE}" --ignore-not-found=true; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
 # Run test steps
 verify_cluster

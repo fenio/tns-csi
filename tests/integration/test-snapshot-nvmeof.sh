@@ -21,7 +21,7 @@ echo "TrueNAS CSI - NVMe-oF Snapshot Test"
 echo "========================================"
 
 # Trap errors and cleanup
-trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_snapshot_test; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
+trap 'save_diagnostic_logs "nvmeof-snapshot" "/tmp/test-logs"; show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_snapshot_test; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
 #######################################
 # Create VolumeSnapshot from PVC

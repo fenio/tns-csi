@@ -1055,12 +1055,12 @@ func (c *Client) AddSubsystemToPort(ctx context.Context, subsystemID, portID int
 
 // NVMeOFPortSubsystem represents a port-subsystem association.
 type NVMeOFPortSubsystem struct {
-	ID           int `json:"id"`
-	PortID       int `json:"port_id"`
-	SubsystemID  int `json:"subsys_id"`
-	SubsysID     int `json:"subsysid"`  // Alternative field name
-	PortIDFields int `json:"port"`      // Alternative field name
-	SubsysFields int `json:"subsystem"` // Alternative field name
+	Port        json.RawMessage `json:"port"`      // Can be int or object
+	Subsystem   json.RawMessage `json:"subsystem"` // Can be int or object
+	ID          int             `json:"id"`
+	PortID      int             `json:"port_id"`
+	SubsystemID int             `json:"subsys_id"`
+	SubsysID    int             `json:"subsysid"` // Alternative field name
 }
 
 // GetPortID returns the port ID, trying multiple possible field names.
@@ -1068,8 +1068,19 @@ func (ps *NVMeOFPortSubsystem) GetPortID() int {
 	if ps.PortID != 0 {
 		return ps.PortID
 	}
-	if ps.PortIDFields != 0 {
-		return ps.PortIDFields
+	// Try to parse Port as int
+	if len(ps.Port) > 0 {
+		var portInt int
+		if err := json.Unmarshal(ps.Port, &portInt); err == nil {
+			return portInt
+		}
+		// Try to parse as object with id field
+		var portObj struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal(ps.Port, &portObj); err == nil && portObj.ID != 0 {
+			return portObj.ID
+		}
 	}
 	return 0
 }
@@ -1082,8 +1093,19 @@ func (ps *NVMeOFPortSubsystem) GetSubsystemID() int {
 	if ps.SubsysID != 0 {
 		return ps.SubsysID
 	}
-	if ps.SubsysFields != 0 {
-		return ps.SubsysFields
+	// Try to parse Subsystem as int
+	if len(ps.Subsystem) > 0 {
+		var subsysInt int
+		if err := json.Unmarshal(ps.Subsystem, &subsysInt); err == nil {
+			return subsysInt
+		}
+		// Try to parse as object with id field
+		var subsysObj struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal(ps.Subsystem, &subsysObj); err == nil && subsysObj.ID != 0 {
+			return subsysObj.ID
+		}
 	}
 	return 0
 }

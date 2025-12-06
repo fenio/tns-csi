@@ -447,7 +447,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	// Step 1: Delete NVMe-oF namespace (best effort)
 	namespaceDeleted := false
-	if err := s.deleteNVMeOFNamespace(ctx, meta, timer); err != nil {
+	if err := s.deleteNVMeOFNamespace(ctx, meta); err != nil {
 		klog.Errorf("Failed to delete namespace %d (continuing with cleanup): %v", meta.NVMeOFNamespaceID, err)
 		deletionErrors = append(deletionErrors, fmt.Errorf("namespace deletion failed: %w", err))
 	} else {
@@ -462,7 +462,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		klog.Warningf("Skipping subsystem deletion because namespace %d deletion failed - subsystem %d cannot be deleted while namespace exists",
 			meta.NVMeOFNamespaceID, meta.NVMeOFSubsystemID)
 		deletionErrors = append(deletionErrors, errSubsystemDeletionSkipped)
-	} else if err := s.deleteNVMeOFSubsystem(ctx, meta, timer); err != nil {
+	} else if err := s.deleteNVMeOFSubsystem(ctx, meta); err != nil {
 		klog.Errorf("Failed to delete subsystem %d (continuing with cleanup): %v", meta.NVMeOFSubsystemID, err)
 		deletionErrors = append(deletionErrors, fmt.Errorf("subsystem deletion failed: %w", err))
 	} else {
@@ -513,7 +513,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 // deleteNVMeOFSubsystem deletes an NVMe-oF subsystem.
 // This function first verifies all namespaces are removed, then unbinds from ports, then deletes the subsystem.
 // TrueNAS will refuse to delete subsystems with active namespaces or port bindings.
-func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
+func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.NVMeOFSubsystemID <= 0 {
 		return nil
 	}
@@ -585,7 +585,7 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 }
 
 // deleteNVMeOFNamespace deletes an NVMe-oF namespace and verifies deletion.
-func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
+func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.NVMeOFNamespaceID <= 0 {
 		return nil
 	}
@@ -610,11 +610,11 @@ func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *Vol
 	klog.V(4).Infof("Deleted NVMe-oF namespace %d (ZVOL: %s)", meta.NVMeOFNamespaceID, meta.DatasetID)
 
 	// Verify namespace is gone
-	return s.verifyNamespaceDeletion(ctx, meta, timer)
+	return s.verifyNamespaceDeletion(ctx, meta)
 }
 
 // verifyNamespaceDeletion verifies that a namespace has been fully deleted.
-func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
+func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *VolumeMetadata) error {
 	klog.V(4).Infof("Verifying namespace %d deletion...", meta.NVMeOFNamespaceID)
 
 	allNamespaces, queryErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)

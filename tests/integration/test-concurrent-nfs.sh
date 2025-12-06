@@ -76,11 +76,18 @@ for i in $(seq 1 ${NUM_VOLUMES}); do
     PVC_NAMES[$i]="concurrent-pvc-${i}"
 done
 
-# Create all PVCs simultaneously
-test_info "Creating ${NUM_VOLUMES} PVCs concurrently..."
-declare -a BG_PIDS=()
+# Create all PVCs in a single kubectl apply call to avoid TLS handshake timeouts
+# Using multi-document YAML ensures only one API server connection is used
+test_info "Creating ${NUM_VOLUMES} PVCs in a single request..."
+
+# Build multi-document YAML for all PVCs
+PVC_YAML=""
 for i in $(seq 1 ${NUM_VOLUMES}); do
-    cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
+    if [[ -n "${PVC_YAML}" ]]; then
+        PVC_YAML="${PVC_YAML}
+---"
+    fi
+    PVC_YAML="${PVC_YAML}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -91,28 +98,17 @@ spec:
   resources:
     requests:
       storage: 1Gi
-  storageClassName: tns-csi-nfs
-EOF
-    BG_PIDS+=($!)
-    # Small delay to avoid overwhelming the API server
-    sleep 2
+  storageClassName: tns-csi-nfs"
 done
 
-# Wait for all background jobs to complete and check exit status
-test_info "Waiting for all PVC creation jobs to complete..."
-FAILED=0
-for pid in "${BG_PIDS[@]}"; do
-    if ! wait $pid; then
-        FAILED=1
-    fi
-done
-
-if [[ $FAILED -eq 1 ]]; then
-    test_error "One or more PVC creation commands failed"
+# Apply all PVCs in one call
+echo "${PVC_YAML}" | kubectl apply -n "${TEST_NAMESPACE}" -f -
+if [[ $? -ne 0 ]]; then
+    test_error "Failed to create PVCs"
     kubectl get pvc -n "${TEST_NAMESPACE}" || true
     exit 1
 fi
-test_success "All PVC creation requests submitted successfully"
+test_success "All ${NUM_VOLUMES} PVC creation requests submitted successfully"
 
 # Give provisioner time to start processing
 sleep 10

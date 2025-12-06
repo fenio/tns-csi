@@ -94,13 +94,18 @@ for i in $(seq 1 ${NUM_VOLUMES}); do
     POD_NAMES[$i]="concurrent-pod-nvmeof-${i}"
 done
 
-# Create all PVCs simultaneously (with pods, since WaitForFirstConsumer)
-test_info "Creating ${NUM_VOLUMES} PVC+Pod pairs concurrently..."
-declare -a BG_PIDS=()
+# Create all PVCs and Pods in a single kubectl apply call to avoid TLS handshake timeouts
+# Using multi-document YAML ensures only one API server connection is used
+test_info "Creating ${NUM_VOLUMES} PVC+Pod pairs in a single request..."
+
+# Build multi-document YAML for all PVCs and Pods
+RESOURCES_YAML=""
 for i in $(seq 1 ${NUM_VOLUMES}); do
-    # Create PVC and Pod together for WaitForFirstConsumer binding mode
-    cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f - &
----
+    if [[ -n "${RESOURCES_YAML}" ]]; then
+        RESOURCES_YAML="${RESOURCES_YAML}
+---"
+    fi
+    RESOURCES_YAML="${RESOURCES_YAML}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -121,36 +126,25 @@ spec:
   containers:
   - name: test-container
     image: busybox:latest
-    command: ["sleep", "600"]
+    command: [\"sleep\", \"600\"]
     volumeMounts:
     - name: test-volume
       mountPath: /data
   volumes:
   - name: test-volume
     persistentVolumeClaim:
-      claimName: ${PVC_NAMES[$i]}
-EOF
-    BG_PIDS+=($!)
-    # Delay to avoid overwhelming the API server (especially important for k3s)
-    sleep 2
+      claimName: ${PVC_NAMES[$i]}"
 done
 
-# Wait for all background jobs to complete and check exit status
-test_info "Waiting for all PVC+Pod creation jobs to complete..."
-FAILED=0
-for pid in "${BG_PIDS[@]}"; do
-    if ! wait $pid; then
-        FAILED=1
-    fi
-done
-
-if [[ $FAILED -eq 1 ]]; then
-    test_error "One or more PVC/Pod creation commands failed"
+# Apply all resources in one call
+echo "${RESOURCES_YAML}" | kubectl apply -n "${TEST_NAMESPACE}" -f -
+if [[ $? -ne 0 ]]; then
+    test_error "Failed to create PVCs/Pods"
     kubectl get pvc -n "${TEST_NAMESPACE}" || true
     kubectl get pods -n "${TEST_NAMESPACE}" || true
     exit 1
 fi
-test_success "All PVC+Pod creation requests submitted successfully"
+test_success "All ${NUM_VOLUMES} PVC+Pod creation requests submitted successfully"
 
 # Give provisioner time to start processing
 sleep 15

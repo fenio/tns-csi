@@ -148,10 +148,10 @@ sidecars:
     resources:
       requests:
         cpu: 10m
-        memory: 20Mi
+        memory: 40Mi
       limits:
-        cpu: 200m
-        memory: 200Mi
+        cpu: 300m
+        memory: 300Mi
   
   attacher:
     image:
@@ -161,10 +161,10 @@ sidecars:
     resources:
       requests:
         cpu: 10m
-        memory: 20Mi
+        memory: 40Mi
       limits:
-        cpu: 200m
-        memory: 200Mi
+        cpu: 300m
+        memory: 300Mi
   
   resizer:
     image:
@@ -174,10 +174,10 @@ sidecars:
     resources:
       requests:
         cpu: 10m
-        memory: 20Mi
+        memory: 40Mi
       limits:
-        cpu: 200m
-        memory: 200Mi
+        cpu: 300m
+        memory: 300Mi
   
   nodeDriverRegistrar:
     image:

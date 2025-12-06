@@ -15,6 +15,26 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Tune OS for Kubernetes
+      shell: bash
+      run: |
+        echo "=== Tuning OS network settings for concurrent connections ==="
+        
+        # Increase TCP connection backlog for API server
+        sudo sysctl -w net.core.somaxconn=4096
+        sudo sysctl -w net.ipv4.tcp_max_syn_backlog=4096
+        
+        # Increase file descriptor limits
+        sudo sysctl -w fs.file-max=1000000
+        
+        # Reduce TIME_WAIT sockets
+        sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+        
+        # Increase local port range
+        sudo sysctl -w net.ipv4.ip_local_port_range="10000 65535"
+        
+        echo "OS tuning complete"
+
     - name: Install k3s
       shell: bash
       run: |
@@ -27,7 +47,9 @@ runs:
           if curl -sfL https://get.k3s.io | sh -s - \
             --write-kubeconfig-mode 644 \
             --disable traefik \
-            --disable servicelb; then
+            --disable servicelb \
+            --kube-apiserver-arg=max-requests-inflight=400 \
+            --kube-apiserver-arg=max-mutating-requests-inflight=200; then
             echo "k3s installation successful"
             break
           else

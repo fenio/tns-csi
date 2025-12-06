@@ -430,36 +430,74 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 
 // deleteNVMeOFVolume deletes an NVMe-oF volume.
 // With independent subsystem architecture, this deletes the namespace, subsystem, and ZVOL.
+// Uses best-effort cleanup: continues deleting resources even if earlier steps fail.
+// This prevents orphaned resources on TrueNAS when partial failures occur.
 func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "delete")
 	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d, subsystem ID: %d)",
 		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID, meta.NVMeOFSubsystemID)
 
-	// Step 1: Delete NVMe-oF namespace
+	// Track all errors but continue with best-effort cleanup
+	var errors []error
+
+	// Step 1: Delete NVMe-oF namespace (best effort)
 	if err := s.deleteNVMeOFNamespace(ctx, meta, timer); err != nil {
-		return nil, err
+		klog.Errorf("Failed to delete namespace %d (continuing with cleanup): %v", meta.NVMeOFNamespaceID, err)
+		errors = append(errors, fmt.Errorf("namespace deletion failed: %w", err))
+	} else {
+		klog.V(4).Infof("Successfully deleted namespace %d", meta.NVMeOFNamespaceID)
 	}
 
-	// Step 2: Delete NVMe-oF subsystem (independent subsystem architecture - one per volume)
+	// Step 2: Delete NVMe-oF subsystem (best effort - independent subsystem architecture)
 	if err := s.deleteNVMeOFSubsystem(ctx, meta, timer); err != nil {
-		return nil, err
+		klog.Errorf("Failed to delete subsystem %d (continuing with cleanup): %v", meta.NVMeOFSubsystemID, err)
+		errors = append(errors, fmt.Errorf("subsystem deletion failed: %w", err))
+	} else {
+		klog.V(4).Infof("Successfully deleted subsystem %d", meta.NVMeOFSubsystemID)
 	}
 
-	// Step 3: Delete ZVOL
+	// Step 3: Delete ZVOL (best effort)
 	if err := s.deleteZVOL(ctx, meta); err != nil {
-		return nil, err
+		klog.Errorf("Failed to delete ZVOL %s (continuing with cleanup): %v", meta.DatasetID, err)
+		errors = append(errors, fmt.Errorf("ZVOL deletion failed: %w", err))
+	} else {
+		klog.V(4).Infof("Successfully deleted ZVOL %s", meta.DatasetID)
 	}
 
-	klog.Infof("Deleted NVMe-oF volume: %s (namespace, subsystem, and ZVOL)", meta.Name)
+	// Evaluate cleanup results
+	if len(errors) == 0 {
+		// Complete success
+		klog.Infof("Deleted NVMe-oF volume: %s (namespace, subsystem, and ZVOL)", meta.Name)
+		metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF)
+		timer.ObserveSuccess()
+		return &csi.DeleteVolumeResponse{}, nil
+	}
 
-	// Remove volume capacity metric using plain volume name
+	if len(errors) == 3 {
+		// All deletions failed - return error to trigger retry
+		klog.Errorf("All deletion steps failed for volume %s: %v", meta.Name, errors)
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal,
+			"Failed to delete all volume resources for %s: %v", meta.Name, errors)
+	}
+
+	// Partial success - log warnings but consider it successful
+	// Some resources were deleted, which is better than none
+	klog.Warningf("Partial cleanup for volume %s - some resources may remain: %v", meta.Name, errors)
+	klog.Warningf("Successfully deleted %d of 3 resources (namespace, subsystem, ZVOL)", 3-len(errors))
+
+	// Remove volume capacity metric even on partial success
 	metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF)
 
+	// Return success to avoid infinite retries when partial cleanup succeeded
+	// Kubernetes will consider the volume deleted
 	timer.ObserveSuccess()
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
 // deleteNVMeOFSubsystem deletes an NVMe-oF subsystem.
+// This function first unbinds the subsystem from all ports before deletion
+// to prevent orphaned subsystems due to TrueNAS refusing to delete subsystems with active port bindings.
 func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *VolumeMetadata, timer *metrics.OperationTimer) error {
 	if meta.NVMeOFSubsystemID <= 0 {
 		return nil
@@ -467,6 +505,26 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 
 	klog.V(4).Infof("Deleting NVMe-oF subsystem: ID=%d", meta.NVMeOFSubsystemID)
 
+	// Step 1: Query and unbind all port associations first
+	// TrueNAS may silently fail to delete subsystems with active port bindings
+	bindings, err := s.apiClient.QuerySubsystemPortBindings(ctx, meta.NVMeOFSubsystemID)
+	if err != nil {
+		klog.Warningf("Failed to query port bindings for subsystem %d (continuing anyway): %v",
+			meta.NVMeOFSubsystemID, err)
+	} else if len(bindings) > 0 {
+		klog.V(4).Infof("Unbinding subsystem %d from %d port(s)", meta.NVMeOFSubsystemID, len(bindings))
+		for _, binding := range bindings {
+			if unbindErr := s.apiClient.RemoveSubsystemFromPort(ctx, binding.ID); unbindErr != nil {
+				// Log warning but continue - we still want to try deleting the subsystem
+				klog.Warningf("Failed to unbind subsystem %d from port binding %d (continuing anyway): %v",
+					meta.NVMeOFSubsystemID, binding.ID, unbindErr)
+			} else {
+				klog.V(4).Infof("Unbound subsystem %d from port binding %d", meta.NVMeOFSubsystemID, binding.ID)
+			}
+		}
+	}
+
+	// Step 2: Delete the subsystem
 	if err := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID); err != nil {
 		// Check if subsystem already deleted (idempotency)
 		if isNotFoundError(err) {

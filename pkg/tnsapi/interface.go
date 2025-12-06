@@ -39,6 +39,8 @@ type ClientInterface interface {
 	QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespace, error)
 
 	AddSubsystemToPort(ctx context.Context, subsystemID, portID int) error
+	RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error
+	QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]NVMeOFPortSubsystem, error)
 	QueryNVMeOFPorts(ctx context.Context) ([]NVMeOFPort, error)
 
 	// Snapshot operations

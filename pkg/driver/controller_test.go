@@ -136,6 +136,14 @@ func (m *mockAPIClient) AddSubsystemToPort(ctx context.Context, subsystemID, por
 	return nil
 }
 
+func (m *mockAPIClient) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	return nil
+}
+
+func (m *mockAPIClient) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error) {
+	return nil, nil
+}
+
 func (m *mockAPIClient) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
 	return nil, errNotImplemented
 }

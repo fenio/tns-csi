@@ -216,6 +216,14 @@ func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName stri
 	return nil, errors.New("QueryPoolFunc not implemented")
 }
 
+func (m *MockAPIClientForSnapshots) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	return nil
+}
+
+func (m *MockAPIClientForSnapshots) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error) {
+	return nil, nil
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }
@@ -1029,8 +1037,8 @@ func TestValidateCloneParameters(t *testing.T) {
 		wantPool     string
 		wantParent   string
 		wantDataset  string
-		wantErr      bool
 		errContains  string
+		wantErr      bool
 	}{
 		{
 			name: "pool and parentDataset provided explicitly",

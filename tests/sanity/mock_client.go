@@ -609,6 +609,20 @@ func (m *MockClient) QueryNVMeOFPorts(ctx context.Context) ([]tnsapi.NVMeOFPort,
 	}, nil
 }
 
+// RemoveSubsystemFromPort mocks nvmet.port_subsys.delete.
+func (m *MockClient) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	m.logCall("RemoveSubsystemFromPort", portSubsysID)
+	// Mock implementation - in reality would remove port-subsystem binding
+	return nil
+}
+
+// QuerySubsystemPortBindings mocks nvmet.port_subsys.query for a specific subsystem.
+func (m *MockClient) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error) {
+	m.logCall("QuerySubsystemPortBindings", subsystemID)
+	// Mock implementation - return empty list (no bindings to clean up in mock)
+	return []tnsapi.NVMeOFPortSubsystem{}, nil
+}
+
 // CreateSnapshot mocks zfs.snapshot.create.
 func (m *MockClient) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
 	m.logCall("CreateSnapshot", params.Dataset, params.Name)

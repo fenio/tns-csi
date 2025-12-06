@@ -1053,6 +1053,78 @@ func (c *Client) AddSubsystemToPort(ctx context.Context, subsystemID, portID int
 	return nil
 }
 
+// NVMeOFPortSubsystem represents a port-subsystem association.
+type NVMeOFPortSubsystem struct {
+	ID           int `json:"id"`
+	PortID       int `json:"port_id"`
+	SubsystemID  int `json:"subsys_id"`
+	SubsysID     int `json:"subsysid"`  // Alternative field name
+	PortIDFields int `json:"port"`      // Alternative field name
+	SubsysFields int `json:"subsystem"` // Alternative field name
+}
+
+// GetPortID returns the port ID, trying multiple possible field names.
+func (ps *NVMeOFPortSubsystem) GetPortID() int {
+	if ps.PortID != 0 {
+		return ps.PortID
+	}
+	if ps.PortIDFields != 0 {
+		return ps.PortIDFields
+	}
+	return 0
+}
+
+// GetSubsystemID returns the subsystem ID, trying multiple possible field names.
+func (ps *NVMeOFPortSubsystem) GetSubsystemID() int {
+	if ps.SubsystemID != 0 {
+		return ps.SubsystemID
+	}
+	if ps.SubsysID != 0 {
+		return ps.SubsysID
+	}
+	if ps.SubsysFields != 0 {
+		return ps.SubsysFields
+	}
+	return 0
+}
+
+// QuerySubsystemPortBindings queries all port bindings for a specific subsystem.
+func (c *Client) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]NVMeOFPortSubsystem, error) {
+	klog.V(4).Infof("Querying port bindings for subsystem %d", subsystemID)
+
+	var allBindings []NVMeOFPortSubsystem
+	err := c.Call(ctx, "nvmet.port_subsys.query", []interface{}{}, &allBindings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query port-subsystem bindings: %w", err)
+	}
+
+	// Filter for this specific subsystem
+	var result []NVMeOFPortSubsystem
+	for _, binding := range allBindings {
+		subsysID := binding.GetSubsystemID()
+		if subsysID == subsystemID {
+			result = append(result, binding)
+		}
+	}
+
+	klog.V(4).Infof("Found %d port binding(s) for subsystem %d", len(result), subsystemID)
+	return result, nil
+}
+
+// RemoveSubsystemFromPort removes an NVMe-oF subsystem from a port binding.
+func (c *Client) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	klog.V(4).Infof("Removing port-subsystem binding: %d", portSubsysID)
+
+	var result bool
+	err := c.Call(ctx, "nvmet.port_subsys.delete", []interface{}{portSubsysID}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to remove port-subsystem binding %d: %w", portSubsysID, err)
+	}
+
+	klog.V(4).Infof("Successfully removed port-subsystem binding: %d", portSubsysID)
+	return nil
+}
+
 // QueryNVMeOFPorts queries available NVMe-oF ports.
 func (c *Client) QueryNVMeOFPorts(ctx context.Context) ([]NVMeOFPort, error) {
 	klog.V(4).Info("Querying NVMe-oF ports")

@@ -24,4 +24,4 @@ runs:
         kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.2/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
         echo "Waiting for snapshot-controller to be ready..."
         kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true
-        kubectl get pods -n kube-system | grep snapshot-controller
+        kubectl get pods -n kube-system -l app=snapshot-controller

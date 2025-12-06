@@ -348,6 +348,18 @@ func main() {
 		fmt.Printf("Warning: Failed to query port-subsystem bindings: %v\n", err)
 	} else {
 		fmt.Printf("  Found %d total port-subsystem binding(s)\n", len(allPortBindings))
+		// Debug: print first binding structure
+		if len(allPortBindings) > 0 {
+			fmt.Printf("  Debug - First binding keys: ")
+			for k := range allPortBindings[0] {
+				fmt.Printf("%s, ", k)
+			}
+			fmt.Println()
+			// Print subsystem field specifically
+			if subsys, ok := allPortBindings[0]["subsystem"]; ok {
+				fmt.Printf("  Debug - subsystem field type: %T, value: %v\n", subsys, subsys)
+			}
+		}
 	}
 
 	// Build a map of subsystem ID -> port binding IDs
@@ -361,14 +373,12 @@ func main() {
 			bindingID = int(id)
 		}
 		
-		// Extract subsystem ID - could be in different fields
-		if subsys, ok := binding["subsystem"].(map[string]interface{}); ok {
+		// Extract subsystem ID - the field is "subsys", can be int or nested object
+		if subsys, ok := binding["subsys"].(map[string]interface{}); ok {
 			if id, ok := subsys["id"].(float64); ok {
 				subsysID = int(id)
 			}
-		} else if id, ok := binding["subsystem"].(float64); ok {
-			subsysID = int(id)
-		} else if id, ok := binding["subsys_id"].(float64); ok {
+		} else if id, ok := binding["subsys"].(float64); ok {
 			subsysID = int(id)
 		}
 		
@@ -376,6 +386,8 @@ func main() {
 			subsysToBindings[subsysID] = append(subsysToBindings[subsysID], bindingID)
 		}
 	}
+	
+	fmt.Printf("  Debug - Built map with %d unique subsystem IDs\n", len(subsysToBindings))
 
 	ssSuccessCount := 0
 	ssFailCount := 0

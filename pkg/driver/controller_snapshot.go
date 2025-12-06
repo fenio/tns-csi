@@ -692,21 +692,44 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 		params = make(map[string]string)
 	}
 
+	// Try to get pool from parameters (StorageClass)
 	pool := params["pool"]
+	parentDataset := params["parentDataset"]
+
+	// If pool is not provided in parameters, infer it from the snapshot's source dataset
+	// This is critical for snapshot restoration to work properly
 	if pool == "" {
-		return nil, status.Error(codes.InvalidArgument, "pool parameter is required")
+		// Extract pool from snapshot's dataset name
+		// DatasetName format: "pool/dataset" or "pool/parent/dataset"
+		parts := strings.Split(snapshotMeta.DatasetName, "/")
+		if len(parts) > 0 {
+			pool = parts[0]
+			klog.V(4).Infof("Inferred pool %q from snapshot dataset %q", pool, snapshotMeta.DatasetName)
+		} else {
+			return nil, status.Errorf(codes.Internal, "Failed to extract pool from snapshot dataset: %s", snapshotMeta.DatasetName)
+		}
 	}
 
-	parentDataset := params["parentDataset"]
+	// If parentDataset is not provided, use the pool as parent
+	// or infer from snapshot's dataset path
 	if parentDataset == "" {
-		parentDataset = pool
+		if len(strings.Split(snapshotMeta.DatasetName, "/")) > 1 {
+			// Use the same parent dataset structure as the source volume
+			// For dataset "pool/parent/volume", use "pool/parent"
+			parts := strings.Split(snapshotMeta.DatasetName, "/")
+			parentDataset = strings.Join(parts[:len(parts)-1], "/")
+			klog.V(4).Infof("Inferred parentDataset %q from snapshot dataset %q", parentDataset, snapshotMeta.DatasetName)
+		} else {
+			// Just use the pool as parent
+			parentDataset = pool
+		}
 	}
 
 	newVolumeName := req.GetName()
 	newDatasetName := fmt.Sprintf("%s/%s", parentDataset, newVolumeName)
 
-	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s",
-		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, newVolumeName)
+	klog.Infof("Cloning snapshot %s (dataset: %s) to new volume %s (new dataset: %s)",
+		snapshotMeta.SnapshotName, snapshotMeta.DatasetName, newVolumeName, newDatasetName)
 
 	return &cloneParameters{
 		pool:           pool,

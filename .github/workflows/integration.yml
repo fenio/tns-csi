@@ -128,6 +128,13 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-snapshot-nfs.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nfs-snapshot-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
 
   nfs-concurrent:
     name: "NFS: Concurrent"
@@ -288,6 +295,13 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-snapshot-nvmeof.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvmeof-snapshot-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
 
   nvmeof-concurrent:
     name: "NVMe-oF: Concurrent"
@@ -521,6 +535,13 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-snapshot-restore.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-restore-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
 
   shared-volume-stress:
     name: "Shared: Volume Stress"

@@ -1351,16 +1351,45 @@ show_diagnostic_logs() {
     echo "========================================"
     echo ""
     
-    echo "=== Controller Logs (last 200 lines) ==="
+    echo "=== Controller Logs - tns-csi-plugin (last 300 lines) ==="
     kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c tns-csi-plugin \
+        --tail=300 || true
+    
+    echo ""
+    echo "=== Controller Logs - csi-provisioner (last 200 lines) ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c csi-provisioner \
         --tail=200 || true
+    
+    echo ""
+    echo "=== Controller Logs - csi-snapshotter (last 200 lines) ==="
+    kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c csi-snapshotter \
+        --tail=200 2>/dev/null || echo "csi-snapshotter sidecar not found (snapshots may not be enabled)"
     
     echo ""
     echo "=== Node Logs (last 200 lines) ==="
     kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
         --tail=200 || true
+    
+    echo ""
+    echo "=== Snapshot-Related Resources ==="
+    echo ""
+    echo "--- VolumeSnapshots in test namespace ---"
+    kubectl get volumesnapshot -n "${TEST_NAMESPACE}" -o yaml 2>/dev/null || echo "No VolumeSnapshots found or CRD not installed"
+    
+    echo ""
+    echo "--- VolumeSnapshotContents (cluster-wide) ---"
+    kubectl get volumesnapshotcontent -o yaml 2>/dev/null || echo "No VolumeSnapshotContents found or CRD not installed"
+    
+    echo ""
+    echo "--- VolumeSnapshotClasses ---"
+    kubectl get volumesnapshotclass -o yaml 2>/dev/null || echo "No VolumeSnapshotClasses found or CRD not installed"
     
     if [[ -n "${pvc_name}" ]]; then
         echo ""
@@ -1424,6 +1453,37 @@ show_diagnostic_logs() {
     echo "========================================"
     echo "=== END DIAGNOSTIC INFORMATION ==="
     echo "========================================"
+}
+
+#######################################
+# Save diagnostic logs to file for artifact collection
+# Arguments:
+#   Test name (for filename)
+#   Output directory (optional, defaults to /tmp/test-logs)
+#######################################
+save_diagnostic_logs() {
+    local test_name=$1
+    local output_dir=${2:-/tmp/test-logs}
+    
+    mkdir -p "${output_dir}"
+    local log_file="${output_dir}/${test_name}-diagnostics-$(date +%Y%m%d-%H%M%S).log"
+    
+    echo "Saving diagnostic logs to: ${log_file}"
+    
+    {
+        echo "========================================" 
+        echo "Diagnostic Logs for: ${test_name}"
+        echo "Timestamp: $(date)"
+        echo "Namespace: ${TEST_NAMESPACE}"
+        echo "========================================"
+        echo ""
+        
+        show_diagnostic_logs "${pod_name:-}" "${pvc_name:-}"
+        
+    } > "${log_file}" 2>&1
+    
+    echo "Diagnostic logs saved to: ${log_file}"
+    echo "LOG_FILE=${log_file}" >> "${GITHUB_OUTPUT:-/dev/null}" 2>/dev/null || true
 }
 
 #######################################

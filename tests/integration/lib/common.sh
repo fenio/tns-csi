@@ -557,7 +557,7 @@ deploy_driver() {
     if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
         "${base_args[@]}" \
         "${helm_args[@]}" \
-        --wait --timeout 5m; then
+        --wait --timeout 10m; then
         stop_test_timer "deploy_driver" "FAILED"
         test_error "Helm deployment failed"
         

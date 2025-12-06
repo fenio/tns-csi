@@ -91,7 +91,10 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
-            - "--timeout=60s"
+            - "--timeout=120s"
+            - "--leader-election-lease-duration=30s"
+            - "--leader-election-renew-deadline=20s"
+            - "--leader-election-retry-period=5s"
             - "--leader-election"
             - "--default-fstype=nfs"
             - "--extra-create-metadata"
@@ -112,6 +115,9 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
+            - "--leader-election-lease-duration=30s"
+            - "--leader-election-renew-deadline=20s"
+            - "--leader-election-retry-period=5s"
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -129,7 +135,10 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
-            - "--timeout=60s"
+            - "--timeout=120s"
+            - "--leader-election-lease-duration=30s"
+            - "--leader-election-renew-deadline=20s"
+            - "--leader-election-retry-period=5s"
             - "--handle-volume-inuse-error=true"
           env:
             - name: ADDRESS
@@ -149,8 +158,10 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
-            - "--timeout=60s"
-          env:
+            - "--timeout=120s"
+            - "--leader-election-lease-duration=30s"
+            - "--leader-election-renew-deadline=20s"
+            - "--leader-election-retry-period=5s"          env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
           volumeMounts:

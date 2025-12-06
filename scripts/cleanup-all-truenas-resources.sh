@@ -175,11 +175,10 @@ func main() {
 	}
 
 	if len(targetDatasets) == 0 {
-		fmt.Println("\n✓ No datasets found matching criteria - TrueNAS is clean!")
-		return
+		fmt.Println("  No datasets found matching criteria")
+	} else {
+		fmt.Printf("\n=== Found %d dataset(s) to delete ===\n", len(targetDatasets))
 	}
-
-	fmt.Printf("\n=== Found %d dataset(s) to delete ===\n", len(targetDatasets))
 
 	// List NFS shares
 	fmt.Println("\n=== Listing NFS shares ===")
@@ -221,14 +220,9 @@ func main() {
 		}
 	}
 
-	if dryRun {
-		fmt.Println("\n=== DRY RUN - No changes will be made ===")
-		fmt.Printf("Would delete %d NFS share(s)\n", len(targetShares))
-		fmt.Printf("Would delete %d dataset(s)\n", len(targetDatasets))
-		return
-	}
-
 	// Delete NFS shares first
+	nfsSuccessCount := 0
+	nfsFailCount := 0
 	if len(targetShares) > 0 {
 		fmt.Printf("\n=== Deleting %d NFS share(s) ===\n", len(targetShares))
 		for _, share := range targetShares {
@@ -239,8 +233,10 @@ func main() {
 			var result interface{}
 			if err := client.Call(ctx, "sharing.nfs.delete", []interface{}{shareID}, &result); err != nil {
 				fmt.Printf("    ⚠ Failed to delete NFS share: %v\n", err)
+				nfsFailCount++
 			} else {
 				fmt.Printf("    ✓ Deleted\n")
+				nfsSuccessCount++
 			}
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -248,78 +244,218 @@ func main() {
 		fmt.Println("\n=== No NFS shares to delete ===")
 	}
 
-	// List iSCSI targets (for NVMe-oF)
-	fmt.Println("\n=== Listing iSCSI/NVMe-oF targets ===")
-	var targets []map[string]interface{}
-	if err := client.Call(ctx, "iscsi.target.query", []interface{}{}, &targets); err != nil {
-		fmt.Printf("Warning: Failed to query iSCSI targets: %v\n", err)
+	// List NVMe-oF namespaces
+	fmt.Println("\n=== Listing NVMe-oF namespaces ===")
+	namespaces, err := client.QueryAllNVMeOFNamespaces(ctx)
+	targetNamespaces := []tnsapi.NVMeOFNamespace{}
+	if err != nil {
+		fmt.Printf("Warning: Failed to query NVMe-oF namespaces: %v\n", err)
 	} else {
-		targetTargets := []map[string]interface{}{}
-		for _, target := range targets {
-			name, ok := target["name"].(string)
-			if !ok {
-				continue
+		for _, ns := range namespaces {
+			device := ns.Device
+			if device == "" {
+				device = ns.DevicePath
 			}
 			
 			shouldInclude := false
 			if mode == "all" {
-				// In "all" mode, consider all targets (but be cautious)
-				if strings.Contains(name, "pvc-") || strings.Contains(name, "test-") {
+				// In "all" mode, delete namespaces for any dataset in the pool
+				if strings.Contains(device, pool+"/") {
 					shouldInclude = true
 				}
 			} else {
-				// Safe mode: only CSI test targets
-				if strings.Contains(name, "pvc-") || strings.Contains(name, "test-csi") {
+				// Safe mode: only CSI test namespaces
+				if strings.Contains(device, "pvc-") || strings.Contains(device, "test-csi") {
 					shouldInclude = true
 				}
 			}
 			
 			if shouldInclude {
-				targetTargets = append(targetTargets, target)
-				targetID := target["id"]
-				fmt.Printf("  Found target: %s (ID: %v)\n", name, targetID)
+				targetNamespaces = append(targetNamespaces, ns)
+				fmt.Printf("  Found namespace: ID=%d, Device=%s, SubsystemID=%d, NSID=%d\n", 
+					ns.ID, device, ns.Subsystem, ns.NSID)
 			}
 		}
-		
-		// NOTE: We don't automatically delete targets as they might be pre-configured infrastructure
-		// Instead, we just report them
-		if len(targetTargets) > 0 {
-			fmt.Printf("\n⚠️  Found %d iSCSI/NVMe-oF target(s)\n", len(targetTargets))
-			fmt.Println("Note: Targets are not automatically deleted. Manage them manually if needed.")
+	}
+
+	// List NVMe-oF subsystems
+	fmt.Println("\n=== Listing NVMe-oF subsystems ===")
+	subsystems, err := client.ListAllNVMeOFSubsystems(ctx)
+	targetSubsystems := []tnsapi.NVMeOFSubsystem{}
+	if err != nil {
+		fmt.Printf("Warning: Failed to query NVMe-oF subsystems: %v\n", err)
+	} else {
+		for _, ss := range subsystems {
+			shouldInclude := false
+			if mode == "all" {
+				// In "all" mode, delete CSI-managed subsystems (nqn.2014-08.org.truenas:csi-*)
+				if strings.Contains(ss.NQN, "csi-") || strings.Contains(ss.Name, "pvc-") || strings.Contains(ss.Name, "test-") {
+					shouldInclude = true
+				}
+			} else {
+				// Safe mode: only CSI test subsystems
+				if strings.Contains(ss.NQN, "csi-pvc-") || strings.Contains(ss.Name, "pvc-") || strings.Contains(ss.Name, "test-csi") {
+					shouldInclude = true
+				}
+			}
+			
+			if shouldInclude {
+				targetSubsystems = append(targetSubsystems, ss)
+				fmt.Printf("  Found subsystem: ID=%d, Name=%s, NQN=%s\n", ss.ID, ss.Name, ss.NQN)
+			}
 		}
+	}
+
+	if dryRun {
+		fmt.Println("\n=== DRY RUN - No changes will be made ===")
+		fmt.Printf("Would delete %d NFS share(s)\n", len(targetShares))
+		fmt.Printf("Would delete %d NVMe-oF namespace(s)\n", len(targetNamespaces))
+		fmt.Printf("Would delete %d NVMe-oF subsystem(s)\n", len(targetSubsystems))
+		fmt.Printf("Would delete %d dataset(s)\n", len(targetDatasets))
+		return
+	}
+
+	// Delete NVMe-oF namespaces first (must be deleted before subsystems)
+	nsSuccessCount := 0
+	nsFailCount := 0
+	if len(targetNamespaces) > 0 {
+		fmt.Printf("\n=== Deleting %d NVMe-oF namespace(s) ===\n", len(targetNamespaces))
+		for _, ns := range targetNamespaces {
+			device := ns.Device
+			if device == "" {
+				device = ns.DevicePath
+			}
+			fmt.Printf("  Deleting namespace: ID=%d, Device=%s...\n", ns.ID, device)
+			
+			if err := client.DeleteNVMeOFNamespace(ctx, ns.ID); err != nil {
+				fmt.Printf("    ⚠ Failed to delete namespace: %v\n", err)
+				nsFailCount++
+			} else {
+				fmt.Printf("    ✓ Deleted\n")
+				nsSuccessCount++
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	} else {
+		fmt.Println("\n=== No NVMe-oF namespaces to delete ===")
+	}
+
+	// Delete NVMe-oF subsystems (after namespaces are deleted)
+	// First, query ALL port-subsystem bindings upfront
+	fmt.Println("\n=== Querying all port-subsystem bindings ===")
+	var allPortBindings []map[string]interface{}
+	if err := client.Call(ctx, "nvmet.port_subsys.query", []interface{}{}, &allPortBindings); err != nil {
+		fmt.Printf("Warning: Failed to query port-subsystem bindings: %v\n", err)
+	} else {
+		fmt.Printf("  Found %d total port-subsystem binding(s)\n", len(allPortBindings))
+	}
+
+	// Build a map of subsystem ID -> port binding IDs
+	subsysToBindings := make(map[int][]int)
+	for _, binding := range allPortBindings {
+		bindingID := 0
+		subsysID := 0
+		
+		// Extract binding ID
+		if id, ok := binding["id"].(float64); ok {
+			bindingID = int(id)
+		}
+		
+		// Extract subsystem ID - could be in different fields
+		if subsys, ok := binding["subsystem"].(map[string]interface{}); ok {
+			if id, ok := subsys["id"].(float64); ok {
+				subsysID = int(id)
+			}
+		} else if id, ok := binding["subsystem"].(float64); ok {
+			subsysID = int(id)
+		} else if id, ok := binding["subsys_id"].(float64); ok {
+			subsysID = int(id)
+		}
+		
+		if bindingID != 0 && subsysID != 0 {
+			subsysToBindings[subsysID] = append(subsysToBindings[subsysID], bindingID)
+		}
+	}
+
+	ssSuccessCount := 0
+	ssFailCount := 0
+	portBindingCount := 0
+	if len(targetSubsystems) > 0 {
+		fmt.Printf("\n=== Removing port bindings and deleting %d NVMe-oF subsystem(s) ===\n", len(targetSubsystems))
+		for _, ss := range targetSubsystems {
+			fmt.Printf("  Processing subsystem: ID=%d, NQN=%s\n", ss.ID, ss.NQN)
+			
+			// Get port bindings for this subsystem from our map
+			bindingIDs := subsysToBindings[ss.ID]
+			if len(bindingIDs) > 0 {
+				fmt.Printf("    Found %d port binding(s) to remove\n", len(bindingIDs))
+				for _, bindingID := range bindingIDs {
+					fmt.Printf("      Removing port binding ID=%d...\n", bindingID)
+					if err := client.RemoveSubsystemFromPort(ctx, bindingID); err != nil {
+						fmt.Printf("        ⚠ Failed to remove port binding: %v\n", err)
+					} else {
+						fmt.Printf("        ✓ Removed\n")
+						portBindingCount++
+					}
+					time.Sleep(200 * time.Millisecond)
+				}
+			}
+			
+			// Now delete the subsystem
+			fmt.Printf("    Deleting subsystem...\n")
+			if err := client.DeleteNVMeOFSubsystem(ctx, ss.ID); err != nil {
+				fmt.Printf("    ⚠ Failed to delete subsystem: %v\n", err)
+				ssFailCount++
+			} else {
+				fmt.Printf("    ✓ Deleted\n")
+				ssSuccessCount++
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	} else {
+		fmt.Println("\n=== No NVMe-oF subsystems to delete ===")
 	}
 
 	// Delete datasets
-	fmt.Printf("\n=== Deleting %d dataset(s) ===\n", len(targetDatasets))
 	successCount := 0
 	failCount := 0
-	
-	for _, dsName := range targetDatasets {
-		fmt.Printf("  Deleting dataset: %s...\n", dsName)
-		
-		var result interface{}
-		params := []interface{}{
-			dsName,
-			map[string]interface{}{
-				"recursive": true,
-				"force":     true,
-			},
+	if len(targetDatasets) > 0 {
+		fmt.Printf("\n=== Deleting %d dataset(s) ===\n", len(targetDatasets))
+		for _, dsName := range targetDatasets {
+			fmt.Printf("  Deleting dataset: %s...\n", dsName)
+			
+			var result interface{}
+			params := []interface{}{
+				dsName,
+				map[string]interface{}{
+					"recursive": true,
+					"force":     true,
+				},
+			}
+			
+			if err := client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
+				fmt.Printf("    ⚠ Failed to delete dataset: %v\n", err)
+				failCount++
+			} else {
+				fmt.Printf("    ✓ Deleted\n")
+				successCount++
+			}
+			time.Sleep(500 * time.Millisecond)
 		}
-		
-		if err := client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
-			fmt.Printf("    ⚠ Failed to delete dataset: %v\n", err)
-			failCount++
-		} else {
-			fmt.Printf("    ✓ Deleted\n")
-			successCount++
-		}
-		time.Sleep(500 * time.Millisecond)
+	} else {
+		fmt.Println("\n=== No datasets to delete ===")
 	}
 
 	fmt.Println("\n=== Summary ===")
-	fmt.Printf("Successfully deleted: %d dataset(s)\n", successCount)
-	if failCount > 0 {
-		fmt.Printf("Failed to delete: %d dataset(s)\n", failCount)
+	fmt.Printf("NFS shares:         %d deleted, %d failed\n", nfsSuccessCount, nfsFailCount)
+	fmt.Printf("NVMe-oF namespaces: %d deleted, %d failed\n", nsSuccessCount, nsFailCount)
+	fmt.Printf("NVMe-oF port bindings: %d removed\n", portBindingCount)
+	fmt.Printf("NVMe-oF subsystems: %d deleted, %d failed\n", ssSuccessCount, ssFailCount)
+	fmt.Printf("Datasets:           %d deleted, %d failed\n", successCount, failCount)
+	
+	totalFailed := nfsFailCount + nsFailCount + ssFailCount + failCount
+	if totalFailed > 0 {
+		fmt.Printf("\n⚠ %d resource(s) failed to delete\n", totalFailed)
 	}
 	fmt.Println("\n✓ Cleanup complete!")
 }

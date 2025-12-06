@@ -1019,3 +1019,157 @@ func TestSnapshotRegistry(t *testing.T) {
 		registry.Unregister("nonexistent")
 	})
 }
+
+// TestValidateCloneParameters tests the validateCloneParameters function.
+func TestValidateCloneParameters(t *testing.T) {
+	tests := []struct {
+		name         string
+		params       map[string]string
+		snapshotMeta *SnapshotMetadata
+		wantPool     string
+		wantParent   string
+		wantDataset  string
+		wantErr      bool
+		errContains  string
+	}{
+		{
+			name: "pool and parentDataset provided explicitly",
+			params: map[string]string{
+				"pool":          "mypool",
+				"parentDataset": "mypool/csi",
+			},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "tank/csi/pvc-source",
+				Protocol:    ProtocolNFS,
+			},
+			wantPool:    "mypool",
+			wantParent:  "mypool/csi",
+			wantDataset: "mypool/csi/test-volume",
+			wantErr:     false,
+		},
+		{
+			name:   "infer pool and parentDataset from NFS snapshot dataset",
+			params: map[string]string{},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "tank/csi/pvc-source",
+				Protocol:    ProtocolNFS,
+			},
+			wantPool:    "tank",
+			wantParent:  "tank/csi",
+			wantDataset: "tank/csi/test-volume",
+			wantErr:     false,
+		},
+		{
+			name:   "infer pool and parentDataset from NVMe-oF snapshot dataset",
+			params: map[string]string{},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "nvmepool/zvols/pvc-source",
+				Protocol:    ProtocolNVMeOF,
+			},
+			wantPool:    "nvmepool",
+			wantParent:  "nvmepool/zvols",
+			wantDataset: "nvmepool/zvols/test-volume",
+			wantErr:     false,
+		},
+		{
+			name:   "infer from pool-level dataset (no parent)",
+			params: map[string]string{},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "tank/pvc-source",
+				Protocol:    ProtocolNFS,
+			},
+			wantPool:    "tank",
+			wantParent:  "tank",
+			wantDataset: "tank/test-volume",
+			wantErr:     false,
+		},
+		{
+			name: "pool provided explicitly, infer parentDataset from snapshot structure",
+			params: map[string]string{
+				"pool": "explicitpool",
+			},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "tank/csi/pvc-source",
+				Protocol:    ProtocolNFS,
+			},
+			wantPool:    "explicitpool",
+			wantParent:  "tank/csi", // Still inferred from snapshot to preserve structure
+			wantDataset: "tank/csi/test-volume",
+			wantErr:     false,
+		},
+		{
+			name:   "invalid dataset name (empty)",
+			params: map[string]string{},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "",
+				Protocol:    ProtocolNFS,
+			},
+			wantErr:     true,
+			errContains: "Snapshot dataset name is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock controller service
+			mockClient := &MockAPIClientForSnapshots{}
+			svc := &ControllerService{
+				apiClient: mockClient,
+			}
+
+			// Create request
+			req := &csi.CreateVolumeRequest{
+				Name:       "test-volume",
+				Parameters: tt.params,
+			}
+
+			// Call validateCloneParameters
+			result, err := svc.validateCloneParameters(req, tt.snapshotMeta)
+
+			// Check error
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("validateCloneParameters() expected error but got nil")
+					return
+				}
+				if tt.errContains != "" && !contains(err.Error(), tt.errContains) {
+					t.Errorf("validateCloneParameters() error = %v, want error containing %q", err, tt.errContains)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("validateCloneParameters() unexpected error = %v", err)
+				return
+			}
+
+			// Verify results
+			if result.pool != tt.wantPool {
+				t.Errorf("validateCloneParameters() pool = %v, want %v", result.pool, tt.wantPool)
+			}
+			if result.parentDataset != tt.wantParent {
+				t.Errorf("validateCloneParameters() parentDataset = %v, want %v", result.parentDataset, tt.wantParent)
+			}
+			if result.newDatasetName != tt.wantDataset {
+				t.Errorf("validateCloneParameters() newDatasetName = %v, want %v", result.newDatasetName, tt.wantDataset)
+			}
+			if result.newVolumeName != "test-volume" {
+				t.Errorf("validateCloneParameters() newVolumeName = %v, want %v", result.newVolumeName, "test-volume")
+			}
+		})
+	}
+}
+
+// Helper function to check if a string contains a substring.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && indexOf(s, substr) >= 0
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}

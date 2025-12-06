@@ -696,13 +696,18 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 	pool := params["pool"]
 	parentDataset := params["parentDataset"]
 
+	// Validate snapshot dataset name
+	if snapshotMeta.DatasetName == "" {
+		return nil, status.Error(codes.Internal, "Snapshot dataset name is empty")
+	}
+
 	// If pool is not provided in parameters, infer it from the snapshot's source dataset
 	// This is critical for snapshot restoration to work properly
 	if pool == "" {
 		// Extract pool from snapshot's dataset name
 		// DatasetName format: "pool/dataset" or "pool/parent/dataset"
 		parts := strings.Split(snapshotMeta.DatasetName, "/")
-		if len(parts) > 0 {
+		if len(parts) > 0 && parts[0] != "" {
 			pool = parts[0]
 			klog.V(4).Infof("Inferred pool %q from snapshot dataset %q", pool, snapshotMeta.DatasetName)
 		} else {
@@ -710,18 +715,18 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 		}
 	}
 
-	// If parentDataset is not provided, use the pool as parent
-	// or infer from snapshot's dataset path
+	// If parentDataset is not provided, infer from snapshot's dataset path or use pool
 	if parentDataset == "" {
-		if len(strings.Split(snapshotMeta.DatasetName, "/")) > 1 {
+		parts := strings.Split(snapshotMeta.DatasetName, "/")
+		if len(parts) > 1 {
 			// Use the same parent dataset structure as the source volume
 			// For dataset "pool/parent/volume", use "pool/parent"
-			parts := strings.Split(snapshotMeta.DatasetName, "/")
 			parentDataset = strings.Join(parts[:len(parts)-1], "/")
 			klog.V(4).Infof("Inferred parentDataset %q from snapshot dataset %q", parentDataset, snapshotMeta.DatasetName)
 		} else {
 			// Just use the pool as parent
 			parentDataset = pool
+			klog.V(4).Infof("Using pool %q as parentDataset", pool)
 		}
 	}
 

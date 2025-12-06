@@ -466,33 +466,21 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	// Evaluate cleanup results
 	if len(errors) == 0 {
-		// Complete success
+		// Complete success - all resources deleted
 		klog.Infof("Deleted NVMe-oF volume: %s (namespace, subsystem, and ZVOL)", meta.Name)
 		metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF)
 		timer.ObserveSuccess()
 		return &csi.DeleteVolumeResponse{}, nil
 	}
 
-	if len(errors) == 3 {
-		// All deletions failed - return error to trigger retry
-		klog.Errorf("All deletion steps failed for volume %s: %v", meta.Name, errors)
-		timer.ObserveError()
-		return nil, status.Errorf(codes.Internal,
-			"Failed to delete all volume resources for %s: %v", meta.Name, errors)
-	}
-
-	// Partial success - log warnings but consider it successful
-	// Some resources were deleted, which is better than none
-	klog.Warningf("Partial cleanup for volume %s - some resources may remain: %v", meta.Name, errors)
-	klog.Warningf("Successfully deleted %d of 3 resources (namespace, subsystem, ZVOL)", 3-len(errors))
-
-	// Remove volume capacity metric even on partial success
-	metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF)
-
-	// Return success to avoid infinite retries when partial cleanup succeeded
-	// Kubernetes will consider the volume deleted
-	timer.ObserveSuccess()
-	return &csi.DeleteVolumeResponse{}, nil
+	// Partial or complete failure - return error to trigger retry
+	// This prevents orphaned resources on TrueNAS by ensuring Kubernetes retries until all resources are cleaned
+	klog.Errorf("Failed to delete %d of 3 resources for volume %s: %v", len(errors), meta.Name, errors)
+	klog.Infof("Successfully deleted %d of 3 resources (namespace, subsystem, ZVOL) - will retry remaining", 3-len(errors))
+	timer.ObserveError()
+	return nil, status.Errorf(codes.Internal,
+		"Failed to delete %d volume resources for %s (deleted %d): %v",
+		len(errors), meta.Name, 3-len(errors), errors)
 }
 
 // deleteNVMeOFSubsystem deletes an NVMe-oF subsystem.

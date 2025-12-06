@@ -257,12 +257,27 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
 
-	// Delete ZFS dataset - TrueNAS automatically deletes associated NFS shares
-	// when the dataset is deleted, so we don't need to explicitly delete the share
+	// Step 1: Delete NFS share first (required - TrueNAS does NOT auto-delete shares when dataset is deleted)
+	if meta.NFSShareID > 0 {
+		klog.V(4).Infof("Deleting NFS share: ID=%d", meta.NFSShareID)
+		err := s.apiClient.DeleteNFSShare(ctx, meta.NFSShareID)
+		switch {
+		case err == nil:
+			klog.V(4).Infof("Successfully deleted NFS share %d", meta.NFSShareID)
+		case isNotFoundError(err):
+			klog.V(4).Infof("NFS share %d not found, assuming already deleted (idempotency)", meta.NFSShareID)
+		default:
+			// For non-idempotent errors, log warning but continue to try dataset deletion
+			// This prevents orphaned datasets if share deletion fails
+			klog.Warningf("Failed to delete NFS share %d: %v (continuing with dataset deletion)", meta.NFSShareID, err)
+		}
+	}
+
+	// Step 2: Delete ZFS dataset
 	if meta.DatasetID == "" {
 		klog.V(4).Infof("No dataset ID provided, skipping dataset deletion")
 	} else {
-		klog.V(4).Infof("Deleting dataset: %s (NFS share %d will be automatically removed)", meta.DatasetID, meta.NFSShareID)
+		klog.V(4).Infof("Deleting dataset: %s", meta.DatasetID)
 		err := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
 		if err != nil && !isNotFoundError(err) {
 			// For non-idempotent errors, return error to trigger retry and prevent orphaned datasets
@@ -270,7 +285,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 			return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
 		}
 		if err == nil {
-			klog.V(4).Infof("Successfully deleted dataset %s and associated NFS share %d", meta.DatasetID, meta.NFSShareID)
+			klog.V(4).Infof("Successfully deleted dataset %s", meta.DatasetID)
 		} else {
 			klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 		}

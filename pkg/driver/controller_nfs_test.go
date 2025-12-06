@@ -283,7 +283,13 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  1,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Only DeleteDataset should be called - TrueNAS automatically deletes the NFS share
+				// Both NFS share and dataset should be deleted
+				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
+					if shareID != 1 {
+						t.Errorf("Expected share ID 1, got %d", shareID)
+					}
+					return nil
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					if datasetID != "tank/test-nfs-volume" {
 						t.Errorf("Expected dataset ID tank/test-nfs-volume, got %s", datasetID)
@@ -303,7 +309,10 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  1,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Dataset already deleted (share was automatically removed with it)
+				// Both share and dataset already deleted
+				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
+					return errors.New("share does not exist")
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return errors.New("dataset does not exist")
 				}
@@ -320,6 +329,9 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  1,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
+					return nil // Share deleted successfully
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return errors.New("some backend error")
 				}
@@ -336,6 +348,11 @@ func TestDeleteNFSVolume(t *testing.T) {
 				NFSShareID:  0, // Missing share ID
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// DeleteNFSShare should NOT be called when share ID is 0
+				m.DeleteNFSShareFunc = func(ctx context.Context, shareID int) error {
+					t.Error("DeleteNFSShare should not be called when share ID is 0")
+					return nil
+				}
 				m.DeleteDatasetFunc = func(ctx context.Context, datasetID string) error {
 					return nil
 				}

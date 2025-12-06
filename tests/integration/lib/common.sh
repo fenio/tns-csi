@@ -1459,11 +1459,15 @@ show_diagnostic_logs() {
 # Save diagnostic logs to file for artifact collection
 # Arguments:
 #   Test name (for filename)
+#   Pod name (optional)
+#   PVC name (optional)
 #   Output directory (optional, defaults to /tmp/test-logs)
 #######################################
 save_diagnostic_logs() {
     local test_name=$1
-    local output_dir=${2:-/tmp/test-logs}
+    local pod_name=${2:-}
+    local pvc_name=${3:-}
+    local output_dir=${4:-/tmp/test-logs}
     
     mkdir -p "${output_dir}"
     local log_file="${output_dir}/${test_name}-diagnostics-$(date +%Y%m%d-%H%M%S).log"
@@ -1478,7 +1482,7 @@ save_diagnostic_logs() {
         echo "========================================"
         echo ""
         
-        show_diagnostic_logs "${pod_name:-}" "${pvc_name:-}"
+        show_diagnostic_logs "${pod_name}" "${pvc_name}"
         
     } > "${log_file}" 2>&1
     

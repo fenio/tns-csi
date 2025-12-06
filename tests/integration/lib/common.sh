@@ -483,12 +483,15 @@ deploy_driver() {
     # Base Helm values
     # Use CSI_IMAGE_TAG env var if set, otherwise default to 'latest'
     local image_tag="${CSI_IMAGE_TAG:-latest}"
-    test_debug "Using image tag: ${image_tag}"
+    # Use CSI_IMAGE_REPOSITORY env var if set, otherwise default to GHCR
+    # GHCR is preferred over Docker Hub to avoid rate limiting (429 Too Many Requests)
+    local image_repo="${CSI_IMAGE_REPOSITORY:-ghcr.io/fenio/tns-csi}"
+    test_debug "Using image: ${image_repo}:${image_tag}"
     
     local base_args=(
         --namespace kube-system
         --create-namespace
-        --set image.repository=bfenski/tns-csi
+        --set image.repository="${image_repo}"
         --set image.tag="${image_tag}"
         --set image.pullPolicy=Always
         --set truenas.url="${truenas_url}"

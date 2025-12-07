@@ -492,7 +492,12 @@ func (c *Client) reconnect() bool {
 		// Record reconnection attempt
 		metrics.RecordWSReconnection()
 		// Exponential backoff: 2^(attempt-1) * retryInterval, max 60s
-		backoff := time.Duration(1<<uint(attempt-1)) * c.retryInterval
+		// Use max(0, attempt-1) to satisfy gosec G115 (integer overflow check)
+		shift := attempt - 1
+		if shift < 0 {
+			shift = 0
+		}
+		backoff := time.Duration(1<<shift) * c.retryInterval
 		if backoff > 60*time.Second {
 			backoff = 60 * time.Second
 		}

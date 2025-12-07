@@ -18,7 +18,8 @@ echo "================================================"
 echo "TrueNAS CSI - Orphaned Resource Detection Test"
 echo "================================================"
 echo ""
-# Configure test with 14 total steps
+# Configure test with 14 total steps:
+# verify_cluster + 2 driver deploys + 2 driver waits + 9 explicit test_steps = 14
 set_test_steps 14
 echo "This test verifies:"
 echo "  • Datasets are cleaned up after PVC deletion"

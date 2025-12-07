@@ -40,36 +40,82 @@ runs:
       run: |
         echo "=== Installing k3s cluster on pristine VM ==="
         
-        # Retry k3s installation up to 3 times
+        # Download k3s binary with timeout to fail fast on slow/stalled downloads
+        # The default k3s install script can hang for 4+ minutes on download failures
         MAX_RETRIES=3
+        K3S_VERSION=""  # Empty = latest stable
+        
         for i in $(seq 1 $MAX_RETRIES); do
           echo "Attempt $i/$MAX_RETRIES: Installing k3s..."
-          if curl -sfL https://get.k3s.io | sh -s - \
-            --write-kubeconfig-mode 644 \
-            --disable traefik \
-            --disable servicelb \
-            --kube-apiserver-arg=max-requests-inflight=400 \
-            --kube-apiserver-arg=max-mutating-requests-inflight=200; then
-            echo "k3s installation successful"
-            break
-          else
-            echo "k3s installation failed on attempt $i"
-            if [ $i -lt $MAX_RETRIES ]; then
-              echo "Retrying in 10 seconds..."
-              sleep 10
+          
+          # First, get the install script and determine version
+          if ! curl -sfL --connect-timeout 10 --max-time 30 -o /tmp/k3s-install.sh https://get.k3s.io; then
+            echo "Failed to download k3s install script"
+            sleep 5
+            continue
+          fi
+          
+          # Get latest stable version if not specified
+          if [ -z "$K3S_VERSION" ]; then
+            K3S_VERSION=$(curl -sfL --connect-timeout 10 --max-time 30 https://update.k3s.io/v1-release/channels/stable | grep -oP '"latest":\s*"\K[^"]+' || true)
+            if [ -z "$K3S_VERSION" ]; then
+              echo "Failed to get k3s version, using script default"
             else
-              echo "All installation attempts failed"
-              exit 1
+              echo "Using k3s version: $K3S_VERSION"
             fi
+          fi
+          
+          # Download k3s binary with strict timeout (60s max, fail fast)
+          echo "Downloading k3s binary..."
+          K3S_URL="https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s"
+          if [ -n "$K3S_VERSION" ]; then
+            if curl -sfL --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 5 \
+              -o /usr/local/bin/k3s "$K3S_URL"; then
+              chmod +x /usr/local/bin/k3s
+              echo "k3s binary downloaded successfully"
+              
+              # Run install script with skip download flag
+              if INSTALL_K3S_SKIP_DOWNLOAD=true sh /tmp/k3s-install.sh \
+                --write-kubeconfig-mode 644 \
+                --disable traefik \
+                --disable servicelb \
+                --kube-apiserver-arg=max-requests-inflight=400 \
+                --kube-apiserver-arg=max-mutating-requests-inflight=200; then
+                echo "k3s installation successful"
+                break
+              fi
+            else
+              echo "Failed to download k3s binary (attempt $i)"
+            fi
+          else
+            # Fallback: use install script directly (no version pinning)
+            if sh /tmp/k3s-install.sh \
+              --write-kubeconfig-mode 644 \
+              --disable traefik \
+              --disable servicelb \
+              --kube-apiserver-arg=max-requests-inflight=400 \
+              --kube-apiserver-arg=max-mutating-requests-inflight=200; then
+              echo "k3s installation successful"
+              break
+            fi
+          fi
+          
+          echo "k3s installation failed on attempt $i"
+          if [ $i -lt $MAX_RETRIES ]; then
+            echo "Retrying in 5 seconds..."
+            sleep 5
+          else
+            echo "All installation attempts failed"
+            exit 1
           fi
         done
         
         echo "Waiting for k3s service to start..."
-        sleep 15
+        sleep 10
         
         echo "Waiting for cluster to become ready..."
         retries=0
-        while [[ $retries -lt 60 ]]; do
+        while [[ $retries -lt 30 ]]; do
           if sudo k3s kubectl get nodes &>/dev/null; then
             if sudo k3s kubectl wait --for=condition=Ready node --all --timeout=10s 2>/dev/null; then
               echo "k3s cluster ready"
@@ -77,11 +123,11 @@ runs:
               exit 0
             fi
           fi
-          echo "Waiting for cluster... (attempt $((retries+1))/60)"
-          sleep 5
+          echo "Waiting for cluster... (attempt $((retries+1))/30)"
+          sleep 2
           retries=$((retries + 1))
         done
-        echo "ERROR: Cluster failed to become ready within 5 minutes"
+        echo "ERROR: Cluster failed to become ready within 60 seconds"
         sudo systemctl status k3s || true
         exit 1
 
@@ -103,9 +149,6 @@ runs:
         kubectl get nodes
         
         echo ""
-        echo "=== Waiting for API server to stabilize ==="
-        sleep 10
-        
         echo "=== Verifying API server responsiveness ==="
         kubectl get --raw /readyz
         kubectl get --raw /healthz
@@ -113,22 +156,16 @@ runs:
         echo ""
         echo "=== Warming up API server with concurrent requests ==="
         # Make concurrent requests to warm up TLS session cache and connection handling
-        # Use timeout to prevent hanging if API server struggles
         for i in {1..5}; do
-          timeout 30 kubectl get nodes &>/dev/null &
+          timeout 10 kubectl get nodes &>/dev/null &
         done
-        if ! wait; then
-          echo "WARNING: Some warmup requests timed out, continuing anyway"
-        fi
-        echo "Warmup complete"
+        wait || echo "Warmup complete (some requests may have been slow)"
         
         echo ""
         echo "=== Verifying concurrent connection handling ==="
-        # Test that 5 concurrent kubectl commands work
-        sleep 5  # Give API server a moment after warmup
         PIDS=""
         for i in {1..5}; do
-          timeout 30 kubectl get ns &>/dev/null &
+          timeout 10 kubectl get ns &>/dev/null &
           PIDS="$PIDS $!"
         done
         FAIL=0
@@ -136,21 +173,6 @@ runs:
           wait $pid || FAIL=1
         done
         if [ $FAIL -eq 1 ]; then
-          echo "WARNING: Concurrent kubectl test failed, waiting 30s for API server to stabilize"
-          sleep 30
-          # Retry once more
-          PIDS=""
-          for i in {1..5}; do
-            timeout 30 kubectl get ns &>/dev/null &
-            PIDS="$PIDS $!"
-          done
-          FAIL=0
-          for pid in $PIDS; do
-            wait $pid || FAIL=1
-          done
-          if [ $FAIL -eq 1 ]; then
-            echo "WARNING: API server still struggling with concurrent connections"
-            echo "Tests may experience intermittent TLS timeouts"
-          fi
+          echo "WARNING: Concurrent kubectl test had issues, but continuing"
         fi
         echo "API server concurrent connection check complete"

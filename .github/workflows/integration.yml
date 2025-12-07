@@ -1,6 +1,9 @@
 name: Integration Tests
 
 on:
+  # Scheduled trigger - run every 2 hours
+  schedule:
+    - cron: '0 */2 * * *'
   # Automatic trigger disabled - run manually until volume expansion issues are fixed
   # workflow_run:
   #   workflows: ["CI"]

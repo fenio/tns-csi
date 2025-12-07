@@ -885,14 +885,20 @@ type NVMeOFNamespaceCreateParams struct {
 	NSID       int    `json:"nsid,omitempty"`
 }
 
+// NVMeOFNamespaceSubsystem represents the nested subsystem object in namespace responses.
+type NVMeOFNamespaceSubsystem struct {
+	Name   string `json:"name"`   // Short NQN (e.g., "nqn.2137.csi.tns:pvc-...")
+	SubNQN string `json:"subnqn"` // Full NQN with UUID prefix
+	ID     int    `json:"id"`
+}
+
 // NVMeOFNamespace represents an NVMe-oF namespace.
 type NVMeOFNamespace struct {
-	Device     string `json:"device"`      // Device path from API response
-	DevicePath string `json:"device_path"` // Alternative field name that TrueNAS might use
-	ID         int    `json:"id"`
-	Subsystem  int    `json:"subsystem"` // Some TrueNAS versions use this field name
-	SubsysID   int    `json:"subsys_id"` // Other TrueNAS versions use this field name
-	NSID       int    `json:"nsid"`
+	Subsys     *NVMeOFNamespaceSubsystem `json:"subsys"`      // Nested subsystem object from TrueNAS API
+	Device     string                    `json:"device"`      // Device path from API response
+	DevicePath string                    `json:"device_path"` // Alternative field name that TrueNAS might use
+	ID         int                       `json:"id"`
+	NSID       int                       `json:"nsid"`
 }
 
 // GetDevice returns the device path, trying both possible field names.
@@ -903,12 +909,28 @@ func (n *NVMeOFNamespace) GetDevice() string {
 	return n.DevicePath
 }
 
-// GetSubsystemID returns the subsystem ID, trying both possible field names.
+// GetSubsystemID returns the subsystem ID from the nested subsys object.
 func (n *NVMeOFNamespace) GetSubsystemID() int {
-	if n.Subsystem != 0 {
-		return n.Subsystem
+	if n.Subsys != nil {
+		return n.Subsys.ID
 	}
-	return n.SubsysID
+	return 0
+}
+
+// GetSubsystemNQN returns the short subsystem NQN (name field) from the nested subsys object.
+func (n *NVMeOFNamespace) GetSubsystemNQN() string {
+	if n.Subsys != nil {
+		return n.Subsys.Name
+	}
+	return ""
+}
+
+// GetSubsystemSubNQN returns the full subsystem NQN (subnqn field) from the nested subsys object.
+func (n *NVMeOFNamespace) GetSubsystemSubNQN() string {
+	if n.Subsys != nil {
+		return n.Subsys.SubNQN
+	}
+	return ""
 }
 
 // CreateNVMeOFNamespace creates a new NVMe-oF namespace.
@@ -1397,7 +1419,7 @@ func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespac
 		if i >= 3 {
 			break
 		}
-		klog.Infof("QueryAllNVMeOFNamespaces: Sample namespace %d: ID=%d, Device='%s', DevicePath='%s', SubsystemID=%d, NSID=%d", i, ns.ID, ns.Device, ns.DevicePath, ns.GetSubsystemID(), ns.NSID)
+		klog.Infof("QueryAllNVMeOFNamespaces: Sample namespace %d: ID=%d, Device='%s', DevicePath='%s', SubsystemID=%d, SubsystemNQN='%s', NSID=%d", i, ns.ID, ns.Device, ns.DevicePath, ns.GetSubsystemID(), ns.GetSubsystemNQN(), ns.NSID)
 	}
 	return result, nil
 }

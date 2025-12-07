@@ -807,9 +807,9 @@ func TestControllerExpandVolume(t *testing.T) {
 				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
 					return []tnsapi.NVMeOFNamespace{
 						{
-							ID:        200,
-							Subsystem: 100,
-							Device:    "/dev/zvol/tank/csi/" + nvmeofVolumeID,
+							ID:     200,
+							Subsys: &tnsapi.NVMeOFNamespaceSubsystem{ID: 100, Name: "nqn.2005-03.org.truenas:test"},
+							Device: "/dev/zvol/tank/csi/" + nvmeofVolumeID,
 						},
 					}, nil
 				}

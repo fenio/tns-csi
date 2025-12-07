@@ -545,10 +545,10 @@ func (m *MockClient) CreateNVMeOFNamespace(ctx context.Context, params tnsapi.NV
 	}
 
 	return &tnsapi.NVMeOFNamespace{
-		ID:        nsID,
-		Device:    params.DevicePath,
-		Subsystem: params.SubsysID,
-		NSID:      nsID,
+		ID:     nsID,
+		Device: params.DevicePath,
+		Subsys: &tnsapi.NVMeOFNamespaceSubsystem{ID: params.SubsysID},
+		NSID:   nsID,
 	}, nil
 }
 
@@ -577,10 +577,10 @@ func (m *MockClient) QueryAllNVMeOFNamespaces(ctx context.Context) ([]tnsapi.NVM
 	result := make([]tnsapi.NVMeOFNamespace, 0, len(m.namespaces))
 	for _, ns := range m.namespaces {
 		result = append(result, tnsapi.NVMeOFNamespace{
-			ID:        ns.ID,
-			Device:    ns.Device,
-			Subsystem: ns.SubsystemID,
-			NSID:      ns.NSID,
+			ID:     ns.ID,
+			Device: ns.Device,
+			Subsys: &tnsapi.NVMeOFNamespaceSubsystem{ID: ns.SubsystemID},
+			NSID:   ns.NSID,
 		})
 	}
 

@@ -135,8 +135,10 @@ INTERVAL=5
 while [[ $ELAPSED -lt $TIMEOUT ]]; do
     # Count PVCs in Bound state
     BOUND_COUNT=$(kubectl get pvc -n "${TEST_NAMESPACE}" \
-        --no-headers 2>/dev/null | grep -c "Bound" || echo "0")
-    BOUND_COUNT=$((BOUND_COUNT + 0))  # Ensure numeric
+        --no-headers 2>/dev/null | grep -c "Bound" || true)
+    BOUND_COUNT=${BOUND_COUNT:-0}
+    BOUND_COUNT=$(echo "${BOUND_COUNT}" | tr -d '[:space:]')
+    [[ -z "${BOUND_COUNT}" ]] && BOUND_COUNT=0
     
     echo "Progress: ${BOUND_COUNT}/${NUM_VOLUMES} PVCs bound (${ELAPSED}s elapsed)"
     
@@ -176,8 +178,10 @@ fi
 echo ""
 test_info "Verifying all PVs are unique..."
 UNIQUE_PV_COUNT=$(kubectl get pvc -n "${TEST_NAMESPACE}" \
-    -o jsonpath='{range .items[*]}{.spec.volumeName}{"\n"}{end}' | sort -u | wc -l)
-UNIQUE_PV_COUNT=$((UNIQUE_PV_COUNT + 0))  # Ensure numeric
+    -o jsonpath='{range .items[*]}{.spec.volumeName}{"\n"}{end}' | grep -v '^$' | sort -u | wc -l || true)
+UNIQUE_PV_COUNT=${UNIQUE_PV_COUNT:-0}
+UNIQUE_PV_COUNT=$(echo "${UNIQUE_PV_COUNT}" | tr -d '[:space:]')
+[[ -z "${UNIQUE_PV_COUNT}" ]] && UNIQUE_PV_COUNT=0
 
 if [[ $UNIQUE_PV_COUNT -eq $NUM_VOLUMES ]]; then
     test_success "All ${NUM_VOLUMES} PVCs have unique PVs"

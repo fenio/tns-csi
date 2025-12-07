@@ -159,7 +159,7 @@ test_info "Checking each pod wrote to its own volume..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
     
-    if ! IDENTITY=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt 2>&1 | head -1); then
+    if ! IDENTITY=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt 2>/dev/null | head -1); then
         test_error "${POD_NAME}: Failed to read pod identity file!"
         test_error "Error: ${IDENTITY}"
         show_diagnostic_logs "${POD_NAME}" ""
@@ -201,7 +201,7 @@ kubectl exec -n kube-system $(kubectl get pods -n kube-system -l app.kubernetes.
 test_info "Verifying all pods can read data BEFORE scale down..."
 for i in $(seq 0 $((REPLICAS - 1))); do
     POD_NAME="${STS_NAME}-${i}"
-    if REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then
+    if REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>/dev/null); then
         test_success "${POD_NAME}: Can read data before scale down: ${REPLICA_DATA}"
     else
         test_error "${POD_NAME}: Cannot read data BEFORE scale down - test environment is broken!"
@@ -255,7 +255,7 @@ for i in $(seq 0 $((NEW_REPLICAS - 1))); do
     
     # Read the data - explicitly check for errors
     test_info "${POD_NAME}: Reading /data/replica-data.txt..."
-    if ! REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then
+    if ! REPLICA_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>/dev/null); then
         test_error "${POD_NAME}: Failed to read /data/replica-data.txt - I/O error!"
         test_error "Error output: ${REPLICA_DATA}"
         
@@ -316,7 +316,7 @@ test_success "Scaled back up to ${REPLICAS} replicas"
 echo ""
 test_info "Verifying scaled-up pod reattached to original volume..."
 
-if ! IDENTITY=$(kubectl exec "${SCALED_UP_POD}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt 2>&1 | head -1); then
+if ! IDENTITY=$(kubectl exec "${SCALED_UP_POD}" -n "${TEST_NAMESPACE}" -- cat /data/pod-identity.txt 2>/dev/null | head -1); then
     test_error "${SCALED_UP_POD}: Failed to read pod identity after scale-up!"
     test_error "Error: ${IDENTITY}"
     show_diagnostic_logs "${SCALED_UP_POD}" ""
@@ -354,7 +354,7 @@ test_success "Pod ${TEST_POD} recreated"
 echo ""
 test_info "Verifying recreated pod has original data..."
 
-if ! REPLICA_DATA=$(kubectl exec "${TEST_POD}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>&1); then
+if ! REPLICA_DATA=$(kubectl exec "${TEST_POD}" -n "${TEST_NAMESPACE}" -- cat /data/replica-data.txt 2>/dev/null); then
     test_error "${TEST_POD}: Failed to read data after rolling update!"
     test_error "Error: ${REPLICA_DATA}"
     show_diagnostic_logs "${TEST_POD}" ""

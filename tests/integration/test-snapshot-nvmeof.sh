@@ -130,7 +130,7 @@ test_block_io_with_pattern() {
         return 1
     fi
     
-    if ! verify_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>&1); then
+    if ! verify_pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>/dev/null); then
         test_error "Failed to read test-pattern.txt before snapshot!"
         test_error "Error: ${verify_pattern}"
         return 1
@@ -160,7 +160,7 @@ verify_block_pattern() {
         return 1
     fi
     
-    if ! pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>&1); then
+    if ! pattern=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test-pattern.txt" 2>/dev/null); then
         test_error "Failed to read test-pattern.txt from snapshot!"
         test_error "Error: ${pattern}"
         return 1

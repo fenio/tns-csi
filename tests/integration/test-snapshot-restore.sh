@@ -129,7 +129,7 @@ if ! pod_file_exists "${POD_NAME_SOURCE}" "${TEST_NAMESPACE}" "/data/version.txt
     exit 1
 fi
 
-if ! V1_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+if ! V1_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>/dev/null); then
     test_error "Failed to read version.txt!"
     test_error "Error: ${V1_VERSION}"
     show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
@@ -231,7 +231,7 @@ kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- \
 
 test_success "Version 2 data written"
 
-if ! V2_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+if ! V2_VERSION=$(kubectl exec "${POD_NAME_SOURCE}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>/dev/null); then
     test_error "Failed to read version.txt for version 2!"
     test_error "Error: ${V2_VERSION}"
     show_diagnostic_logs "${POD_NAME_SOURCE}" "${PVC_NAME_SOURCE}"
@@ -387,7 +387,7 @@ if ! pod_file_exists "${POD_NAME_RESTORE1}" "${TEST_NAMESPACE}" "/data/version.t
     exit 1
 fi
 
-if ! RESTORE1_VERSION=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+if ! RESTORE1_VERSION=$(kubectl exec "${POD_NAME_RESTORE1}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>/dev/null); then
     test_error "Failed to read version.txt from restored volume!"
     test_error "Error: ${RESTORE1_VERSION}"
     show_diagnostic_logs "${POD_NAME_RESTORE1}" "${PVC_NAME_RESTORE1}"
@@ -507,7 +507,7 @@ if ! pod_file_exists "${POD_NAME_RESTORE2}" "${TEST_NAMESPACE}" "/data/version.t
     exit 1
 fi
 
-if ! RESTORE2_VERSION=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>&1); then
+if ! RESTORE2_VERSION=$(kubectl exec "${POD_NAME_RESTORE2}" -n "${TEST_NAMESPACE}" -- cat /data/version.txt 2>/dev/null); then
     test_error "Failed to read version.txt from snapshot 2 restore!"
     test_error "Error: ${RESTORE2_VERSION}"
     show_diagnostic_logs "${POD_NAME_RESTORE2}" "${PVC_NAME_RESTORE2}"

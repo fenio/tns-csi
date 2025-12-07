@@ -135,7 +135,7 @@ kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 test_success "Wrote test file: test.txt"
 
 # Verify what was actually written
-if ! WRITTEN_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+if ! WRITTEN_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>/dev/null); then
     test_error "CRITICAL: Failed to read test.txt immediately after write!"
     test_error "Error: ${WRITTEN_DATA}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
@@ -241,7 +241,7 @@ if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/test.txt"; then
     exit 1
 fi
 
-if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>/dev/null); then
     test_error "Failed to read test.txt after graceful restart!"
     test_error "Error: ${RETRIEVED_DATA}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
@@ -266,7 +266,7 @@ if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/large-file.bin"; t
     exit 1
 fi
 
-if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>&1); then
+if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>/dev/null); then
     test_error "Failed to calculate checksum after restart!"
     test_error "Error: ${NEW_CHECKSUM}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
@@ -293,7 +293,7 @@ if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/subdir1/subdir2/ne
     exit 1
 fi
 
-if ! NESTED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>&1); then
+if ! NESTED_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>/dev/null); then
     test_error "Failed to read nested.txt after restart!"
     test_error "Error: ${NESTED_DATA}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"
@@ -405,7 +405,7 @@ fi
 
 test_success "test.txt file exists"
 
-if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+if ! RETRIEVED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>/dev/null); then
     test_error "Failed to read test.txt after force delete!"
     test_error "Error: ${RETRIEVED_DATA}"
     show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
@@ -438,7 +438,7 @@ fi
 
 test_success "large-file.bin exists"
 
-if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>&1); then
+if ! NEW_CHECKSUM=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- sh -c "md5sum /data/large-file.bin | awk '{print \$1}'" 2>/dev/null); then
     test_error "Failed to calculate checksum after force delete!"
     test_error "Error: ${NEW_CHECKSUM}"
     show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
@@ -471,7 +471,7 @@ fi
 
 test_success "nested.txt exists in correct location"
 
-if ! NESTED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>&1); then
+if ! NESTED_DATA=$(kubectl exec "${POD_NAME_2}" -n "${TEST_NAMESPACE}" -- cat /data/subdir1/subdir2/nested.txt 2>/dev/null); then
     test_error "Failed to read nested.txt after force delete!"
     test_error "Error: ${NESTED_DATA}"
     show_diagnostic_logs "${POD_NAME_2}" "${PVC_NAME}"
@@ -535,7 +535,7 @@ if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/second-pod.txt"; t
     exit 1
 fi
 
-if ! SECOND_POD_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/second-pod.txt 2>&1); then
+if ! SECOND_POD_DATA=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/second-pod.txt 2>/dev/null); then
     test_error "Failed to read second-pod.txt!"
     test_error "Error: ${SECOND_POD_DATA}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"

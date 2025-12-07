@@ -177,7 +177,7 @@ EOF
         return 1
     fi
     
-    if ! content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test.txt" 2>&1); then
+    if ! content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/test.txt" 2>/dev/null); then
         test_error "Failed to read test.txt from snapshot!"
         test_error "Error: ${content}"
         return 1
@@ -211,7 +211,7 @@ EOF
         return 1
     fi
     
-    if ! new_content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/cloned-data.txt" 2>&1); then
+    if ! new_content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${mount_path}/cloned-data.txt" 2>/dev/null); then
         test_error "Failed to read cloned-data.txt!"
         test_error "Error: ${new_content}"
         return 1

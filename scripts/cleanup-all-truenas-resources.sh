@@ -348,18 +348,6 @@ func main() {
 		fmt.Printf("Warning: Failed to query port-subsystem bindings: %v\n", err)
 	} else {
 		fmt.Printf("  Found %d total port-subsystem binding(s)\n", len(allPortBindings))
-		// Debug: print first binding structure
-		if len(allPortBindings) > 0 {
-			fmt.Printf("  Debug - First binding keys: ")
-			for k := range allPortBindings[0] {
-				fmt.Printf("%s, ", k)
-			}
-			fmt.Println()
-			// Print subsystem field specifically
-			if subsys, ok := allPortBindings[0]["subsystem"]; ok {
-				fmt.Printf("  Debug - subsystem field type: %T, value: %v\n", subsys, subsys)
-			}
-		}
 	}
 
 	// Build a map of subsystem ID -> port binding IDs
@@ -387,8 +375,6 @@ func main() {
 		}
 	}
 	
-	fmt.Printf("  Debug - Built map with %d unique subsystem IDs\n", len(subsysToBindings))
-
 	ssSuccessCount := 0
 	ssFailCount := 0
 	portBindingCount := 0

@@ -200,7 +200,7 @@ if ! pod_file_exists "${POD_NAME}" "${TEST_NAMESPACE}" "/data/test.txt"; then
     exit 1
 fi
 
-if ! DATA_CONTENT=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>&1); then
+if ! DATA_CONTENT=$(kubectl exec "${POD_NAME}" -n "${TEST_NAMESPACE}" -- cat /data/test.txt 2>/dev/null); then
     test_error "Failed to read test.txt after expansion!"
     test_error "Error: ${DATA_CONTENT}"
     show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"

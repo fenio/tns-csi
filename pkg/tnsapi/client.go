@@ -292,12 +292,81 @@ func (c *Client) authenticateDirect() error {
 	return nil
 }
 
-// Call makes a JSON-RPC 2.0 call.
+// isConnectionError checks if the error is a connection-related error that should trigger a retry.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrConnectionClosed) {
+		return true
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "use of closed network connection") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// Call makes a JSON-RPC 2.0 call with automatic retry on connection failures.
 func (c *Client) Call(ctx context.Context, method string, params []interface{}, result interface{}) error {
 	// Start timing for metrics
 	timer := metrics.NewWSMessageTimer(method)
 	defer timer.Observe()
 
+	// Retry configuration: 3 attempts with exponential backoff (1s, 2s, 4s)
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := c.callOnce(ctx, method, params, result)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// Check if this is a retryable connection error
+		if !isConnectionError(err) {
+			// Not a connection error, don't retry
+			return err
+		}
+
+		// Check if context is still valid for retry
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Don't retry if client is closed
+		c.mu.Lock()
+		closed := c.closed
+		c.mu.Unlock()
+		if closed {
+			return ErrClientClosed
+		}
+
+		if attempt < maxRetries {
+			// Exponential backoff: 1s, 2s, 4s
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
+			klog.V(4).Infof("Request failed with connection error (attempt %d/%d): %v, retrying in %v...",
+				attempt, maxRetries, err, backoff)
+
+			select {
+			case <-time.After(backoff):
+				// Continue to next attempt
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c.closeCh:
+				return ErrClientClosed
+			}
+		}
+	}
+
+	return fmt.Errorf("request failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+// callOnce makes a single JSON-RPC 2.0 call attempt.
+func (c *Client) callOnce(ctx context.Context, method string, params []interface{}, result interface{}) error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()

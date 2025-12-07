@@ -273,7 +273,7 @@ func main() {
 			if shouldInclude {
 				targetNamespaces = append(targetNamespaces, ns)
 				fmt.Printf("  Found namespace: ID=%d, Device=%s, SubsystemID=%d, NSID=%d\n", 
-					ns.ID, device, ns.Subsystem, ns.NSID)
+					ns.ID, device, ns.GetSubsystemID(), ns.NSID)
 			}
 		}
 	}

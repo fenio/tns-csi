@@ -258,9 +258,44 @@ EOF
     # Wait for pod to be ready
     echo ""
     test_info "Waiting for pod to be ready (timeout: ${TIMEOUT_POD})..."
-    kubectl wait --for=condition=Ready pod/"${pod_name}" \
+    if ! kubectl wait --for=condition=Ready pod/"${pod_name}" \
         -n "${TEST_NAMESPACE}" \
-        --timeout="${TIMEOUT_POD}"
+        --timeout="${TIMEOUT_POD}"; then
+        echo ""
+        echo "=== POD WAIT FAILED - Collecting diagnostics ==="
+        echo ""
+        echo "--- PVC Status ---"
+        kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o yaml || true
+        echo ""
+        echo "--- PVC Events ---"
+        kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}" | grep -A 30 "Events:" || true
+        echo ""
+        echo "--- Pod Status ---"
+        kubectl get pod "${pod_name}" -n "${TEST_NAMESPACE}" -o yaml || true
+        echo ""
+        echo "--- Pod Events ---"
+        kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}" | grep -A 30 "Events:" || true
+        echo ""
+        echo "--- Controller Logs (last 100 lines) ---"
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            -c tns-csi-plugin \
+            --tail=100 || true
+        echo ""
+        echo "--- CSI Provisioner Logs (last 50 lines) ---"
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            -c csi-provisioner \
+            --tail=50 || true
+        echo ""
+        echo "--- Node Logs (last 50 lines) ---"
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
+            --tail=50 || true
+        echo ""
+        echo "=== END DIAGNOSTICS ==="
+        return 1
+    fi
     
     test_success "Pod is ready"
     

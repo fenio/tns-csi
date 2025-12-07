@@ -1371,12 +1371,24 @@ func (c *Client) QueryAllNFSShares(ctx context.Context, pathFilter string) ([]NF
 func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespace, error) {
 	klog.V(5).Info("Querying all NVMe-oF namespaces")
 
-	var result []NVMeOFNamespace
-	// Pass empty params to get all namespaces
-	// Use nvmet.namespace.query to match the API naming used for create/delete
-	err := c.Call(ctx, "nvmet.namespace.query", []interface{}{}, &result)
+	// First, get raw JSON to debug the actual field names
+	var rawResult json.RawMessage
+	err := c.Call(ctx, "nvmet.namespace.query", []interface{}{}, &rawResult)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
+	}
+
+	// Log raw JSON for debugging (first 2000 chars to avoid log spam)
+	rawStr := string(rawResult)
+	if len(rawStr) > 2000 {
+		rawStr = rawStr[:2000] + "..."
+	}
+	klog.Infof("QueryAllNVMeOFNamespaces: Raw JSON response: %s", rawStr)
+
+	// Now unmarshal into our struct
+	var result []NVMeOFNamespace
+	if err := json.Unmarshal(rawResult, &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal NVMe-oF namespaces: %w", err)
 	}
 
 	klog.Infof("QueryAllNVMeOFNamespaces: Found %d NVMe-oF namespaces", len(result))

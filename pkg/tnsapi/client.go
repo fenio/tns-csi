@@ -1085,13 +1085,15 @@ func (c *Client) AddSubsystemToPort(ctx context.Context, subsystemID, portID int
 }
 
 // NVMeOFPortSubsystem represents a port-subsystem association.
+// TrueNAS API returns this with fields like "port", "subsys" (nested objects containing id, name, etc.)
 type NVMeOFPortSubsystem struct {
-	Port        json.RawMessage `json:"port"`      // Can be int or object
-	Subsystem   json.RawMessage `json:"subsystem"` // Can be int or object
-	ID          int             `json:"id"`
-	PortID      int             `json:"port_id"`
-	SubsystemID int             `json:"subsys_id"`
-	SubsysID    int             `json:"subsysid"` // Alternative field name
+	Port        json.RawMessage `json:"port"`      // Can be int or object with id field
+	Subsystem   json.RawMessage `json:"subsystem"` // Alternative field name (may not be used)
+	Subsys      json.RawMessage `json:"subsys"`    // Nested object: {"id": int, "name": "...", "subnqn": "..."}
+	ID          int             `json:"id"`        // Binding ID
+	PortID      int             `json:"port_id"`   // Direct port ID (may not be present)
+	SubsystemID int             `json:"subsys_id"` // Direct subsystem ID (may not be present)
+	SubsysID    int             `json:"subsysid"`  // Alternative field name
 }
 
 // GetPortID returns the port ID, trying multiple possible field names.
@@ -1116,21 +1118,42 @@ func (ps *NVMeOFPortSubsystem) GetPortID() int {
 	return 0
 }
 
-// GetSubsystemID returns the subsystem ID, trying multiple possible field names.
+// GetSubsystemID returns the subsystem ID, trying multiple possible field names and formats.
+// TrueNAS may return subsystem as:
+// - Direct field: subsys_id, subsysid.
+// - Nested object in "subsys": {"id": 338, "name": "...", ...}.
+// - Nested object in "subsystem": {"id": 338, "name": "...", ...}.
 func (ps *NVMeOFPortSubsystem) GetSubsystemID() int {
+	// Try direct fields first
 	if ps.SubsystemID != 0 {
 		return ps.SubsystemID
 	}
 	if ps.SubsysID != 0 {
 		return ps.SubsysID
 	}
-	// Try to parse Subsystem as int
-	if len(ps.Subsystem) > 0 {
+
+	// Try to parse Subsys (the actual field name TrueNAS uses) as object or int
+	if len(ps.Subsys) > 0 {
+		// Try as int first
 		var subsysInt int
-		if err := json.Unmarshal(ps.Subsystem, &subsysInt); err == nil {
+		if err := json.Unmarshal(ps.Subsys, &subsysInt); err == nil && subsysInt != 0 {
 			return subsysInt
 		}
 		// Try to parse as object with id field
+		var subsysObj struct {
+			ID int `json:"id"`
+		}
+		if err := json.Unmarshal(ps.Subsys, &subsysObj); err == nil && subsysObj.ID != 0 {
+			return subsysObj.ID
+		}
+	}
+
+	// Fallback: Try Subsystem field (alternative naming)
+	if len(ps.Subsystem) > 0 {
+		var subsysInt int
+		if err := json.Unmarshal(ps.Subsystem, &subsysInt); err == nil && subsysInt != 0 {
+			return subsysInt
+		}
 		var subsysObj struct {
 			ID int `json:"id"`
 		}
@@ -1145,22 +1168,40 @@ func (ps *NVMeOFPortSubsystem) GetSubsystemID() int {
 func (c *Client) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]NVMeOFPortSubsystem, error) {
 	klog.V(4).Infof("Querying port bindings for subsystem %d", subsystemID)
 
-	var allBindings []NVMeOFPortSubsystem
-	err := c.Call(ctx, "nvmet.port_subsys.query", []interface{}{}, &allBindings)
+	// First, get raw JSON to debug the actual field names
+	var rawResult json.RawMessage
+	err := c.Call(ctx, "nvmet.port_subsys.query", []interface{}{}, &rawResult)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query port-subsystem bindings: %w", err)
 	}
+
+	// Log raw JSON for debugging (first 2000 chars to avoid log spam)
+	rawStr := string(rawResult)
+	if len(rawStr) > 2000 {
+		rawStr = rawStr[:2000] + "..."
+	}
+	klog.Infof("QuerySubsystemPortBindings: Raw JSON response: %s", rawStr)
+
+	// Now unmarshal into our struct
+	var allBindings []NVMeOFPortSubsystem
+	if err := json.Unmarshal(rawResult, &allBindings); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal port-subsystem bindings: %w", err)
+	}
+
+	klog.Infof("QuerySubsystemPortBindings: Found %d total port bindings", len(allBindings))
 
 	// Filter for this specific subsystem
 	var result []NVMeOFPortSubsystem
 	for _, binding := range allBindings {
 		subsysID := binding.GetSubsystemID()
+		klog.V(5).Infof("QuerySubsystemPortBindings: Binding ID=%d, SubsystemID=%d (looking for %d)",
+			binding.ID, subsysID, subsystemID)
 		if subsysID == subsystemID {
 			result = append(result, binding)
 		}
 	}
 
-	klog.V(4).Infof("Found %d port binding(s) for subsystem %d", len(result), subsystemID)
+	klog.Infof("Found %d port binding(s) for subsystem %d", len(result), subsystemID)
 	return result, nil
 }
 

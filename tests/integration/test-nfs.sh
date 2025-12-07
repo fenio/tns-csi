@@ -17,6 +17,11 @@ echo "========================================"
 echo "TrueNAS CSI - NFS Integration Test"
 echo "========================================"
 
+# Configure test with 7 total steps:
+# verify_cluster, deploy_driver, wait_for_driver, create_pvc,
+# create_test_pod, test_io_operations, test_volume_expansion
+set_test_steps 7
+
 # Check if test should be skipped
 if should_skip_test "${TEST_TAGS}"; then
     echo "Skipping NFS test due to tag filter: ${TEST_SKIP_TAGS}"

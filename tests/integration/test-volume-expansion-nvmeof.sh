@@ -17,8 +17,9 @@ echo "================================================"
 echo "TrueNAS CSI - NVMe-oF Volume Expansion Test"
 echo "================================================"
 echo ""
-# Configure test with 10 total steps
-set_test_steps 10
+# Configure test with 11 total steps:
+# verify_cluster, deploy_driver, wait_for_driver, then 8 explicit test_steps
+set_test_steps 11
 echo "This test verifies:"
 echo "  • ZVOL can be expanded"
 echo "  • Filesystem resizes automatically"

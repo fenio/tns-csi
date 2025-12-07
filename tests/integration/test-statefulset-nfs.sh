@@ -21,8 +21,9 @@ echo "========================================"
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "" ""; kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=120s || true; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
-# Configure test with 9 steps (verify cluster, deploy driver, wait for driver, then 6 test steps)
-set_test_steps 9
+# Configure test with 10 steps:
+# verify_cluster, deploy_driver, wait_for_driver, then 7 explicit test_steps
+set_test_steps 10
 
 # Run test steps
 verify_cluster

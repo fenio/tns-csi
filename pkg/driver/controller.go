@@ -578,23 +578,20 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 			// Check if the namespace device path contains the volume name
 			devicePath := ns.GetDevice()
 			if strings.Contains(devicePath, volumeID) {
-				// Find the subsystem for this namespace
-				subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
-				if subErr == nil {
-					for _, sub := range subsystems {
-						if sub.ID == ns.GetSubsystemID() {
-							meta := VolumeMetadata{
-								Name:              volumeID,
-								Protocol:          ProtocolNVMeOF,
-								DatasetName:       devicePath, // Device path is the zvol path
-								NVMeOFNQN:         sub.NQN,
-								NVMeOFSubsystemID: sub.ID,
-								NVMeOFNamespaceID: ns.ID,
-							}
-							klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s", volumeID, meta.DatasetName)
-							return s.deleteNVMeOFVolume(ctx, &meta)
-						}
+				// The subsystem NQN is directly in the nested subsys object
+				subsystemNQN := ns.GetSubsystemNQN()
+				subsystemID := ns.GetSubsystemID()
+				if subsystemNQN != "" && subsystemID > 0 {
+					meta := VolumeMetadata{
+						Name:              volumeID,
+						Protocol:          ProtocolNVMeOF,
+						DatasetName:       devicePath, // Device path is the zvol path
+						NVMeOFNQN:         subsystemNQN,
+						NVMeOFSubsystemID: subsystemID,
+						NVMeOFNamespaceID: ns.ID,
 					}
+					klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s", volumeID, meta.DatasetName)
+					return s.deleteNVMeOFVolume(ctx, &meta)
 				}
 			}
 		}
@@ -1062,39 +1059,30 @@ func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID str
 	for _, ns := range namespaces {
 		device := ns.GetDevice()
 		subsystemID := ns.GetSubsystemID()
-		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, DevicePath=%s, SubsystemID=%d", ns.ID, ns.Device, ns.DevicePath, subsystemID)
+		subsystemNQN := ns.GetSubsystemNQN()
+		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, DevicePath=%s, SubsystemID=%d, SubsystemNQN=%s", ns.ID, ns.Device, ns.DevicePath, subsystemID, subsystemNQN)
 		if strings.Contains(device, volumeID) {
 			klog.Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", device)
 
-			subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
-			if subErr != nil {
-				return nil, fmt.Errorf("failed to query NVMe-oF subsystems: %w", subErr)
+			// The subsystem NQN is directly in the nested subsys object
+			if subsystemNQN != "" && subsystemID > 0 {
+				// Extract the dataset ID from the device path
+				// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
+				// Dataset ID should be "tank/csi/volume-name"
+				datasetID := strings.TrimPrefix(device, "/dev/zvol/")
+				datasetID = strings.TrimPrefix(datasetID, "zvol/")
+				klog.Infof("lookupNVMeOFVolume: Found NVMe-oF volume %s with dataset %s, NQN %s", volumeID, datasetID, subsystemNQN)
+				return &VolumeMetadata{
+					Name:              volumeID,
+					Protocol:          ProtocolNVMeOF,
+					DatasetID:         datasetID,
+					DatasetName:       datasetID,
+					NVMeOFNQN:         subsystemNQN,
+					NVMeOFSubsystemID: subsystemID,
+					NVMeOFNamespaceID: ns.ID,
+				}, nil
 			}
-
-			klog.Infof("lookupNVMeOFVolume: Found %d subsystems, looking for subsystem with volumeID %s in NQN (fallback: subsystem ID %d)", len(subsystems), volumeID, subsystemID)
-			for _, sub := range subsystems {
-				klog.Infof("lookupNVMeOFVolume: Checking subsystem ID=%d, NQN=%s", sub.ID, sub.NQN)
-				// Match by subsystem ID or by checking if volumeID appears in the subsystem NQN
-				// Expected NQN format: nqn.2011-06.com.truenas:uuid:xxx:nqn.2137.csi.tns:pvc-<volumeID>
-				if sub.ID == subsystemID || strings.Contains(sub.NQN, volumeID) {
-					// Extract the dataset ID from the device path
-					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
-					// Dataset ID should be "tank/csi/volume-name"
-					datasetID := strings.TrimPrefix(device, "/dev/zvol/")
-					datasetID = strings.TrimPrefix(datasetID, "zvol/")
-					klog.Infof("lookupNVMeOFVolume: Found NVMe-oF volume %s with dataset %s, NQN %s", volumeID, datasetID, sub.NQN)
-					return &VolumeMetadata{
-						Name:              volumeID,
-						Protocol:          ProtocolNVMeOF,
-						DatasetID:         datasetID,
-						DatasetName:       datasetID,
-						NVMeOFNQN:         sub.NQN,
-						NVMeOFSubsystemID: sub.ID,
-						NVMeOFNamespaceID: ns.ID,
-					}, nil
-				}
-			}
-			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but no matching subsystem for volume %s (namespace subsystem ID: %d, searched %d subsystems)", volumeID, subsystemID, len(subsystems))
+			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but subsystem info is incomplete for volume %s (subsystemID: %d, subsystemNQN: %s)", volumeID, subsystemID, subsystemNQN)
 		}
 	}
 

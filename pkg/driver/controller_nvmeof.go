@@ -114,7 +114,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 	// Log all namespaces for this subsystem to help diagnose NSID conflicts
 	subsystemNamespaces := 0
 	for _, ns := range namespaces {
-		if ns.Subsystem == subsystemID {
+		if ns.GetSubsystemID() == subsystemID {
 			subsystemNamespaces++
 			klog.V(5).Infof("Existing namespace in subsystem %d: ID=%d, NSID=%d, device=%s",
 				subsystemID, ns.ID, ns.NSID, ns.GetDevice())
@@ -127,7 +127,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 	// Find namespace matching this ZVOL in the target subsystem
 	for i := range namespaces {
 		ns := &namespaces[i]
-		if ns.Subsystem == subsystemID && ns.GetDevice() == devicePath {
+		if ns.GetSubsystemID() == subsystemID && ns.GetDevice() == devicePath {
 			return ns, nil
 		}
 	}

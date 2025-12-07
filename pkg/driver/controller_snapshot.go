@@ -869,22 +869,10 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 		} else {
 			for _, ns := range namespaces {
 				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
-					// Found the namespace - get its subsystem by ID
-					subsystemID := ns.GetSubsystemID()
-					if subsystemID > 0 {
-						// Query all subsystems and find the matching one
-						allSubsystems, subsysErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
-						if subsysErr != nil {
-							klog.Warningf("Failed to query NVMe-oF subsystems: %v", subsysErr)
-						} else {
-							for _, subsys := range allSubsystems {
-								if subsys.ID == subsystemID {
-									subsystemNQN = subsys.NQN
-									klog.V(4).Infof("Found subsystemNQN %s from source volume namespace", subsystemNQN)
-									break
-								}
-							}
-						}
+					// Found the namespace - the subsystem NQN is directly in the nested subsys object
+					subsystemNQN = ns.GetSubsystemNQN()
+					if subsystemNQN != "" {
+						klog.V(4).Infof("Found subsystemNQN %s directly from source volume namespace", subsystemNQN)
 					}
 					break
 				}

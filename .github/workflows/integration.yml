@@ -292,6 +292,22 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
       - uses: actions/checkout@v6
+      - name: Debug shell environment
+        run: |
+          echo "=== Shell info ==="
+          echo "SHELL: $SHELL"
+          echo "BASH_VERSION: $BASH_VERSION"
+          ls -la /bin/sh
+          
+          echo "=== grep info ==="
+          which grep
+          grep --version || true
+          
+          echo "=== Test grep -c behavior ==="
+          echo -e "a\nb\nc" | grep -c "x" || echo "fallback"
+          RESULT=$(echo -e "a\nb\nc" | grep -c "x" || echo "0")
+          echo "RESULT='$RESULT'"
+          echo "RESULT bytes: $(echo -n "$RESULT" | xxd)"
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}

@@ -870,7 +870,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 			for _, ns := range namespaces {
 				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
 					// Found the namespace - get its subsystem by ID
-					subsystemID := ns.Subsystem
+					subsystemID := ns.GetSubsystemID()
 					if subsystemID > 0 {
 						// Query all subsystems and find the matching one
 						allSubsystems, subsysErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)

@@ -529,7 +529,7 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 		// Count namespaces still attached to this subsystem
 		attachedCount := 0
 		for _, ns := range namespaces {
-			if ns.Subsystem == meta.NVMeOFSubsystemID {
+			if ns.GetSubsystemID() == meta.NVMeOFSubsystemID {
 				attachedCount++
 				klog.Warningf("Namespace %d (NSID: %d, device: %s) still attached to subsystem %d",
 					ns.ID, ns.NSID, ns.GetDevice(), meta.NVMeOFSubsystemID)

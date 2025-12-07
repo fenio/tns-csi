@@ -890,7 +890,8 @@ type NVMeOFNamespace struct {
 	Device     string `json:"device"`      // Device path from API response
 	DevicePath string `json:"device_path"` // Alternative field name that TrueNAS might use
 	ID         int    `json:"id"`
-	Subsystem  int    `json:"subsystem"`
+	Subsystem  int    `json:"subsystem"` // Some TrueNAS versions use this field name
+	SubsysID   int    `json:"subsys_id"` // Other TrueNAS versions use this field name
 	NSID       int    `json:"nsid"`
 }
 
@@ -900,6 +901,14 @@ func (n *NVMeOFNamespace) GetDevice() string {
 		return n.Device
 	}
 	return n.DevicePath
+}
+
+// GetSubsystemID returns the subsystem ID, trying both possible field names.
+func (n *NVMeOFNamespace) GetSubsystemID() int {
+	if n.Subsystem != 0 {
+		return n.Subsystem
+	}
+	return n.SubsysID
 }
 
 // CreateNVMeOFNamespace creates a new NVMe-oF namespace.
@@ -1376,7 +1385,7 @@ func (c *Client) QueryAllNVMeOFNamespaces(ctx context.Context) ([]NVMeOFNamespac
 		if i >= 3 {
 			break
 		}
-		klog.Infof("QueryAllNVMeOFNamespaces: Sample namespace %d: ID=%d, Device='%s', DevicePath='%s', Subsystem=%d, NSID=%d", i, ns.ID, ns.Device, ns.DevicePath, ns.Subsystem, ns.NSID)
+		klog.Infof("QueryAllNVMeOFNamespaces: Sample namespace %d: ID=%d, Device='%s', DevicePath='%s', SubsystemID=%d, NSID=%d", i, ns.ID, ns.Device, ns.DevicePath, ns.GetSubsystemID(), ns.NSID)
 	}
 	return result, nil
 }

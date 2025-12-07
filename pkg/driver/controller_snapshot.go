@@ -184,8 +184,9 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 			namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
 			if err == nil {
 				for _, ns := range namespaces {
-					if strings.Contains(ns.Device, sourceVolumeID) {
-						datasetName = strings.TrimPrefix(ns.Device, "zvol/")
+					devicePath := ns.GetDevice()
+					if strings.Contains(devicePath, sourceVolumeID) {
+						datasetName = strings.TrimPrefix(devicePath, "zvol/")
 						protocol = ProtocolNVMeOF
 						break
 					}
@@ -462,8 +463,8 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 		namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
 		if nsErr == nil {
 			for _, ns := range namespaces {
-				if strings.Contains(ns.Device, sourceVolumeID) {
-					datasetName = strings.TrimPrefix(ns.Device, "zvol/")
+				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
+					datasetName = strings.TrimPrefix(ns.GetDevice(), "zvol/")
 					protocol = ProtocolNVMeOF
 					break
 				}
@@ -867,7 +868,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 			klog.Warningf("Failed to query NVMe-oF namespaces to find subsystemNQN: %v", nsErr)
 		} else {
 			for _, ns := range namespaces {
-				if strings.Contains(ns.Device, sourceVolumeID) {
+				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
 					// Found the namespace - get its subsystem by ID
 					subsystemID := ns.Subsystem
 					if subsystemID > 0 {

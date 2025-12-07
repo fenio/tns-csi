@@ -1226,12 +1226,17 @@ func (c *Client) CreateSnapshot(ctx context.Context, params SnapshotCreateParams
 }
 
 // DeleteSnapshot deletes a ZFS snapshot.
+// Uses defer=true to handle snapshots with dependent clones (ZFS clones from snapshot restore).
+// With defer=true, the snapshot will be marked for deletion and automatically removed
+// when all dependent clones are destroyed.
 func (c *Client) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	klog.V(4).Infof("Deleting snapshot: %s", snapshotID)
 
 	// TrueNAS API expects snapshot deletion parameters
+	// Use defer=true to handle snapshots with dependent clones (restored volumes)
+	// The snapshot will be automatically deleted when all clones are destroyed
 	params := map[string]interface{}{
-		"defer": false, // Don't defer deletion
+		"defer": true,
 	}
 
 	var result bool
@@ -1240,7 +1245,7 @@ func (c *Client) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 		return fmt.Errorf("failed to delete snapshot: %w", err)
 	}
 
-	klog.V(4).Infof("Successfully deleted snapshot: %s", snapshotID)
+	klog.V(4).Infof("Successfully deleted snapshot: %s (defer=true)", snapshotID)
 	return nil
 }
 

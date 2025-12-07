@@ -576,7 +576,8 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	if err == nil {
 		for _, ns := range namespaces {
 			// Check if the namespace device path contains the volume name
-			if strings.Contains(ns.Device, volumeID) {
+			devicePath := ns.GetDevice()
+			if strings.Contains(devicePath, volumeID) {
 				// Find the subsystem for this namespace
 				subsystems, subErr := s.apiClient.ListAllNVMeOFSubsystems(ctx)
 				if subErr == nil {
@@ -585,7 +586,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 							meta := VolumeMetadata{
 								Name:              volumeID,
 								Protocol:          ProtocolNVMeOF,
-								DatasetName:       ns.Device, // Device path is the zvol path
+								DatasetName:       devicePath, // Device path is the zvol path
 								NVMeOFNQN:         sub.NQN,
 								NVMeOFSubsystemID: sub.ID,
 								NVMeOFNamespaceID: ns.ID,
@@ -684,7 +685,7 @@ func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 		namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
 		if err == nil {
 			for _, ns := range namespaces {
-				if strings.Contains(ns.Device, volumeID) {
+				if strings.Contains(ns.GetDevice(), volumeID) {
 					volumeExists = true
 					break
 				}
@@ -837,9 +838,10 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 	for _, ns := range namespaces {
 		// Each namespace corresponds to a ZVOL
 		// The device path usually points to the ZVOL
-		datasets, err := s.apiClient.QueryAllDatasets(ctx, ns.Device)
+		devicePath := ns.GetDevice()
+		datasets, err := s.apiClient.QueryAllDatasets(ctx, devicePath)
 		if err != nil || len(datasets) == 0 {
-			klog.V(5).Infof("Skipping NVMe-oF namespace with no matching ZVOL: %s", ns.Device)
+			klog.V(5).Infof("Skipping NVMe-oF namespace with no matching ZVOL: %s", devicePath)
 			continue
 		}
 

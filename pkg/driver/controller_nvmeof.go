@@ -117,7 +117,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 		if ns.Subsystem == subsystemID {
 			subsystemNamespaces++
 			klog.V(5).Infof("Existing namespace in subsystem %d: ID=%d, NSID=%d, device=%s",
-				subsystemID, ns.ID, ns.NSID, ns.Device)
+				subsystemID, ns.ID, ns.NSID, ns.GetDevice())
 		}
 	}
 	if subsystemNamespaces > 0 {
@@ -127,7 +127,7 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 	// Find namespace matching this ZVOL in the target subsystem
 	for i := range namespaces {
 		ns := &namespaces[i]
-		if ns.Subsystem == subsystemID && ns.Device == devicePath {
+		if ns.Subsystem == subsystemID && ns.GetDevice() == devicePath {
 			return ns, nil
 		}
 	}
@@ -532,7 +532,7 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 			if ns.Subsystem == meta.NVMeOFSubsystemID {
 				attachedCount++
 				klog.Warningf("Namespace %d (NSID: %d, device: %s) still attached to subsystem %d",
-					ns.ID, ns.NSID, ns.Device, meta.NVMeOFSubsystemID)
+					ns.ID, ns.NSID, ns.GetDevice(), meta.NVMeOFSubsystemID)
 			}
 		}
 		if attachedCount > 0 {
@@ -631,7 +631,7 @@ func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *V
 		}
 		// Namespace still exists - return error to retry
 		e := status.Errorf(codes.Internal, "Namespace %d still exists after deletion (NSID: %d, device: %s)",
-			ns.ID, ns.NSID, ns.Device)
+			ns.ID, ns.NSID, ns.GetDevice())
 		klog.Error(e)
 		// Don't call timer.ObserveError() here - let the caller handle it
 		return e

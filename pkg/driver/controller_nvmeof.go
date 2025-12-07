@@ -372,16 +372,16 @@ func (s *ControllerService) bindSubsystemToPort(ctx context.Context, subsystemID
 				"No NVMe-oF ports configured. Create a port in TrueNAS (Shares > NVMe-oF Targets > Ports) first.")
 		}
 		portID = ports[0].ID
-		klog.V(4).Infof("Using first available NVMe-oF port: ID=%d", portID)
+		klog.Infof("Using first available NVMe-oF port: ID=%d", portID)
 	}
 
-	klog.V(4).Infof("Binding subsystem %d to port %d", subsystemID, portID)
+	klog.Infof("Binding subsystem %d to port %d", subsystemID, portID)
 	if err := s.apiClient.AddSubsystemToPort(ctx, subsystemID, portID); err != nil {
 		timer.ObserveError()
 		return status.Errorf(codes.Internal, "Failed to bind subsystem to port: %v", err)
 	}
 
-	klog.V(4).Infof("Successfully bound subsystem %d to port %d", subsystemID, portID)
+	klog.Infof("Successfully bound subsystem %d to port %d", subsystemID, portID)
 	return nil
 }
 
@@ -665,13 +665,14 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 // setupNVMeOFVolumeFromClone sets up NVMe-oF infrastructure for a cloned ZVOL.
 // With independent subsystem architecture, creates a new subsystem for the clone.
 func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, _, snapshotID string) (*csi.CreateVolumeResponse, error) {
-	klog.V(4).Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s", zvol.Name)
+	klog.Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s (from snapshot)", zvol.Name)
 
 	volumeName := req.GetName()
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "clone")
 
 	// Generate NQN for the cloned volume's dedicated subsystem
 	subsystemNQN := generateNQN(volumeName)
+	klog.Infof("Generated NQN for cloned volume: %s", subsystemNQN)
 
 	// Parse optional port ID from StorageClass parameters
 	params := req.GetParameters()
@@ -686,7 +687,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	}
 
 	// Step 1: Create dedicated subsystem for the cloned volume
-	klog.V(4).Infof("Creating dedicated NVMe-oF subsystem for clone: %s", subsystemNQN)
+	klog.Infof("Creating dedicated NVMe-oF subsystem for clone: %s", subsystemNQN)
 	subsystem, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
 		Name:         subsystemNQN,
 		AllowAnyHost: true,
@@ -701,7 +702,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF subsystem: %v", err)
 	}
 
-	klog.V(4).Infof("Created NVMe-oF subsystem: ID=%d, Name=%s", subsystem.ID, subsystem.Name)
+	klog.Infof("Created NVMe-oF subsystem: ID=%d, Name=%s", subsystem.ID, subsystem.Name)
 
 	// Step 2: Bind subsystem to port
 	if bindErr := s.bindSubsystemToPort(ctx, subsystem.ID, portID, timer); bindErr != nil {
@@ -718,7 +719,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	// Step 3: Create NVMe-oF namespace (NSID = 1)
 	devicePath := "zvol/" + zvol.Name
-	klog.V(4).Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
+	klog.Infof("Creating NVMe-oF namespace for device: %s in subsystem %d", devicePath, subsystem.ID)
 
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 		SubsysID:   subsystem.ID,
@@ -739,7 +740,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		return nil, status.Errorf(codes.Internal, "Failed to create NVMe-oF namespace: %v", err)
 	}
 
-	klog.V(4).Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
+	klog.Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
 
 	// Get requested capacity
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()

@@ -89,6 +89,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -112,6 +115,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -143,6 +149,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -166,6 +175,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -189,6 +201,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -212,6 +227,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -238,6 +256,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -261,6 +282,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -292,6 +316,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - name: Debug shell environment
         run: |
           echo "=== Shell info ==="
@@ -331,6 +358,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -354,6 +384,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -377,6 +410,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -402,6 +438,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -424,6 +463,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nfs
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -446,6 +488,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -468,6 +513,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -490,6 +538,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}
@@ -520,6 +571,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-dependencies
+        with:
+          protocol: nvmeof
       - uses: ./.github/actions/setup-k3s
         with:
           truenas_host: ${{ secrets.TRUENAS_HOST }}

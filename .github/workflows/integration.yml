@@ -127,7 +127,7 @@ jobs:
         run: ./tests/integration/test-snapshot-nfs.sh
       - name: Upload diagnostic logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: nfs-snapshot-diagnostics
           path: /tmp/test-logs/
@@ -276,7 +276,7 @@ jobs:
         run: ./tests/integration/test-snapshot-nvmeof.sh
       - name: Upload diagnostic logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: nvmeof-snapshot-diagnostics
           path: /tmp/test-logs/
@@ -505,7 +505,7 @@ jobs:
         run: ./tests/integration/test-snapshot-restore.sh
       - name: Upload diagnostic logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: snapshot-restore-diagnostics
           path: /tmp/test-logs/

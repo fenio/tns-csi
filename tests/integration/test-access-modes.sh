@@ -33,7 +33,7 @@ trap 'show_diagnostic_logs "${POD_NAME_1}" "${PVC_NAME_RWX}"; cleanup_test "${PO
 
 # Run test steps
 verify_cluster
-deploy_driver "nvmeof"  # Deploy with both NFS and NVMe-oF
+deploy_driver "both"  # Deploy with both NFS and NVMe-oF
 wait_for_driver
 
 #######################################

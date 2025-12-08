@@ -10,7 +10,7 @@ source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="Access Mode Validation"
 PVC_NAME_RWX="access-mode-rwx"
-PVC_NAME_RWO="access-mode-rwo"
+PVC_NAME_RWOP="access-mode-rwop"
 POD_NAME_1="access-test-pod-1"
 POD_NAME_2="access-test-pod-2"
 POD_NAME_3="access-test-pod-3"
@@ -23,13 +23,13 @@ echo ""
 set_test_steps 10
 echo "This test verifies:"
 echo "  • ReadWriteMany (RWX) allows multiple pods to mount"
-echo "  • ReadWriteOnce (RWO) restricts to single pod"
+echo "  • ReadWriteOncePod (RWOP) restricts to single pod"
 echo "  • Data is shared correctly in RWX mode"
-echo "  • Proper isolation in RWO mode"
+echo "  • Proper isolation in RWOP mode"
 echo "================================================"
 
 # Trap errors and cleanup
-trap 'show_diagnostic_logs "${POD_NAME_1}" "${PVC_NAME_RWX}"; cleanup_test "${POD_NAME_1}" "${PVC_NAME_RWX}"; cleanup_test "${POD_NAME_2}" "${PVC_NAME_RWO}"; cleanup_test "${POD_NAME_3}" ""; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
+trap 'show_diagnostic_logs "${POD_NAME_1}" "${PVC_NAME_RWX}"; cleanup_test "${POD_NAME_1}" "${PVC_NAME_RWX}"; cleanup_test "${POD_NAME_2}" "${PVC_NAME_RWOP}"; cleanup_test "${POD_NAME_3}" ""; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 
 # Run test steps
 verify_cluster
@@ -195,18 +195,18 @@ else
 fi
 
 #######################################
-# Test 5: Create RWO PVC (NVMe-oF)
+# Test 5: Create RWOP PVC (NVMe-oF)
 #######################################
-test_step "Creating ReadWriteOnce PVC (NVMe-oF)"
+test_step "Creating ReadWriteOncePod PVC (NVMe-oF)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: ${PVC_NAME_RWO}
+  name: ${PVC_NAME_RWOP}
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteOncePod
   resources:
     requests:
       storage: 1Gi
@@ -220,7 +220,7 @@ kind: Pod
 metadata:
   name: ${POD_NAME_3}
   labels:
-    test: access-mode-rwo
+    test: access-mode-rwop
 spec:
   containers:
   - name: test-container
@@ -232,11 +232,11 @@ spec:
   volumes:
   - name: exclusive-volume
     persistentVolumeClaim:
-      claimName: ${PVC_NAME_RWO}
+      claimName: ${PVC_NAME_RWOP}
 EOF
 
 kubectl wait --for=jsonpath='{.status.phase}'=Bound \
-    pvc/"${PVC_NAME_RWO}" \
+    pvc/"${PVC_NAME_RWOP}" \
     -n "${TEST_NAMESPACE}" \
     --timeout="${TIMEOUT_PVC}"
 
@@ -244,34 +244,34 @@ kubectl wait --for=condition=Ready pod/"${POD_NAME_3}" \
     -n "${TEST_NAMESPACE}" \
     --timeout=360s
 
-test_success "RWO PVC created and bound to pod 3"
+test_success "RWOP PVC created and bound to pod 3"
 
-# Write data to RWO volume
+# Write data to RWOP volume
 echo ""
 # Configure test with 10 total steps
-test_info "Writing data to RWO volume..."
+test_info "Writing data to RWOP volume..."
 kubectl exec "${POD_NAME_3}" -n "${TEST_NAMESPACE}" -- \
     sh -c "echo 'Exclusive data from pod 3' > /data/exclusive.txt"
 
-test_success "Data written to RWO volume"
+test_success "Data written to RWOP volume"
 
 #######################################
-# Test 6: Verify RWO exclusivity
+# Test 6: Verify RWOP exclusivity
 #######################################
-test_step "Verifying RWO volume exclusivity"
+test_step "Verifying RWOP volume exclusivity"
 
 echo ""
 # Configure test with 10 total steps
-test_info "Attempting to create second pod with same RWO volume..."
-test_info "This should remain in ContainerCreating or Pending state"
+test_info "Attempting to create second pod with same RWOP volume..."
+test_info "This should remain in Pending state (blocked by scheduler)"
 
 cat <<EOF | kubectl apply -n "${TEST_NAMESPACE}" -f -
 apiVersion: v1
 kind: Pod
 metadata:
-  name: access-test-rwo-violation
+  name: access-test-rwop-violation
   labels:
-    test: access-mode-rwo-violation
+    test: access-mode-rwop-violation
 spec:
   containers:
   - name: test-container
@@ -283,33 +283,34 @@ spec:
   volumes:
   - name: exclusive-volume
     persistentVolumeClaim:
-      claimName: ${PVC_NAME_RWO}
+      claimName: ${PVC_NAME_RWOP}
 EOF
 
 # Wait a bit and check the pod status
 sleep 15
 
-POD_STATUS=$(kubectl get pod access-test-rwo-violation -n "${TEST_NAMESPACE}" -o jsonpath='{.status.phase}')
-CONTAINER_STATUS=$(kubectl get pod access-test-rwo-violation -n "${TEST_NAMESPACE}" -o jsonpath='{.status.containerStatuses[0].state}' 2>/dev/null || echo "")
+POD_STATUS=$(kubectl get pod access-test-rwop-violation -n "${TEST_NAMESPACE}" -o jsonpath='{.status.phase}')
+POD_REASON=$(kubectl get pod access-test-rwop-violation -n "${TEST_NAMESPACE}" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null || echo "")
 
-if [[ "${POD_STATUS}" == "Pending" ]] || [[ "${POD_STATUS}" == "ContainerCreating" ]] || echo "${CONTAINER_STATUS}" | grep -q "waiting"; then
-    test_success "RWO exclusivity enforced - second pod cannot mount volume"
+if [[ "${POD_STATUS}" == "Pending" ]]; then
+    test_success "RWOP exclusivity enforced - second pod blocked by scheduler"
+    test_info "Pod status: ${POD_STATUS}, Reason: ${POD_REASON}"
 else
-    test_error "RWO violation: second pod reached unexpected state: ${POD_STATUS}"
-    kubectl describe pod access-test-rwo-violation -n "${TEST_NAMESPACE}"
+    test_error "RWOP violation: second pod reached unexpected state: ${POD_STATUS}"
+    kubectl describe pod access-test-rwop-violation -n "${TEST_NAMESPACE}"
     exit 1
 fi
 
-# Check events for attachment errors
-EVENTS=$(kubectl get events -n "${TEST_NAMESPACE}" --sort-by='.lastTimestamp' | grep -i "access-test-rwo-violation" | tail -5 || echo "")
-if echo "${EVENTS}" | grep -qE "(FailedAttachVolume|FailedMount|Volume.*already.*use)"; then
-    test_success "Kubernetes correctly reports volume attachment conflict"
+# Check events for scheduler blocking
+EVENTS=$(kubectl get events -n "${TEST_NAMESPACE}" --sort-by='.lastTimestamp' | grep -i "access-test-rwop-violation" | tail -5 || echo "")
+if echo "${EVENTS}" | grep -qE "(Unschedulable|conflict|in use)"; then
+    test_success "Kubernetes scheduler correctly blocks RWOP volume reuse"
 else
-    test_info "Pod is waiting for volume attachment (expected behavior)"
+    test_info "Pod is waiting for scheduling (expected with RWOP)"
 fi
 
 # Cleanup the violation test pod
-kubectl delete pod access-test-rwo-violation -n "${TEST_NAMESPACE}" --wait=false
+kubectl delete pod access-test-rwop-violation -n "${TEST_NAMESPACE}" --wait=false
 
 #######################################
 # Test 7: Summary and verification
@@ -332,13 +333,13 @@ else
     test_warning "Expected more files in RWX volume: ${RWX_FILE_COUNT}"
 fi
 
-test_info "Verifying RWO volume data..."
-RWO_DATA=$(kubectl exec "${POD_NAME_3}" -n "${TEST_NAMESPACE}" -- cat /data/exclusive.txt)
+test_info "Verifying RWOP volume data..."
+RWOP_DATA=$(kubectl exec "${POD_NAME_3}" -n "${TEST_NAMESPACE}" -- cat /data/exclusive.txt)
 
-if [[ "${RWO_DATA}" == "Exclusive data from pod 3" ]]; then
-    test_success "RWO volume data intact"
+if [[ "${RWOP_DATA}" == "Exclusive data from pod 3" ]]; then
+    test_success "RWOP volume data intact"
 else
-    test_error "RWO data verification failed: ${RWO_DATA}"
+    test_error "RWOP data verification failed: ${RWOP_DATA}"
     exit 1
 fi
 
@@ -356,10 +357,10 @@ echo "  ✓ Both pods could read and write"
 echo "  ✓ Files created: ${RWX_FILE_COUNT}"
 echo ""
 # Configure test with 10 total steps
-echo "ReadWriteOnce (RWO) - NVMe-oF:"
+echo "ReadWriteOncePod (RWOP) - NVMe-oF:"
 echo "  ✓ Single pod mounted volume successfully"
 echo "  ✓ Second pod blocked from mounting"
-echo "  ✓ Kubernetes enforced exclusivity"
+echo "  ✓ Kubernetes scheduler enforced exclusivity"
 echo "  ✓ Data remained isolated to single pod"
 echo ""
 # Configure test with 10 total steps
@@ -371,7 +372,7 @@ verify_metrics
 # Cleanup
 cleanup_test "${POD_NAME_1}" "${PVC_NAME_RWX}"
 cleanup_test "${POD_NAME_2}" ""
-cleanup_test "${POD_NAME_3}" "${PVC_NAME_RWO}"
+cleanup_test "${POD_NAME_3}" "${PVC_NAME_RWOP}"
 
 # Success
 test_summary "${PROTOCOL}" "PASSED"

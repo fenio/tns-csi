@@ -1,0 +1,654 @@
+name: Integration Tests new VM
+
+on:
+  # Scheduled trigger - run every 2 hours
+  # schedule:
+  #   - cron: '0 */2 * * *'
+  # Automatic trigger disabled - run manually until volume expansion issues are fixed
+  # workflow_run:
+  #   workflows: ["CI"]
+  #   types:
+  #     - completed
+  #   branches:
+  #     - main
+  # Manual trigger for testing specific protocols/tests
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Protocol to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - nfs
+          - nvmeof
+      test:
+        description: 'Specific test to run (leave empty for all tests of selected protocol)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - basic
+          - snapshot
+          - concurrent
+          - persistence
+          - statefulset
+          - volume-expansion
+          - dual-mount
+          - connection-resilience
+          - pod-restart
+          - access-modes
+          - snapshot-restore
+          - volume-stress
+
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
+# Ensure only one integration test runs at a time on the new runner
+concurrency:
+  group: integration-tests
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================
+  # Setup Phase
+  # ==========================================
+  compute-tag:
+    name: Compute Image Tag
+    runs-on: new
+    # Skip if triggered by workflow_run and CI failed
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Compute image tag from branch
+        id: tag
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "main" ]; then
+            TAG="latest"
+          else
+            TAG=$(echo "$BRANCH" | sed 's/\//-/g')
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG (from branch: $BRANCH)"
+
+  # ==========================================
+  # NFS Tests
+  # ==========================================
+  nfs-basic:
+    name: "NFS: Basic"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-nfs.sh
+
+  nfs-snapshot:
+    name: "NFS: Snapshot"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-snapshot-nfs.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nfs-snapshot-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nfs-concurrent:
+    name: "NFS: Concurrent"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-concurrent-nfs.sh
+
+  nfs-persistence:
+    name: "NFS: Persistence"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-persistence-nfs.sh
+
+  nfs-statefulset:
+    name: "NFS: StatefulSet"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-statefulset-nfs.sh
+
+  nfs-expansion:
+    name: "NFS: Volume Expansion"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-volume-expansion-nfs.sh
+
+  # ==========================================
+  # NVMe-oF Tests
+  # ==========================================
+  nvmeof-basic:
+    name: "NVMe-oF: Basic"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-nvmeof.sh
+
+  nvmeof-snapshot:
+    name: "NVMe-oF: Snapshot"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-snapshot-nvmeof.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nvmeof-snapshot-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nvmeof-concurrent:
+    name: "NVMe-oF: Concurrent"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Debug shell environment
+        run: |
+          echo "=== Shell info ==="
+          echo "SHELL: $SHELL"
+          echo "BASH_VERSION: $BASH_VERSION"
+          ls -la /bin/sh
+          
+          echo "=== grep info ==="
+          which grep
+          grep --version || true
+          
+          echo "=== Test grep -c behavior ==="
+          echo -e "a\nb\nc" | grep -c "x" || echo "fallback"
+          RESULT=$(echo -e "a\nb\nc" | grep -c "x" || echo "0")
+          echo "RESULT='$RESULT'"
+          echo "RESULT bytes: $(echo -n "$RESULT" | xxd)"
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-concurrent-nvmeof.sh
+
+  nvmeof-persistence:
+    name: "NVMe-oF: Persistence"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-persistence-nvmeof.sh
+
+  nvmeof-statefulset:
+    name: "NVMe-oF: StatefulSet"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-statefulset-nvmeof.sh
+
+  nvmeof-expansion:
+    name: "NVMe-oF: Volume Expansion"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-volume-expansion-nvmeof.sh
+
+  # ==========================================
+  # Shared Tests
+  # ==========================================
+  shared-dual-mount:
+    name: "Shared: Dual Mount"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-dual-mount.sh
+
+  shared-connection-resilience:
+    name: "Shared: Connection Resilience"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-connection-resilience.sh
+
+  shared-pod-restart:
+    name: "Shared: Pod Restart"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-pod-restart.sh
+
+  shared-access-modes:
+    name: "Shared: Access Modes"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-access-modes.sh
+
+  shared-snapshot-restore:
+    name: "Shared: Snapshot Restore"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-snapshot-restore.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: snapshot-restore-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  shared-volume-stress:
+    name: "Shared: Volume Stress"
+    runs-on: new
+    timeout-minutes: 30
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-k3s
+        with:
+          truenas_host: ${{ secrets.TRUENAS_HOST }}
+          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
+          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: |
+          echo "=== Starting Volume Stress Test ==="
+          date
+          stdbuf -o0 ./tests/integration/test-volume-stress.sh
+          echo "=== Volume Stress Test Completed ==="
+          date
+
+  # ==========================================
+  # Summary
+  # ==========================================
+  test-summary:
+    name: "Test Summary"
+    runs-on: new
+    timeout-minutes: 5
+    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
+    if: always()
+    steps:
+      - name: Generate Test Summary
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const results = {
+              // NFS Tests
+              'Basic': '${{ needs.nfs-basic.result }}',
+              'Snapshot': '${{ needs.nfs-snapshot.result }}',
+              'Concurrent': '${{ needs.nfs-concurrent.result }}',
+              'Persistence': '${{ needs.nfs-persistence.result }}',
+              'StatefulSet': '${{ needs.nfs-statefulset.result }}',
+              'Volume Expansion': '${{ needs.nfs-expansion.result }}',
+            };
+            
+            const nvmeofResults = {
+              'Basic': '${{ needs.nvmeof-basic.result }}',
+              'Snapshot': '${{ needs.nvmeof-snapshot.result }}',
+              'Concurrent': '${{ needs.nvmeof-concurrent.result }}',
+              'Persistence': '${{ needs.nvmeof-persistence.result }}',
+              'StatefulSet': '${{ needs.nvmeof-statefulset.result }}',
+              'Volume Expansion': '${{ needs.nvmeof-expansion.result }}',
+            };
+            
+            const sharedResults = {
+              'Dual Mount': '${{ needs.shared-dual-mount.result }}',
+              'Connection Resilience': '${{ needs.shared-connection-resilience.result }}',
+              'Pod Restart': '${{ needs.shared-pod-restart.result }}',
+              'Access Modes': '${{ needs.shared-access-modes.result }}',
+              'Snapshot Restore': '${{ needs.shared-snapshot-restore.result }}',
+              'Volume Stress': '${{ needs.shared-volume-stress.result }}',
+            };
+            
+            const getIcon = (result) => {
+              switch(result) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'skipped': return '⏭️';
+                case 'cancelled': return '🚫';
+                default: return '⚪';
+              }
+            };
+            
+            const countResults = (obj) => {
+              let passed = 0, failed = 0, skipped = 0;
+              for (const result of Object.values(obj)) {
+                if (result === 'success') passed++;
+                else if (result === 'failure') failed++;
+                else if (result === 'skipped') skipped++;
+              }
+              return { passed, failed, skipped };
+            };
+            
+            const nfsCounts = countResults(results);
+            const nvmeofCounts = countResults(nvmeofResults);
+            const sharedCounts = countResults(sharedResults);
+            
+            const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
+            const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
+            const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
+            const total = 18;
+            
+            let summary = `# Integration Test Results\n\n`;
+            
+            // Overall status banner
+            if (totalFailed > 0) {
+              summary += `> ### ${totalFailed} test(s) failed\n\n`;
+            } else if (totalPassed === total) {
+              summary += `> ### All ${total} tests passed!\n\n`;
+            } else {
+              summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
+            }
+            
+            // Quick stats
+            summary += `| Passed | Failed | Skipped | Total |\n`;
+            summary += `|:------:|:------:|:-------:|:-----:|\n`;
+            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${total} |\n\n`;
+            
+            // Side-by-side NFS and NVMe-oF tables
+            summary += `## Protocol Tests\n\n`;
+            summary += `| Test | NFS | NVMe-oF |\n`;
+            summary += `|------|:---:|:-------:|\n`;
+            
+            const testNames = ['Basic', 'Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion'];
+            for (const test of testNames) {
+              const nfsResult = results[test];
+              const nvmeofResult = nvmeofResults[test];
+              summary += `| ${test} | ${getIcon(nfsResult)} | ${getIcon(nvmeofResult)} |\n`;
+            }
+            
+            // Shared tests
+            summary += `\n## Shared Tests\n\n`;
+            summary += `| Test | Status |\n`;
+            summary += `|------|:------:|\n`;
+            for (const [test, result] of Object.entries(sharedResults)) {
+              summary += `| ${test} | ${getIcon(result)} |\n`;
+            }
+            
+            // Write to job summary
+            await core.summary.addRaw(summary).write();
+            
+            // Fail if any test failed
+            if (totalFailed > 0) {
+              core.setFailed(`${totalFailed} test(s) failed`);
+            }

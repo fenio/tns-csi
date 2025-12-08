@@ -445,7 +445,7 @@ verify_cluster() {
 #######################################
 # Deploy CSI driver using Helm
 # Arguments:
-#   Protocol (nfs, nvmeof, iscsi)
+#   Protocol (nfs, nvmeof, both, iscsi)
 #   Additional helm values (optional)
 #######################################
 deploy_driver() {
@@ -515,6 +515,21 @@ deploy_driver() {
             # Only the NVMe-oF port needs to be pre-configured in TrueNAS
             base_args+=(
                 --set storageClasses.nfs.enabled=false
+                --set storageClasses.nvmeof.enabled=true
+                --set storageClasses.nvmeof.name=tns-csi-nvmeof
+                --set storageClasses.nvmeof.pool="${TRUENAS_POOL}"
+                --set storageClasses.nvmeof.server="${TRUENAS_HOST}"
+                --set storageClasses.nvmeof.transport=tcp
+                --set storageClasses.nvmeof.port=4420
+            )
+            ;;
+        both)
+            # Enable both NFS and NVMe-oF storage classes for tests that need both protocols
+            base_args+=(
+                --set storageClasses.nfs.enabled=true
+                --set storageClasses.nfs.name=tns-csi-nfs
+                --set storageClasses.nfs.pool="${TRUENAS_POOL}"
+                --set storageClasses.nfs.server="${TRUENAS_HOST}"
                 --set storageClasses.nvmeof.enabled=true
                 --set storageClasses.nvmeof.name=tns-csi-nvmeof
                 --set storageClasses.nvmeof.pool="${TRUENAS_POOL}"
@@ -610,6 +625,13 @@ deploy_driver() {
             kubectl get storageclass tns-csi-nfs -o yaml || true
             ;;
         nvmeof)
+            kubectl get storageclass tns-csi-nvmeof -o yaml || true
+            ;;
+        both)
+            echo "--- NFS StorageClass ---"
+            kubectl get storageclass tns-csi-nfs -o yaml || true
+            echo ""
+            echo "--- NVMe-oF StorageClass ---"
             kubectl get storageclass tns-csi-nvmeof -o yaml || true
             ;;
         iscsi)

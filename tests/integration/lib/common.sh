@@ -703,6 +703,53 @@ wait_for_driver() {
     echo "=== Driver image version ==="
     kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
         -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+    
+    # Wait for StorageClasses to be fully registered in API server
+    # This prevents race conditions where PVC creation happens before StorageClass is available
+    echo ""
+    test_info "Verifying StorageClasses are available..."
+    
+    local storageclass_timeout=30
+    local elapsed=0
+    local interval=2
+    local all_ready=false
+    
+    while [[ $elapsed -lt $storageclass_timeout ]]; do
+        # Get list of expected StorageClasses from deployed resources
+        local expected_scs
+        expected_scs=$(kubectl get storageclass -o jsonpath='{.items[?(@.provisioner=="tns.csi.io")].metadata.name}' 2>/dev/null || echo "")
+        
+        if [[ -n "${expected_scs}" ]]; then
+            # Verify each StorageClass can be retrieved successfully
+            all_ready=true
+            for sc in ${expected_scs}; do
+                if ! kubectl get storageclass "${sc}" &>/dev/null; then
+                    test_debug "StorageClass ${sc} not yet available"
+                    all_ready=false
+                    break
+                fi
+            done
+            
+            if [[ "${all_ready}" == "true" ]]; then
+                test_success "StorageClasses verified: ${expected_scs}"
+                break
+            fi
+        else
+            test_debug "No TNS StorageClasses found yet"
+        fi
+        
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+    
+    if [[ "${all_ready}" != "true" ]]; then
+        test_warning "StorageClass verification timed out after ${storageclass_timeout}s"
+        test_warning "PVC creation may fail if StorageClasses are not ready"
+    fi
+    
+    # Additional safety: Give API server a moment to fully propagate StorageClass changes
+    sleep 2
+    
     stop_test_timer "wait_for_driver" "PASSED"
 }
 

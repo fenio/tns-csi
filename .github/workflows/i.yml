@@ -110,11 +110,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@v2
         with:
-          truenas_host: ${{ secrets.TRUENAS_HOST }}
-          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
-          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:
@@ -249,11 +247,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@v2
         with:
-          truenas_host: ${{ secrets.TRUENAS_HOST }}
-          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
-          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:
@@ -462,11 +458,9 @@ jobs:
       (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
     steps:
       - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-k3s
+      - uses: fenio/setup-k3s@v2
         with:
-          truenas_host: ${{ secrets.TRUENAS_HOST }}
-          truenas_api_key: ${{ secrets.TRUENAS_API_KEY }}
-          truenas_pool: ${{ secrets.TRUENAS_POOL }}
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
       - name: Run Test
         env:

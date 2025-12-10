@@ -23,7 +23,6 @@ FROM alpine:3.23
 RUN apk add --no-cache \
     ca-certificates \
     nfs-utils \
-    open-iscsi \
     e2fsprogs \
     e2fsprogs-extra \
     xfsprogs \

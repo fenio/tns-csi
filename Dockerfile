@@ -1,5 +1,8 @@
 # Build stage
-FROM golang:1.25.5-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25.5-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /workspace
 
@@ -13,13 +16,14 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the driver
-RUN make build
+# Build the driver for target platform
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make build
 
-# Final stage
+# Final stage - use distroless or minimal base to avoid trigger issues
 FROM alpine:3.23
 
 # Install runtime dependencies
+# Note: apk exit code 4 means trigger scripts failed but packages are installed (expected under QEMU emulation)
 RUN apk add --no-cache \
     ca-certificates \
     nfs-utils \
@@ -29,7 +33,8 @@ RUN apk add --no-cache \
     blkid \
     util-linux \
     eudev \
-    nvme-cli
+    nvme-cli \
+    || [ $? -eq 4 ]
 
 # Copy the driver binary
 COPY --from=builder /workspace/bin/tns-csi-driver /usr/local/bin/

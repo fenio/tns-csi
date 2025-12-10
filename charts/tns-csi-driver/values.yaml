@@ -104,6 +104,13 @@ controller:
 
 # Node plugin configuration
 node:
+  # Kubelet data directory path
+  # Different Kubernetes distributions use different paths:
+  # - Standard K8s, K3s, Minikube: /var/lib/kubelet
+  # - K0s: /var/lib/k0s/kubelet
+  # - OpenShift: /var/lib/kubelet
+  kubeletPath: /var/lib/kubelet
+  
   # Log verbosity level (0-5, higher = more verbose)
   # 0: Errors only
   # 2: Normal operation (default) - volume created/deleted messages

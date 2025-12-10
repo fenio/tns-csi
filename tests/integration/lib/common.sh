@@ -488,6 +488,13 @@ deploy_driver() {
     local image_repo="${CSI_IMAGE_REPOSITORY:-ghcr.io/fenio/tns-csi}"
     test_debug "Using image: ${image_repo}:${image_tag}"
     
+    # Use KUBELET_PATH env var if set, otherwise default to '/var/lib/kubelet'
+    # Different distros use different paths:
+    # - Standard K8s, K3s, Minikube: /var/lib/kubelet
+    # - K0s: /var/lib/k0s/kubelet
+    local kubelet_path="${KUBELET_PATH:-/var/lib/kubelet}"
+    test_debug "Using kubelet path: ${kubelet_path}"
+    
     local base_args=(
         --namespace kube-system
         --create-namespace
@@ -497,6 +504,7 @@ deploy_driver() {
         --set truenas.url="${truenas_url}"
         --set truenas.apiKey="${TRUENAS_API_KEY}"
         --set truenas.skipTLSVerify=true
+        --set node.kubeletPath="${kubelet_path}"
     )
     
     # Protocol-specific configuration

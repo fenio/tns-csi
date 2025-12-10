@@ -81,10 +81,10 @@ spec:
             - name: plugin-dir
               mountPath: /csi
             - name: pods-mount-dir
-              mountPath: /var/lib/kubelet/pods
+              mountPath: {{ .Values.node.kubeletPath }}/pods
               mountPropagation: Bidirectional
             - name: plugins-mount-dir
-              mountPath: /var/lib/kubelet/plugins
+              mountPath: {{ .Values.node.kubeletPath }}/plugins
               mountPropagation: Bidirectional
             - name: device-dir
               mountPath: /dev
@@ -107,7 +107,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/{{ .Values.csiDriverName }}/csi.sock
+              value: {{ .Values.node.kubeletPath }}/plugins/{{ .Values.csiDriverName }}/csi.sock
           volumeMounts:
             - name: plugin-dir
               mountPath: /csi
@@ -119,19 +119,19 @@ spec:
       volumes:
         - name: plugin-dir
           hostPath:
-            path: /var/lib/kubelet/plugins/{{ .Values.csiDriverName }}
+            path: {{ .Values.node.kubeletPath }}/plugins/{{ .Values.csiDriverName }}
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:
-            path: /var/lib/kubelet/plugins_registry
+            path: {{ .Values.node.kubeletPath }}/plugins_registry
             type: Directory
         - name: pods-mount-dir
           hostPath:
-            path: /var/lib/kubelet/pods
+            path: {{ .Values.node.kubeletPath }}/pods
             type: Directory
         - name: plugins-mount-dir
           hostPath:
-            path: /var/lib/kubelet/plugins
+            path: {{ .Values.node.kubeletPath }}/plugins
             type: Directory
         - name: device-dir
           hostPath:

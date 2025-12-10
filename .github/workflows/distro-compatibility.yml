@@ -1,0 +1,339 @@
+name: Distro Compatibility Tests
+
+on:
+  # Manual trigger for testing on different K8s distros
+  workflow_dispatch:
+    inputs:
+      distro:
+        description: 'Kubernetes distribution to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - k3s
+          - k0s
+          - kubesolo
+          - minikube
+      protocol:
+        description: 'Protocol to test'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - nfs
+          - nvmeof
+  # Run weekly to catch distro-specific issues
+  schedule:
+    - cron: '0 3 * * 0'  # 3 AM UTC every Sunday
+
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
+# Ensure only one distro test runs at a time
+concurrency:
+  group: distro-compatibility-tests
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================
+  # Setup Phase
+  # ==========================================
+  compute-tag:
+    name: Compute Image Tag
+    runs-on: new
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Compute image tag from branch
+        id: tag
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "main" ]; then
+            TAG="latest"
+          else
+            TAG=$(echo "$BRANCH" | sed 's/\//-/g')
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG (from branch: $BRANCH)"
+
+  # ==========================================
+  # K3s Tests
+  # ==========================================
+  k3s-nfs:
+    name: "K3s: NFS"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k3s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v2
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+        run: ./tests/integration/test-distro-basic.sh
+
+  k3s-nvmeof:
+    name: "K3s: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k3s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v2
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
+  # K0s Tests
+  # ==========================================
+  k0s-nfs:
+    name: "K0s: NFS"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k0s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k0s@v1
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+        run: ./tests/integration/test-distro-basic.sh
+
+  k0s-nvmeof:
+    name: "K0s: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k0s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k0s@v1
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
+  # KubeSolo Tests
+  # ==========================================
+  kubesolo-nfs:
+    name: "KubeSolo: NFS"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'kubesolo' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-kubesolo@v1
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+        run: ./tests/integration/test-distro-basic.sh
+
+  kubesolo-nvmeof:
+    name: "KubeSolo: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'kubesolo' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-kubesolo@v1
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
+  # Minikube Tests
+  # ==========================================
+  minikube-nfs:
+    name: "Minikube: NFS"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'minikube' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-minikube@v1
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+        run: ./tests/integration/test-distro-basic.sh
+
+  minikube-nvmeof:
+    name: "Minikube: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'minikube' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-minikube@v1
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
+  # Summary
+  # ==========================================
+  test-summary:
+    name: "Distro Test Summary"
+    runs-on: new
+    timeout-minutes: 5
+    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof]
+    if: always()
+    steps:
+      - name: Generate Test Summary
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const distroResults = {
+              'K3s': {
+                'NFS': '${{ needs.k3s-nfs.result }}',
+                'NVMe-oF': '${{ needs.k3s-nvmeof.result }}'
+              },
+              'K0s': {
+                'NFS': '${{ needs.k0s-nfs.result }}',
+                'NVMe-oF': '${{ needs.k0s-nvmeof.result }}'
+              },
+              'KubeSolo': {
+                'NFS': '${{ needs.kubesolo-nfs.result }}',
+                'NVMe-oF': '${{ needs.kubesolo-nvmeof.result }}'
+              },
+              'Minikube': {
+                'NFS': '${{ needs.minikube-nfs.result }}',
+                'NVMe-oF': '${{ needs.minikube-nvmeof.result }}'
+              }
+            };
+            
+            const getIcon = (result) => {
+              switch(result) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'skipped': return '⏭️';
+                case 'cancelled': return '🚫';
+                default: return '⚪';
+              }
+            };
+            
+            let totalPassed = 0;
+            let totalFailed = 0;
+            let totalSkipped = 0;
+            
+            for (const distro of Object.keys(distroResults)) {
+              for (const protocol of Object.keys(distroResults[distro])) {
+                const result = distroResults[distro][protocol];
+                if (result === 'success') totalPassed++;
+                else if (result === 'failure') totalFailed++;
+                else if (result === 'skipped') totalSkipped++;
+              }
+            }
+            
+            let summary = `# Kubernetes Distribution Compatibility Results\n\n`;
+            
+            // Overall status banner
+            if (totalFailed > 0) {
+              summary += `> ### ${totalFailed} test(s) failed\n\n`;
+            } else if (totalPassed === 8) {
+              summary += `> ### All distribution tests passed!\n\n`;
+            } else {
+              summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
+            }
+            
+            // Quick stats
+            summary += `| Passed | Failed | Skipped | Total |\n`;
+            summary += `|:------:|:------:|:-------:|:-----:|\n`;
+            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | 8 |\n\n`;
+            
+            // Distribution results table
+            summary += `## Distribution Compatibility Matrix\n\n`;
+            summary += `| Distribution | NFS | NVMe-oF |\n`;
+            summary += `|--------------|:---:|:-------:|\n`;
+            
+            for (const [distro, protocols] of Object.entries(distroResults)) {
+              summary += `| ${distro} | ${getIcon(protocols['NFS'])} | ${getIcon(protocols['NVMe-oF'])} |\n`;
+            }
+            
+            summary += `\n## Test Details\n\n`;
+            summary += `These tests verify basic CSI driver functionality:\n`;
+            summary += `- Driver deployment and pod readiness\n`;
+            summary += `- PVC creation and binding\n`;
+            summary += `- Pod creation with volume mount\n`;
+            summary += `- Basic I/O operations (read/write)\n`;
+            summary += `- Volume cleanup\n\n`;
+            
+            summary += `### Tested on:\n`;
+            summary += `- **K3s**: Lightweight Kubernetes by Rancher\n`;
+            summary += `- **K0s**: Zero-friction Kubernetes by Mirantis\n`;
+            summary += `- **KubeSolo**: Single-node Kubernetes\n`;
+            summary += `- **Minikube**: Local Kubernetes for development\n`;
+            
+            // Write to job summary
+            await core.summary.addRaw(summary).write();
+            
+            // Fail if any test failed
+            if (totalFailed > 0) {
+              core.setFailed(`${totalFailed} test(s) failed`);
+            }

@@ -172,6 +172,7 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           TEST_PROTOCOL: nfs
+          KUBELET_PATH: /var/lib/kubesolo/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
   kubesolo-nvmeof:
@@ -192,6 +193,7 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           TEST_PROTOCOL: nvmeof
+          KUBELET_PATH: /var/lib/kubesolo/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
   # ==========================================

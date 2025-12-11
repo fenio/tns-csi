@@ -209,7 +209,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: fenio/setup-minikube@v5
         with:
-          driver: docker
+          driver: none
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -231,7 +231,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: fenio/setup-minikube@v5
         with:
-          driver: docker
+          driver: none
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

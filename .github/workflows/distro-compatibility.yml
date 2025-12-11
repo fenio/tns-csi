@@ -212,6 +212,7 @@ jobs:
       - uses: fenio/setup-minikube@v5
         with:
           driver: none
+          container-runtime: cri-o
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -234,6 +235,7 @@ jobs:
       - uses: fenio/setup-minikube@v5
         with:
           driver: none
+          container-runtime: cri-o
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

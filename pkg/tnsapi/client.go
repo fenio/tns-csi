@@ -93,6 +93,30 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("Storage API error %d: %s", e.Code, e.Message)
 }
 
+// isAuthenticationError checks if an error is a permanent authentication failure.
+// These include:
+// - 401 (unauthorized/invalid API key)
+// - Rejected API key errors
+// - 500 errors during authentication (likely indicates broken auth endpoint, not transient)
+// These should not be retried as they indicate configuration/server issues.
+func isAuthenticationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for explicit authentication errors
+	if errors.Is(err, ErrAuthenticationRejected) {
+		return true
+	}
+
+	// Check error message for authentication-related failures
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "401") ||
+		strings.Contains(errMsg, "invalid API key") ||
+		strings.Contains(errMsg, "rejected API key") ||
+		(strings.Contains(errMsg, "authentication failed") && strings.Contains(errMsg, "500"))
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
 func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
@@ -112,24 +136,73 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 		skipTLSVerify: skipTLSVerify,
 	}
 
-	// Connect to WebSocket
-	if err := c.connect(); err != nil {
-		return nil, fmt.Errorf("failed to connect: %w", err)
+	// Connect to WebSocket with retry logic
+	// This is critical for driver initialization in environments with intermittent network connectivity
+	maxAttempts := 5
+	retryDelays := []time.Duration{0, 5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second}
+
+	var lastConnErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			klog.Warningf("Connection attempt %d/%d to TrueNAS failed: %v", attempt-1, maxAttempts, lastConnErr)
+			delay := retryDelays[attempt-1]
+			klog.Infof("Retrying connection in %v...", delay)
+			time.Sleep(delay)
+
+			// Create a fresh client instance for retry to avoid goroutine conflicts
+			c = &Client{
+				url:           url,
+				apiKey:        apiKey,
+				pending:       make(map[string]chan *Response),
+				closeCh:       make(chan struct{}),
+				maxRetries:    5,
+				retryInterval: 5 * time.Second,
+				skipTLSVerify: skipTLSVerify,
+			}
+		}
+
+		klog.V(4).Infof("Attempting to connect to TrueNAS (attempt %d/%d)", attempt, maxAttempts)
+
+		// Connect to WebSocket
+		if err := c.connect(); err != nil {
+			lastConnErr = err
+			if attempt == maxAttempts {
+				return nil, fmt.Errorf("failed to connect after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Start response handler
+		go c.readLoop()
+
+		// Start ping handler for connection health monitoring
+		go c.pingLoop()
+
+		// Authenticate
+		if err := c.authenticate(); err != nil {
+			c.Close()
+			lastConnErr = err
+
+			// Don't retry on authentication errors (401, rejected API key) - these are permanent failures
+			// Only retry on network/connection errors
+			if errors.Is(err, ErrAuthenticationRejected) || isAuthenticationError(err) {
+				klog.Errorf("Authentication failed permanently: %v", err)
+				return nil, fmt.Errorf("authentication failed: %w", err)
+			}
+
+			if attempt == maxAttempts {
+				return nil, fmt.Errorf("failed to authenticate after %d attempts: %w", maxAttempts, err)
+			}
+			continue
+		}
+
+		// Success!
+		klog.Infof("Successfully connected to TrueNAS on attempt %d/%d", attempt, maxAttempts)
+		return c, nil
 	}
 
-	// Start response handler
-	go c.readLoop()
-
-	// Start ping handler for connection health monitoring
-	go c.pingLoop()
-
-	// Authenticate
-	if err := c.authenticate(); err != nil {
-		c.Close()
-		return nil, fmt.Errorf("failed to authenticate: %w", err)
-	}
-
-	return c, nil
+	// This should never be reached due to the return in the loop, but keep for safety
+	return nil, fmt.Errorf("failed to initialize client after %d attempts: %w", maxAttempts, lastConnErr)
 }
 
 // connect establishes WebSocket connection.

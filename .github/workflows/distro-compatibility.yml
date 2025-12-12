@@ -165,6 +165,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-kubesolo@v5
+      - name: Debug KubeSolo on failure
+        if: failure()
+        run: |
+          echo "=== KubeSolo Service Status ==="
+          sudo systemctl status kubesolo || true
+          echo "=== KubeSolo Journalctl Logs ==="
+          sudo journalctl -u kubesolo -n 200 --no-pager || true
+          echo "=== System Journal (last 5 minutes) ==="
+          sudo journalctl --since "5 minutes ago" -n 100 --no-pager || true
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -186,6 +195,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-kubesolo@v5
+      - name: Debug KubeSolo on failure
+        if: failure()
+        run: |
+          echo "=== KubeSolo Service Status ==="
+          sudo systemctl status kubesolo || true
+          echo "=== KubeSolo Journalctl Logs ==="
+          sudo journalctl -u kubesolo -n 200 --no-pager || true
+          echo "=== System Journal (last 5 minutes) ==="
+          sudo journalctl --since "5 minutes ago" -n 100 --no-pager || true
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

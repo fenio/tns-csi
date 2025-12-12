@@ -1431,6 +1431,66 @@ show_diagnostic_logs() {
     echo "========================================"
     echo ""
     
+    echo "=== System Information ==="
+    echo "--- Hostname ---"
+    hostname || true
+    echo ""
+    echo "--- Uptime ---"
+    uptime || true
+    echo ""
+    echo "--- Kernel Version ---"
+    uname -a || true
+    echo ""
+    
+    echo "=== Network Diagnostics ==="
+    echo "--- IP Configuration ---"
+    ip addr show || ifconfig -a || true
+    echo ""
+    echo "--- DNS Resolution ---"
+    echo "Resolving TRUENAS_HOST: ${TRUENAS_HOST:-<not set>}"
+    if [[ -n "${TRUENAS_HOST}" ]]; then
+        nslookup "${TRUENAS_HOST}" || host "${TRUENAS_HOST}" || echo "DNS resolution failed"
+        echo ""
+        echo "--- Connectivity Test to TrueNAS ---"
+        # Extract host from wss:// URL if it's a full URL
+        TRUENAS_IP="${TRUENAS_HOST#wss://}"
+        TRUENAS_IP="${TRUENAS_IP%%/*}"
+        ping -c 3 "${TRUENAS_IP}" || echo "Ping to ${TRUENAS_IP} failed"
+        echo ""
+        echo "--- TCP Port Check (443) ---"
+        nc -zv "${TRUENAS_IP}" 443 2>&1 || timeout 5 bash -c "cat < /dev/null > /dev/tcp/${TRUENAS_IP}/443" 2>&1 || echo "Port 443 connectivity check failed"
+    fi
+    echo ""
+    
+    echo "=== Journalctl Logs (kubelet/containerd - last 200 lines) ==="
+    if command -v journalctl &>/dev/null; then
+        echo "--- Kubelet Logs ---"
+        journalctl -u kubelet --no-pager -n 200 2>&1 || echo "No kubelet journal logs available"
+        echo ""
+        echo "--- Containerd/CRI-O Logs ---"
+        journalctl -u containerd --no-pager -n 100 2>&1 || journalctl -u crio --no-pager -n 100 2>&1 || echo "No container runtime journal logs available"
+        echo ""
+        echo "--- Kubesolo Logs ---"
+        journalctl -u kubesolo --no-pager -n 200 2>&1 || echo "Not a kubesolo system"
+        echo ""
+        echo "--- K3s Logs ---"
+        journalctl -u k3s --no-pager -n 200 2>&1 || echo "Not a k3s system"
+        echo ""
+        echo "--- K0s Logs ---"
+        journalctl -u k0scontroller --no-pager -n 100 2>&1 || journalctl -u k0sworker --no-pager -n 100 2>&1 || echo "Not a k0s system"
+    else
+        echo "journalctl not available on this system"
+    fi
+    echo ""
+    
+    echo "=== Container Runtime Status ==="
+    echo "--- Containerd Status ---"
+    systemctl status containerd --no-pager -l 2>&1 || echo "Containerd not running or systemctl not available"
+    echo ""
+    echo "--- CRI-O Status ---"
+    systemctl status crio --no-pager -l 2>&1 || echo "CRI-O not running or systemctl not available"
+    echo ""
+    
     echo "=== Controller Logs - tns-csi-plugin (last 300 lines) ==="
     kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \

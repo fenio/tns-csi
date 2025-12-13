@@ -164,7 +164,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-kubesolo@v5
+      - uses: fenio/setup-kubesolo@v5.0.1
       - name: Debug KubeSolo on failure
         if: failure()
         run: |
@@ -194,7 +194,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-kubesolo@v5
+      - uses: fenio/setup-kubesolo@v5.0.1
       - name: Debug KubeSolo on failure
         if: failure()
         run: |

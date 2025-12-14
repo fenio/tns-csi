@@ -15,6 +15,8 @@ on:
           - k0s
           - kubesolo
           - minikube
+          - talos
+          - microk8s
       protocol:
         description: 'Protocol to test'
         required: false
@@ -64,7 +66,7 @@ jobs:
   # ==========================================
   k3s-nfs:
     name: "K3s: NFS"
-    runs-on: new
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -111,7 +113,7 @@ jobs:
   # ==========================================
   k0s-nfs:
     name: "K0s: NFS"
-    runs-on: new
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -156,7 +158,7 @@ jobs:
   # ==========================================
   kubesolo-nfs:
     name: "KubeSolo: NFS"
-    runs-on: new
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -219,7 +221,7 @@ jobs:
   # ==========================================
   minikube-nfs:
     name: "Minikube: NFS"
-    runs-on: new
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -264,13 +266,103 @@ jobs:
         run: ./tests/integration/test-distro-basic.sh
 
   # ==========================================
+  # Talos Tests
+  # ==========================================
+  talos-nfs:
+    name: "Talos: NFS"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-talos@v5
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+          KUBELET_PATH: /var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
+  talos-nvmeof:
+    name: "Talos: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-talos@v5
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+          KUBELET_PATH: /var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
+  # MicroK8s Tests
+  # ==========================================
+  microk8s-nfs:
+    name: "MicroK8s: NFS"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'microk8s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-microk8s@v5
+      - name: Run Basic NFS Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nfs
+          KUBELET_PATH: /var/snap/microk8s/common/var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
+  microk8s-nvmeof:
+    name: "MicroK8s: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'microk8s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-microk8s@v5
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+          KUBELET_PATH: /var/snap/microk8s/common/var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
+  # ==========================================
   # Summary
   # ==========================================
   test-summary:
     name: "Distro Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof]
+    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof, talos-nfs, talos-nvmeof, microk8s-nfs, microk8s-nvmeof]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -293,6 +385,14 @@ jobs:
               'Minikube': {
                 'NFS': '${{ needs.minikube-nfs.result }}',
                 'NVMe-oF': '${{ needs.minikube-nvmeof.result }}'
+              },
+              'Talos': {
+                'NFS': '${{ needs.talos-nfs.result }}',
+                'NVMe-oF': '${{ needs.talos-nvmeof.result }}'
+              },
+              'MicroK8s': {
+                'NFS': '${{ needs.microk8s-nfs.result }}',
+                'NVMe-oF': '${{ needs.microk8s-nvmeof.result }}'
               }
             };
             
@@ -324,7 +424,7 @@ jobs:
             // Overall status banner
             if (totalFailed > 0) {
               summary += `> ### ${totalFailed} test(s) failed\n\n`;
-            } else if (totalPassed === 8) {
+            } else if (totalPassed === 12) {
               summary += `> ### All distribution tests passed!\n\n`;
             } else {
               summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
@@ -333,7 +433,7 @@ jobs:
             // Quick stats
             summary += `| Passed | Failed | Skipped | Total |\n`;
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
-            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | 8 |\n\n`;
+            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | 12 |\n\n`;
             
             // Distribution results table
             summary += `## Distribution Compatibility Matrix\n\n`;
@@ -357,6 +457,8 @@ jobs:
             summary += `- **K0s**: Zero-friction Kubernetes by Mirantis\n`;
             summary += `- **KubeSolo**: Single-node Kubernetes\n`;
             summary += `- **Minikube**: Local Kubernetes for development\n`;
+            summary += `- **Talos**: Secure, immutable Kubernetes OS\n`;
+            summary += `- **MicroK8s**: Lightweight Kubernetes by Canonical\n`;
             
             // Write to job summary
             await core.summary.addRaw(summary).write();

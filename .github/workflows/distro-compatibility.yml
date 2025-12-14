@@ -229,7 +229,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-minikube@v5.0.1
+      - uses: fenio/setup-minikube@v5.0.2
         with:
           driver: none
           container-runtime: docker
@@ -252,7 +252,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-minikube@v5.0.1
+      - uses: fenio/setup-minikube@v5.0.2
         with:
           driver: none
           container-runtime: docker

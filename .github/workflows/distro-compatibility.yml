@@ -66,7 +66,7 @@ jobs:
   # ==========================================
   k3s-nfs:
     name: "K3s: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -113,7 +113,7 @@ jobs:
   # ==========================================
   k0s-nfs:
     name: "K0s: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -158,7 +158,7 @@ jobs:
   # ==========================================
   kubesolo-nfs:
     name: "KubeSolo: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -221,7 +221,7 @@ jobs:
   # ==========================================
   minikube-nfs:
     name: "Minikube: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -270,7 +270,7 @@ jobs:
   # ==========================================
   talos-nfs:
     name: "Talos: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |
@@ -315,7 +315,7 @@ jobs:
   # ==========================================
   microk8s-nfs:
     name: "MicroK8s: NFS"
-    runs-on: ubuntu-latest
+    runs-on: new
     timeout-minutes: 15
     needs: compute-tag
     if: |

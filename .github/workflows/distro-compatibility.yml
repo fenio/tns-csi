@@ -363,7 +363,7 @@ jobs:
     name: "Distro Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof, talos-nfs, microk8s-nfs, microk8s-nvmeof]
+    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof, talos-nfs, talos-nvmeof, microk8s-nfs, microk8s-nvmeof]
     if: always()
     steps:
       - name: Generate Test Summary

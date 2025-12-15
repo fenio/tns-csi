@@ -160,7 +160,7 @@ metadata:
 spec:
   containers:
   - name: test-container
-    image: busybox:latest
+    image: public.ecr.aws/docker/library/busybox:latest
     command: ["sleep", "300"]
     volumeMounts:
     - name: vol1

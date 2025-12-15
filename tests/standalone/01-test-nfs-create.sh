@@ -126,7 +126,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox:latest
+    image: public.ecr.aws/docker/library/busybox:latest
     imagePullPolicy: Always
     command: ["sh", "-c", "echo 'Ready' && sleep 3600"]
     volumeMounts:

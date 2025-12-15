@@ -81,7 +81,7 @@ spec:
     spec:
       containers:
       - name: web
-        image: busybox:latest
+        image: public.ecr.aws/docker/library/busybox:latest
         command:
           - sh
           - -c

@@ -160,7 +160,7 @@ metadata:
 spec:
   containers:
   - name: test-container
-    image: busybox:latest
+    image: public.ecr.aws/docker/library/busybox:latest
     command: ["sh", "-c", "echo 'Pod ${i} data' > /data/test.txt && sleep 600"]
     volumeMounts:
     - name: test-volume

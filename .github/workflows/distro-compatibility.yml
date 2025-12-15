@@ -389,7 +389,7 @@ jobs:
               },
               'Talos': {
                 'NFS': '${{ needs.talos-nfs.result }}',
-                'NVMe-oF': 'skipped'  // Skipped: Docker containers lack /dev access for NVMe devices
+                'NVMe-oF': '${{ needs.talos-nvmeof.result }}'
               },
               'MicroK8s': {
                 'NFS': '${{ needs.microk8s-nfs.result }}',

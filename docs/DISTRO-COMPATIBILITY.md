@@ -6,10 +6,27 @@ This test suite runs basic CSI driver functionality tests across multiple Kubern
 
 ## Tested Distributions
 
-- **K3s** - Lightweight Kubernetes by Rancher (https://github.com/fenio/setup-k3s)
-- **K0s** - Zero-friction Kubernetes by Mirantis (https://github.com/fenio/setup-k0s)
-- **KubeSolo** - Single-node Kubernetes (https://github.com/fenio/setup-kubesolo)
-- **Minikube** - Local Kubernetes for development (https://github.com/fenio/setup-minikube)
+| Distribution | Description | Setup Action |
+|--------------|-------------|--------------|
+| **K3s** | Lightweight Kubernetes by Rancher | [fenio/setup-k3s](https://github.com/fenio/setup-k3s) |
+| **K0s** | Zero-friction Kubernetes by Mirantis | [fenio/setup-k0s](https://github.com/fenio/setup-k0s) |
+| **KubeSolo** | Single-node Kubernetes | [fenio/setup-kubesolo](https://github.com/fenio/setup-kubesolo) |
+| **Minikube** | Local Kubernetes for development | [fenio/setup-minikube](https://github.com/fenio/setup-minikube) |
+| **Talos** | Secure, immutable Kubernetes OS | [fenio/setup-talos](https://github.com/fenio/setup-talos) |
+| **MicroK8s** | Lightweight Kubernetes by Canonical | [fenio/setup-microk8s](https://github.com/fenio/setup-microk8s) |
+
+### Compatibility Matrix
+
+All 6 distributions are tested with both NFS and NVMe-oF protocols:
+
+| Distribution | NFS | NVMe-oF |
+|--------------|:---:|:-------:|
+| K3s | ✅ | ✅ |
+| K0s | ✅ | ✅ |
+| KubeSolo | ✅ | ✅ |
+| Minikube | ✅ | ✅ |
+| Talos | ✅ | ✅ |
+| MicroK8s | ✅ | ✅ |
 
 ## What's Tested
 
@@ -58,19 +75,19 @@ curl -sfL https://get.k3s.io | sh -
 
 ## Test Duration
 
-- **Per distro/protocol**: ~5-10 minutes
-- **Full suite (all distros, both protocols)**: ~30-40 minutes
+- **Per distro/protocol**: ~3-5 minutes
+- **Full suite (all distros, both protocols)**: ~20 minutes
 
 ## Comparison with Full Integration Tests
 
 | Feature | Distro Tests | Full Integration Tests |
 |---------|--------------|------------------------|
-| **Distributions** | 4 distros | K3s only |
+| **Distributions** | 6 distros | K3s only |
 | **Protocols** | NFS, NVMe-oF | NFS, NVMe-oF |
 | **Test Coverage** | Basic functionality | Comprehensive (snapshots, expansion, etc.) |
-| **Duration** | 5-10 min per distro | 60+ min total |
+| **Duration** | 3-5 min per distro | 60+ min total |
 | **Purpose** | Verify compatibility | Validate features |
-| **Frequency** | Weekly | On demand |
+| **Frequency** | Weekly + on demand | On demand |
 
 ## Viewing Results
 

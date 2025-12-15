@@ -276,7 +276,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.5
+      - uses: fenio/setup-talos@v5.0.6
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -297,7 +297,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.5
+      - uses: fenio/setup-talos@v5.0.6
         with:
           provisioner: qemu
           timeout: '600'

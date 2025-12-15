@@ -287,32 +287,29 @@ jobs:
           KUBELET_PATH: /var/lib/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
-  # NOTE: Talos NVMe-oF test is skipped because:
-  # - Docker provisioner: containers don't have /dev access for NVMe devices
-  # - QEMU provisioner: networking issues in Incus runner environment
-  # NVMe-oF works on real Talos installations (bare metal/VM with proper networking)
-  # talos-nvmeof:
-  #   name: "Talos: NVMe-oF"
-  #   runs-on: new
-  #   timeout-minutes: 15
-  #   needs: compute-tag
-  #   if: |
-  #     (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
-  #     (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
-  #   steps:
-  #     - uses: actions/checkout@v6
-  #     - uses: fenio/setup-talos@v5.0.8
-  #       with:
-  #         load-nvme-modules: 'true'
-  #     - name: Run Basic NVMe-oF Test
-  #       env:
-  #         TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-  #         TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-  #         TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-  #         CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-  #         TEST_PROTOCOL: nvmeof
-  #         KUBELET_PATH: /var/lib/kubelet
-  #       run: ./tests/integration/test-distro-basic.sh
+  talos-nvmeof:
+    name: "Talos: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-talos@v5.0.9
+        with:
+          load-nvme-modules: 'true'
+          mount-dev: 'true'
+      - name: Run Basic NVMe-oF Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: nvmeof
+          KUBELET_PATH: /var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
 
   # ==========================================
   # MicroK8s Tests

@@ -279,8 +279,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-talos@v5
-        with:
-          talosctl-args: '--provisioner=qemu'
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

@@ -74,7 +74,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
+      - uses: fenio/setup-k3s@v5.0.1
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - name: Run Basic NFS Test
@@ -96,7 +96,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
+      - uses: fenio/setup-k3s@v5.0.1
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - name: Run Basic NVMe-oF Test
@@ -121,7 +121,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-k0s@v5
+      - uses: fenio/setup-k0s@v5.0.1
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -142,7 +142,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-k0s@v5
+      - uses: fenio/setup-k0s@v5.0.1
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -166,7 +166,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-kubesolo@v5.0.2
+      - uses: fenio/setup-kubesolo@v5.0.3
       - name: Debug KubeSolo on failure
         if: failure()
         run: |
@@ -196,7 +196,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-kubesolo@v5.0.2
+      - uses: fenio/setup-kubesolo@v5.0.3
       - name: Debug KubeSolo on failure
         if: failure()
         run: |
@@ -229,7 +229,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-minikube@v5.0.2
+      - uses: fenio/setup-minikube@v5.0.4
         with:
           driver: docker
       - name: Run Basic NFS Test
@@ -251,7 +251,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-minikube@v5.0.3
+      - uses: fenio/setup-minikube@v5.0.4
         with:
           driver: none
       - name: Run Basic NVMe-oF Test
@@ -276,7 +276,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.1
+      - uses: fenio/setup-talos@v5.0.4
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -297,7 +297,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.3
+      - uses: fenio/setup-talos@v5.0.4
         with:
           provisioner: qemu
           timeout: '600'
@@ -324,7 +324,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-microk8s@v5
+      - uses: fenio/setup-microk8s@v5.0.1
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -345,7 +345,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-microk8s@v5
+      - uses: fenio/setup-microk8s@v5.0.1
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

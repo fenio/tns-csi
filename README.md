@@ -4,6 +4,7 @@
 [![Go Version](https://img.shields.io/badge/Go-1.25.4-00ADD8?logo=go)](https://go.dev/)
 [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml)
 [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml)
+[![Distro Compatibility](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml)
 [![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://fenio.github.io/tns-csi/dashboard/)
 [![Docker Hub](https://img.shields.io/docker/pulls/bfenski/tns-csi?logo=docker)](https://hub.docker.com/r/bfenski/tns-csi)
 [![Release](https://img.shields.io/github/v/release/fenio/tns-csi?logo=github)](https://github.com/fenio/tns-csi/releases/latest)
@@ -43,6 +44,21 @@ The driver intentionally focuses on these two production-ready protocols rather 
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
+
+## Kubernetes Distribution Compatibility
+
+This driver is tested and verified to work on **6 Kubernetes distributions** with both NFS and NVMe-oF protocols:
+
+| Distribution | NFS | NVMe-oF | Description |
+|--------------|:---:|:-------:|-------------|
+| K3s | ✅ | ✅ | Lightweight Kubernetes by Rancher |
+| K0s | ✅ | ✅ | Zero-friction Kubernetes by Mirantis |
+| KubeSolo | ✅ | ✅ | Single-node Kubernetes |
+| Minikube | ✅ | ✅ | Local Kubernetes for development |
+| Talos | ✅ | ✅ | Secure, immutable Kubernetes OS |
+| MicroK8s | ✅ | ✅ | Lightweight Kubernetes by Canonical |
+
+Compatibility tests run weekly and on-demand. See [Distro Compatibility Tests](docs/DISTRO-COMPATIBILITY.md) for details.
 
 ## Prerequisites
 
@@ -258,6 +274,7 @@ kubectl logs -n kube-system -l app=tns-csi,component=node
 - [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
 - [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
 - [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning
+- [Distro Compatibility](docs/DISTRO-COMPATIBILITY.md) - Kubernetes distribution compatibility testing
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind
 - [Security](docs/SECURITY-SANITIZATION.md) - Security considerations

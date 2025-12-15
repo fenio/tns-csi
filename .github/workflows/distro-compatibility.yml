@@ -251,7 +251,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-minikube@v5.0.2
+      - uses: fenio/setup-minikube@v5.0.3
         with:
           driver: none
       - name: Run Basic NVMe-oF Test

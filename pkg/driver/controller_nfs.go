@@ -4,6 +4,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
@@ -176,7 +177,7 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 	return dataset, nil
 }
 
-// createNFSShareForDataset creates an NFS share for a dataset.
+// createNFSShareForDataset creates an NFS share for a dataset and stores ZFS properties for tracking.
 func (s *ControllerService) createNFSShareForDataset(ctx context.Context, dataset *tnsapi.Dataset, params *nfsVolumeParams, timer *metrics.OperationTimer) (*tnsapi.NFSShare, error) {
 	comment := fmt.Sprintf("CSI Volume: %s | Capacity: %d", params.volumeName, params.requestedCapacity)
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
@@ -196,6 +197,18 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	}
 
 	klog.V(4).Infof("Created NFS share with ID: %d for path: %s", nfsShare.ID, nfsShare.Path)
+
+	// Store ZFS user properties for CSI metadata tracking
+	// This enables safe deletion (verify ownership before delete) and debugging
+	props := tnsapi.NFSVolumeProperties(params.volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339))
+	if err := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); err != nil {
+		// Log warning but don't fail - properties are not critical for basic operation
+		// Volume will still work, just without the safety features
+		klog.Warningf("Failed to set ZFS user properties on dataset %s: %v (volume will still work)", dataset.ID, err)
+	} else {
+		klog.V(4).Infof("Stored ZFS user properties on dataset %s: %v", dataset.ID, props)
+	}
+
 	return nfsShare, nil
 }
 
@@ -252,10 +265,58 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	return resp, nil
 }
 
-// deleteNFSVolume deletes an NFS volume.
+// deleteNFSVolume deletes an NFS volume with ownership verification.
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
+
+	// Step 0: Verify ownership using ZFS properties (safe deletion)
+	// This prevents accidental deletion if share IDs were reused after TrueNAS restart
+	if meta.DatasetID != "" {
+		props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
+			tnsapi.PropertyManagedBy,
+			tnsapi.PropertyCSIVolumeName,
+			tnsapi.PropertyNFSShareID,
+		})
+		if err != nil {
+			// If we can't read properties, the dataset might not exist
+			if isNotFoundError(err) {
+				klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+				timer.ObserveSuccess()
+				return &csi.DeleteVolumeResponse{}, nil
+			}
+			// For other errors, log warning but continue (backward compatibility)
+			klog.Warningf("Failed to verify dataset ownership via ZFS properties: %v (continuing with deletion)", err)
+		} else {
+			// Verify ownership if properties exist
+			if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
+				klog.Errorf("Dataset %s is not managed by tns-csi (managed_by=%s), refusing to delete", meta.DatasetID, managedBy)
+				timer.ObserveError()
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"Dataset %s is not managed by tns-csi (managed_by=%s)", meta.DatasetID, managedBy)
+			}
+
+			// Verify volume name matches
+			if volumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok && volumeName != meta.Name {
+				klog.Errorf("Dataset %s volume name mismatch: property=%s, requested=%s", meta.DatasetID, volumeName, meta.Name)
+				timer.ObserveError()
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"Dataset %s volume name mismatch (stored=%s, requested=%s)", meta.DatasetID, volumeName, meta.Name)
+			}
+
+			// Verify share ID matches (if stored)
+			if shareIDStr, ok := props[tnsapi.PropertyNFSShareID]; ok {
+				storedShareID := tnsapi.StringToInt(shareIDStr)
+				if storedShareID > 0 && meta.NFSShareID > 0 && storedShareID != meta.NFSShareID {
+					klog.Warningf("NFS share ID mismatch: stored=%d, metadata=%d (using stored ID)", storedShareID, meta.NFSShareID)
+					// Use the stored share ID for deletion as it's more reliable
+					meta.NFSShareID = storedShareID
+				}
+			}
+
+			klog.V(4).Infof("Ownership verified for dataset %s via ZFS properties", meta.DatasetID)
+		}
+	}
 
 	// Step 1: Delete NFS share first (required - TrueNAS does NOT auto-delete shares when dataset is deleted)
 	if meta.NFSShareID > 0 {
@@ -329,6 +390,19 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
 	if requestedCapacity == 0 {
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
+	// Store ZFS user properties for CSI metadata tracking (including clone source info)
+	props := tnsapi.NFSVolumeProperties(volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339))
+	// Add clone-specific properties
+	cloneProps := tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID)
+	for k, v := range cloneProps {
+		props[k] = v
+	}
+	if err := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); err != nil {
+		klog.Warningf("Failed to set ZFS user properties on cloned dataset %s: %v (volume will still work)", dataset.ID, err)
+	} else {
+		klog.V(4).Infof("Stored ZFS user properties on cloned dataset %s: %v", dataset.ID, props)
 	}
 
 	// Build volume metadata

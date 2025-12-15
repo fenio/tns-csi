@@ -18,6 +18,13 @@ type ClientInterface interface {
 	UpdateDataset(ctx context.Context, datasetID string, params DatasetUpdateParams) (*Dataset, error)
 	QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error)
 
+	// ZFS User Property operations (for CSI metadata tracking)
+	SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error
+	GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error)
+	GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error)
+	InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error
+	ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error
+
 	// NFS share operations
 	CreateNFSShare(ctx context.Context, params NFSShareCreateParams) (*NFSShare, error)
 	DeleteNFSShare(ctx context.Context, shareID int) error

@@ -43,15 +43,17 @@ type MockClient struct {
 	mu              sync.Mutex
 }
 
+//nolint:govet // fieldalignment: field order prioritizes readability.
 type mockDataset struct {
-	ID         string
-	Name       string
-	Type       string
-	Used       map[string]any
-	Available  map[string]any
-	Mountpoint string
-	Volsize    int64
-	Capacity   int64 // Store requested capacity for CSI volume
+	ID             string
+	Name           string
+	Type           string
+	Used           map[string]any
+	Available      map[string]any
+	Mountpoint     string
+	UserProperties map[string]string // ZFS user properties for CSI metadata
+	Volsize        int64
+	Capacity       int64 // Store requested capacity for CSI volume
 }
 
 type mockNFSShare struct {
@@ -294,6 +296,112 @@ func (m *MockClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tns
 	}
 
 	return result, nil
+}
+
+// SetDatasetProperties mocks pool.dataset.update with user_properties.
+func (m *MockClient) SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error {
+	m.logCall("SetDatasetProperties", datasetID, properties)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find dataset by ID or name
+	for name, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			if ds.UserProperties == nil {
+				ds.UserProperties = make(map[string]string)
+			}
+			for k, v := range properties {
+				ds.UserProperties[k] = v
+			}
+			m.datasets[name] = ds
+			return nil
+		}
+	}
+
+	return fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// GetDatasetProperties mocks pool.dataset.query with extra properties.
+func (m *MockClient) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
+	m.logCall("GetDatasetProperties", datasetID, propertyNames)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find dataset by ID or name
+	for _, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			result := make(map[string]string)
+			if ds.UserProperties != nil {
+				for _, name := range propertyNames {
+					if val, ok := ds.UserProperties[name]; ok {
+						result[name] = val
+					}
+				}
+			}
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// GetAllDatasetProperties mocks pool.dataset.query to get all user properties.
+func (m *MockClient) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
+	m.logCall("GetAllDatasetProperties", datasetID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find dataset by ID or name
+	for _, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			result := make(map[string]string)
+			if ds.UserProperties != nil {
+				for k, v := range ds.UserProperties {
+					result[k] = v
+				}
+			}
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// InheritDatasetProperty mocks pool.dataset.inherit.
+func (m *MockClient) InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error {
+	m.logCall("InheritDatasetProperty", datasetID, propertyName)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find dataset by ID or name
+	for name, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			if ds.UserProperties != nil {
+				delete(ds.UserProperties, propertyName)
+				m.datasets[name] = ds
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// ClearDatasetProperties mocks clearing multiple ZFS user properties.
+func (m *MockClient) ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error {
+	m.logCall("ClearDatasetProperties", datasetID, propertyNames)
+
+	for _, name := range propertyNames {
+		if err := m.InheritDatasetProperty(ctx, datasetID, name); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // CreateNFSShare mocks sharing.nfs.create.

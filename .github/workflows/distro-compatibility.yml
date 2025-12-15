@@ -276,7 +276,7 @@ jobs:
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.7
+      - uses: fenio/setup-talos@v5.0.8
       - name: Run Basic NFS Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
@@ -290,17 +290,16 @@ jobs:
   talos-nvmeof:
     name: "Talos: NVMe-oF"
     runs-on: new
-    timeout-minutes: 20
+    timeout-minutes: 15
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
       (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v5.0.7
+      - uses: fenio/setup-talos@v5.0.8
         with:
-          provisioner: qemu
-          timeout: '600'
+          load-nvme-modules: 'true'
       - name: Run Basic NVMe-oF Test
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

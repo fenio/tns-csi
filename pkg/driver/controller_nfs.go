@@ -49,7 +49,8 @@ type zfsDatasetProperties struct {
 
 // parseZFSDatasetProperties extracts ZFS properties from StorageClass parameters.
 // Parameters with the "zfs." prefix are extracted and the prefix is removed.
-// Example: "zfs.compression" -> "compression" = "lz4".
+// Values are normalized to uppercase as required by TrueNAS API.
+// Example: "zfs.compression" -> "compression" = "LZ4".
 func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
 	props := &zfsDatasetProperties{}
 	hasProps := false
@@ -63,15 +64,20 @@ func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
 
 		switch propName {
 		case "compression":
-			props.Compression = value
+			// TrueNAS API requires uppercase: ON, OFF, LZ4, GZIP, ZSTD, etc.
+			props.Compression = strings.ToUpper(value)
 		case "dedup":
-			props.Dedup = value
+			// TrueNAS API requires uppercase: ON, OFF, VERIFY
+			props.Dedup = strings.ToUpper(value)
 		case "atime":
-			props.Atime = value
+			// TrueNAS API requires uppercase: ON, OFF, INHERIT
+			props.Atime = strings.ToUpper(value)
 		case "sync":
-			props.Sync = value
+			// TrueNAS API requires uppercase: STANDARD, ALWAYS, DISABLED
+			props.Sync = strings.ToUpper(value)
 		case "recordsize":
-			props.Recordsize = value
+			// Recordsize can be like "128K" - normalize to uppercase
+			props.Recordsize = strings.ToUpper(value)
 		case "copies":
 			if copies, err := strconv.Atoi(value); err == nil {
 				props.Copies = &copies
@@ -79,17 +85,23 @@ func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
 				klog.Warningf("Invalid zfs.copies value '%s': %v", value, err)
 			}
 		case "snapdir":
-			props.Snapdir = value
+			// TrueNAS API requires uppercase: VISIBLE, HIDDEN
+			props.Snapdir = strings.ToUpper(value)
 		case "readonly":
-			props.Readonly = value
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Readonly = strings.ToUpper(value)
 		case "exec":
-			props.Exec = value
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Exec = strings.ToUpper(value)
 		case "aclmode":
-			props.Aclmode = value
+			// TrueNAS API requires uppercase: PASSTHROUGH, RESTRICTED, etc.
+			props.Aclmode = strings.ToUpper(value)
 		case "acltype":
-			props.Acltype = value
+			// TrueNAS API requires uppercase: OFF, NFSV4, POSIX
+			props.Acltype = strings.ToUpper(value)
 		case "casesensitivity":
-			props.Casesensitivity = value
+			// TrueNAS API requires uppercase: SENSITIVE, INSENSITIVE, MIXED
+			props.Casesensitivity = strings.ToUpper(value)
 		default:
 			klog.V(4).Infof("Unknown ZFS property: %s=%s (ignoring)", propName, value)
 		}

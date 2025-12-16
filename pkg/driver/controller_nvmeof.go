@@ -67,7 +67,8 @@ func generateNQN(volumeName string) string {
 
 // parseZFSZvolProperties extracts ZFS properties for ZVOL creation from StorageClass parameters.
 // Parameters with the "zfs." prefix are extracted and the prefix is removed.
-// Example: "zfs.compression" -> "compression" = "lz4".
+// Values are normalized to uppercase as required by TrueNAS API.
+// Example: "zfs.compression" -> "compression" = "LZ4".
 func parseZFSZvolProperties(params map[string]string) *zfsZvolProperties {
 	props := &zfsZvolProperties{}
 	hasProps := false
@@ -81,11 +82,14 @@ func parseZFSZvolProperties(params map[string]string) *zfsZvolProperties {
 
 		switch propName {
 		case "compression":
-			props.Compression = value
+			// TrueNAS API requires uppercase: ON, OFF, LZ4, GZIP, ZSTD, etc.
+			props.Compression = strings.ToUpper(value)
 		case "dedup":
-			props.Dedup = value
+			// TrueNAS API requires uppercase: ON, OFF, VERIFY
+			props.Dedup = strings.ToUpper(value)
 		case "sync":
-			props.Sync = value
+			// TrueNAS API requires uppercase: STANDARD, ALWAYS, DISABLED
+			props.Sync = strings.ToUpper(value)
 		case "copies":
 			if copies, err := strconv.Atoi(value); err == nil {
 				props.Copies = &copies
@@ -93,12 +97,14 @@ func parseZFSZvolProperties(params map[string]string) *zfsZvolProperties {
 				klog.Warningf("Invalid zfs.copies value '%s': %v", value, err)
 			}
 		case "readonly":
-			props.Readonly = value
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Readonly = strings.ToUpper(value)
 		case "sparse":
 			sparse := strings.EqualFold(value, "true") || value == "1"
 			props.Sparse = &sparse
 		case "volblocksize":
-			props.Volblocksize = value
+			// Volblocksize can be like "16K" - normalize to uppercase
+			props.Volblocksize = strings.ToUpper(value)
 		default:
 			klog.V(4).Infof("Unknown or unsupported ZFS ZVOL property: %s=%s (ignoring)", propName, value)
 		}

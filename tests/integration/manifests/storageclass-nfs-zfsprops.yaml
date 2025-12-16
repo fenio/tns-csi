@@ -1,5 +1,6 @@
 # StorageClass with ZFS properties for NFS testing
 # Tests: compression, atime, recordsize
+# Note: Values are case-insensitive in StorageClass but normalized to uppercase by the driver
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -9,7 +10,7 @@ parameters:
   protocol: "nfs"
   pool: "${TRUENAS_POOL}"
   server: "${TRUENAS_HOST}"
-  # ZFS properties with zfs. prefix
+  # ZFS properties with zfs. prefix (values are normalized to uppercase by driver)
   zfs.compression: "lz4"
   zfs.atime: "off"
   zfs.recordsize: "128K"

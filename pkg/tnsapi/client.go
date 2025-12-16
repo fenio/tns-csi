@@ -29,6 +29,7 @@ var (
 	ErrSubsystemNotFound      = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
 	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
 	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
+	ErrDatasetNotFound        = errors.New("dataset not found")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1627,4 +1628,193 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 	}
 
 	return result, nil
+}
+
+// ZFS User Property API methods
+//
+// These methods manage ZFS user properties on datasets, which are used to store
+// CSI metadata for reliable tracking and safe deletion verification.
+
+// SetDatasetProperties sets ZFS user properties on a dataset.
+// Properties are stored in the ZFS dataset's user_properties field.
+// This is used to track CSI metadata like NFS share IDs, NVMe-oF subsystem IDs, etc.
+func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error {
+	klog.V(4).Infof("Setting %d user properties on dataset: %s", len(properties), datasetID)
+
+	if len(properties) == 0 {
+		return nil
+	}
+
+	// TrueNAS pool.dataset.update accepts user_properties as a map of property name to value
+	// The API expects: {"user_properties": {"property_name": {"value": "property_value"}}}
+	// Convert our simple map to the nested format expected by TrueNAS
+	userProps := make(map[string]interface{})
+	for key, value := range properties {
+		userProps[key] = map[string]string{"value": value}
+	}
+
+	params := map[string]interface{}{
+		"user_properties": userProps,
+	}
+
+	var result Dataset
+	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to set user properties on dataset %s: %w", datasetID, err)
+	}
+
+	klog.V(4).Infof("Successfully set %d user properties on dataset: %s", len(properties), datasetID)
+	return nil
+}
+
+// DatasetWithProperties represents a dataset with its user properties.
+// This struct is used when querying datasets with extra properties included.
+//
+//nolint:govet // fieldalignment: struct embeds Dataset for readability.
+type DatasetWithProperties struct {
+	Dataset
+	UserProperties map[string]UserProperty `json:"user_properties,omitempty"`
+}
+
+// UserProperty represents a ZFS user property value.
+type UserProperty struct {
+	Value  string `json:"value"`
+	Source string `json:"source,omitempty"`
+}
+
+// GetDatasetProperties retrieves ZFS user properties from a dataset.
+// Returns a map of property name to value for the requested properties.
+// Properties that don't exist will not be included in the returned map.
+func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
+	klog.V(4).Infof("Getting %d user properties from dataset: %s", len(propertyNames), datasetID)
+
+	// Query the dataset with extra properties
+	// TrueNAS pool.dataset.query supports an "extra" option to include user_properties
+	var result []DatasetWithProperties
+	queryOpts := map[string]interface{}{
+		"extra": map[string]interface{}{
+			"properties": true,
+		},
+	}
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", datasetID},
+		},
+		queryOpts,
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dataset properties for %s: %w", datasetID, err)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("dataset not found: %s: %w", datasetID, ErrDatasetNotFound)
+	}
+
+	// Extract requested properties from user_properties
+	props := make(map[string]string)
+	dataset := result[0]
+
+	if dataset.UserProperties == nil {
+		klog.V(4).Infof("Dataset %s has no user properties", datasetID)
+		return props, nil
+	}
+
+	for _, name := range propertyNames {
+		if prop, ok := dataset.UserProperties[name]; ok {
+			props[name] = prop.Value
+		}
+	}
+
+	klog.V(4).Infof("Retrieved %d user properties from dataset: %s", len(props), datasetID)
+	return props, nil
+}
+
+// GetAllDatasetProperties retrieves all ZFS user properties from a dataset.
+// Returns a map of all property names to values.
+func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
+	klog.V(4).Infof("Getting all user properties from dataset: %s", datasetID)
+
+	// Query the dataset with extra properties
+	var result []DatasetWithProperties
+	queryOpts := map[string]interface{}{
+		"extra": map[string]interface{}{
+			"properties": true,
+		},
+	}
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", datasetID},
+		},
+		queryOpts,
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dataset properties for %s: %w", datasetID, err)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("dataset not found: %s: %w", datasetID, ErrDatasetNotFound)
+	}
+
+	// Extract all user properties
+	props := make(map[string]string)
+	dataset := result[0]
+
+	if dataset.UserProperties == nil {
+		klog.V(4).Infof("Dataset %s has no user properties", datasetID)
+		return props, nil
+	}
+
+	for name, prop := range dataset.UserProperties {
+		props[name] = prop.Value
+	}
+
+	klog.V(4).Infof("Retrieved %d user properties from dataset: %s", len(props), datasetID)
+	return props, nil
+}
+
+// InheritDatasetProperty removes (inherits) a ZFS user property from a dataset.
+// This effectively deletes the property by setting it to inherit from the parent.
+func (c *Client) InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error {
+	klog.V(4).Infof("Inheriting (removing) user property %s from dataset: %s", propertyName, datasetID)
+
+	// TrueNAS doesn't have a direct "inherit" API for user properties.
+	// To remove a user property, we set it with source="INHERIT" or use pool.dataset.inherit
+	// Try the inherit method first
+	err := c.Call(ctx, "pool.dataset.inherit", []interface{}{
+		datasetID,
+		propertyName,
+		false, // recursive
+	}, nil)
+	if err != nil {
+		// If inherit fails, try setting to empty value (which effectively clears it)
+		klog.V(4).Infof("Inherit method failed, trying to clear property: %v", err)
+		clearProps := map[string]interface{}{
+			"user_properties": map[string]interface{}{
+				propertyName: map[string]string{"value": ""},
+			},
+		}
+		var result Dataset
+		err2 := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, clearProps}, &result)
+		if err2 != nil {
+			return fmt.Errorf("failed to clear user property %s on dataset %s: %w (inherit also failed: %w)", propertyName, datasetID, err2, err)
+		}
+	}
+
+	klog.V(4).Infof("Successfully inherited (removed) user property %s from dataset: %s", propertyName, datasetID)
+	return nil
+}
+
+// ClearDatasetProperties removes multiple ZFS user properties from a dataset.
+// This is a convenience method that calls InheritDatasetProperty for each property.
+func (c *Client) ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error {
+	klog.V(4).Infof("Clearing %d user properties from dataset: %s", len(propertyNames), datasetID)
+
+	for _, name := range propertyNames {
+		if err := c.InheritDatasetProperty(ctx, datasetID, name); err != nil {
+			return fmt.Errorf("failed to clear property %s: %w", name, err)
+		}
+	}
+
+	klog.V(4).Infof("Successfully cleared %d user properties from dataset: %s", len(propertyNames), datasetID)
+	return nil
 }

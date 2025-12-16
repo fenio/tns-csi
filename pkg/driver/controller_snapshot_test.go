@@ -224,6 +224,33 @@ func (m *MockAPIClientForSnapshots) QuerySubsystemPortBindings(ctx context.Conte
 	return nil, nil
 }
 
+// ZFS User Property methods - mock implementations for Phase 1
+
+func (m *MockAPIClientForSnapshots) SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error {
+	// Mock implementation - always succeed
+	return nil
+}
+
+func (m *MockAPIClientForSnapshots) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
+	// Mock implementation - return empty map (no properties)
+	return make(map[string]string), nil
+}
+
+func (m *MockAPIClientForSnapshots) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
+	// Mock implementation - return empty map (no properties)
+	return make(map[string]string), nil
+}
+
+func (m *MockAPIClientForSnapshots) InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error {
+	// Mock implementation - always succeed
+	return nil
+}
+
+func (m *MockAPIClientForSnapshots) ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error {
+	// Mock implementation - always succeed
+	return nil
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

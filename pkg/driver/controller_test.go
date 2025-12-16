@@ -179,6 +179,26 @@ func (m *mockAPIClient) QueryPool(ctx context.Context, poolName string) (*tnsapi
 	return nil, errNotImplemented
 }
 
+func (m *mockAPIClient) SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error {
+	return nil // Stub implementation
+}
+
+func (m *mockAPIClient) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
+	return make(map[string]string), nil // Stub implementation - returns empty properties
+}
+
+func (m *mockAPIClient) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
+	return make(map[string]string), nil // Stub implementation - returns empty properties
+}
+
+func (m *mockAPIClient) InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error {
+	return nil // Stub implementation
+}
+
+func (m *mockAPIClient) ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error {
+	return nil // Stub implementation
+}
+
 func (m *mockAPIClient) Close() {
 	// Mock client doesn't need cleanup
 }

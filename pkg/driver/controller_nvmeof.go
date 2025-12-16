@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
@@ -329,6 +330,21 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		return nil, err
 	}
 
+	// Step 5: Store ZFS user properties for metadata tracking and ownership verification
+	props := tnsapi.NVMeOFVolumeProperties(
+		params.volumeName,
+		subsystem.ID,
+		namespace.ID,
+		subsystem.NQN,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err := s.apiClient.SetDatasetProperties(ctx, zvol.ID, props); err != nil {
+		// Non-fatal: volume works without properties, but deletion safety is reduced
+		klog.Warningf("Failed to set ZFS properties on ZVOL %s: %v (volume will still work)", zvol.ID, err)
+	} else {
+		klog.V(4).Infof("Set ZFS properties on ZVOL %s: %v", zvol.ID, props)
+	}
+
 	// Build and return response
 	// Use subsystem.NQN (what TrueNAS actually created) not params.subsystemNQN (what we requested)
 	// TrueNAS may assign a different NQN prefix than what we requested
@@ -433,6 +449,60 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 	return namespace, nil
 }
 
+// verifyNVMeOFOwnership verifies ownership of an NVMe-oF volume via ZFS properties.
+// It returns an error if ownership verification fails, or nil if verification passes
+// or properties are not available (for backward compatibility with older volumes).
+// If verification passes, it may update meta with stored IDs from ZFS properties.
+func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *VolumeMetadata) error {
+	if meta.DatasetID == "" {
+		return nil
+	}
+
+	props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
+		tnsapi.PropertyManagedBy,
+		tnsapi.PropertyCSIVolumeName,
+		tnsapi.PropertyNVMeSubsystemID,
+		tnsapi.PropertyNVMeNamespaceID,
+		tnsapi.PropertyNVMeSubsystemNQN,
+	})
+	if err != nil {
+		// Properties not found - could be old volume or manual creation
+		klog.V(4).Infof("Could not read ZFS properties for %s: %v (proceeding with metadata-based deletion)", meta.DatasetID, err)
+		return nil
+	}
+
+	// Verify managed_by property
+	if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
+		return status.Errorf(codes.FailedPrecondition,
+			"ZVOL %s is not managed by tns-csi (managed_by=%s), refusing to delete",
+			meta.DatasetID, managedBy)
+	}
+
+	// Verify volume name matches
+	if storedVolumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok && storedVolumeName != meta.Name {
+		return status.Errorf(codes.FailedPrecondition,
+			"Volume name mismatch: ZVOL %s belongs to volume '%s', not '%s' (possible ID reuse)",
+			meta.DatasetID, storedVolumeName, meta.Name)
+	}
+
+	// Use stored IDs if available (more reliable than metadata after TrueNAS restart)
+	if storedSubsystemID, ok := props[tnsapi.PropertyNVMeSubsystemID]; ok {
+		if parsedID := tnsapi.StringToInt(storedSubsystemID); parsedID > 0 && parsedID != meta.NVMeOFSubsystemID {
+			klog.Infof("Using stored subsystem ID %d instead of metadata ID %d", parsedID, meta.NVMeOFSubsystemID)
+			meta.NVMeOFSubsystemID = parsedID
+		}
+	}
+	if storedNamespaceID, ok := props[tnsapi.PropertyNVMeNamespaceID]; ok {
+		if parsedID := tnsapi.StringToInt(storedNamespaceID); parsedID > 0 && parsedID != meta.NVMeOFNamespaceID {
+			klog.Infof("Using stored namespace ID %d instead of metadata ID %d", parsedID, meta.NVMeOFNamespaceID)
+			meta.NVMeOFNamespaceID = parsedID
+		}
+	}
+
+	klog.V(4).Infof("Ownership verified for ZVOL %s (volume: %s)", meta.DatasetID, meta.Name)
+	return nil
+}
+
 // deleteNVMeOFVolume deletes an NVMe-oF volume.
 // With independent subsystem architecture, this deletes the namespace, subsystem, and ZVOL.
 // Uses best-effort cleanup: continues deleting resources even if earlier steps fail.
@@ -441,6 +511,13 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "delete")
 	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d, subsystem ID: %d)",
 		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID, meta.NVMeOFSubsystemID)
+
+	// Step 0: Verify ownership via ZFS properties before deletion
+	// This prevents accidental deletion of resources when TrueNAS reuses IDs
+	if err := s.verifyNVMeOFOwnership(ctx, meta); err != nil {
+		timer.ObserveError()
+		return nil, err
+	}
 
 	// Track all errors but continue with best-effort cleanup
 	var deletionErrors []error
@@ -741,6 +818,25 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	}
 
 	klog.Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
+
+	// Step 4: Store ZFS user properties for metadata tracking and ownership verification
+	props := tnsapi.NVMeOFVolumeProperties(
+		volumeName,
+		subsystem.ID,
+		namespace.ID,
+		subsystem.NQN,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	// Add clone source properties
+	for k, v := range tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID) {
+		props[k] = v
+	}
+	if err := s.apiClient.SetDatasetProperties(ctx, zvol.ID, props); err != nil {
+		// Non-fatal: volume works without properties, but deletion safety is reduced
+		klog.Warningf("Failed to set ZFS properties on cloned ZVOL %s: %v (volume will still work)", zvol.ID, err)
+	} else {
+		klog.V(4).Infof("Set ZFS properties on cloned ZVOL %s: %v", zvol.ID, props)
+	}
 
 	// Get requested capacity
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()

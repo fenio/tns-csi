@@ -43,12 +43,80 @@ type nvmeofVolumeParams struct {
 	subsystemNQN string
 	// Optional: port ID to bind the subsystem to (from StorageClass)
 	portID int
+	// ZFS properties parsed from StorageClass parameters
+	zfsProps *zfsZvolProperties
+}
+
+// zfsZvolProperties holds ZFS properties for ZVOL creation.
+// These are parsed from StorageClass parameters with the "zfs." prefix.
+type zfsZvolProperties struct {
+	Compression  string
+	Dedup        string
+	Sync         string
+	Copies       *int
+	Readonly     string
+	Sparse       *bool
+	Volblocksize string
 }
 
 // generateNQN creates a unique NQN for a volume's dedicated subsystem.
 // Format: nqn.2137.csi.tns:<volume-name>.
 func generateNQN(volumeName string) string {
 	return fmt.Sprintf("%s:%s", nqnPrefix, volumeName)
+}
+
+// parseZFSZvolProperties extracts ZFS properties for ZVOL creation from StorageClass parameters.
+// Parameters with the "zfs." prefix are extracted and the prefix is removed.
+// Values are normalized to uppercase as required by TrueNAS API.
+// Example: "zfs.compression" -> "compression" = "LZ4".
+func parseZFSZvolProperties(params map[string]string) *zfsZvolProperties {
+	props := &zfsZvolProperties{}
+	hasProps := false
+
+	for key, value := range params {
+		if !strings.HasPrefix(key, "zfs.") {
+			continue
+		}
+		propName := strings.TrimPrefix(key, "zfs.")
+		hasProps = true
+
+		switch propName {
+		case "compression":
+			// TrueNAS API requires uppercase: ON, OFF, LZ4, GZIP, ZSTD, etc.
+			props.Compression = strings.ToUpper(value)
+		case "dedup":
+			// TrueNAS API requires uppercase: ON, OFF, VERIFY
+			props.Dedup = strings.ToUpper(value)
+		case "sync":
+			// TrueNAS API requires uppercase: STANDARD, ALWAYS, DISABLED
+			props.Sync = strings.ToUpper(value)
+		case "copies":
+			if copies, err := strconv.Atoi(value); err == nil {
+				props.Copies = &copies
+			} else {
+				klog.Warningf("Invalid zfs.copies value '%s': %v", value, err)
+			}
+		case "readonly":
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Readonly = strings.ToUpper(value)
+		case "sparse":
+			sparse := strings.EqualFold(value, "true") || value == "1"
+			props.Sparse = &sparse
+		case "volblocksize":
+			// Volblocksize can be like "16K" - normalize to uppercase
+			props.Volblocksize = strings.ToUpper(value)
+		default:
+			klog.V(4).Infof("Unknown or unsupported ZFS ZVOL property: %s=%s (ignoring)", propName, value)
+		}
+	}
+
+	if !hasProps {
+		return nil
+	}
+
+	klog.V(4).Infof("Parsed ZFS ZVOL properties: compression=%s, dedup=%s, sync=%s, sparse=%v",
+		props.Compression, props.Dedup, props.Sync, props.Sparse)
+	return props
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF volume parameters from the request.
@@ -91,6 +159,9 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		}
 	}
 
+	// Parse ZFS properties from StorageClass parameters
+	zfsProps := parseZFSZvolProperties(params)
+
 	return &nvmeofVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -100,6 +171,7 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		zvolName:          zvolName,
 		subsystemNQN:      subsystemNQN,
 		portID:            portID,
+		zfsProps:          zfsProps,
 	}, nil
 }
 
@@ -409,13 +481,34 @@ func (s *ControllerService) getOrCreateZVOL(ctx context.Context, params *nvmeofV
 		return zvol, nil
 	}
 
-	// Create new ZVOL
-	zvol, err := s.apiClient.CreateZvol(ctx, tnsapi.ZvolCreateParams{
+	// Build ZVOL creation parameters with ZFS properties
+	createParams := tnsapi.ZvolCreateParams{
 		Name:         params.zvolName,
 		Type:         "VOLUME",
 		Volsize:      params.requestedCapacity,
 		Volblocksize: "16K", // Default block size for NVMe-oF
-	})
+	}
+
+	// Apply ZFS properties if specified in StorageClass
+	if params.zfsProps != nil {
+		createParams.Compression = params.zfsProps.Compression
+		createParams.Dedup = params.zfsProps.Dedup
+		createParams.Sync = params.zfsProps.Sync
+		createParams.Copies = params.zfsProps.Copies
+		createParams.Readonly = params.zfsProps.Readonly
+		createParams.Sparse = params.zfsProps.Sparse
+
+		// Override default volblocksize if specified
+		if params.zfsProps.Volblocksize != "" {
+			createParams.Volblocksize = params.zfsProps.Volblocksize
+		}
+
+		klog.V(4).Infof("Creating ZVOL with ZFS properties: compression=%s, dedup=%s, sync=%s, sparse=%v, volblocksize=%s",
+			createParams.Compression, createParams.Dedup, createParams.Sync, createParams.Sparse, createParams.Volblocksize)
+	}
+
+	// Create new ZVOL
+	zvol, err := s.apiClient.CreateZvol(ctx, createParams)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create ZVOL: %v", err)

@@ -243,6 +243,79 @@ spec:
   - Common: `protocol`, `pool`, `server`
   - NFS-specific: `mountOptions`, `path`
   - NVMe-oF specific: `subsystemNQN`, `fsType`, `transport`, `port`
+  - ZFS properties: See "Configurable ZFS Properties" section below
+
+### Configurable ZFS Properties
+- **Status**: ✅ Implemented
+- **Description**: Configure ZFS dataset/ZVOL properties via StorageClass parameters
+- **Prefix**: All ZFS properties use the `zfs.` prefix in StorageClass parameters
+
+#### NFS (Dataset) Properties
+| Parameter | Description | Valid Values |
+|-----------|-------------|--------------|
+| `zfs.compression` | Compression algorithm | `off`, `lz4`, `gzip`, `gzip-1` to `gzip-9`, `zstd`, `zstd-1` to `zstd-19`, `lzjb`, `zle` |
+| `zfs.dedup` | Deduplication | `off`, `on`, `verify`, `sha256`, `sha512` |
+| `zfs.atime` | Access time updates | `on`, `off` |
+| `zfs.sync` | Synchronous writes | `standard`, `always`, `disabled` |
+| `zfs.recordsize` | Record size | `512`, `1K`, `2K`, `4K`, `8K`, `16K`, `32K`, `64K`, `128K`, `256K`, `512K`, `1M` |
+| `zfs.copies` | Number of data copies | `1`, `2`, `3` |
+| `zfs.snapdir` | Snapshot directory visibility | `hidden`, `visible` |
+| `zfs.readonly` | Read-only mode | `on`, `off` |
+| `zfs.exec` | Executable files | `on`, `off` |
+| `zfs.aclmode` | ACL mode | `passthrough`, `restricted`, `discard`, `groupmask` |
+| `zfs.acltype` | ACL type | `off`, `nfsv4`, `posix` |
+| `zfs.casesensitivity` | Case sensitivity (creation only) | `sensitive`, `insensitive`, `mixed` |
+
+#### NVMe-oF (ZVOL) Properties
+| Parameter | Description | Valid Values |
+|-----------|-------------|--------------|
+| `zfs.compression` | Compression algorithm | `off`, `lz4`, `gzip`, `gzip-1` to `gzip-9`, `zstd`, `zstd-1` to `zstd-19`, `lzjb`, `zle` |
+| `zfs.dedup` | Deduplication | `off`, `on`, `verify`, `sha256`, `sha512` |
+| `zfs.sync` | Synchronous writes | `standard`, `always`, `disabled` |
+| `zfs.copies` | Number of data copies | `1`, `2`, `3` |
+| `zfs.readonly` | Read-only mode | `on`, `off` |
+| `zfs.sparse` | Thin provisioning | `true`, `false` |
+| `zfs.volblocksize` | Volume block size | `512`, `1K`, `2K`, `4K`, `8K`, `16K`, `32K`, `64K`, `128K` |
+
+**Example StorageClass with ZFS Properties:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-compressed
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  # ZFS properties
+  zfs.compression: "lz4"
+  zfs.atime: "off"
+  zfs.recordsize: "128K"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
+**Example NVMe-oF StorageClass with ZFS Properties:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nvmeof-compressed
+provisioner: tns.csi.io
+parameters:
+  protocol: nvmeof
+  pool: tank
+  server: truenas.local
+  transport: tcp
+  port: "4420"
+  # ZFS properties
+  zfs.compression: "lz4"
+  zfs.sparse: "true"
+  zfs.volblocksize: "16K"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
 
 ### RBAC
 - **Status**: ✅ Complete RBAC configuration

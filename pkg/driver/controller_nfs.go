@@ -4,6 +4,8 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -24,6 +26,94 @@ type nfsVolumeParams struct {
 	parentDataset     string
 	volumeName        string
 	datasetName       string
+	// ZFS properties parsed from StorageClass parameters
+	zfsProps *zfsDatasetProperties
+}
+
+// zfsDatasetProperties holds ZFS properties for dataset creation.
+// These are parsed from StorageClass parameters with the "zfs." prefix.
+type zfsDatasetProperties struct {
+	Compression     string
+	Dedup           string
+	Atime           string
+	Sync            string
+	Recordsize      string
+	Copies          *int
+	Snapdir         string
+	Readonly        string
+	Exec            string
+	Aclmode         string
+	Acltype         string
+	Casesensitivity string
+}
+
+// parseZFSDatasetProperties extracts ZFS properties from StorageClass parameters.
+// Parameters with the "zfs." prefix are extracted and the prefix is removed.
+// Values are normalized to uppercase as required by TrueNAS API.
+// Example: "zfs.compression" -> "compression" = "LZ4".
+func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
+	props := &zfsDatasetProperties{}
+	hasProps := false
+
+	for key, value := range params {
+		if !strings.HasPrefix(key, "zfs.") {
+			continue
+		}
+		propName := strings.TrimPrefix(key, "zfs.")
+		hasProps = true
+
+		switch propName {
+		case "compression":
+			// TrueNAS API requires uppercase: ON, OFF, LZ4, GZIP, ZSTD, etc.
+			props.Compression = strings.ToUpper(value)
+		case "dedup":
+			// TrueNAS API requires uppercase: ON, OFF, VERIFY
+			props.Dedup = strings.ToUpper(value)
+		case "atime":
+			// TrueNAS API requires uppercase: ON, OFF, INHERIT
+			props.Atime = strings.ToUpper(value)
+		case "sync":
+			// TrueNAS API requires uppercase: STANDARD, ALWAYS, DISABLED
+			props.Sync = strings.ToUpper(value)
+		case "recordsize":
+			// Recordsize can be like "128K" - normalize to uppercase
+			props.Recordsize = strings.ToUpper(value)
+		case "copies":
+			if copies, err := strconv.Atoi(value); err == nil {
+				props.Copies = &copies
+			} else {
+				klog.Warningf("Invalid zfs.copies value '%s': %v", value, err)
+			}
+		case "snapdir":
+			// TrueNAS API requires uppercase: VISIBLE, HIDDEN
+			props.Snapdir = strings.ToUpper(value)
+		case "readonly":
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Readonly = strings.ToUpper(value)
+		case "exec":
+			// TrueNAS API requires uppercase: ON, OFF
+			props.Exec = strings.ToUpper(value)
+		case "aclmode":
+			// TrueNAS API requires uppercase: PASSTHROUGH, RESTRICTED, etc.
+			props.Aclmode = strings.ToUpper(value)
+		case "acltype":
+			// TrueNAS API requires uppercase: OFF, NFSV4, POSIX
+			props.Acltype = strings.ToUpper(value)
+		case "casesensitivity":
+			// TrueNAS API requires uppercase: SENSITIVE, INSENSITIVE, MIXED
+			props.Casesensitivity = strings.ToUpper(value)
+		default:
+			klog.V(4).Infof("Unknown ZFS property: %s=%s (ignoring)", propName, value)
+		}
+	}
+
+	if !hasProps {
+		return nil
+	}
+
+	klog.V(4).Infof("Parsed ZFS dataset properties: compression=%s, dedup=%s, atime=%s, sync=%s, recordsize=%s",
+		props.Compression, props.Dedup, props.Atime, props.Sync, props.Recordsize)
+	return props
 }
 
 // validateNFSParams validates and extracts NFS volume parameters from the request.
@@ -55,6 +145,9 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	volumeName := req.GetName()
 	datasetName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
+	// Parse ZFS properties from StorageClass parameters
+	zfsProps := parseZFSDatasetProperties(params)
+
 	return &nfsVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -62,6 +155,7 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		requestedCapacity: requestedCapacity,
 		volumeName:        volumeName,
 		datasetName:       datasetName,
+		zfsProps:          zfsProps,
 	}, nil
 }
 
@@ -163,11 +257,33 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 		return dataset, nil
 	}
 
-	// Create new dataset
-	dataset, err := s.apiClient.CreateDataset(ctx, tnsapi.DatasetCreateParams{
+	// Build dataset creation parameters with ZFS properties
+	createParams := tnsapi.DatasetCreateParams{
 		Name: params.datasetName,
 		Type: "FILESYSTEM",
-	})
+	}
+
+	// Apply ZFS properties if specified in StorageClass
+	if params.zfsProps != nil {
+		createParams.Compression = params.zfsProps.Compression
+		createParams.Dedup = params.zfsProps.Dedup
+		createParams.Atime = params.zfsProps.Atime
+		createParams.Sync = params.zfsProps.Sync
+		createParams.Recordsize = params.zfsProps.Recordsize
+		createParams.Copies = params.zfsProps.Copies
+		createParams.Snapdir = params.zfsProps.Snapdir
+		createParams.Readonly = params.zfsProps.Readonly
+		createParams.Exec = params.zfsProps.Exec
+		createParams.Aclmode = params.zfsProps.Aclmode
+		createParams.Acltype = params.zfsProps.Acltype
+		createParams.Casesensitivity = params.zfsProps.Casesensitivity
+
+		klog.V(4).Infof("Creating dataset with ZFS properties: compression=%s, dedup=%s, atime=%s",
+			createParams.Compression, createParams.Dedup, createParams.Atime)
+	}
+
+	// Create new dataset
+	dataset, err := s.apiClient.CreateDataset(ctx, createParams)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create dataset: %v", err)

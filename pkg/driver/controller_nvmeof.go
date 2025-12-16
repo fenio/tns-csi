@@ -12,6 +12,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/fenio/tns-csi/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -680,7 +681,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 		len(deletionErrors), meta.Name, 3-len(deletionErrors), errorDetails)
 }
 
-// deleteNVMeOFSubsystem deletes an NVMe-oF subsystem.
+// deleteNVMeOFSubsystem deletes an NVMe-oF subsystem with retry logic for busy resources.
 // This function first verifies all namespaces are removed, then unbinds from ports, then deletes the subsystem.
 // TrueNAS will refuse to delete subsystems with active namespaces or port bindings.
 func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *VolumeMetadata) error {
@@ -688,7 +689,7 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 		return nil
 	}
 
-	klog.V(4).Infof("Deleting NVMe-oF subsystem: ID=%d", meta.NVMeOFSubsystemID)
+	klog.V(4).Infof("Deleting NVMe-oF subsystem: ID=%d (with retry for busy resources)", meta.NVMeOFSubsystemID)
 
 	// Step 1: Verify no namespaces are attached to this subsystem
 	// TrueNAS will refuse to delete subsystems with active namespaces
@@ -735,18 +736,23 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 		}
 	}
 
-	// Step 3: Delete the subsystem
-	if err := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID); err != nil {
-		// Check if subsystem already deleted (idempotency)
-		if isNotFoundError(err) {
+	// Step 3: Delete the subsystem with retry logic for busy resources
+	retryConfig := utils.DeletionRetryConfig("delete-nvmeof-subsystem")
+	err = utils.WithRetryNoResult(ctx, retryConfig, func() error {
+		deleteErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID)
+		if deleteErr != nil && isNotFoundError(deleteErr) {
+			// Subsystem already deleted - not an error (idempotency)
 			klog.V(4).Infof("Subsystem %d not found, assuming already deleted (idempotency)", meta.NVMeOFSubsystemID)
 			return nil
 		}
-		// For other errors, fail and retry
+		return deleteErr
+	})
+
+	if err != nil {
+		// All retries exhausted or non-retryable error
 		e := status.Errorf(codes.Internal, "Failed to delete NVMe-oF subsystem %d: %v",
 			meta.NVMeOFSubsystemID, err)
 		klog.Error(e)
-		// Don't call timer.ObserveError() here - let the caller handle it
 		return e
 	}
 
@@ -754,26 +760,31 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 	return nil
 }
 
-// deleteNVMeOFNamespace deletes an NVMe-oF namespace and verifies deletion.
+// deleteNVMeOFNamespace deletes an NVMe-oF namespace with retry logic for busy resources.
 func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.NVMeOFNamespaceID <= 0 {
 		return nil
 	}
 
-	klog.V(4).Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s",
+	klog.V(4).Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s (with retry for busy resources)",
 		meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
 
-	if err := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID); err != nil {
-		// Check if namespace already deleted (idempotency)
-		if isNotFoundError(err) {
+	retryConfig := utils.DeletionRetryConfig("delete-nvmeof-namespace")
+	err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+		deleteErr := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID)
+		if deleteErr != nil && isNotFoundError(deleteErr) {
+			// Namespace already deleted - not an error (idempotency)
 			klog.V(4).Infof("Namespace %d not found, assuming already deleted (idempotency)", meta.NVMeOFNamespaceID)
 			return nil
 		}
-		// For other errors, fail and retry to prevent orphaned ZVOLs
+		return deleteErr
+	})
+
+	if err != nil {
+		// All retries exhausted or non-retryable error
 		e := status.Errorf(codes.Internal, "Failed to delete NVMe-oF namespace %d (ZVOL: %s): %v",
 			meta.NVMeOFNamespaceID, meta.DatasetID, err)
 		klog.Error(e)
-		// Don't call timer.ObserveError() here - let the caller handle it
 		return e
 	}
 
@@ -811,20 +822,27 @@ func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *V
 	return nil
 }
 
-// deleteZVOL deletes a ZVOL dataset.
+// deleteZVOL deletes a ZVOL dataset with retry logic for busy resources.
 func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.DatasetID == "" {
 		return nil
 	}
 
-	klog.V(4).Infof("Deleting ZVOL: %s", meta.DatasetID)
-	if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
-		// Check if dataset doesn't exist - this is OK (idempotency)
-		if isNotFoundError(err) {
+	klog.V(4).Infof("Deleting ZVOL: %s (with retry for busy resources)", meta.DatasetID)
+
+	retryConfig := utils.DeletionRetryConfig("delete-zvol")
+	err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+		deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+		if deleteErr != nil && isNotFoundError(deleteErr) {
+			// ZVOL already deleted - not an error (idempotency)
 			klog.V(4).Infof("ZVOL %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 			return nil
 		}
-		// For other errors, return error to trigger retry and prevent orphaned ZVOLs
+		return deleteErr
+	})
+
+	if err != nil {
+		// All retries exhausted or non-retryable error
 		return status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 	}
 

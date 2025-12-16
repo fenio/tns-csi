@@ -11,6 +11,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/fenio/tns-csi/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -382,6 +383,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 }
 
 // deleteNFSVolume deletes an NFS volume with ownership verification.
+// Dataset deletion is retried for busy resource errors.
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
@@ -450,22 +452,29 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		}
 	}
 
-	// Step 2: Delete ZFS dataset
+	// Step 2: Delete ZFS dataset with retry logic for busy resources
 	if meta.DatasetID == "" {
 		klog.V(4).Infof("No dataset ID provided, skipping dataset deletion")
 	} else {
-		klog.V(4).Infof("Deleting dataset: %s", meta.DatasetID)
-		err := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-		if err != nil && !isNotFoundError(err) {
-			// For non-idempotent errors, return error to trigger retry and prevent orphaned datasets
+		klog.V(4).Infof("Deleting dataset: %s (with retry for busy resources)", meta.DatasetID)
+
+		retryConfig := utils.DeletionRetryConfig("delete-nfs-dataset")
+		err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+			deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+			if deleteErr != nil && isNotFoundError(deleteErr) {
+				// Dataset already deleted - not an error (idempotency)
+				klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+				return nil
+			}
+			return deleteErr
+		})
+
+		if err != nil {
+			// All retries exhausted or non-retryable error
 			timer.ObserveError()
 			return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
 		}
-		if err == nil {
-			klog.V(4).Infof("Successfully deleted dataset %s", meta.DatasetID)
-		} else {
-			klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
-		}
+		klog.V(4).Infof("Successfully deleted dataset %s", meta.DatasetID)
 	}
 
 	klog.Infof("Deleted NFS volume: %s", meta.Name)

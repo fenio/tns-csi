@@ -821,9 +821,39 @@ func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) 
 // Dataset API methods
 
 // DatasetCreateParams represents parameters for dataset creation.
+// Supports configurable ZFS properties via StorageClass parameters.
 type DatasetCreateParams struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // FILESYSTEM, VOLUME
+
+	// ZFS Properties (optional - passed to TrueNAS pool.dataset.create API)
+	// These can be configured per-StorageClass with the "zfs." prefix
+	// Example StorageClass parameter: zfs.compression: "lz4"
+
+	// Compression algorithm: off, lz4, gzip, gzip-1 through gzip-9, zstd, zstd-1 through zstd-19, lzjb, zle
+	Compression string `json:"compression,omitempty"`
+	// Deduplication: off, on, verify, sha256, sha512
+	Dedup string `json:"dedup,omitempty"`
+	// Access time updates: on, off
+	Atime string `json:"atime,omitempty"`
+	// Synchronous write behavior: standard, always, disabled
+	Sync string `json:"sync,omitempty"`
+	// Record size: 512, 1K, 2K, 4K, 8K, 16K, 32K, 64K, 128K, 256K, 512K, 1M
+	Recordsize string `json:"recordsize,omitempty"`
+	// Number of data copies: 1, 2, 3
+	Copies *int `json:"copies,omitempty"`
+	// Snapshot directory visibility: hidden, visible
+	Snapdir string `json:"snapdir,omitempty"`
+	// Read-only mode: on, off
+	Readonly string `json:"readonly,omitempty"`
+	// Executable files: on, off
+	Exec string `json:"exec,omitempty"`
+	// ACL mode: passthrough, restricted, discard, groupmask
+	Aclmode string `json:"aclmode,omitempty"`
+	// ACL type: off, nfsv4, posix
+	Acltype string `json:"acltype,omitempty"`
+	// Case sensitivity: sensitive, insensitive, mixed (only at creation, cannot be changed)
+	Casesensitivity string `json:"casesensitivity,omitempty"`
 }
 
 // Dataset represents a ZFS dataset.
@@ -961,11 +991,31 @@ func (c *Client) QueryNFSShare(ctx context.Context, path string) ([]NFSShare, er
 // NVMe-oF API methods
 
 // ZvolCreateParams represents parameters for ZVOL creation.
+// Supports configurable ZFS properties via StorageClass parameters.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
 type ZvolCreateParams struct {
 	Name         string `json:"name"`
 	Type         string `json:"type"`
 	Volblocksize string `json:"volblocksize,omitempty"`
 	Volsize      int64  `json:"volsize"`
+
+	// ZFS Properties (optional - passed to TrueNAS pool.dataset.create API)
+	// These can be configured per-StorageClass with the "zfs." prefix
+	// Example StorageClass parameter: zfs.compression: "lz4"
+
+	// Compression algorithm: off, lz4, gzip, gzip-1 through gzip-9, zstd, zstd-1 through zstd-19, lzjb, zle
+	Compression string `json:"compression,omitempty"`
+	// Deduplication: off, on, verify, sha256, sha512
+	Dedup string `json:"dedup,omitempty"`
+	// Synchronous write behavior: standard, always, disabled
+	Sync string `json:"sync,omitempty"`
+	// Number of data copies: 1, 2, 3
+	Copies *int `json:"copies,omitempty"`
+	// Read-only mode: on, off
+	Readonly string `json:"readonly,omitempty"`
+	// Sparse ZVOL (thin provisioning): true allocates space on demand
+	Sparse *bool `json:"sparse,omitempty"`
 }
 
 // CreateZvol creates a new ZVOL (block device).

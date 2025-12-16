@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod-nfs-zfsprops
+spec:
+  containers:
+    - name: test-container
+      image: public.ecr.aws/docker/library/busybox:stable
+      command: ["sleep", "3600"]
+      volumeMounts:
+        - name: test-volume
+          mountPath: /data
+  volumes:
+    - name: test-volume
+      persistentVolumeClaim:
+        claimName: test-pvc-nfs-zfsprops

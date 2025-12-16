@@ -2,6 +2,8 @@ package driver
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -256,10 +258,12 @@ func (m *MockAPIClientForSnapshots) Close() {
 }
 
 func TestEncodeDecodeSnapshotID(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
-		name    string
-		meta    SnapshotMetadata
-		wantErr bool
+		meta             SnapshotMetadata
+		name             string
+		wantSnapshotName string // Expected snapshot name after decode (just the name part)
+		wantErr          bool
 	}{
 		{
 			name: "NFS snapshot metadata",
@@ -270,7 +274,8 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				Protocol:     "nfs",
 				CreatedAt:    time.Now().Unix(),
 			},
-			wantErr: false,
+			wantSnapshotName: "snap1", // Compact format only stores snapshot name
+			wantErr:          false,
 		},
 		{
 			name: "NVMe-oF snapshot metadata",
@@ -281,7 +286,8 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				Protocol:     "nvmeof",
 				CreatedAt:    time.Now().Unix(),
 			},
-			wantErr: false,
+			wantSnapshotName: "snap2", // Compact format only stores snapshot name
+			wantErr:          false,
 		},
 		{
 			name: "Minimal snapshot metadata",
@@ -292,7 +298,8 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				Protocol:     "nfs",
 				CreatedAt:    0,
 			},
-			wantErr: false,
+			wantSnapshotName: "snap", // Compact format only stores snapshot name
+			wantErr:          false,
 		},
 	}
 
@@ -314,6 +321,11 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				return
 			}
 
+			// Verify encoded string length is under 128 bytes (CSI spec recommendation)
+			if len(encoded) > 128 {
+				t.Errorf("encodeSnapshotID() returned string of %d bytes, want <= 128", len(encoded))
+			}
+
 			// Decode the encoded string
 			decoded, err := decodeSnapshotID(encoded)
 			if err != nil {
@@ -321,15 +333,20 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				return
 			}
 
-			// Verify decoded metadata matches original (except CreatedAt which is excluded from encoding)
-			if decoded.SnapshotName != tt.meta.SnapshotName {
-				t.Errorf("SnapshotName = %v, want %v", decoded.SnapshotName, tt.meta.SnapshotName)
+			// Verify decoded metadata:
+			// - SnapshotName: only the snapshot name part (not full ZFS path)
+			// - SourceVolume: preserved
+			// - Protocol: preserved
+			// - DatasetName: NOT preserved in compact format (empty string)
+			if decoded.SnapshotName != tt.wantSnapshotName {
+				t.Errorf("SnapshotName = %v, want %v", decoded.SnapshotName, tt.wantSnapshotName)
 			}
 			if decoded.SourceVolume != tt.meta.SourceVolume {
 				t.Errorf("SourceVolume = %v, want %v", decoded.SourceVolume, tt.meta.SourceVolume)
 			}
-			if decoded.DatasetName != tt.meta.DatasetName {
-				t.Errorf("DatasetName = %v, want %v", decoded.DatasetName, tt.meta.DatasetName)
+			// DatasetName is NOT preserved in compact format - it's resolved at runtime
+			if decoded.DatasetName != "" {
+				t.Errorf("DatasetName = %v, want empty (compact format doesn't store DatasetName)", decoded.DatasetName)
 			}
 			if decoded.Protocol != tt.meta.Protocol {
 				t.Errorf("Protocol = %v, want %v", decoded.Protocol, tt.meta.Protocol)
@@ -340,6 +357,44 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				t.Errorf("CreatedAt = %v, want 0 (CreatedAt is excluded from snapshot ID encoding)", decoded.CreatedAt)
 			}
 		})
+	}
+}
+
+// TestLegacySnapshotIDDecoding tests backward compatibility with legacy base64 encoded snapshot IDs.
+func TestLegacySnapshotIDDecoding(t *testing.T) {
+	// Create a legacy format snapshot ID (base64 encoded JSON)
+	legacyMeta := SnapshotMetadata{
+		SnapshotName: "tank/test-volume@snap1",
+		SourceVolume: "test-volume-id",
+		DatasetName:  "tank/test-volume",
+		Protocol:     "nfs",
+	}
+
+	// Manually encode using legacy format
+	data, err := json.Marshal(legacyMeta)
+	if err != nil {
+		t.Fatalf("Failed to marshal legacy metadata: %v", err)
+	}
+	legacyID := base64.RawURLEncoding.EncodeToString(data)
+
+	// Decode using current decoder (should work with backward compatibility)
+	decoded, err := decodeSnapshotID(legacyID)
+	if err != nil {
+		t.Fatalf("Failed to decode legacy snapshot ID: %v", err)
+	}
+
+	// Legacy format preserves all fields
+	if decoded.SnapshotName != legacyMeta.SnapshotName {
+		t.Errorf("SnapshotName = %v, want %v", decoded.SnapshotName, legacyMeta.SnapshotName)
+	}
+	if decoded.SourceVolume != legacyMeta.SourceVolume {
+		t.Errorf("SourceVolume = %v, want %v", decoded.SourceVolume, legacyMeta.SourceVolume)
+	}
+	if decoded.DatasetName != legacyMeta.DatasetName {
+		t.Errorf("DatasetName = %v, want %v", decoded.DatasetName, legacyMeta.DatasetName)
+	}
+	if decoded.Protocol != legacyMeta.Protocol {
+		t.Errorf("Protocol = %v, want %v", decoded.Protocol, legacyMeta.Protocol)
 	}
 }
 
@@ -527,10 +582,12 @@ func TestDeleteSnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a valid encoded snapshot ID for testing
+	// Use volume ID that will appear in the dataset path
+	volumeID := "test-volume"
 	snapshotMeta := SnapshotMetadata{
-		SnapshotName: "tank/test-volume@test-snapshot",
-		SourceVolume: "encoded-volume-id",
-		DatasetName:  "tank/test-volume",
+		SnapshotName: "tank/" + volumeID + "@test-snapshot",
+		SourceVolume: volumeID,
+		DatasetName:  "tank/" + volumeID,
 		Protocol:     ProtocolNFS,
 		CreatedAt:    time.Now().Unix(),
 	}
@@ -552,6 +609,12 @@ func TestDeleteSnapshot(t *testing.T) {
 				SnapshotId: snapshotID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// QuerySnapshots is called to resolve the full ZFS snapshot name
+				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
+					return []tnsapi.Snapshot{
+						{ID: "tank/" + volumeID + "@test-snapshot", Dataset: "tank/" + volumeID},
+					}, nil
+				}
 				m.DeleteSnapshotFunc = func(ctx context.Context, snapshotID string) error {
 					return nil
 				}
@@ -576,16 +639,17 @@ func TestDeleteSnapshot(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name: "snapshot not found - should succeed (idempotency)",
+			name: "snapshot not found in TrueNAS - should succeed (idempotency)",
 			req: &csi.DeleteSnapshotRequest{
 				SnapshotId: snapshotID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.DeleteSnapshotFunc = func(ctx context.Context, snapshotID string) error {
-					return errors.New("snapshot not found")
+				// QuerySnapshots returns empty - snapshot not found
+				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
+					return []tnsapi.Snapshot{}, nil
 				}
 			},
-			wantErr: false,
+			wantErr: false, // Should succeed per CSI idempotency
 		},
 		{
 			name: "TrueNAS API error during deletion",
@@ -593,6 +657,13 @@ func TestDeleteSnapshot(t *testing.T) {
 				SnapshotId: snapshotID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// QuerySnapshots finds the snapshot
+				m.QuerySnapshotsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error) {
+					return []tnsapi.Snapshot{
+						{ID: "tank/" + volumeID + "@test-snapshot", Dataset: "tank/" + volumeID},
+					}, nil
+				}
+				// DeleteSnapshot returns a non-"not found" error
 				m.DeleteSnapshotFunc = func(ctx context.Context, snapshotID string) error {
 					return errors.New("internal TrueNAS error")
 				}

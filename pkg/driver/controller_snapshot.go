@@ -22,7 +22,13 @@ import (
 
 // Static errors for snapshot operations.
 var (
-	ErrSnapshotNameExists = errors.New("snapshot name already exists for different dataset")
+	ErrSnapshotNameExists      = errors.New("snapshot name already exists for different dataset")
+	ErrProtocolRequired        = errors.New("protocol is required for snapshot ID encoding")
+	ErrSourceVolumeRequired    = errors.New("source volume is required for snapshot ID encoding")
+	ErrSnapshotNameRequired    = errors.New("snapshot name is required for snapshot ID encoding")
+	ErrInvalidSnapshotIDFormat = errors.New("invalid compact snapshot ID format")
+	ErrInvalidProtocol         = errors.New("invalid protocol in snapshot ID")
+	ErrSnapshotNotFoundTrueNAS = errors.New("snapshot not found in TrueNAS")
 )
 
 // SnapshotRegistry maintains a global registry of snapshot names to enforce
@@ -82,19 +88,98 @@ type SnapshotMetadata struct {
 	CreatedAt    int64  `json:"-"`            // Creation timestamp (Unix epoch) - excluded from ID encoding
 }
 
-// encodeSnapshotID encodes snapshot metadata into a snapshotID string.
+// Compact snapshot ID format: {protocol}:{volume_id}@{snapshot_name}.
+// Example: "nfs:pvc-abc123@snap-xyz789" (~65 bytes vs 300+ for base64 JSON).
+// This format is CSI-compliant (under 128 bytes) and easy to parse.
+//
+// The full ZFS dataset path can be reconstructed from:
+// - parentDataset (from StorageClass parameters) + volumeID.
+// - Format: {parentDataset}/{volumeID}@{snapshotName}.
+
+// encodeSnapshotID encodes snapshot metadata into a compact snapshotID string.
+// Format: {protocol}:{volume_id}@{snapshot_name}.
 func encodeSnapshotID(meta SnapshotMetadata) (string, error) {
-	data, err := json.Marshal(meta)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal snapshot metadata: %w", err)
+	if meta.Protocol == "" {
+		return "", ErrProtocolRequired
 	}
-	// Use base64 URL-safe encoding (no padding) to create a valid snapshotID
-	encoded := base64.RawURLEncoding.EncodeToString(data)
-	return encoded, nil
+	if meta.SourceVolume == "" {
+		return "", ErrSourceVolumeRequired
+	}
+
+	// Extract just the snapshot name from the full ZFS snapshot name (dataset@snapname)
+	snapshotName := meta.SnapshotName
+	if idx := strings.LastIndex(meta.SnapshotName, "@"); idx != -1 {
+		snapshotName = meta.SnapshotName[idx+1:]
+	}
+
+	if snapshotName == "" {
+		return "", ErrSnapshotNameRequired
+	}
+
+	// Format: protocol:volume_id@snapshot_name
+	return fmt.Sprintf("%s:%s@%s", meta.Protocol, meta.SourceVolume, snapshotName), nil
 }
 
 // decodeSnapshotID decodes a snapshotID string into snapshot metadata.
+// Supports both:
+// - New compact format: {protocol}:{volume_id}@{snapshot_name}.
+// - Legacy base64-encoded JSON format (for backward compatibility).
 func decodeSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
+	// Try compact format first (has colon before @)
+	if meta, err := decodeCompactSnapshotID(snapshotID); err == nil {
+		return meta, nil
+	}
+
+	// Fall back to legacy base64 JSON format
+	return decodeLegacySnapshotID(snapshotID)
+}
+
+// decodeCompactSnapshotID decodes the new compact format: {protocol}:{volume_id}@{snapshot_name}.
+func decodeCompactSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
+	// Format: protocol:volume_id@snapshot_name
+	// First split by ":" to get protocol
+	colonIdx := strings.Index(snapshotID, ":")
+	if colonIdx == -1 {
+		return nil, fmt.Errorf("%w: missing protocol separator", ErrInvalidSnapshotIDFormat)
+	}
+
+	protocol := snapshotID[:colonIdx]
+	remainder := snapshotID[colonIdx+1:]
+
+	// Validate protocol
+	if protocol != ProtocolNFS && protocol != ProtocolNVMeOF {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidProtocol, protocol)
+	}
+
+	// Split remainder by "@" to get volume_id and snapshot_name
+	atIdx := strings.LastIndex(remainder, "@")
+	if atIdx == -1 {
+		return nil, fmt.Errorf("%w: missing snapshot separator", ErrInvalidSnapshotIDFormat)
+	}
+
+	volumeID := remainder[:atIdx]
+	snapshotName := remainder[atIdx+1:]
+
+	if volumeID == "" {
+		return nil, fmt.Errorf("%w: empty volume ID", ErrInvalidSnapshotIDFormat)
+	}
+	if snapshotName == "" {
+		return nil, fmt.Errorf("%w: empty snapshot name", ErrInvalidSnapshotIDFormat)
+	}
+
+	// Note: DatasetName and full SnapshotName (with dataset path) cannot be reconstructed
+	// from the compact format alone. They will be populated by the caller if needed
+	// by looking up the volume in TrueNAS or using StorageClass parameters.
+	return &SnapshotMetadata{
+		Protocol:     protocol,
+		SourceVolume: volumeID,
+		SnapshotName: snapshotName, // Just the snapshot name, not full ZFS path
+		DatasetName:  "",           // Must be resolved by caller
+	}, nil
+}
+
+// decodeLegacySnapshotID decodes the old base64-encoded JSON format for backward compatibility.
+func decodeLegacySnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 	data, err := base64.RawURLEncoding.DecodeString(snapshotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode snapshot ID: %w", err)
@@ -334,18 +419,25 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 		return &csi.DeleteSnapshotResponse{}, nil
 	}
 
-	klog.Infof("Deleting ZFS snapshot: %s", snapshotMeta.SnapshotName)
+	// Resolve the full ZFS snapshot name if we only have the short name
+	// Compact format gives us just the snapshot name, need to find full path
+	zfsSnapshotName, err := s.resolveZFSSnapshotName(ctx, snapshotMeta)
+	if err != nil {
+		// If we can't resolve the snapshot, it might not exist
+		klog.Warningf("Failed to resolve ZFS snapshot name: %v. Assuming snapshot doesn't exist.", err)
+		timer.ObserveSuccess()
+		return &csi.DeleteSnapshotResponse{}, nil
+	}
+
+	klog.Infof("Deleting ZFS snapshot: %s", zfsSnapshotName)
 
 	// Delete snapshot using TrueNAS API
-	if err := s.apiClient.DeleteSnapshot(ctx, snapshotMeta.SnapshotName); err != nil {
+	if err := s.apiClient.DeleteSnapshot(ctx, zfsSnapshotName); err != nil {
 		// Check if error is because snapshot doesn't exist
 		if isNotFoundError(err) {
-			klog.Infof("Snapshot %s not found, assuming already deleted", snapshotMeta.SnapshotName)
+			klog.Infof("Snapshot %s not found, assuming already deleted", zfsSnapshotName)
 			// Unregister from registry since it doesn't exist anymore
-			parts := strings.Split(snapshotMeta.SnapshotName, "@")
-			if len(parts) == 2 {
-				s.snapshotRegistry.Unregister(parts[1])
-			}
+			s.snapshotRegistry.Unregister(snapshotMeta.SnapshotName)
 			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil
 		}
@@ -354,16 +446,51 @@ func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteS
 	}
 
 	// Unregister the snapshot name from the registry
-	// Extract snapshot name from full ZFS snapshot name (dataset@snapname)
-	parts := strings.Split(snapshotMeta.SnapshotName, "@")
-	if len(parts) == 2 {
-		s.snapshotRegistry.Unregister(parts[1])
-		klog.V(4).Infof("Unregistered snapshot name %q from registry", parts[1])
-	}
+	s.snapshotRegistry.Unregister(snapshotMeta.SnapshotName)
+	klog.V(4).Infof("Unregistered snapshot name %q from registry", snapshotMeta.SnapshotName)
 
-	klog.Infof("Successfully deleted snapshot: %s", snapshotMeta.SnapshotName)
+	klog.Infof("Successfully deleted snapshot: %s", zfsSnapshotName)
 	timer.ObserveSuccess()
 	return &csi.DeleteSnapshotResponse{}, nil
+}
+
+// resolveZFSSnapshotName resolves the full ZFS snapshot name (dataset@snapname) from metadata.
+// For legacy format, SnapshotName already contains the full path.
+// For compact format, we need to look up the volume to get the dataset path.
+func (s *ControllerService) resolveZFSSnapshotName(ctx context.Context, meta *SnapshotMetadata) (string, error) {
+	// If SnapshotName already contains "@", it's the full ZFS path (legacy format)
+	if strings.Contains(meta.SnapshotName, "@") {
+		return meta.SnapshotName, nil
+	}
+
+	// Compact format: SnapshotName is just the snapshot name, need to find dataset
+	snapshotName := meta.SnapshotName
+	volumeID := meta.SourceVolume
+
+	// Query TrueNAS to find snapshots matching this name
+	// We search for snapshots ending with @{snapshotName}
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to query snapshots: %w", err)
+	}
+
+	// Look for a snapshot that matches our criteria:
+	// 1. Ends with @{snapshotName}
+	// 2. Dataset path contains the volumeID
+	for _, snap := range snapshots {
+		// ZFS snapshot ID format: dataset@snapname
+		if !strings.HasSuffix(snap.ID, "@"+snapshotName) {
+			continue
+		}
+
+		// Check if the dataset contains our volume ID
+		datasetPath := strings.TrimSuffix(snap.ID, "@"+snapshotName)
+		if strings.Contains(datasetPath, volumeID) {
+			return snap.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: snapshot %s for volume %s", ErrSnapshotNotFoundTrueNAS, snapshotName, volumeID)
 }
 
 // ListSnapshots lists snapshots.
@@ -395,11 +522,21 @@ func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListS
 		}, nil
 	}
 
-	klog.V(4).Infof("ListSnapshots: filtering by snapshot ID (ZFS name: %s)", snapshotMeta.SnapshotName)
+	// Resolve the full ZFS snapshot name if we only have the short name
+	zfsSnapshotName, err := s.resolveZFSSnapshotName(ctx, snapshotMeta)
+	if err != nil {
+		// Snapshot not found
+		klog.V(4).Infof("Snapshot not found: %v - returning empty list", err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	klog.V(4).Infof("ListSnapshots: filtering by snapshot ID (ZFS name: %s)", zfsSnapshotName)
 
 	// Query to verify snapshot exists
 	filters := []interface{}{
-		[]interface{}{"id", "=", snapshotMeta.SnapshotName},
+		[]interface{}{"id", "=", zfsSnapshotName},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
@@ -593,32 +730,25 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 	}
 
 	// Convert to CSI format
-	// Note: Without additional context, we can't fully populate source volume info
-	// This is acceptable per CSI spec - ListSnapshots without filters is mainly for discovery
+	// Note: We try to infer protocol and source volume from ZFS dataset info
 	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, endIndex-startIndex)
 	for i := startIndex; i < endIndex; i++ {
 		snapshot := snapshots[i]
 
-		// Create minimal snapshot metadata
-		// We don't know the source volume or protocol without additional queries
-		snapshotMeta := SnapshotMetadata{
-			SnapshotName: snapshot.ID,
-			DatasetName:  snapshot.Dataset,
-			Protocol:     "",
-			CreatedAt:    time.Now().Unix(),
-			SourceVolume: "",
-		}
+		// Extract snapshot name and infer metadata from ZFS path
+		// ZFS snapshot ID format: dataset@snapname or zvol/dataset@snapname
+		snapshotMeta := s.inferSnapshotMetadataFromZFS(snapshot)
 
 		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 		if encodeErr != nil {
-			klog.Warningf("Failed to encode snapshot ID for %s: %v", snapshot.ID, encodeErr)
+			klog.Warningf("Failed to encode snapshot ID for %s: %v - skipping", snapshot.ID, encodeErr)
 			continue
 		}
 
 		entry := &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SnapshotId:     snapshotID,
-				SourceVolumeId: "", // Unknown without additional context
+				SourceVolumeId: snapshotMeta.SourceVolume,
 				CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
 				ReadyToUse:     true,
 			},
@@ -637,28 +767,70 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 	}, nil
 }
 
+// inferSnapshotMetadataFromZFS infers snapshot metadata from ZFS snapshot info.
+// This is used when listing all snapshots where we don't have explicit metadata.
+func (s *ControllerService) inferSnapshotMetadataFromZFS(snapshot tnsapi.Snapshot) SnapshotMetadata {
+	// ZFS snapshot ID format: dataset@snapname
+	// For zvols: pool/path/to/volume@snapname
+	// For filesystems: pool/path/to/dataset@snapname
+	datasetName := snapshot.Dataset
+
+	// Infer protocol from dataset path
+	// NVMe-oF volumes are typically zvols (visible in /dev/zvol/...)
+	// NFS volumes are filesystems
+	// Without querying TrueNAS, we assume NFS as the default
+	protocol := ProtocolNFS
+
+	// Extract volume ID from dataset name (last component)
+	// Format: pool/parent/volumeID -> volumeID
+	volumeID := datasetName
+	if idx := strings.LastIndex(datasetName, "/"); idx != -1 {
+		volumeID = datasetName[idx+1:]
+	}
+
+	// Extract snapshot name from full snapshot ID
+	snapshotName := ""
+	if idx := strings.LastIndex(snapshot.ID, "@"); idx != -1 {
+		snapshotName = snapshot.ID[idx+1:]
+	}
+
+	return SnapshotMetadata{
+		SnapshotName: snapshotName,
+		SourceVolume: volumeID,
+		DatasetName:  datasetName,
+		Protocol:     protocol,
+		CreatedAt:    time.Now().Unix(),
+	}
+}
+
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
 func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *csi.CreateVolumeRequest, snapshotID string) (*csi.CreateVolumeResponse, error) {
 	klog.Infof("=== createVolumeFromSnapshot CALLED === Volume: %s, SnapshotID: %s", req.GetName(), snapshotID)
 	klog.V(4).Infof("Full request: %+v", req)
 
 	// Decode snapshot metadata
-	snapshotMeta, err := decodeSnapshotID(snapshotID)
-	if err != nil {
-		klog.Warningf("Failed to decode snapshot ID %s: %v. Treating as not found.", snapshotID, err)
+	snapshotMeta, decodeErr := decodeSnapshotID(snapshotID)
+	if decodeErr != nil {
+		klog.Warningf("Failed to decode snapshot ID %s: %v. Treating as not found.", snapshotID, decodeErr)
+		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
+	}
+
+	// Resolve the full ZFS snapshot name and dataset info if using compact format
+	if resolveErr := s.resolveSnapshotMetadata(ctx, snapshotMeta); resolveErr != nil {
+		klog.Warningf("Failed to resolve snapshot metadata: %v. Treating as not found.", resolveErr)
 		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
 	}
 
 	// Validate and extract clone parameters
-	cloneParams, err := s.validateCloneParameters(req, snapshotMeta)
-	if err != nil {
-		return nil, err
+	cloneParams, validateErr := s.validateCloneParameters(req, snapshotMeta)
+	if validateErr != nil {
+		return nil, validateErr
 	}
 
 	// Clone the snapshot
-	clonedDataset, err := s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
-	if err != nil {
-		return nil, err
+	clonedDataset, cloneErr := s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
+	if cloneErr != nil {
+		return nil, cloneErr
 	}
 
 	// Wait for ZFS metadata sync for NVMe-oF volumes
@@ -676,6 +848,36 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 
 	// Route to protocol-specific volume setup
 	return s.setupVolumeFromClone(ctx, req, clonedDataset, snapshotMeta.Protocol, server, subsystemNQN, snapshotID)
+}
+
+// resolveSnapshotMetadata resolves missing metadata fields for compact format snapshots.
+// For legacy format, the metadata is already complete.
+// For compact format, we need to look up the full ZFS snapshot name and dataset info.
+func (s *ControllerService) resolveSnapshotMetadata(ctx context.Context, meta *SnapshotMetadata) error {
+	// If SnapshotName already contains "@", it's the full ZFS path (legacy format)
+	// and DatasetName should also be populated
+	if strings.Contains(meta.SnapshotName, "@") && meta.DatasetName != "" {
+		return nil
+	}
+
+	// Compact format: need to resolve full paths
+	zfsSnapshotName, err := s.resolveZFSSnapshotName(ctx, meta)
+	if err != nil {
+		return err
+	}
+
+	// Update metadata with resolved values
+	meta.SnapshotName = zfsSnapshotName
+
+	// Extract dataset name from full ZFS snapshot name (format: dataset@snapname)
+	if idx := strings.LastIndex(zfsSnapshotName, "@"); idx != -1 {
+		meta.DatasetName = zfsSnapshotName[:idx]
+	}
+
+	klog.V(4).Infof("Resolved snapshot metadata: SnapshotName=%s, DatasetName=%s",
+		meta.SnapshotName, meta.DatasetName)
+
+	return nil
 }
 
 // cloneParameters holds validated parameters for snapshot cloning.

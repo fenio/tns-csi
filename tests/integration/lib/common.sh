@@ -567,12 +567,29 @@ deploy_driver() {
     echo ""
     echo "=== Helm Installation Command ==="
     echo "helm upgrade --install tns-csi ./charts/tns-csi-driver \\"
-    for arg in "${base_args[@]}" "${helm_args[@]}"; do
-        # Mask sensitive values
-        if [[ "${arg}" == *"apiKey="* ]]; then
-            echo "  ${arg/=*/=***MASKED***} \\"
+    local all_args=("${base_args[@]}" "${helm_args[@]}")
+    local i=0
+    while [[ $i -lt ${#all_args[@]} ]]; do
+        local arg="${all_args[$i]}"
+        local next_arg="${all_args[$((i+1))]:-}"
+        
+        # Check if this is a flag that takes a value as the next argument
+        if [[ "${arg}" == --* && -n "${next_arg}" && "${next_arg}" != --* ]]; then
+            # Mask sensitive values
+            if [[ "${next_arg}" == *"apiKey"* || "${arg}" == *"apiKey"* ]]; then
+                echo "  ${arg} ***MASKED*** \\"
+            else
+                echo "  ${arg} ${next_arg} \\"
+            fi
+            i=$((i + 2))
         else
-            echo "  ${arg} \\"
+            # Standalone flag or flag with = syntax
+            if [[ "${arg}" == *"apiKey="* ]]; then
+                echo "  ${arg/=*/=***MASKED***} \\"
+            else
+                echo "  ${arg} \\"
+            fi
+            i=$((i + 1))
         fi
     done
     echo "  --wait --timeout 5m"

@@ -190,6 +190,53 @@ func IsRetryableError(err error) bool {
 	return IsRetryableNetworkError(err) || IsRetryableAPIError(err)
 }
 
+// IsBusyResourceError returns true if the error indicates a resource is busy
+// and the operation should be retried. This is used for deletion operations
+// where resources may be temporarily in use.
+//
+// Common busy error patterns from TrueNAS:
+//   - "dataset is busy" - ZFS dataset has active operations
+//   - "target is busy" - NVMe-oF/iSCSI target has active connections
+//   - "filesystem has dependent clones" - ZFS clone dependency
+//   - "resource busy" - Generic busy state
+//   - "EBUSY" - POSIX busy error.
+func IsBusyResourceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return contains(errStr,
+		"dataset is busy",
+		"target is busy",
+		"resource busy",
+		"EBUSY",
+		"Device or resource busy",
+		"pool is busy",
+		"filesystem is busy",
+	)
+}
+
+// IsRetryableDeletionError returns true if the error during a deletion operation
+// should be retried. This includes busy resource errors and transient API errors.
+func IsRetryableDeletionError(err error) bool {
+	return IsBusyResourceError(err) || IsRetryableError(err)
+}
+
+// DeletionRetryConfig returns a RetryConfig optimized for deletion operations.
+// Uses a fixed interval (not exponential backoff) since busy resources typically
+// become available after a short, consistent delay.
+// Default: 12 retries with 5-second intervals (total ~60 seconds).
+func DeletionRetryConfig(operationName string) RetryConfig {
+	return RetryConfig{
+		MaxAttempts:       12,
+		InitialBackoff:    5 * time.Second,
+		MaxBackoff:        5 * time.Second, // Fixed interval (no exponential backoff)
+		BackoffMultiplier: 1.0,             // No increase between retries
+		RetryableFunc:     IsRetryableDeletionError,
+		OperationName:     operationName,
+	}
+}
+
 // contains checks if any of the substrings are present in the string.
 func contains(s string, substrings ...string) bool {
 	for _, sub := range substrings {

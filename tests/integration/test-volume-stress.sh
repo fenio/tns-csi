@@ -38,24 +38,63 @@ declare -a PVC_NAMES=()
 declare -a POD_NAMES=()
 declare -a PV_NAMES=()
 
-# Cleanup function
+# Cleanup function - use the standard cleanup_test for proper namespace deletion
 cleanup_all() {
     echo ""
     test_info "Cleaning up all test resources..."
     
-    # Delete all pods
+    # Delete all pods first (parallel)
     for pod_name in "${POD_NAMES[@]}"; do
         kubectl delete pod "${pod_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=30s &
     done
     wait
     
-    # Delete all PVCs
+    # Delete all PVCs (parallel)
     for pvc_name in "${PVC_NAMES[@]}"; do
         kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s &
     done
     wait
     
-    test_success "Cleanup initiated for all resources"
+    # Wait for PVs to be deleted (indicates TrueNAS backend cleanup)
+    test_info "Waiting for PVs to be released..."
+    local timeout=120
+    local elapsed=0
+    local interval=5
+    
+    while [[ $elapsed -lt $timeout ]]; do
+        local remaining_pvs=0
+        for pv_name in "${PV_NAMES[@]}"; do
+            if kubectl get pv "${pv_name}" &>/dev/null; then
+                remaining_pvs=$((remaining_pvs + 1))
+            fi
+        done
+        
+        if [[ $remaining_pvs -eq 0 ]]; then
+            test_success "All PVs deleted (TrueNAS cleanup complete)"
+            break
+        fi
+        
+        test_info "  ${remaining_pvs} PV(s) still deleting (${elapsed}s elapsed)..."
+        sleep "${interval}"
+        elapsed=$((elapsed + interval))
+    done
+    
+    if [[ $elapsed -ge $timeout ]]; then
+        test_warning "PV cleanup timed out after ${timeout}s - some resources may remain on TrueNAS"
+    fi
+    
+    # Now delete the namespace to ensure full cleanup
+    test_info "Deleting test namespace: ${TEST_NAMESPACE}"
+    kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || {
+        test_warning "Namespace deletion timed out, forcing deletion"
+        kubectl delete namespace "${TEST_NAMESPACE}" --force --grace-period=0 --ignore-not-found=true || true
+    }
+    
+    # Additional wait for TrueNAS backend to fully process deletions
+    test_info "Waiting additional 10s for TrueNAS backend cleanup..."
+    sleep 10
+    
+    test_success "Cleanup completed"
 }
 
 # Trap errors

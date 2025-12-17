@@ -44,6 +44,8 @@ type nvmeofVolumeParams struct {
 	subsystemNQN string
 	// Optional: port ID to bind the subsystem to (from StorageClass)
 	portID int
+	// deleteStrategy controls what happens on volume deletion: "delete" (default) or "retain"
+	deleteStrategy string
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsZvolProperties
 }
@@ -163,6 +165,12 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 	// Parse ZFS properties from StorageClass parameters
 	zfsProps := parseZFSZvolProperties(params)
 
+	// Parse deleteStrategy from StorageClass parameters (default: "delete")
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+
 	return &nvmeofVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -172,6 +180,7 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		zvolName:          zvolName,
 		subsystemNQN:      subsystemNQN,
 		portID:            portID,
+		deleteStrategy:    deleteStrategy,
 		zfsProps:          zfsProps,
 	}, nil
 }
@@ -410,6 +419,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		namespace.ID,
 		subsystem.NQN,
 		time.Now().UTC().Format(time.RFC3339),
+		params.deleteStrategy,
 	)
 	if err := s.apiClient.SetDatasetProperties(ctx, zvol.ID, props); err != nil {
 		// Non-fatal: volume works without properties, but deletion safety is reduced
@@ -547,9 +557,12 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 // It returns an error if ownership verification fails, or nil if verification passes
 // or properties are not available (for backward compatibility with older volumes).
 // If verification passes, it may update meta with stored IDs from ZFS properties.
-func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *VolumeMetadata) error {
+// Also returns the deleteStrategy from ZFS properties (defaults to "delete" if not found).
+func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *VolumeMetadata) (string, error) {
+	deleteStrategy := tnsapi.DeleteStrategyDelete // Default to delete
+
 	if meta.DatasetID == "" {
-		return nil
+		return deleteStrategy, nil
 	}
 
 	props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
@@ -558,23 +571,24 @@ func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *Vol
 		tnsapi.PropertyNVMeSubsystemID,
 		tnsapi.PropertyNVMeNamespaceID,
 		tnsapi.PropertyNVMeSubsystemNQN,
+		tnsapi.PropertyDeleteStrategy,
 	})
 	if err != nil {
 		// Properties not found - could be old volume or manual creation
 		klog.V(4).Infof("Could not read ZFS properties for %s: %v (proceeding with metadata-based deletion)", meta.DatasetID, err)
-		return nil
+		return deleteStrategy, nil
 	}
 
 	// Verify managed_by property
 	if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
-		return status.Errorf(codes.FailedPrecondition,
+		return "", status.Errorf(codes.FailedPrecondition,
 			"ZVOL %s is not managed by tns-csi (managed_by=%s), refusing to delete",
 			meta.DatasetID, managedBy)
 	}
 
 	// Verify volume name matches
 	if storedVolumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok && storedVolumeName != meta.Name {
-		return status.Errorf(codes.FailedPrecondition,
+		return "", status.Errorf(codes.FailedPrecondition,
 			"Volume name mismatch: ZVOL %s belongs to volume '%s', not '%s' (possible ID reuse)",
 			meta.DatasetID, storedVolumeName, meta.Name)
 	}
@@ -593,14 +607,20 @@ func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *Vol
 		}
 	}
 
+	// Get deleteStrategy from properties
+	if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
+		deleteStrategy = strategy
+	}
+
 	klog.V(4).Infof("Ownership verified for ZVOL %s (volume: %s)", meta.DatasetID, meta.Name)
-	return nil
+	return deleteStrategy, nil
 }
 
 // deleteNVMeOFVolume deletes an NVMe-oF volume.
 // With independent subsystem architecture, this deletes the namespace, subsystem, and ZVOL.
 // Uses best-effort cleanup: continues deleting resources even if earlier steps fail.
 // This prevents orphaned resources on TrueNAS when partial failures occur.
+// If deleteStrategy is "retain", the volume is kept but CSI returns success.
 func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "delete")
 	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d, subsystem ID: %d)",
@@ -608,9 +628,21 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 
 	// Step 0: Verify ownership via ZFS properties before deletion
 	// This prevents accidental deletion of resources when TrueNAS reuses IDs
-	if err := s.verifyNVMeOFOwnership(ctx, meta); err != nil {
+	// Also retrieves the deleteStrategy
+	deleteStrategy, err := s.verifyNVMeOFOwnership(ctx, meta)
+	if err != nil {
 		timer.ObserveError()
 		return nil, err
+	}
+
+	// Check if we should retain the volume instead of deleting
+	if deleteStrategy == tnsapi.DeleteStrategyRetain {
+		klog.Infof("Volume %s has deleteStrategy=retain, skipping actual deletion (ZVOL: %s, namespace ID: %d, subsystem ID: %d will be kept)",
+			meta.Name, meta.DatasetID, meta.NVMeOFNamespaceID, meta.NVMeOFSubsystemID)
+		// Return success per CSI spec - the PV is "deleted" from Kubernetes perspective
+		// but the underlying storage is retained
+		timer.ObserveSuccess()
+		return &csi.DeleteVolumeResponse{}, nil
 	}
 
 	// Track all errors but continue with best-effort cleanup
@@ -930,6 +962,12 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	klog.Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
 
+	// Get deleteStrategy from StorageClass parameters (default: "delete")
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+
 	// Step 4: Store ZFS user properties for metadata tracking and ownership verification
 	props := tnsapi.NVMeOFVolumeProperties(
 		volumeName,
@@ -937,6 +975,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		namespace.ID,
 		subsystem.NQN,
 		time.Now().UTC().Format(time.RFC3339),
+		deleteStrategy,
 	)
 	// Add clone source properties
 	for k, v := range tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID) {

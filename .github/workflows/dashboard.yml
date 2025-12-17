@@ -13,11 +13,18 @@ on:
     - cron: '0 6 * * *'
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  deploy-dashboard:
-    name: Generate and Deploy Dashboard
+  build:
+    name: Generate Dashboard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -42,11 +49,11 @@ jobs:
 
       - name: Prepare deployment directory
         run: |
-          mkdir -p deploy-dir/dashboard
-          cp dashboard/dist/index.html deploy-dir/dashboard/
-          cp dashboard/.nojekyll deploy-dir/
+          mkdir -p _site/dashboard
+          cp dashboard/dist/index.html _site/dashboard/
+          cp dashboard/.nojekyll _site/
           # Create a simple redirect at root to dashboard
-          cat > deploy-dir/index.html << 'EOF'
+          cat > _site/index.html << 'EOF'
           <!DOCTYPE html>
           <html>
           <head>
@@ -59,11 +66,22 @@ jobs:
           </html>
           EOF
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy-dir
-          publish_branch: gh-pages
-          force_orphan: true
-          commit_message: 'Deploy test dashboard'
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -145,7 +145,11 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	volumeName := req.GetName()
+	// Resolve volume name using templating (if configured in StorageClass)
+	volumeName, err := ResolveVolumeName(params, req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to resolve volume name: %v", err)
+	}
 	datasetName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
 	// Parse ZFS properties from StorageClass parameters

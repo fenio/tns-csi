@@ -146,7 +146,11 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	volumeName := req.GetName()
+	// Resolve volume name using templating (if configured in StorageClass)
+	volumeName, err := ResolveVolumeName(params, req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to resolve volume name: %v", err)
+	}
 	zvolName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
 	// Generate unique NQN for this volume's dedicated subsystem

@@ -10,8 +10,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
+	"github.com/fenio/tns-csi/pkg/retry"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
-	"github.com/fenio/tns-csi/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -145,7 +145,11 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	volumeName := req.GetName()
+	// Resolve volume name using templating (if configured in StorageClass)
+	volumeName, err := ResolveVolumeName(params, req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to resolve volume name: %v", err)
+	}
 	datasetName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
 	// Parse ZFS properties from StorageClass parameters
@@ -486,8 +490,8 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	} else {
 		klog.V(4).Infof("Deleting dataset: %s (with retry for busy resources)", meta.DatasetID)
 
-		retryConfig := utils.DeletionRetryConfig("delete-nfs-dataset")
-		err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+		retryConfig := retry.DeletionConfig("delete-nfs-dataset")
+		err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 			deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
 			if deleteErr != nil && isNotFoundError(deleteErr) {
 				// Dataset already deleted - not an error (idempotency)

@@ -1,5 +1,4 @@
-//nolint:revive // Package name 'utils' is intentional for grouping utility functions.
-package utils
+package retry
 
 import (
 	"context"
@@ -8,8 +7,8 @@ import (
 	"time"
 )
 
-func TestDefaultRetryConfig(t *testing.T) {
-	config := DefaultRetryConfig()
+func TestDefaultConfig(t *testing.T) {
+	config := DefaultConfig()
 
 	if config.MaxAttempts != 3 {
 		t.Errorf("Expected MaxAttempts=3, got %d", config.MaxAttempts)
@@ -31,8 +30,8 @@ func TestDefaultRetryConfig(t *testing.T) {
 	}
 }
 
-func TestDeletionRetryConfig(t *testing.T) {
-	config := DeletionRetryConfig("delete-dataset")
+func TestDeletionConfig(t *testing.T) {
+	config := DeletionConfig("delete-dataset")
 
 	if config.MaxAttempts != 12 {
 		t.Errorf("Expected MaxAttempts=12, got %d", config.MaxAttempts)
@@ -55,7 +54,7 @@ func TestDeletionRetryConfig(t *testing.T) {
 }
 
 func TestWithRetry_Success(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -81,7 +80,7 @@ func TestWithRetry_Success(t *testing.T) {
 }
 
 func TestWithRetry_EventualSuccess(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       5,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -110,7 +109,7 @@ func TestWithRetry_EventualSuccess(t *testing.T) {
 }
 
 func TestWithRetry_AllAttemptsFail(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -136,7 +135,7 @@ func TestWithRetry_AllAttemptsFail(t *testing.T) {
 }
 
 func TestWithRetry_NonRetryableError(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       5,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -166,7 +165,7 @@ func TestWithRetry_NonRetryableError(t *testing.T) {
 }
 
 func TestWithRetry_ContextCanceled(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       10,
 		InitialBackoff:    100 * time.Millisecond,
 		MaxBackoff:        1 * time.Second,
@@ -193,7 +192,7 @@ func TestWithRetry_ContextCanceled(t *testing.T) {
 }
 
 func TestWithRetry_ContextCanceledBeforeStart(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -220,7 +219,7 @@ func TestWithRetry_ContextCanceledBeforeStart(t *testing.T) {
 
 func TestWithRetry_DefaultsApplied(t *testing.T) {
 	// Use zero values to test defaults
-	config := RetryConfig{}
+	config := Config{}
 
 	callCount := 0
 	_, err := WithRetry(context.Background(), config, func() (string, error) {
@@ -238,7 +237,7 @@ func TestWithRetry_DefaultsApplied(t *testing.T) {
 }
 
 func TestWithRetryNoResult_Success(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -261,7 +260,7 @@ func TestWithRetryNoResult_Success(t *testing.T) {
 }
 
 func TestWithRetryNoResult_EventualSuccess(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       5,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -287,7 +286,7 @@ func TestWithRetryNoResult_EventualSuccess(t *testing.T) {
 }
 
 func TestWithRetryNoResult_AllAttemptsFail(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,
@@ -691,7 +690,7 @@ func TestContains(t *testing.T) {
 }
 
 func TestWithRetry_BackoffCapping(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       5,
 		InitialBackoff:    10 * time.Millisecond,
 		MaxBackoff:        15 * time.Millisecond, // Low cap to test capping
@@ -730,7 +729,7 @@ func TestWithRetry_BackoffCapping(t *testing.T) {
 }
 
 func TestWithRetry_GenericTypes(t *testing.T) {
-	config := RetryConfig{
+	config := Config{
 		MaxAttempts:       2,
 		InitialBackoff:    1 * time.Millisecond,
 		MaxBackoff:        10 * time.Millisecond,

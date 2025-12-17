@@ -397,6 +397,74 @@ allowVolumeExpansion: true
 reclaimPolicy: Delete
 ```
 
+### Volume Name Templating
+- **Status**: ✅ Implemented
+- **Description**: Customize volume/dataset names on TrueNAS using Go templates
+- **Protocols**: NFS, NVMe-oF
+- **Use Cases**:
+  - Use meaningful names instead of auto-generated PV UUIDs
+  - Include namespace/PVC name in dataset names for easier identification
+  - Organize volumes with consistent naming patterns
+
+#### Template Variables
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `.PVCName` | PVC name | `postgres-data` |
+| `.PVCNamespace` | PVC namespace | `production` |
+| `.PVName` | PV name (CSI volume name) | `pvc-abc123-def456` |
+
+#### StorageClass Parameters
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `nameTemplate` | Go template for full name | `{{ .PVCNamespace }}-{{ .PVCName }}` |
+| `namePrefix` | Simple prefix | `prod-` |
+| `nameSuffix` | Simple suffix | `-data` |
+
+**Note**: `nameTemplate` takes precedence over `namePrefix`/`nameSuffix` if both are specified.
+
+#### Name Sanitization
+Volume names are automatically sanitized for ZFS compatibility:
+- Invalid characters replaced with hyphens
+- Leading/trailing hyphens removed
+- Multiple consecutive hyphens collapsed
+- Truncated to 63 characters (K8s label compatibility)
+
+**Example StorageClass with Name Template:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-named
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  # Volume name templating
+  nameTemplate: "{{ .PVCNamespace }}-{{ .PVCName }}"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
+With this StorageClass, a PVC named `postgres-data` in namespace `production` would create a dataset named `tank/production-postgres-data` instead of `tank/pvc-abc123-def456-789...`.
+
+**Example with Simple Prefix/Suffix:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-prefixed
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  namePrefix: "k8s-"
+  nameSuffix: "-vol"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
 ### RBAC
 - **Status**: ✅ Complete RBAC configuration
 - **Components**:

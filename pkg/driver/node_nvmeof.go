@@ -28,6 +28,10 @@ var (
 	ErrDeviceSizeMismatch          = errors.New("device size does not match expected capacity")
 )
 
+// defaultNVMeOFMountOptions are sensible defaults for NVMe-oF filesystem mounts.
+// These are merged with user-specified mount options from StorageClass.
+var defaultNVMeOFMountOptions = []string{"noatime"}
+
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
 // With independent subsystems per volume, NSID is always 1.
 type nvmeOFConnectionParams struct {
@@ -358,10 +362,15 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 
 	// Mount the device
 	klog.V(4).Infof("Mounting device %s to %s", devicePath, stagingTargetPath)
-	mountOptions := []string{}
+
+	// Get user-specified mount options from StorageClass (passed via VolumeCapability)
+	var userMountOptions []string
 	if mnt := volumeCapability.GetMount(); mnt != nil {
-		mountOptions = mnt.MountFlags
+		userMountOptions = mnt.MountFlags
 	}
+	mountOptions := getNVMeOFMountOptions(userMountOptions)
+
+	klog.V(4).Infof("NVMe-oF mount options: user=%v, final=%v", userMountOptions, mountOptions)
 
 	args := []string{devicePath, stagingTargetPath}
 	if len(mountOptions) > 0 {
@@ -847,4 +856,47 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	}
 
 	return nil
+}
+
+// getNVMeOFMountOptions merges user-provided mount options with sensible defaults.
+// User options take precedence - if a user specifies an option that conflicts
+// with a default, the user's option wins.
+// This allows StorageClass mountOptions to fully customize NVMe-oF filesystem mount behavior.
+func getNVMeOFMountOptions(userOptions []string) []string {
+	if len(userOptions) == 0 {
+		return defaultNVMeOFMountOptions
+	}
+
+	// Build a map of option keys that the user has specified
+	// This handles both key=value options and flags (e.g., "noatime", "ro")
+	userOptionKeys := make(map[string]bool)
+	for _, opt := range userOptions {
+		key := extractNVMeOFOptionKey(opt)
+		userOptionKeys[key] = true
+	}
+
+	// Start with user options, then add defaults that don't conflict
+	result := make([]string, 0, len(userOptions)+len(defaultNVMeOFMountOptions))
+	result = append(result, userOptions...)
+
+	for _, defaultOpt := range defaultNVMeOFMountOptions {
+		key := extractNVMeOFOptionKey(defaultOpt)
+		if !userOptionKeys[key] {
+			result = append(result, defaultOpt)
+		}
+	}
+
+	return result
+}
+
+// extractNVMeOFOptionKey extracts the key from a mount option.
+// For "key=value" options, returns "key".
+// For flag options like "noatime" or "ro", returns the flag itself.
+func extractNVMeOFOptionKey(option string) string {
+	for i, c := range option {
+		if c == '=' {
+			return option[:i]
+		}
+	}
+	return option
 }

@@ -50,6 +50,8 @@ create_storageclass_with_name_template() {
     
     # Create StorageClass with nameTemplate parameter
     # Template: {{ .PVCNamespace }}-{{ .PVCName }} will produce "<namespace>-test-pvc-name-template"
+    # Note: The csi-provisioner with --extra-create-metadata flag automatically passes
+    # csi.storage.k8s.io/pvc/name, csi.storage.k8s.io/pvc/namespace, and csi.storage.k8s.io/pv/name
     cat <<EOF | kubectl apply -f -
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -62,9 +64,6 @@ parameters:
   server: "${TRUENAS_HOST}"
   # Name templating: use namespace and PVC name
   nameTemplate: "{{ .PVCNamespace }}-{{ .PVCName }}"
-  # CSI parameters to pass PVC info (required for templating)
-  csi.storage.k8s.io/provisioner-secret-name: ""
-  csi.storage.k8s.io/provisioner-secret-namespace: ""
 allowVolumeExpansion: true
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
@@ -123,6 +122,24 @@ EOF
         -n "${TEST_NAMESPACE}" \
         --timeout="${TIMEOUT_PVC}"; then
         test_error "PVC failed to bind"
+        echo ""
+        echo "=== PVC Status ==="
+        kubectl describe pvc "${PVC_NAME}" -n "${TEST_NAMESPACE}" || true
+        echo ""
+        echo "=== PVC Events ==="
+        kubectl get events -n "${TEST_NAMESPACE}" --sort-by='.lastTimestamp' || true
+        echo ""
+        echo "=== Controller Logs (last 100 lines) ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            -c tns-csi-plugin \
+            --tail=100 || true
+        echo ""
+        echo "=== CSI Provisioner Logs (last 50 lines) ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            -c csi-provisioner \
+            --tail=50 || true
         false
     fi
     

@@ -64,6 +64,11 @@ const (
 	// Value: "nfs" or "nvmeof".
 	PropertyProtocol = "tns-csi:protocol"
 
+	// PropertyDeleteStrategy stores the deletion strategy for the volume.
+	// Value: "delete" (default) or "retain".
+	// When "retain", the volume will not be deleted when the PVC is deleted.
+	PropertyDeleteStrategy = "tns-csi:delete_strategy"
+
 	// ManagedByValue is the value stored in PropertyManagedBy.
 	ManagedByValue = "tns-csi"
 
@@ -78,6 +83,12 @@ const (
 
 	// ContentSourceVolume indicates the volume was created from another volume (clone).
 	ContentSourceVolume = "volume"
+
+	// DeleteStrategyDelete is the default strategy - volume is deleted when PVC is deleted.
+	DeleteStrategyDelete = "delete"
+
+	// DeleteStrategyRetain means the volume is retained when PVC is deleted.
+	DeleteStrategyRetain = "retain"
 )
 
 // PropertyNames returns all tns-csi property names for querying.
@@ -95,22 +106,24 @@ func PropertyNames() []string {
 		PropertyContentSourceID,
 		PropertyProvisionedAt,
 		PropertyProtocol,
+		PropertyDeleteStrategy,
 	}
 }
 
 // NFSVolumeProperties returns properties to set when creating an NFS volume.
-func NFSVolumeProperties(volumeName string, shareID int, provisionedAt string) map[string]string {
+func NFSVolumeProperties(volumeName string, shareID int, provisionedAt, deleteStrategy string) map[string]string {
 	return map[string]string{
-		PropertyManagedBy:     ManagedByValue,
-		PropertyCSIVolumeName: volumeName,
-		PropertyNFSShareID:    intToString(shareID),
-		PropertyProtocol:      ProtocolNFS,
-		PropertyProvisionedAt: provisionedAt,
+		PropertyManagedBy:      ManagedByValue,
+		PropertyCSIVolumeName:  volumeName,
+		PropertyNFSShareID:     intToString(shareID),
+		PropertyProtocol:       ProtocolNFS,
+		PropertyProvisionedAt:  provisionedAt,
+		PropertyDeleteStrategy: deleteStrategy,
 	}
 }
 
 // NVMeOFVolumeProperties returns properties to set when creating an NVMe-oF volume.
-func NVMeOFVolumeProperties(volumeName string, subsystemID, namespaceID int, subsystemNQN, provisionedAt string) map[string]string {
+func NVMeOFVolumeProperties(volumeName string, subsystemID, namespaceID int, subsystemNQN, provisionedAt, deleteStrategy string) map[string]string {
 	return map[string]string{
 		PropertyManagedBy:        ManagedByValue,
 		PropertyCSIVolumeName:    volumeName,
@@ -119,6 +132,7 @@ func NVMeOFVolumeProperties(volumeName string, subsystemID, namespaceID int, sub
 		PropertyNVMeSubsystemNQN: subsystemNQN,
 		PropertyProtocol:         ProtocolNVMeOF,
 		PropertyProvisionedAt:    provisionedAt,
+		PropertyDeleteStrategy:   deleteStrategy,
 	}
 }
 

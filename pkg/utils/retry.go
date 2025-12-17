@@ -1,6 +1,4 @@
 // Package utils provides utility functions for the CSI driver.
-//
-//nolint:revive // Package name 'utils' is intentional for grouping utility functions.
 package utils
 
 import (

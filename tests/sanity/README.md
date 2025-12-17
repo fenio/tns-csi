@@ -162,7 +162,6 @@ The csi-test framework provides detailed logs for failures:
 - [CSI Specification](https://github.com/container-storage-interface/spec)
 - [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test)
 - [CSI Sanity Documentation](https://github.com/kubernetes-csi/csi-test/tree/master/pkg/sanity)
-- [TrueNAS CSI Driver AGENTS.md](../../AGENTS.md)
 
 ## Next Steps
 

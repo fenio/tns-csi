@@ -2,7 +2,7 @@
 
 This document compares TNS-CSI with [democratic-csi](https://github.com/democratic-csi/democratic-csi), the most popular community CSI driver for TrueNAS.
 
-**Last Updated**: December 2024
+**Last Updated**: December 2025
 
 ## Overview
 

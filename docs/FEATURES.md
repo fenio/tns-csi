@@ -703,7 +703,6 @@ reclaimPolicy: Delete
 - ✅ METRICS.md - Prometheus metrics documentation
 - ✅ TESTING.md - Comprehensive testing guide and infrastructure details
 - ✅ FEATURES.md - This document
-- ✅ AGENTS.md - Development guidelines for AI agents
 - ✅ CONTRIBUTING.md - Contribution guidelines
 - ✅ CONNECTION_RESILIENCE_TEST.md - Connection testing guide
 

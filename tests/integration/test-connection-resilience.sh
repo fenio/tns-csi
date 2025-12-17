@@ -257,10 +257,6 @@ echo "  • Driver operations work reliably during test"
 echo "  • Automatic reconnection mechanism is in place"
 echo ""
 # Configure test with 8 total steps
-echo "Note: As per AGENTS.md guidance, this test does NOT"
-echo "      modify the working WebSocket connection code."
-echo ""
-# Configure test with 8 total steps
 echo "================================================"
 
 # Verify metrics

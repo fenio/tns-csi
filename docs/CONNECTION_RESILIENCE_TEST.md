@@ -1,8 +1,7 @@
 # WebSocket Connection Resilience Test Report
 
-**Test Date:** October 31, 2024  
+**Test Date:** October 31, 2025  
 **Test Objective:** Verify ping/pong loop and reconnection mechanism  
-**Following:** AGENTS.md - NO modifications to working WebSocket client
 
 > **Note:** This is a historical test report. Line number references are from the time of testing and may have shifted in the current codebase. The implementation behavior remains the same.
 
@@ -186,8 +185,6 @@ I1031 20:33:15.025823 Successfully authenticated with TrueNAS
 
 ---
 
-## Compliance with AGENTS.md
-
 ### ✅ Did NOT Modify Working Code
 - No changes to `pkg/tnsapi/client.go`
 - No changes to ping/pong timing
@@ -287,12 +284,10 @@ All aspects of the connection resilience mechanism work as designed:
 5. Re-authentication: **VERIFIED** ✅
 
 ### Final Statement
-**As per AGENTS.md: The WebSocket client works. Don't fix what isn't broken.**
 
 This test confirms that the current implementation is solid, well-designed, and handles real-world failure scenarios correctly. No modifications are needed or recommended.
 
 ---
 
 **Test Conducted By:** OpenCode Agent  
-**Following Guidelines:** AGENTS.md  
-**Test Report Generated:** October 31, 2024
+**Test Report Generated:** October 31, 2025

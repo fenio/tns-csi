@@ -109,7 +109,6 @@ tns-csi/
 1. **DO NOT modify WebSocket connection logic** in `pkg/tnsapi/client.go` without proven need
    - The ping/pong system is working correctly
    - Connection handling has been thoroughly tested
-   - See `AGENTS.md` for details on what NOT to change
 
 2. **Add comprehensive error handling**
    - Always check errors

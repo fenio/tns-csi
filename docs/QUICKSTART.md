@@ -365,6 +365,13 @@ storageClasses:
       - nfsvers=4.1
       - noatime
     isDefault: true  # Set as default storage class
+    # Optional: Additional parameters
+    parameters:
+      # Keep volumes on TrueNAS when PVC is deleted (useful for data protection)
+      # deleteStrategy: "retain"
+      # ZFS properties
+      # zfs.compression: "lz4"
+      # zfs.recordsize: "128K"
 ```
 
 Install with values file:
@@ -374,6 +381,23 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --namespace kube-system \
   --create-namespace \
   --values my-values.yaml
+```
+
+### Volume Retention (Delete Strategy)
+
+To keep volumes on TrueNAS even when PVCs are deleted (useful for data protection):
+
+```bash
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.0.1 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.nfs.enabled=true \
+  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
+  --set storageClasses.nfs.server="YOUR-TRUENAS-IP" \
+  --set "storageClasses.nfs.parameters.deleteStrategy=retain"
 ```
 
 ### Volume Expansion

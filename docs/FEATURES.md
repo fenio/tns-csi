@@ -67,6 +67,33 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
   - NFS: Removes NFS share and deletes ZFS dataset
   - NVMe-oF: Removes namespace from subsystem and deletes ZVOL
   - Idempotent operations (safe to retry)
+  - Supports `deleteStrategy` parameter for volume retention (see below)
+
+#### Delete Strategy (Volume Retention)
+- **Status**: ✅ Implemented
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Control whether volumes are actually deleted or retained when a PVC is deleted
+- **Parameter**: `deleteStrategy` in StorageClass parameters
+- **Values**:
+  - `delete` (default): Volume is deleted when PVC is deleted
+  - `retain`: Volume is kept on TrueNAS when PVC is deleted (useful for data protection)
+- **Use Case**: Protect important data from accidental deletion while still using `reclaimPolicy: Delete`
+
+**Example StorageClass with Delete Strategy:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-retained
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  deleteStrategy: "retain"  # Volumes kept on TrueNAS when PVC deleted
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
 
 #### Volume Attachment/Detachment
 - **Status**: ✅ Fully implemented and functional
@@ -84,6 +111,58 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
   - NFS: Standard NFSv4.2 mount with optimized options
   - NVMe-oF: Block device formatting (ext4/xfs) and filesystem mount
   - Proper cleanup on unmount
+
+### Configurable Mount Options
+- **Status**: ✅ Implemented
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Customize mount options via StorageClass `mountOptions` field
+- **Behavior**: User-specified options are merged with sensible defaults, with user options taking precedence for conflicting keys
+
+**Default Mount Options:**
+| Protocol | Platform | Defaults |
+|----------|----------|----------|
+| NFS | Linux | `vers=4.2`, `nolock` |
+| NFS | macOS | `vers=4`, `nolock` |
+| NVMe-oF | Linux | `noatime` |
+
+**Example StorageClass with Custom Mount Options:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-custom
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+mountOptions:
+  - hard
+  - nointr
+  - rsize=1048576
+  - wsize=1048576
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
+**NVMe-oF Mount Options Example:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nvmeof-custom
+provisioner: tns.csi.io
+parameters:
+  protocol: nvmeof
+  pool: tank
+  server: truenas.local
+  subsystemNQN: nqn.2025-01.com.truenas:csi
+mountOptions:
+  - discard
+  - data=ordered
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
 
 ### Volume Expansion
 - **Status**: ✅ Fully implemented and functional
@@ -240,10 +319,11 @@ spec:
 - **Status**: ✅ Flexible configuration
 - **Support**: Multiple storage classes per driver installation
 - **Parameters**:
-  - Common: `protocol`, `pool`, `server`
-  - NFS-specific: `mountOptions`, `path`
+  - Common: `protocol`, `pool`, `server`, `deleteStrategy`
+  - NFS-specific: `path`
   - NVMe-oF specific: `subsystemNQN`, `fsType`, `transport`, `port`
   - ZFS properties: See "Configurable ZFS Properties" section below
+- **Mount Options**: Configurable via StorageClass `mountOptions` field (see "Configurable Mount Options" above)
 
 ### Configurable ZFS Properties
 - **Status**: ✅ Implemented
@@ -617,7 +697,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ---
 
-**Last Updated**: 2025-01-07  
+**Last Updated**: 2025-12-17  
 **Driver Version**: v0.0.x (early development)  
 **Kubernetes Version Tested**: 1.27+  
 **Go Version**: 1.25.4+

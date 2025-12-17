@@ -41,6 +41,9 @@ The driver intentionally focuses on these two production-ready protocols rather 
 - **Volume snapshots** - Create, delete, and restore from snapshots (NFS and NVMe-oF)
 - **Volume cloning** - Create new volumes from existing snapshots
 - **Volume expansion** - Resize volumes dynamically (supported for both NFS and NVMe-oF)
+- **Volume retention** - Optional `deleteStrategy: retain` to keep volumes on PVC deletion
+- **Configurable mount options** - Customize NFS/NVMe-oF mount options via StorageClass
+- **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API

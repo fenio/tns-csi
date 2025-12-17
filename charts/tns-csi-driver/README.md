@@ -8,7 +8,10 @@ A Container Storage Interface (CSI) driver for TrueNAS Scale 25.10+ that enables
 - **Multiple Protocols**: Support for NFS and NVMe-oF
 - **Volume Snapshots**: Create, delete, and restore from snapshots (both NFS and NVMe-oF)
 - **Volume Cloning**: Create new volumes from existing snapshots
-- **Volume Expansion**: Resize volumes without pod recreation (NFS)
+- **Volume Expansion**: Resize volumes without pod recreation (NFS and NVMe-oF)
+- **Volume Retention**: Optional `deleteStrategy: retain` to keep volumes on PVC deletion
+- **Configurable Mount Options**: Customize mount options via StorageClass `mountOptions`
+- **Configurable ZFS Properties**: Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **WebSocket API**: Real-time communication with TrueNAS using WebSockets with automatic reconnection
 - **Production Ready**: Connection resilience, proper cleanup, comprehensive error handling
 
@@ -177,7 +180,21 @@ helm install tns-csi ./charts/tns-csi-driver \
 | `storageClasses.nfs.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nfs.volumeBindingMode` | Binding mode | `Immediate` |
 | `storageClasses.nfs.isDefault` | Set as default storage class | `false` |
-| `storageClasses.nfs.mountOptions` | NFS mount options | `[hard, nfsvers=4.1]` |
+| `storageClasses.nfs.mountOptions` | NFS mount options (merged with defaults) | `[]` |
+| `storageClasses.nfs.parameters` | Additional StorageClass parameters | `{}` |
+
+**Additional NFS Parameters (via `parameters` map):**
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `delete` |
+| `zfs.compression` | ZFS compression algorithm | (inherited) |
+| `zfs.dedup` | ZFS deduplication | (inherited) |
+| `zfs.atime` | Access time updates | (inherited) |
+| `zfs.sync` | Sync writes | (inherited) |
+| `zfs.recordsize` | ZFS record size | (inherited) |
+
+See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentation.
 
 **Important Note on `parentDataset`:**
 - If `parentDataset` is specified, it must already exist on TrueNAS
@@ -204,6 +221,21 @@ helm install tns-csi ./charts/tns-csi-driver \
 | `storageClasses.nvmeof.reclaimPolicy` | Reclaim policy | `Delete` |
 | `storageClasses.nvmeof.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nvmeof.volumeBindingMode` | Binding mode | `Immediate` |
+| `storageClasses.nvmeof.mountOptions` | Filesystem mount options (merged with defaults) | `[]` |
+| `storageClasses.nvmeof.parameters` | Additional StorageClass parameters | `{}` |
+
+**Additional NVMe-oF Parameters (via `parameters` map):**
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `delete` |
+| `zfs.compression` | ZFS compression algorithm | (inherited) |
+| `zfs.dedup` | ZFS deduplication | (inherited) |
+| `zfs.sync` | Sync writes | (inherited) |
+| `zfs.volblocksize` | ZVOL block size | (inherited) |
+| `zfs.sparse` | Thin provisioning | (inherited) |
+
+See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentation.
 
 **Important:** The `subsystemNQN` parameter is required for NVMe-oF volumes. You must pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) before provisioning volumes. The CSI driver creates namespaces within this shared subsystem.
 

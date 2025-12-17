@@ -247,6 +247,14 @@ storageClasses:
     #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
     #   zfs.atime: Access time updates (e.g., "on", "off")
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
+    #
+    # Volume Name Templating:
+    #   nameTemplate: Go template for volume names (e.g., "{{ .PVCNamespace }}-{{ .PVCName }}")
+    #     Available variables: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}-{{ .PVCName }}" creates "production-myapp-data"
+    #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
+    #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
+    #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
     parameters: {}
   
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
@@ -289,6 +297,14 @@ storageClasses:
     #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
     #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
+    #
+    # Volume Name Templating:
+    #   nameTemplate: Go template for volume names (e.g., "{{ .PVCNamespace }}-{{ .PVCName }}")
+    #     Available variables: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}-{{ .PVCName }}" creates "production-myapp-data"
+    #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
+    #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
+    #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
     parameters: {}
 
 # Snapshot support

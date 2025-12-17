@@ -1,5 +1,5 @@
-// Package utils provides utility functions for the CSI driver.
-package utils
+// Package retry provides retry utilities with exponential backoff for the CSI driver.
+package retry
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// RetryConfig configures retry behavior.
+// Config configures retry behavior.
 //
 //nolint:govet // fieldalignment: field order prioritizes readability over memory optimization.
-type RetryConfig struct {
+type Config struct {
 	// MaxAttempts is the maximum number of attempts (including the first try).
 	// Default: 3
 	MaxAttempts int
@@ -38,9 +38,9 @@ type RetryConfig struct {
 	OperationName string
 }
 
-// DefaultRetryConfig returns a RetryConfig with sensible defaults.
-func DefaultRetryConfig() RetryConfig {
-	return RetryConfig{
+// DefaultConfig returns a Config with sensible defaults.
+func DefaultConfig() Config {
+	return Config{
 		MaxAttempts:       3,
 		InitialBackoff:    1 * time.Second,
 		MaxBackoff:        30 * time.Second,
@@ -61,7 +61,7 @@ var ErrMaxRetriesExceeded = errors.New("max retries exceeded")
 //	result, err := WithRetry(ctx, config, func() (*MyType, error) {
 //	    return client.DoSomething()
 //	})
-func WithRetry[T any](ctx context.Context, config RetryConfig, fn func() (T, error)) (T, error) {
+func WithRetry[T any](ctx context.Context, config Config, fn func() (T, error)) (T, error) {
 	var zero T
 
 	// Apply defaults if not set
@@ -137,7 +137,7 @@ func WithRetry[T any](ctx context.Context, config RetryConfig, fn func() (T, err
 //	err := WithRetryNoResult(ctx, config, func() error {
 //	    return client.DeleteSomething()
 //	})
-func WithRetryNoResult(ctx context.Context, config RetryConfig, fn func() error) error {
+func WithRetryNoResult(ctx context.Context, config Config, fn func() error) error {
 	_, err := WithRetry(ctx, config, func() (struct{}, error) {
 		return struct{}{}, fn()
 	})
@@ -220,12 +220,12 @@ func IsRetryableDeletionError(err error) bool {
 	return IsBusyResourceError(err) || IsRetryableError(err)
 }
 
-// DeletionRetryConfig returns a RetryConfig optimized for deletion operations.
+// DeletionConfig returns a Config optimized for deletion operations.
 // Uses a fixed interval (not exponential backoff) since busy resources typically
 // become available after a short, consistent delay.
 // Default: 12 retries with 5-second intervals (total ~60 seconds).
-func DeletionRetryConfig(operationName string) RetryConfig {
-	return RetryConfig{
+func DeletionConfig(operationName string) Config {
+	return Config{
 		MaxAttempts:       12,
 		InitialBackoff:    5 * time.Second,
 		MaxBackoff:        5 * time.Second, // Fixed interval (no exponential backoff)

@@ -603,6 +603,7 @@ The following features are fully implemented and tested:
 - **Configurable ZFS Properties**: Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Snapshots**: CSI snapshot support using TrueNAS snapshots (see [SNAPSHOTS.md](SNAPSHOTS.md))
 - **Volume Cloning**: Create new volumes from snapshots
+- **Volume Health Monitoring**: CSI `GET_VOLUME` capability for Kubernetes volume health reporting
 - **Metrics**: Prometheus metrics endpoint (see [METRICS.md](METRICS.md))
 
 ## Future Enhancements
@@ -610,6 +611,5 @@ The following features are fully implemented and tested:
 Potential future enhancements:
 
 - **Topology**: Add topology awareness for multi-zone deployments
-- **Health Monitoring**: Enhanced volume health checks and reporting
 
 Note: iSCSI is intentionally not supported - NVMe-oF provides superior performance for block storage. SMB support is low priority.

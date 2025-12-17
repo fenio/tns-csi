@@ -1,3 +1,6 @@
+# Agent instructions (local only)
+AGENTS.md
+
 # Credentials and secrets
 .tns-credentials
 *.local.yaml

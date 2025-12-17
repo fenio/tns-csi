@@ -232,6 +232,37 @@ spec:
       storage: 10Gi
 ```
 
+### Volume Health Monitoring
+- **Status**: ✅ Implemented
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Report volume health status to Kubernetes via CSI `ControllerGetVolume` capability
+- **CSI Capability**: `GET_VOLUME` - enables Kubernetes to query volume health
+- **Features**:
+  - Reports `VolumeCondition` with `Abnormal` flag and descriptive `Message`
+  - Health checks performed on-demand when Kubernetes queries volume status
+  - Protocol-specific validation of underlying storage resources
+
+**Health Checks Performed:**
+
+| Protocol | Check | Abnormal If |
+|----------|-------|-------------|
+| NFS | Dataset exists | Dataset not found or inaccessible |
+| NFS | NFS share enabled | Share disabled or missing |
+| NVMe-oF | ZVOL exists | ZVOL not found |
+| NVMe-oF | Subsystem exists | Subsystem missing |
+| NVMe-oF | Namespace exists | Namespace not found in subsystem |
+
+**Return Values:**
+- `Abnormal: false` - Volume is healthy, all checks passed
+- `Abnormal: true` - Volume has issues, `Message` contains details
+
+**Use Cases:**
+- Kubernetes can detect storage issues before pods fail
+- Operators can monitor volume health via CSI events
+- Automated alerting on storage problems
+
+**Note:** This is a controller-side capability. Kubernetes periodically queries volume health for volumes with `GET_VOLUME` capability enabled.
+
 ## Infrastructure Features
 
 ### WebSocket API Client
@@ -636,7 +667,6 @@ reclaimPolicy: Delete
 - **Topology Awareness**: Multi-zone deployments
 - **Volume Migration**: Move volumes between protocols/pools
 - **Quota Management**: Advanced quota and reservation features
-- **Enhanced Monitoring**: Additional metrics and health checks
 
 ### Not Planned
 - **iSCSI Protocol**: NVMe-oF is superior for block storage

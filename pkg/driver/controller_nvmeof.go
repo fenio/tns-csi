@@ -11,8 +11,8 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
+	"github.com/fenio/tns-csi/pkg/retry"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
-	"github.com/fenio/tns-csi/pkg/utils"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -773,8 +773,8 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 	}
 
 	// Step 3: Delete the subsystem with retry logic for busy resources
-	retryConfig := utils.DeletionRetryConfig("delete-nvmeof-subsystem")
-	err = utils.WithRetryNoResult(ctx, retryConfig, func() error {
+	retryConfig := retry.DeletionConfig("delete-nvmeof-subsystem")
+	err = retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID)
 		if deleteErr != nil && isNotFoundError(deleteErr) {
 			// Subsystem already deleted - not an error (idempotency)
@@ -805,8 +805,8 @@ func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *Vol
 	klog.V(4).Infof("Deleting NVMe-oF namespace: ID=%d, ZVOL=%s, dataset=%s (with retry for busy resources)",
 		meta.NVMeOFNamespaceID, meta.DatasetID, meta.DatasetName)
 
-	retryConfig := utils.DeletionRetryConfig("delete-nvmeof-namespace")
-	err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+	retryConfig := retry.DeletionConfig("delete-nvmeof-namespace")
+	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID)
 		if deleteErr != nil && isNotFoundError(deleteErr) {
 			// Namespace already deleted - not an error (idempotency)
@@ -866,8 +866,8 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 
 	klog.V(4).Infof("Deleting ZVOL: %s (with retry for busy resources)", meta.DatasetID)
 
-	retryConfig := utils.DeletionRetryConfig("delete-zvol")
-	err := utils.WithRetryNoResult(ctx, retryConfig, func() error {
+	retryConfig := retry.DeletionConfig("delete-zvol")
+	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
 		if deleteErr != nil && isNotFoundError(deleteErr) {
 			// ZVOL already deleted - not an error (idempotency)

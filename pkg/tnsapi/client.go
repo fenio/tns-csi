@@ -30,6 +30,7 @@ var (
 	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
 	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
 	ErrDatasetNotFound        = errors.New("dataset not found")
+	ErrPromoteFailed          = errors.New("promote operation returned false (unsuccessful)")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1568,6 +1569,35 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 
 	klog.V(4).Infof("Successfully cloned snapshot to dataset: %s", datasets[0].Name)
 	return &datasets[0], nil
+}
+
+// PromoteDataset promotes a cloned dataset to become independent from its origin snapshot.
+// After promotion, the clone becomes a standalone dataset with no dependency on the parent.
+// This is essential for "detached snapshots" where you want an independent copy of data.
+//
+// The promotion operation:
+// 1. Reverses the parent-child relationship between clone and origin
+// 2. Makes the clone independent (it no longer depends on the snapshot)
+// 3. Allows the original snapshot to be deleted (if no other clones depend on it)
+//
+// Note: This uses the TrueNAS pool.dataset.promote API which wraps ZFS promote.
+func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
+	klog.V(4).Infof("Promoting dataset: %s", datasetID)
+
+	// TrueNAS pool.dataset.promote takes the dataset ID and returns success/failure
+	// The API expects just the dataset ID as a string parameter
+	var result bool
+	err := c.Call(ctx, "pool.dataset.promote", []interface{}{datasetID}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to promote dataset %s: %w", datasetID, err)
+	}
+
+	if !result {
+		return fmt.Errorf("%w: dataset %s", ErrPromoteFailed, datasetID)
+	}
+
+	klog.V(4).Infof("Successfully promoted dataset: %s", datasetID)
+	return nil
 }
 
 // queryWithOptionalFilter is a helper function to reduce duplication in query methods.

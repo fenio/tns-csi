@@ -873,6 +873,26 @@ func (m *MockClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnaps
 	}, nil
 }
 
+// PromoteDataset mocks pool.dataset.promote.
+// This simulates promoting a cloned dataset to become independent from its origin.
+func (m *MockClient) PromoteDataset(ctx context.Context, datasetID string) error {
+	m.logCall("PromoteDataset", datasetID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find dataset by ID or name
+	for _, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			// In a real implementation, this would break the clone-parent relationship
+			// For the mock, we just verify the dataset exists
+			return nil
+		}
+	}
+
+	return fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
 // GetCallLog returns the list of API calls made (for debugging).
 func (m *MockClient) GetCallLog() []string {
 	m.mu.Lock()

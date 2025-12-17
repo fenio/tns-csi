@@ -65,9 +65,8 @@ func TestGetPluginInfo(t *testing.T) {
 				return
 			}
 
-			if resp == nil {
-				t.Fatal("GetPluginInfo() returned nil response")
-			}
+			// Use require pattern - fail immediately if nil.
+			requireNotNil(t, resp, "GetPluginInfo() returned nil response")
 
 			if resp.Name != tt.driverName {
 				t.Errorf("GetPluginInfo() Name = %v, want %v", resp.Name, tt.driverName)
@@ -88,20 +87,19 @@ func TestGetPluginCapabilities(t *testing.T) {
 		t.Fatalf("GetPluginCapabilities() error = %v", err)
 	}
 
-	if resp == nil {
-		t.Fatal("GetPluginCapabilities() returned nil response")
-	}
+	// Use require pattern - fail immediately if nil.
+	requireNotNil(t, resp, "GetPluginCapabilities() returned nil response")
 
 	if len(resp.Capabilities) == 0 {
 		t.Error("GetPluginCapabilities() returned no capabilities")
 	}
 
-	// Verify expected capabilities
+	// Verify expected capabilities.
 	hasControllerService := false
 
 	for _, cap := range resp.Capabilities {
-		if service := cap.GetService(); service != nil {
-			if service.Type == csi.PluginCapability_Service_CONTROLLER_SERVICE {
+		if svc := cap.GetService(); svc != nil {
+			if svc.Type == csi.PluginCapability_Service_CONTROLLER_SERVICE {
 				hasControllerService = true
 			}
 		}
@@ -111,7 +109,7 @@ func TestGetPluginCapabilities(t *testing.T) {
 		t.Error("GetPluginCapabilities() missing CONTROLLER_SERVICE capability")
 	}
 
-	// Note: VOLUME_ACCESSIBILITY_CONSTRAINTS intentionally removed for csi-provisioner v5+ compatibility
+	// Note: VOLUME_ACCESSIBILITY_CONSTRAINTS intentionally removed for csi-provisioner v5+ compatibility.
 }
 
 func TestProbe(t *testing.T) {
@@ -122,15 +120,21 @@ func TestProbe(t *testing.T) {
 		t.Fatalf("Probe() error = %v", err)
 	}
 
-	if resp == nil {
-		t.Fatal("Probe() returned nil response")
-	}
-
-	if resp.Ready == nil {
-		t.Fatal("Probe() Ready field is nil")
-	}
+	// Use require pattern - fail immediately if nil.
+	requireNotNil(t, resp, "Probe() returned nil response")
+	requireNotNil(t, resp.Ready, "Probe() Ready field is nil")
 
 	if !resp.Ready.Value {
 		t.Error("Probe() Ready = false, want true")
+	}
+}
+
+// requireNotNil fails the test immediately if v is nil.
+// This helper avoids staticcheck SA5011 warnings about nil pointer dereference
+// that occur when using the pattern: if x == nil { t.Fatal(...) }; x.Field.
+func requireNotNil(t *testing.T, v any, msg string) {
+	t.Helper()
+	if v == nil {
+		t.Fatal(msg)
 	}
 }

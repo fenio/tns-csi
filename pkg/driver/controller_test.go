@@ -19,15 +19,14 @@ func TestControllerGetCapabilities(t *testing.T) {
 		t.Fatalf("ControllerGetCapabilities() error = %v", err)
 	}
 
-	if resp == nil {
-		t.Fatal("ControllerGetCapabilities() returned nil response")
-	}
+	// Use require pattern - fail immediately if nil.
+	requireNotNilController(t, resp, "ControllerGetCapabilities() returned nil response")
 
 	if len(resp.Capabilities) == 0 {
 		t.Error("ControllerGetCapabilities() returned no capabilities")
 	}
 
-	// Verify expected capabilities are present
+	// Verify expected capabilities are present.
 	expectedCaps := map[string]bool{
 		"CREATE_DELETE_VOLUME":     false,
 		"PUBLISH_UNPUBLISH_VOLUME": false,
@@ -54,6 +53,16 @@ func TestControllerGetCapabilities(t *testing.T) {
 		if !found {
 			t.Errorf("Expected capability %s not found", cap)
 		}
+	}
+}
+
+// requireNotNilController fails the test immediately if v is nil.
+// This helper avoids staticcheck SA5011 warnings about nil pointer dereference
+// that occur when using the pattern: if x == nil { t.Fatal(...) }; x.Field.
+func requireNotNilController(t *testing.T, v any, msg string) {
+	t.Helper()
+	if v == nil {
+		t.Fatal(msg)
 	}
 }
 
@@ -158,6 +167,10 @@ func (m *mockAPIClient) QuerySnapshots(ctx context.Context, filters []interface{
 
 func (m *mockAPIClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error) {
 	return nil, errNotImplemented
+}
+
+func (m *mockAPIClient) PromoteDataset(ctx context.Context, datasetID string) error {
+	return nil // Stub implementation - always succeed
 }
 
 func (m *mockAPIClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {

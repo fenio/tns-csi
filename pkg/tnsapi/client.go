@@ -1724,12 +1724,15 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 		return nil
 	}
 
-	// TrueNAS pool.dataset.update accepts user_properties as a map of property name to value
-	// The API expects: {"user_properties": {"property_name": {"value": "property_value"}}}
-	// Convert our simple map to the nested format expected by TrueNAS
-	userProps := make(map[string]interface{})
+	// TrueNAS pool.dataset.update accepts user_properties as a list of objects
+	// The API expects: {"user_properties": [{"key": "property_name", "value": "property_value"}, ...]}
+	// Convert our simple map to the list format expected by TrueNAS
+	userProps := make([]map[string]string, 0, len(properties))
 	for key, value := range properties {
-		userProps[key] = map[string]string{"value": value}
+		userProps = append(userProps, map[string]string{
+			"key":   key,
+			"value": value,
+		})
 	}
 
 	params := map[string]interface{}{

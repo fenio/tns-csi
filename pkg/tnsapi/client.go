@@ -30,7 +30,6 @@ var (
 	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
 	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
 	ErrDatasetNotFound        = errors.New("dataset not found")
-	ErrPromoteFailed          = errors.New("promote operation returned false (unsuccessful)")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1586,17 +1585,17 @@ func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
 
 	// TrueNAS pool.dataset.promote takes the dataset ID and returns success/failure
 	// The API expects just the dataset ID as a string parameter
-	var result bool
+	// Note: TrueNAS API returns null on success, which Go unmarshals as false for bool.
+	// We use json.RawMessage to capture the raw response and check for errors properly.
+	var result json.RawMessage
 	err := c.Call(ctx, "pool.dataset.promote", []interface{}{datasetID}, &result)
 	if err != nil {
 		return fmt.Errorf("failed to promote dataset %s: %w", datasetID, err)
 	}
 
-	if !result {
-		return fmt.Errorf("%w: dataset %s", ErrPromoteFailed, datasetID)
-	}
-
-	klog.V(4).Infof("Successfully promoted dataset: %s", datasetID)
+	// If no error was returned, the promote operation succeeded.
+	// TrueNAS returns null on success, which is valid.
+	klog.V(4).Infof("Successfully promoted dataset: %s (raw response: %s)", datasetID, string(result))
 	return nil
 }
 

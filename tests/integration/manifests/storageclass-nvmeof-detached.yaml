@@ -1,0 +1,18 @@
+# StorageClass for NVMe-oF with detached snapshot support
+# When creating PVCs from snapshots, the clone will be promoted
+# to break the parent-child relationship with the source snapshot
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tns-csi-nvmeof-detached
+provisioner: tns.csi.io
+parameters:
+  protocol: "nvmeof"
+  pool: "${TRUENAS_POOL}"
+  server: "${TRUENAS_HOST}"
+  subsystemNQN: "${TRUENAS_NVMEOF_SUBSYSTEM_NQN}"
+  # Enable detached snapshots - clones will be promoted to be independent
+  detached: "true"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

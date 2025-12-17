@@ -37,6 +37,7 @@ on:
           - statefulset
           - volume-expansion
           - zfsprops
+          - name-templating
           - dual-mount
           - connection-resilience
           - pod-restart
@@ -234,6 +235,27 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-nfs-zfsprops.sh
+
+  nfs-name-templating:
+    name: "NFS: Name Templating"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'name-templating')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-name-templating.sh
 
   # ==========================================
   # NVMe-oF Tests
@@ -531,7 +553,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
+    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -547,6 +569,7 @@ jobs:
               'StatefulSet': '${{ needs.nfs-statefulset.result }}',
               'Volume Expansion': '${{ needs.nfs-expansion.result }}',
               'ZFS Properties': '${{ needs.nfs-zfsprops.result }}',
+              'Name Templating': '${{ needs.nfs-name-templating.result }}',
             };
             
             const nvmeofResults = {
@@ -594,7 +617,7 @@ jobs:
             const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
             const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 19;
+            const total = 20;
             
             let summary = `# Integration Test Results\n\n`;
             
@@ -629,6 +652,7 @@ jobs:
             summary += `| Test | Status |\n`;
             summary += `|------|:------:|\n`;
             summary += `| ZFS Properties | ${getIcon(results['ZFS Properties'])} |\n`;
+            summary += `| Name Templating | ${getIcon(results['Name Templating'])} |\n`;
             
             // Shared tests
             summary += `\n## Shared Tests\n\n`;

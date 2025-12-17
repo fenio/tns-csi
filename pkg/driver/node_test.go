@@ -737,3 +737,212 @@ func TestGetProtocolFromVolumeContext(t *testing.T) {
 		})
 	}
 }
+
+func TestGetNFSMountOptions(t *testing.T) {
+	//nolint:govet // Field alignment not critical for test structs
+	tests := []struct {
+		name        string
+		userOptions []string
+		wantLen     int
+		wantContain []string
+	}{
+		{
+			name:        "no user options returns defaults",
+			userOptions: nil,
+			wantLen:     len(defaultNFSMountOptions),
+			wantContain: defaultNFSMountOptions,
+		},
+		{
+			name:        "empty user options returns defaults",
+			userOptions: []string{},
+			wantLen:     len(defaultNFSMountOptions),
+			wantContain: defaultNFSMountOptions,
+		},
+		{
+			name:        "user options merged with defaults",
+			userOptions: []string{"hard", "nointr"},
+			wantLen:     4, // user options + defaults
+			wantContain: []string{"hard", "nointr"},
+		},
+		{
+			name:        "user option overrides default vers",
+			userOptions: []string{"vers=3"},
+			wantLen:     2, // vers=3 + nolock (default vers=4.x is overridden)
+			wantContain: []string{"vers=3", "nolock"},
+		},
+		{
+			name:        "user option lock is added along with defaults",
+			userOptions: []string{"lock"},
+			// Note: Our simple key-based conflict detection doesn't handle
+			// lock/nolock pairs - they're different keys. User must specify
+			// both options explicitly if they want to override nolock with lock.
+			wantLen:     3, // lock + vers=4.x + nolock (all added)
+			wantContain: []string{"lock"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getNFSMountOptions(tt.userOptions)
+			if len(got) != tt.wantLen {
+				t.Errorf("getNFSMountOptions(%v) returned %d options, want %d. Got: %v",
+					tt.userOptions, len(got), tt.wantLen, got)
+			}
+			for _, want := range tt.wantContain {
+				found := false
+				for _, opt := range got {
+					if opt == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("getNFSMountOptions(%v) missing expected option %q. Got: %v",
+						tt.userOptions, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractOptionKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		option string
+		want   string
+	}{
+		{
+			name:   "key=value option",
+			option: "vers=4.2",
+			want:   "vers",
+		},
+		{
+			name:   "flag option",
+			option: "nolock",
+			want:   "nolock",
+		},
+		{
+			name:   "another flag option",
+			option: "hard",
+			want:   "hard",
+		},
+		{
+			name:   "complex key=value",
+			option: "rsize=1048576",
+			want:   "rsize",
+		},
+		{
+			name:   "empty option",
+			option: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractOptionKey(tt.option)
+			if got != tt.want {
+				t.Errorf("extractOptionKey(%q) = %q, want %q", tt.option, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetNVMeOFMountOptions(t *testing.T) {
+	//nolint:govet // Field alignment not critical for test structs
+	tests := []struct {
+		name        string
+		userOptions []string
+		wantLen     int
+		wantContain []string
+	}{
+		{
+			name:        "no user options returns defaults",
+			userOptions: nil,
+			wantLen:     len(defaultNVMeOFMountOptions),
+			wantContain: defaultNVMeOFMountOptions,
+		},
+		{
+			name:        "empty user options returns defaults",
+			userOptions: []string{},
+			wantLen:     len(defaultNVMeOFMountOptions),
+			wantContain: defaultNVMeOFMountOptions,
+		},
+		{
+			name:        "user options merged with defaults",
+			userOptions: []string{"discard", "data=ordered"},
+			wantLen:     3, // user options + noatime default
+			wantContain: []string{"discard", "data=ordered", "noatime"},
+		},
+		{
+			name:        "user option atime is added along with defaults",
+			userOptions: []string{"atime"},
+			// Note: Our simple key-based conflict detection doesn't handle
+			// atime/noatime pairs - they're different keys. User must specify
+			// both options explicitly if they want to override noatime with atime.
+			wantLen:     2, // atime + noatime (both added)
+			wantContain: []string{"atime"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := getNVMeOFMountOptions(tt.userOptions)
+			if len(got) != tt.wantLen {
+				t.Errorf("getNVMeOFMountOptions(%v) returned %d options, want %d. Got: %v",
+					tt.userOptions, len(got), tt.wantLen, got)
+			}
+			for _, want := range tt.wantContain {
+				found := false
+				for _, opt := range got {
+					if opt == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("getNVMeOFMountOptions(%v) missing expected option %q. Got: %v",
+						tt.userOptions, want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestExtractNVMeOFOptionKey(t *testing.T) {
+	tests := []struct {
+		name   string
+		option string
+		want   string
+	}{
+		{
+			name:   "key=value option",
+			option: "data=ordered",
+			want:   "data",
+		},
+		{
+			name:   "flag option",
+			option: "noatime",
+			want:   "noatime",
+		},
+		{
+			name:   "another flag option",
+			option: "discard",
+			want:   "discard",
+		},
+		{
+			name:   "empty option",
+			option: "",
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractNVMeOFOptionKey(tt.option)
+			if got != tt.want {
+				t.Errorf("extractNVMeOFOptionKey(%q) = %q, want %q", tt.option, got, tt.want)
+			}
+		})
+	}
+}

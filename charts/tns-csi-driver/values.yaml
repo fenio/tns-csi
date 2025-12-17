@@ -233,7 +233,10 @@ storageClasses:
     volumeBindingMode: Immediate
     # Allow volume expansion
     allowVolumeExpansion: true
-    # Mount options for NFS
+    # Mount options for NFS volumes
+    # These are merged with driver defaults (vers=4.2, nolock on Linux)
+    # User-specified options override defaults if there's a conflict
+    # Example: ["hard", "nointr", "rsize=1048576", "wsize=1048576"]
     mountOptions: []
     # Additional parameters
     parameters: {}
@@ -264,6 +267,10 @@ storageClasses:
     # (snapshot reference) to CreateVolume, resulting in empty volumes instead of clones.
     volumeBindingMode: Immediate
     allowVolumeExpansion: true
+    # Mount options for NVMe-oF filesystem volumes
+    # These are merged with driver defaults (noatime)
+    # User-specified options override defaults if there's a conflict
+    # Example: ["discard", "nodiscard", "data=ordered"]
     mountOptions: []
     parameters: {}
 

@@ -57,7 +57,15 @@ func (s *NodeService) stageNFSVolume(ctx context.Context, req *csi.NodeStageVolu
 
 	// Mount NFS share to staging path
 	nfsSource := fmt.Sprintf("%s:%s", server, share)
-	mountOptions := getNFSMountOptions()
+
+	// Get user-specified mount options from StorageClass (passed via VolumeCapability)
+	var userMountOptions []string
+	if mnt := req.GetVolumeCapability().GetMount(); mnt != nil {
+		userMountOptions = mnt.MountFlags
+	}
+	mountOptions := getNFSMountOptions(userMountOptions)
+
+	klog.V(4).Infof("NFS mount options: user=%v, final=%v", userMountOptions, mountOptions)
 
 	// Construct mount command
 	args := []string{"-t", "nfs", "-o", mount.JoinMountOptions(mountOptions), nfsSource, stagingTargetPath}

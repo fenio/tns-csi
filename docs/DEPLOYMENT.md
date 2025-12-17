@@ -268,6 +268,10 @@ parameters:
   pool: "pool1"              # Your TrueNAS pool name
   # parentDataset: "pool1/k8s"  # Optional parent dataset
   server: "YOUR-TRUENAS-IP"     # Your TrueNAS IP/hostname
+  # Optional parameters:
+  # deleteStrategy: "retain"     # Keep volumes on TrueNAS when PVC deleted
+  # zfs.compression: "lz4"       # ZFS compression algorithm
+  # zfs.recordsize: "128K"       # ZFS record size
 ```
 
 **For NVMe-oF:**
@@ -280,6 +284,8 @@ parameters:
   # Optional parameters:
   # filesystem: "ext4"                                     # Filesystem type: ext4 (default), ext3, or xfs
   # blocksize: "16K"                                       # Block size for ZVOL (default: 16K)
+  # deleteStrategy: "retain"                               # Keep volumes on TrueNAS when PVC deleted
+  # zfs.compression: "lz4"                                 # ZFS compression algorithm
 ```
 
 **Important Notes:**
@@ -592,6 +598,9 @@ The following features are fully implemented and tested:
 
 - **Volume Provisioning**: Dynamic creation and deletion of NFS and NVMe-oF volumes
 - **Volume Expansion**: Resize volumes dynamically (`allowVolumeExpansion: true` in StorageClass)
+- **Volume Retention**: Optional `deleteStrategy: retain` to keep volumes on PVC deletion
+- **Configurable Mount Options**: Custom mount options via StorageClass `mountOptions` field
+- **Configurable ZFS Properties**: Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Snapshots**: CSI snapshot support using TrueNAS snapshots (see [SNAPSHOTS.md](SNAPSHOTS.md))
 - **Volume Cloning**: Create new volumes from snapshots
 - **Metrics**: Prometheus metrics endpoint (see [METRICS.md](METRICS.md))

@@ -32,6 +32,7 @@ on:
           - ''
           - basic
           - snapshot
+          - detached-snapshot
           - concurrent
           - persistence
           - statefulset
@@ -128,6 +129,35 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: nfs-snapshot-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nfs-detached-snapshot:
+    name: "NFS: Detached Snapshot"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'detached-snapshot')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-detached-snapshot-nfs.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nfs-detached-snapshot-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
@@ -553,7 +583,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
+    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nvmeof-basic, nvmeof-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -564,6 +594,7 @@ jobs:
               // NFS Tests
               'Basic': '${{ needs.nfs-basic.result }}',
               'Snapshot': '${{ needs.nfs-snapshot.result }}',
+              'Detached Snapshot': '${{ needs.nfs-detached-snapshot.result }}',
               'Concurrent': '${{ needs.nfs-concurrent.result }}',
               'Persistence': '${{ needs.nfs-persistence.result }}',
               'StatefulSet': '${{ needs.nfs-statefulset.result }}',
@@ -617,7 +648,7 @@ jobs:
             const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
             const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 20;
+            const total = 21;
             
             let summary = `# Integration Test Results\n\n`;
             
@@ -651,6 +682,7 @@ jobs:
             summary += `\n## NFS-Only Tests\n\n`;
             summary += `| Test | Status |\n`;
             summary += `|------|:------:|\n`;
+            summary += `| Detached Snapshot | ${getIcon(results['Detached Snapshot'])} |\n`;
             summary += `| ZFS Properties | ${getIcon(results['ZFS Properties'])} |\n`;
             summary += `| Name Templating | ${getIcon(results['Name Templating'])} |\n`;
             

@@ -97,27 +97,41 @@ function updateStatusCounters(counters, status, isSkipped) {
 }
 
 /**
+ * Checks if a job is a test job (not setup/summary/cleanup).
+ * @param {string} jobName - The job name
+ * @returns {boolean} - True if this is a test job
+ */
+function isTestJob(jobName) {
+  // Test jobs follow patterns: "NFS: *", "NVMe-oF: *", "Shared: *"
+  return jobName.startsWith('NFS:') || 
+         jobName.startsWith('NVMe-oF:') || 
+         jobName.startsWith('Shared:');
+}
+
+/**
  * Parses the protocol from a job name.
  * @param {string} jobName - The job name
  * @returns {string|null} - 'nfs', 'nvmeof', or null if not found
  */
 function parseProtocolFromJobName(jobName) {
-  if (jobName.includes('NFS')) return 'nfs';
-  if (jobName.includes('NVMe-oF')) return 'nvmeof';
+  if (jobName.startsWith('NFS:')) return 'nfs';
+  if (jobName.startsWith('NVMe-oF:')) return 'nvmeof';
+  // Shared tests count for both protocols, but we return null to avoid double-counting
   return null;
 }
 
 /**
  * Extracts the test type from a job name.
- * @param {string} jobName - The job name
+ * @param {string} jobName - The job name (e.g., "NFS: Basic", "Shared: Dual Mount")
  * @returns {string} - The test type (normalized to lowercase)
  */
 function extractTestType(jobName) {
-  return jobName
-    .replace(/Integration Tests?/i, '')  // Remove "Integration Test(s)"
-    .replace(/\b(NFS|NVMe-oF)\b/i, '')   // Remove protocol names
-    .trim()
-    .toLowerCase() || 'basic';            // Default to 'basic' if empty
+  // Job names follow pattern: "Protocol: Test Name"
+  const parts = jobName.split(':');
+  if (parts.length >= 2) {
+    return parts[1].trim().toLowerCase();
+  }
+  return jobName.toLowerCase();
 }
 
 /**
@@ -172,7 +186,8 @@ function parseTestResults(jobs) {
   };
 
   for (const job of jobs) {
-    if (!job.name.includes('Integration Tests')) continue;
+    // Only process actual test jobs, skip setup/summary/cleanup jobs
+    if (!isTestJob(job.name)) continue;
 
     const status = job.conclusion || job.status;
     const isSkipped = isJobSkipped(job, status);
@@ -204,7 +219,7 @@ function parseTestResults(jobs) {
 function generateHTML(results, runs) {
   const lastUpdated = format(new Date(), 'yyyy-MM-dd HH:mm:ss');
   const totalRuns = runs.length;
-  const successRate = totalRuns > 0 ? ((results.passed / results.total) * 100).toFixed(1) : 0;
+  const successRate = results.total > 0 ? ((results.passed / results.total) * 100).toFixed(1) : 0;
 
   return `<!DOCTYPE html>
 <html lang="en">

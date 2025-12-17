@@ -986,6 +986,13 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 					},
 				},
 			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_GET_VOLUME,
+					},
+				},
+			},
 		},
 	}, nil
 }
@@ -1140,10 +1147,218 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	return nil, status.Errorf(codes.NotFound, "Volume %s not found for expansion", volumeID)
 }
 
-// ControllerGetVolume gets volume information.
-func (s *ControllerService) ControllerGetVolume(_ context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
+// ControllerGetVolume returns volume information including health status.
+// This is used by Kubernetes to monitor volume health and report conditions.
+// Per CSI spec, this returns VolumeCondition with Abnormal flag and Message.
+func (s *ControllerService) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	klog.V(4).Infof("ControllerGetVolume called with request: %+v", req)
-	return nil, status.Error(codes.Unimplemented, "ControllerGetVolume not implemented")
+
+	// Validate request
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
+	}
+
+	volumeID := req.GetVolumeId()
+	klog.V(4).Infof("Getting volume info for: %s", volumeID)
+
+	// Try to find the volume as NFS first
+	nfsMeta, nfsErr := s.lookupNFSVolume(ctx, volumeID)
+	if nfsMeta != nil {
+		return s.getNFSVolumeInfo(ctx, nfsMeta)
+	}
+
+	// Try to find the volume as NVMe-oF
+	nvmeofMeta, nvmeofErr := s.lookupNVMeOFVolume(ctx, volumeID)
+	if nvmeofMeta != nil {
+		return s.getNVMeOFVolumeInfo(ctx, nvmeofMeta)
+	}
+
+	// Volume not found in either protocol
+	klog.V(4).Infof("Volume %s not found (NFS error: %v, NVMe-oF error: %v)", volumeID, nfsErr, nvmeofErr)
+	return nil, status.Errorf(codes.NotFound, "Volume %s not found", volumeID)
+}
+
+// getNFSVolumeInfo retrieves volume information and health status for an NFS volume.
+func (s *ControllerService) getNFSVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, error) {
+	klog.V(4).Infof("Getting NFS volume info: %s (dataset: %s, shareID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
+
+	abnormal := false
+	var messages []string
+
+	// Check 1: Verify dataset exists
+	dataset, err := s.apiClient.Dataset(ctx, meta.DatasetName)
+	if err != nil || dataset == nil {
+		abnormal = true
+		messages = append(messages, fmt.Sprintf("Dataset %s not accessible: %v", meta.DatasetName, err))
+	} else {
+		klog.V(4).Infof("Dataset %s exists (ID: %s)", meta.DatasetName, dataset.ID)
+	}
+
+	// Check 2: Verify NFS share exists and is enabled
+	if meta.NFSShareID > 0 {
+		shares, err := s.apiClient.QueryAllNFSShares(ctx, "")
+		if err != nil {
+			abnormal = true
+			messages = append(messages, fmt.Sprintf("Failed to query NFS shares: %v", err))
+		} else {
+			// Find the share by ID
+			var foundShare *tnsapi.NFSShare
+			for i := range shares {
+				if shares[i].ID == meta.NFSShareID {
+					foundShare = &shares[i]
+					break
+				}
+			}
+			switch {
+			case foundShare == nil:
+				abnormal = true
+				messages = append(messages, fmt.Sprintf("NFS share %d not found", meta.NFSShareID))
+			case !foundShare.Enabled:
+				abnormal = true
+				messages = append(messages, fmt.Sprintf("NFS share %d is disabled", meta.NFSShareID))
+			default:
+				klog.V(4).Infof("NFS share %d is healthy (enabled: %t, path: %s)", foundShare.ID, foundShare.Enabled, foundShare.Path)
+			}
+		}
+	}
+
+	// Build response message
+	message := "Volume is healthy"
+	if abnormal {
+		message = strings.Join(messages, "; ")
+	}
+
+	// Build volume context
+	volumeContext := buildVolumeContext(*meta)
+
+	// Get capacity from dataset if available
+	var capacityBytes int64
+	if dataset != nil && dataset.Available != nil {
+		if val, ok := dataset.Available["parsed"].(float64); ok {
+			capacityBytes = int64(val)
+		}
+	}
+
+	klog.V(4).Infof("NFS volume %s status: abnormal=%t, message=%s", meta.Name, abnormal, message)
+
+	return &csi.ControllerGetVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      meta.Name,
+			CapacityBytes: capacityBytes,
+			VolumeContext: volumeContext,
+		},
+		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{
+			VolumeCondition: &csi.VolumeCondition{
+				Abnormal: abnormal,
+				Message:  message,
+			},
+		},
+	}, nil
+}
+
+// getNVMeOFVolumeInfo retrieves volume information and health status for an NVMe-oF volume.
+func (s *ControllerService) getNVMeOFVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, error) {
+	klog.V(4).Infof("Getting NVMe-oF volume info: %s (dataset: %s, subsystemID: %d, namespaceID: %d)",
+		meta.Name, meta.DatasetName, meta.NVMeOFSubsystemID, meta.NVMeOFNamespaceID)
+
+	abnormal := false
+	var messages []string
+
+	// Check 1: Verify ZVOL exists
+	var datasets []tnsapi.Dataset
+	datasets, err := s.apiClient.QueryAllDatasets(ctx, meta.DatasetName)
+	switch {
+	case err != nil:
+		abnormal = true
+		messages = append(messages, fmt.Sprintf("ZVOL %s query failed: %v", meta.DatasetName, err))
+	case len(datasets) == 0:
+		abnormal = true
+		messages = append(messages, fmt.Sprintf("ZVOL %s not found", meta.DatasetName))
+	default:
+		klog.V(4).Infof("ZVOL %s exists (ID: %s)", meta.DatasetName, datasets[0].ID)
+	}
+
+	// Check 2: Verify NVMe-oF subsystem exists
+	var subsystemHealthy bool
+	if meta.NVMeOFSubsystemID > 0 {
+		subsystems, err := s.apiClient.ListAllNVMeOFSubsystems(ctx)
+		if err != nil {
+			abnormal = true
+			messages = append(messages, fmt.Sprintf("Failed to query NVMe-oF subsystems: %v", err))
+		} else {
+			// Find the subsystem by ID
+			var foundSubsystem *tnsapi.NVMeOFSubsystem
+			for i := range subsystems {
+				if subsystems[i].ID == meta.NVMeOFSubsystemID {
+					foundSubsystem = &subsystems[i]
+					break
+				}
+			}
+			if foundSubsystem == nil {
+				abnormal = true
+				messages = append(messages, fmt.Sprintf("NVMe-oF subsystem %d not found", meta.NVMeOFSubsystemID))
+			} else {
+				subsystemHealthy = true
+				klog.V(4).Infof("NVMe-oF subsystem %d is healthy (NQN: %s)", foundSubsystem.ID, foundSubsystem.NQN)
+			}
+		}
+	}
+
+	// Check 3: Verify NVMe-oF namespace exists
+	if meta.NVMeOFNamespaceID > 0 && subsystemHealthy {
+		namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+		if err != nil {
+			abnormal = true
+			messages = append(messages, fmt.Sprintf("Failed to query NVMe-oF namespaces: %v", err))
+		} else {
+			// Find the namespace by ID
+			var foundNamespace *tnsapi.NVMeOFNamespace
+			for i := range namespaces {
+				if namespaces[i].ID == meta.NVMeOFNamespaceID {
+					foundNamespace = &namespaces[i]
+					break
+				}
+			}
+			if foundNamespace == nil {
+				abnormal = true
+				messages = append(messages, fmt.Sprintf("NVMe-oF namespace %d not found", meta.NVMeOFNamespaceID))
+			} else {
+				klog.V(4).Infof("NVMe-oF namespace %d is healthy (NSID: %d, device: %s)",
+					foundNamespace.ID, foundNamespace.NSID, foundNamespace.GetDevice())
+			}
+		}
+	}
+
+	// Build response message
+	message := "Volume is healthy"
+	if abnormal {
+		message = strings.Join(messages, "; ")
+	}
+
+	// Build volume context
+	volumeContext := buildVolumeContext(*meta)
+
+	// Get capacity from ZVOL if available
+	var capacityBytes int64
+	if len(datasets) > 0 {
+		capacityBytes = getZvolCapacity(&datasets[0])
+	}
+
+	klog.V(4).Infof("NVMe-oF volume %s status: abnormal=%t, message=%s", meta.Name, abnormal, message)
+
+	return &csi.ControllerGetVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      meta.Name,
+			CapacityBytes: capacityBytes,
+			VolumeContext: volumeContext,
+		},
+		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{
+			VolumeCondition: &csi.VolumeCondition{
+				Abnormal: abnormal,
+				Message:  message,
+			},
+		},
+	}, nil
 }
 
 // ControllerModifyVolume modifies a volume.

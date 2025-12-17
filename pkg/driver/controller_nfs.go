@@ -27,6 +27,8 @@ type nfsVolumeParams struct {
 	parentDataset     string
 	volumeName        string
 	datasetName       string
+	// deleteStrategy controls what happens on volume deletion: "delete" (default) or "retain"
+	deleteStrategy string
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsDatasetProperties
 }
@@ -149,6 +151,12 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	// Parse ZFS properties from StorageClass parameters
 	zfsProps := parseZFSDatasetProperties(params)
 
+	// Parse deleteStrategy from StorageClass parameters (default: "delete")
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+
 	return &nfsVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -156,6 +164,7 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		requestedCapacity: requestedCapacity,
 		volumeName:        volumeName,
 		datasetName:       datasetName,
+		deleteStrategy:    deleteStrategy,
 		zfsProps:          zfsProps,
 	}, nil
 }
@@ -317,7 +326,7 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 
 	// Store ZFS user properties for CSI metadata tracking
 	// This enables safe deletion (verify ownership before delete) and debugging
-	props := tnsapi.NFSVolumeProperties(params.volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339))
+	props := tnsapi.NFSVolumeProperties(params.volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339), params.deleteStrategy)
 	if err := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); err != nil {
 		// Log warning but don't fail - properties are not critical for basic operation
 		// Volume will still work, just without the safety features
@@ -384,17 +393,21 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 
 // deleteNFSVolume deletes an NFS volume with ownership verification.
 // Dataset deletion is retried for busy resource errors.
+// If deleteStrategy is "retain", the volume is kept but CSI returns success.
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
 
 	// Step 0: Verify ownership using ZFS properties (safe deletion)
 	// This prevents accidental deletion if share IDs were reused after TrueNAS restart
+	// Also check deleteStrategy to determine if we should actually delete
+	deleteStrategy := tnsapi.DeleteStrategyDelete // Default to delete
 	if meta.DatasetID != "" {
 		props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
 			tnsapi.PropertyManagedBy,
 			tnsapi.PropertyCSIVolumeName,
 			tnsapi.PropertyNFSShareID,
+			tnsapi.PropertyDeleteStrategy,
 		})
 		if err != nil {
 			// If we can't read properties, the dataset might not exist
@@ -432,8 +445,23 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 				}
 			}
 
+			// Check deleteStrategy
+			if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
+				deleteStrategy = strategy
+			}
+
 			klog.V(4).Infof("Ownership verified for dataset %s via ZFS properties", meta.DatasetID)
 		}
+	}
+
+	// Check if we should retain the volume instead of deleting
+	if deleteStrategy == tnsapi.DeleteStrategyRetain {
+		klog.Infof("Volume %s has deleteStrategy=retain, skipping actual deletion (dataset: %s, share ID: %d will be kept)",
+			meta.Name, meta.DatasetID, meta.NFSShareID)
+		// Return success per CSI spec - the PV is "deleted" from Kubernetes perspective
+		// but the underlying storage is retained
+		timer.ObserveSuccess()
+		return &csi.DeleteVolumeResponse{}, nil
 	}
 
 	// Step 1: Delete NFS share first (required - TrueNAS does NOT auto-delete shares when dataset is deleted)
@@ -517,8 +545,15 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
+	// Get deleteStrategy from StorageClass parameters (default: "delete")
+	params := req.GetParameters()
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+
 	// Store ZFS user properties for CSI metadata tracking (including clone source info)
-	props := tnsapi.NFSVolumeProperties(volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339))
+	props := tnsapi.NFSVolumeProperties(volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339), deleteStrategy)
 	// Add clone-specific properties
 	cloneProps := tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID)
 	for k, v := range cloneProps {

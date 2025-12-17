@@ -239,6 +239,14 @@ storageClasses:
     # Example: ["hard", "nointr", "rsize=1048576", "wsize=1048576"]
     mountOptions: []
     # Additional parameters
+    # Available parameters:
+    #   deleteStrategy: "delete" or "retain"
+    #     - "delete" (default): Volume is deleted when PVC is deleted
+    #     - "retain": Volume is kept on TrueNAS when PVC is deleted (useful for data protection)
+    #   zfs.compression: ZFS compression algorithm (e.g., "lz4", "zstd", "off")
+    #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
+    #   zfs.atime: Access time updates (e.g., "on", "off")
+    #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
     parameters: {}
   
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
@@ -272,6 +280,15 @@ storageClasses:
     # User-specified options override defaults if there's a conflict
     # Example: ["discard", "nodiscard", "data=ordered"]
     mountOptions: []
+    # Additional parameters
+    # Available parameters:
+    #   deleteStrategy: "delete" or "retain"
+    #     - "delete" (default): Volume is deleted when PVC is deleted
+    #     - "retain": Volume is kept on TrueNAS when PVC is deleted (useful for data protection)
+    #   zfs.compression: ZFS compression algorithm (e.g., "lz4", "zstd", "off")
+    #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
+    #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
+    #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
     parameters: {}
 
 # Snapshot support

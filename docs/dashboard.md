@@ -1,32 +1,78 @@
----
-permalink: /tns-csi/dashboard/
----
-
 # TrueNAS CSI Test Results Dashboard
 
-This dashboard provides real-time insights into the integration test results for the TrueNAS CSI driver.
+The test results dashboard provides real-time visualization of integration test results for the TrueNAS CSI driver.
 
-## Quick Stats
+## Overview
 
-- **Total Tests Run**: {{ site.data.dashboard.total_tests }}
-- **Success Rate**: {{ site.data.dashboard.success_rate }}%
-- **Last Updated**: {{ site.data.dashboard.last_updated }}
+The dashboard displays:
+- Total test counts (passed, failed, skipped)
+- Success rate percentage
+- Test results by protocol (NFS vs NVMe-oF)
+- Test results by type (basic, snapshot, concurrent, etc.)
+- Recent failures with links to workflow runs
 
-## Test Results by Protocol
+## Viewing the Dashboard
 
-| Protocol | Total | Passed | Failed | Success Rate |
-|----------|-------|--------|--------|--------------|
-| NFS | {{ site.data.dashboard.nfs.total }} | {{ site.data.dashboard.nfs.passed }} | {{ site.data.dashboard.nfs.failed }} | {{ site.data.dashboard.nfs.success_rate }}% |
-| NVMe-oF | {{ site.data.dashboard.nvmeof.total }} | {{ site.data.dashboard.nvmeof.passed }} | {{ site.data.dashboard.nvmeof.failed }} | {{ site.data.dashboard.nvmeof.success_rate }}% |
+The dashboard is available at: https://fenio.github.io/tns-csi/dashboard/
 
-## Recent Test Runs
+## How It Works
 
-{% for run in site.data.dashboard.recent_runs %}
-### {{ run.name }} - {{ run.status }}
-- **Started**: {{ run.created_at }}
-- **Duration**: {{ run.duration }} minutes
-- **URL**: [View Details]({{ run.html_url }})
-{% endfor %}
+1. **Data Source**: GitHub Actions workflow runs via GitHub API
+2. **Generation**: Node.js script fetches and processes test results from the last 30 days
+3. **Deployment**: Automated via GitHub Actions to the `gh-pages` branch
+4. **Visualization**: Static HTML with Chart.js for interactive charts
 
----
-*Dashboard automatically updated after each integration test run.*
+## Automatic Updates
+
+The dashboard is automatically updated:
+- After each Integration Tests workflow completes
+- Daily at 6:00 AM UTC (to keep data fresh)
+- On manual trigger via workflow dispatch
+
+## Local Development
+
+To run the dashboard locally:
+
+```bash
+cd dashboard
+
+# Install dependencies
+npm install
+
+# Set GitHub token for API access
+export GITHUB_TOKEN=your_github_token
+
+# Generate dashboard
+npm run build
+
+# Serve locally
+npm run dev
+# Then open http://localhost:3000
+```
+
+## Architecture
+
+```
+dashboard/
+├── generate-dashboard.js   # Main generation script
+├── config.json            # Configuration settings
+├── package.json           # Node.js dependencies
+├── dist/                  # Generated output (created by build)
+│   └── index.html        # The dashboard HTML
+└── .nojekyll             # Prevents Jekyll processing on GitHub Pages
+```
+
+## Troubleshooting
+
+### Dashboard not updating
+- Check that the GitHub Actions workflow completed successfully
+- Verify the `gh-pages` branch exists and has recent commits
+- Ensure GitHub Pages is configured to serve from the `gh-pages` branch
+
+### Empty dashboard
+- Ensure integration tests have run recently (within 30 days)
+- Check that the GITHUB_TOKEN has read access to workflow runs
+
+### API rate limits
+- The script uses authenticated requests to avoid rate limits
+- If you hit limits locally, wait an hour or use a different token

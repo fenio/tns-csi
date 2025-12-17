@@ -1,0 +1,69 @@
+name: Deploy Test Dashboard
+
+on:
+  # Run after integration tests complete
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types:
+      - completed
+  # Allow manual trigger
+  workflow_dispatch:
+  # Run daily to keep dashboard fresh even without test runs
+  schedule:
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-dashboard:
+    name: Generate and Deploy Dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Generate dashboard
+        working-directory: dashboard
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build
+
+      - name: Prepare deployment directory
+        run: |
+          mkdir -p deploy-dir/dashboard
+          cp dashboard/dist/index.html deploy-dir/dashboard/
+          cp dashboard/.nojekyll deploy-dir/
+          # Create a simple redirect at root to dashboard
+          cat > deploy-dir/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta http-equiv="refresh" content="0; url=dashboard/">
+            <title>Redirecting...</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="dashboard/">dashboard</a>...</p>
+          </body>
+          </html>
+          EOF
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./deploy-dir
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: 'Deploy test dashboard'

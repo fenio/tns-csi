@@ -9,7 +9,7 @@ const octokit = new Octokit({
   auth: process.env.GITHUB_TOKEN
 });
 
-const OWNER = 'bfenski';
+const OWNER = 'fenio';
 const REPO = 'tns-csi';
 const WORKFLOW_ID = 'integration.yml';
 

@@ -2,6 +2,8 @@
 
 This document compares TNS-CSI with [democratic-csi](https://github.com/democratic-csi/democratic-csi), the most popular community CSI driver for TrueNAS.
 
+**Last Updated**: December 2024
+
 ## Overview
 
 | Aspect | TNS-CSI | Democratic-CSI |
@@ -10,14 +12,14 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 | **Language** | Go | JavaScript (Node.js) |
 | **License** | GPL v3 | MIT |
 | **TrueNAS Version** | TrueNAS Scale 25.10+ only | FreeNAS/TrueNAS (multiple versions) |
-| **API Connection** | WebSocket only | HTTP API + SSH |
+| **API Connection** | WebSocket API only (no SSH) | SSH-based or HTTP API (experimental) |
 
 ## Protocol Support
 
 | Protocol | TNS-CSI | Democratic-CSI |
 |----------|---------|----------------|
 | **NFS** | Yes | Yes |
-| **NVMe-oF** | Yes (primary block protocol) | Yes (zfs-generic-nvmeof) |
+| **NVMe-oF** | Yes (primary block protocol) | Yes (zfs-generic-nvmeof driver) |
 | **iSCSI** | No (by design) | Yes (primary block protocol) |
 | **SMB/CIFS** | No (low priority) | Yes |
 
@@ -30,12 +32,14 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 - WebSocket-based API communication (no SSH required)
 - Single-purpose: TrueNAS Scale 25.10+ only
 - Deliberately avoids iSCSI in favor of NVMe-oF for better performance
+- Native Go implementation with minimal dependencies
 
 **Democratic-CSI:**
 - Multi-backend support (TrueNAS, ZoL, Synology, ObjectiveFS, etc.)
-- Primarily SSH-based with some experimental API-only drivers
+- Primarily SSH-based with experimental API-only drivers (`freenas-api-*`)
 - Broader compatibility with older TrueNAS/FreeNAS versions
 - iSCSI as the primary block storage protocol
+- Node.js implementation with extensive driver ecosystem
 
 ### Backend Support
 
@@ -47,8 +51,10 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 - ZFS on Linux (Ubuntu, etc.)
 - Synology (experimental)
 - ObjectiveFS
+- Lustre (client mode)
 - Local hostpath provisioning
 - NFS/SMB client modes
+- Node-local ZFS (dataset/zvol)
 
 ### Features
 
@@ -58,10 +64,16 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 | Volume expansion | Yes | Yes |
 | Snapshots | Yes | Yes |
 | Cloning | Yes | Yes |
-| RWX (ReadWriteMany) | Yes | Yes |
+| RWX (ReadWriteMany) | Yes (NFS) | Yes |
+| Volume health monitoring | Yes (GET_VOLUME) | No |
+| Volume name templating | Yes | Yes |
+| Delete strategy (retention) | Yes | No |
+| Configurable mount options | Yes | Yes |
+| ZFS property configuration | Yes | Limited |
 | Windows nodes | No | Yes (v1.7.0+) |
 | Multipath | NVMe-native | iSCSI multipath |
 | Local ephemeral volumes | No | Yes |
+| Prometheus metrics | Yes | No (basic) |
 
 ### Configuration Complexity
 
@@ -70,10 +82,12 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 - Requires pre-configured NVMe-oF subsystem in TrueNAS
 - Helm chart or kubectl manifests
 - No SSH setup required
+- API key authentication only
 
 **Democratic-CSI:**
 - More complex configuration with many options
-- Requires SSH setup and potentially sudo configuration
+- Requires SSH setup and potentially sudo configuration for most drivers
+- Experimental `freenas-api-*` drivers work without SSH (SCALE 21.08+)
 - Helm chart with extensive example values
 - May require shell configuration on TrueNAS
 
@@ -83,8 +97,10 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 
 - You're running TrueNAS Scale 25.10+
 - You want NVMe-oF for block storage (better performance than iSCSI)
-- You prefer a simpler, focused driver
+- You prefer a simpler, focused driver with fewer moving parts
 - You don't want to configure SSH access to your NAS
+- You need volume health monitoring (ControllerGetVolume)
+- You want comprehensive Prometheus metrics
 - You're comfortable with early-stage software
 - You prefer native Go implementation
 
@@ -94,8 +110,9 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 - You're running older TrueNAS/FreeNAS versions or TrueNAS CORE
 - You need iSCSI or SMB support
 - You need Windows node support
-- You want multi-backend flexibility (ZoL, Synology, etc.)
+- You want multi-backend flexibility (ZoL, Synology, ObjectiveFS, etc.)
 - You need local/ephemeral volume support
+- You need Nomad or Docker Swarm support
 
 ## Why NVMe-oF Over iSCSI?
 
@@ -115,10 +132,11 @@ For workloads that can benefit from high-performance block storage, NVMe-oF prov
 | **Best for** | Modern TrueNAS Scale with NVMe-oF | Broad compatibility, production use |
 | **Trade-off** | Newer, less tested | More complex setup |
 | **Block protocol** | NVMe-oF (higher performance) | iSCSI (wider compatibility) |
+| **Unique features** | Volume health monitoring, metrics | Multi-backend, Windows support |
 
-**Democratic-CSI** is the mature, feature-rich choice with broad compatibility and a large community. It's production-ready and supports many backends and protocols.
+**Democratic-CSI** is the mature, feature-rich choice with broad compatibility and a large community. It's production-ready and supports many backends and protocols. It also has NVMe-oF support via `zfs-generic-nvmeof` for ZFS-on-Linux setups.
 
-**TNS-CSI** is a newer, purpose-built driver for modern TrueNAS Scale deployments that prioritizes NVMe-oF over iSCSI for superior block storage performance. It's simpler but still in early development and not yet recommended for production use.
+**TNS-CSI** is a newer, purpose-built driver for modern TrueNAS Scale deployments that prioritizes NVMe-oF over iSCSI for superior block storage performance. It offers unique features like CSI volume health monitoring (GET_VOLUME capability) and comprehensive Prometheus metrics. It's simpler but still in early development and not yet recommended for production use.
 
 ## Related Links
 

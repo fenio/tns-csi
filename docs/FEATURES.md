@@ -208,10 +208,42 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
   - Instant clone creation via ZFS clone
   - Space-efficient (shares blocks with snapshot until modified)
   - Full read/write access to cloned volume
+  - **Detached clones** (promoted) for independent volumes (see below)
 - **Limitations**:
   - Cannot clone across protocols (NFS snapshot → NFS volume only)
   - Must restore to same or larger size
   - Same ZFS pool required
+
+### Detached Snapshots (Independent Clones)
+- **Status**: ✅ Implemented
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Create clones that are independent from the source snapshot
+- **Features**:
+  - Clone is promoted immediately after creation
+  - No dependency on parent snapshot
+  - Source snapshot can be deleted without affecting the clone
+  - Useful for snapshot rotation and cleanup
+- **Parameter**: `detached: "true"` in StorageClass parameters
+- **Use Cases**:
+  - Snapshot rotation policies where old snapshots need to be cleaned up
+  - Creating fully independent copies of data
+  - Avoiding clone dependency issues
+
+**Example StorageClass with Detached Snapshots:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-detached
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  detached: "true"  # Clones will be promoted to break parent dependency
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
 
 **Example:**
 ```yaml

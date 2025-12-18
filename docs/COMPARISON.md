@@ -64,6 +64,7 @@ This document compares TNS-CSI with [democratic-csi](https://github.com/democrat
 | Volume expansion | Yes | Yes |
 | Snapshots | Yes | Yes |
 | Cloning | Yes | Yes |
+| Detached snapshots | Yes | No |
 | RWX (ReadWriteMany) | Yes (NFS) | Yes |
 | Volume health monitoring | Yes (GET_VOLUME) | No |
 | Volume name templating | Yes | Yes |
@@ -132,11 +133,11 @@ For workloads that can benefit from high-performance block storage, NVMe-oF prov
 | **Best for** | Modern TrueNAS Scale with NVMe-oF | Broad compatibility, production use |
 | **Trade-off** | Newer, less tested | More complex setup |
 | **Block protocol** | NVMe-oF (higher performance) | iSCSI (wider compatibility) |
-| **Unique features** | Volume health monitoring, metrics | Multi-backend, Windows support |
+| **Unique features** | Volume health monitoring, metrics, detached snapshots | Multi-backend, Windows support |
 
 **Democratic-CSI** is the mature, feature-rich choice with broad compatibility and a large community. It's production-ready and supports many backends and protocols. It also has NVMe-oF support via `zfs-generic-nvmeof` for ZFS-on-Linux setups.
 
-**TNS-CSI** is a newer, purpose-built driver for modern TrueNAS Scale deployments that prioritizes NVMe-oF over iSCSI for superior block storage performance. It offers unique features like CSI volume health monitoring (GET_VOLUME capability) and comprehensive Prometheus metrics. It's simpler but still in early development and not yet recommended for production use.
+**TNS-CSI** is a newer, purpose-built driver for modern TrueNAS Scale deployments that prioritizes NVMe-oF over iSCSI for superior block storage performance. It offers unique features like CSI volume health monitoring (GET_VOLUME capability), comprehensive Prometheus metrics, and detached snapshots (independent clones that can outlive their source snapshot). It's simpler but still in early development and not yet recommended for production use.
 
 ## Related Links
 

@@ -1,0 +1,18 @@
+# PVC created from a snapshot using the detached StorageClass
+# The resulting volume will be independent from the source snapshot
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc-detached-nvmeof
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: tns-csi-nvmeof-detached
+  dataSource:
+    name: test-snapshot-nvmeof
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io

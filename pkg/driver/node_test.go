@@ -11,6 +11,16 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// requireNotNilNode fails the test immediately if v is nil.
+// This helper avoids staticcheck SA5011 warnings about nil pointer dereference
+// that occur when using the pattern: if x == nil { t.Fatal(...) }; x.Field.
+func requireNotNilNode(t *testing.T, v any, msg string) {
+	t.Helper()
+	if v == nil {
+		t.Fatal(msg)
+	}
+}
+
 func TestNewNodeService(t *testing.T) {
 	registry := NewNodeRegistry()
 	mockClient := &mockAPIClient{}
@@ -18,9 +28,9 @@ func TestNewNodeService(t *testing.T) {
 
 	service := NewNodeService(nodeID, mockClient, true, registry)
 
-	if service == nil {
-		t.Fatal("NewNodeService returned nil")
-	}
+	// Use require pattern - fail immediately if nil.
+	requireNotNilNode(t, service, "NewNodeService returned nil")
+
 	if service.nodeID != nodeID {
 		t.Errorf("Expected nodeID=%q, got %q", nodeID, service.nodeID)
 	}
@@ -40,15 +50,14 @@ func TestNodeGetCapabilities(t *testing.T) {
 		t.Fatalf("NodeGetCapabilities() error = %v", err)
 	}
 
-	if resp == nil {
-		t.Fatal("NodeGetCapabilities() returned nil response")
-	}
+	// Use require pattern - fail immediately if nil.
+	requireNotNilNode(t, resp, "NodeGetCapabilities() returned nil response")
 
 	if len(resp.Capabilities) == 0 {
 		t.Error("NodeGetCapabilities() returned no capabilities")
 	}
 
-	// Verify expected capabilities are present
+	// Verify expected capabilities are present.
 	expectedCaps := map[csi.NodeServiceCapability_RPC_Type]bool{
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME: false,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS:     false,
@@ -79,15 +88,14 @@ func TestNodeGetInfo(t *testing.T) {
 			t.Fatalf("NodeGetInfo() error = %v", err)
 		}
 
-		if resp == nil {
-			t.Fatal("NodeGetInfo() returned nil response")
-		}
+		// Use require pattern - fail immediately if nil.
+		requireNotNilNode(t, resp, "NodeGetInfo() returned nil response")
 
 		if resp.NodeId != nodeID {
 			t.Errorf("Expected NodeId=%q, got %q", nodeID, resp.NodeId)
 		}
 
-		// Verify node was registered
+		// Verify node was registered.
 		if !registry.IsRegistered(nodeID) {
 			t.Error("Expected node to be registered in registry")
 		}
@@ -404,7 +412,7 @@ func TestNodeUnpublishVolume_Validation(t *testing.T) {
 }
 
 func TestNodeUnpublishVolume_TestMode(t *testing.T) {
-	// Create a temporary directory to act as target path
+	// Create a temporary directory to act as target path.
 	tmpDir, err := os.MkdirTemp("", "csi-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -431,7 +439,7 @@ func TestNodeUnpublishVolume_TestMode(t *testing.T) {
 		t.Error("Expected non-nil response")
 	}
 
-	// Verify the target path was removed
+	// Verify the target path was removed.
 	if _, statErr := os.Stat(targetPath); !os.IsNotExist(statErr) {
 		t.Error("Expected target path to be removed in test mode")
 	}
@@ -502,7 +510,7 @@ func TestNodeGetVolumeStats_Validation(t *testing.T) {
 }
 
 func TestNodeGetVolumeStats_TestMode(t *testing.T) {
-	// Create a temporary directory to act as volume path
+	// Create a temporary directory to act as volume path.
 	tmpDir, err := os.MkdirTemp("", "csi-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -518,18 +526,18 @@ func TestNodeGetVolumeStats_TestMode(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// In test mode, should return mock stats
+	// Use require pattern - fail immediately if nil.
+	requireNotNilNode(t, resp, "Expected non-nil response")
+
+	// In test mode, should return mock stats.
 	if len(resp.Usage) == 0 {
 		t.Error("Expected usage stats in response")
 	}
 
-	// Check for BYTES usage
+	// Check for BYTES usage.
 	var foundBytes bool
 	for _, usage := range resp.Usage {
 		if usage.Unit == csi.VolumeUsage_BYTES {
@@ -609,7 +617,7 @@ func TestNodeExpandVolume_Validation(t *testing.T) {
 }
 
 func TestNodeExpandVolume_TestMode(t *testing.T) {
-	// Create a temporary directory to act as volume path
+	// Create a temporary directory to act as volume path.
 	tmpDir, err := os.MkdirTemp("", "csi-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -629,13 +637,13 @@ func TestNodeExpandVolume_TestMode(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	// In test mode, should return the requested capacity
+	// Use require pattern - fail immediately if nil.
+	requireNotNilNode(t, resp, "Expected non-nil response")
+
+	// In test mode, should return the requested capacity.
 	if resp.CapacityBytes != requestedBytes {
 		t.Errorf("Expected CapacityBytes=%d, got %d", requestedBytes, resp.CapacityBytes)
 	}

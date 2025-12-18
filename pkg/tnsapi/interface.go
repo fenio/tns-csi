@@ -56,6 +56,11 @@ type ClientInterface interface {
 	QuerySnapshots(ctx context.Context, filters []interface{}) ([]Snapshot, error)
 	CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error)
 
+	// Dataset promotion (for detached snapshots)
+	// PromoteDataset promotes a cloned dataset to become independent from its origin snapshot.
+	// This breaks the parent-child relationship, making the clone a standalone dataset.
+	PromoteDataset(ctx context.Context, datasetID string) error
+
 	// Connection management
 	Close()
 }

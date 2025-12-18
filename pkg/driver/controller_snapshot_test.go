@@ -20,6 +20,7 @@ type MockAPIClientForSnapshots struct {
 	DeleteSnapshotFunc           func(ctx context.Context, snapshotID string) error
 	QuerySnapshotsFunc           func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
 	CloneSnapshotFunc            func(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
+	PromoteDatasetFunc           func(ctx context.Context, datasetID string) error
 	CreateDatasetFunc            func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
 	DeleteDatasetFunc            func(ctx context.Context, datasetID string) error
 	GetDatasetFunc               func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error)
@@ -69,6 +70,14 @@ func (m *MockAPIClientForSnapshots) CloneSnapshot(ctx context.Context, params tn
 		return m.CloneSnapshotFunc(ctx, params)
 	}
 	return nil, errors.New("CloneSnapshotFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) PromoteDataset(ctx context.Context, datasetID string) error {
+	if m.PromoteDatasetFunc != nil {
+		return m.PromoteDatasetFunc(ctx, datasetID)
+	}
+	// Default to success for tests that don't specifically test promotion
+	return nil
 }
 
 func (m *MockAPIClientForSnapshots) CreateDataset(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {

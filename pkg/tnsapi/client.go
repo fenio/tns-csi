@@ -1570,6 +1570,35 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 	return &datasets[0], nil
 }
 
+// PromoteDataset promotes a cloned dataset to become independent from its origin snapshot.
+// After promotion, the clone becomes a standalone dataset with no dependency on the parent.
+// This is essential for "detached snapshots" where you want an independent copy of data.
+//
+// The promotion operation:
+// 1. Reverses the parent-child relationship between clone and origin
+// 2. Makes the clone independent (it no longer depends on the snapshot)
+// 3. Allows the original snapshot to be deleted (if no other clones depend on it)
+//
+// Note: This uses the TrueNAS pool.dataset.promote API which wraps ZFS promote.
+func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
+	klog.V(4).Infof("Promoting dataset: %s", datasetID)
+
+	// TrueNAS pool.dataset.promote takes the dataset ID and returns success/failure
+	// The API expects just the dataset ID as a string parameter
+	// Note: TrueNAS API returns null on success, which Go unmarshals as false for bool.
+	// We use json.RawMessage to capture the raw response and check for errors properly.
+	var result json.RawMessage
+	err := c.Call(ctx, "pool.dataset.promote", []interface{}{datasetID}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to promote dataset %s: %w", datasetID, err)
+	}
+
+	// If no error was returned, the promote operation succeeded.
+	// TrueNAS returns null on success, which is valid.
+	klog.V(4).Infof("Successfully promoted dataset: %s (raw response: %s)", datasetID, string(result))
+	return nil
+}
+
 // queryWithOptionalFilter is a helper function to reduce duplication in query methods.
 // The operator parameter specifies the filter operator:
 // - "^" for starts-with (prefix match).
@@ -1695,12 +1724,15 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 		return nil
 	}
 
-	// TrueNAS pool.dataset.update accepts user_properties as a map of property name to value
-	// The API expects: {"user_properties": {"property_name": {"value": "property_value"}}}
-	// Convert our simple map to the nested format expected by TrueNAS
-	userProps := make(map[string]interface{})
+	// TrueNAS pool.dataset.update accepts user_properties as a list of objects
+	// The API expects: {"user_properties": [{"key": "property_name", "value": "property_value"}, ...]}
+	// Convert our simple map to the list format expected by TrueNAS
+	userProps := make([]map[string]string, 0, len(properties))
 	for key, value := range properties {
-		userProps[key] = map[string]string{"value": value}
+		userProps = append(userProps, map[string]string{
+			"key":   key,
+			"value": value,
+		})
 	}
 
 	params := map[string]interface{}{

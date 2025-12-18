@@ -30,6 +30,9 @@ var (
 	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
 	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
 	ErrDatasetNotFound        = errors.New("dataset not found")
+	ErrJobNotFound            = errors.New("job not found")
+	ErrJobFailed              = errors.New("job failed")
+	ErrJobAborted             = errors.New("job was aborted")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1903,6 +1906,8 @@ func (c *Client) ClearDatasetProperties(ctx context.Context, datasetID string, p
 
 // ReplicationRunOnetimeParams contains parameters for running a one-time replication task.
 // This is used for creating detached snapshots via zfs send/receive.
+//
+//nolint:govet // fieldalignment: prefer readability over memory alignment for config structs
 type ReplicationRunOnetimeParams struct {
 	Direction               string   `json:"direction"`                  // "PUSH" or "PULL"
 	Transport               string   `json:"transport"`                  // "LOCAL", "SSH", or "SSH+NETCAT"
@@ -1921,6 +1926,8 @@ type ReplicationRunOnetimeParams struct {
 }
 
 // ReplicationJobState represents the state of a replication job.
+//
+//nolint:govet // fieldalignment: prefer readability over memory alignment for API response structs
 type ReplicationJobState struct {
 	ID          int                    `json:"id"`
 	Method      string                 `json:"method"`
@@ -1980,7 +1987,7 @@ func (c *Client) GetJobStatus(ctx context.Context, jobID int) (*ReplicationJobSt
 	}
 
 	if len(jobs) == 0 {
-		return nil, fmt.Errorf("job %d not found", jobID)
+		return nil, fmt.Errorf("job %d: %w", jobID, ErrJobNotFound)
 	}
 
 	return &jobs[0], nil
@@ -1997,7 +2004,7 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("context cancelled while waiting for job %d: %w", jobID, ctx.Err())
+			return fmt.Errorf("context canceled while waiting for job %d: %w", jobID, ctx.Err())
 		case <-ticker.C:
 			status, err := c.GetJobStatus(ctx, jobID)
 			if err != nil {
@@ -2012,9 +2019,9 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 				klog.V(4).Infof("Job %d completed successfully", jobID)
 				return nil
 			case "FAILED":
-				return fmt.Errorf("job %d failed: %s", jobID, status.Error)
+				return fmt.Errorf("job %d: %w: %s", jobID, ErrJobFailed, status.Error)
 			case "ABORTED":
-				return fmt.Errorf("job %d was aborted", jobID)
+				return fmt.Errorf("job %d: %w", jobID, ErrJobAborted)
 			case "WAITING", "RUNNING":
 				// Still in progress, continue polling
 				continue

@@ -30,7 +30,7 @@ const (
 	DetachedSnapshotsParentDatasetParam = "detachedSnapshotsParentDataset"
 
 	// DetachedSnapshotPrefix is the prefix used in snapshot IDs to identify detached snapshots.
-	// Format: detached:{protocol}:{volume_id}@{snapshot_name}
+	// Format: detached:{protocol}:{volume_id}@{snapshot_name}.
 	DetachedSnapshotPrefix = "detached:"
 
 	// DefaultDetachedSnapshotsFolder is the default folder name for detached snapshots.
@@ -125,7 +125,7 @@ type SnapshotMetadata struct {
 // - Format: {parentDataset}/{volumeID}@{snapshotName}.
 
 // encodeSnapshotID encodes snapshot metadata into a compact snapshotID string.
-// Format: {protocol}:{volume_id}@{snapshot_name} or detached:{protocol}:{volume_id}@{snapshot_name}
+// Format: {protocol}:{volume_id}@{snapshot_name} or detached:{protocol}:{volume_id}@{snapshot_name}.
 func encodeSnapshotID(meta SnapshotMetadata) (string, error) {
 	if meta.Protocol == "" {
 		return "", ErrProtocolRequired
@@ -256,8 +256,8 @@ func parseSnapshotToken(token string) (int, error) {
 
 // CreateSnapshot creates a volume snapshot.
 // Supports two modes based on VolumeSnapshotClass parameters:
-// 1. Regular snapshots (default): COW ZFS snapshots, fast but dependent on source
-// 2. Detached snapshots (detachedSnapshots=true): Full copy via zfs send/receive, survives source deletion
+// 1. Regular snapshots (default): COW ZFS snapshots, fast but dependent on source.
+// 2. Detached snapshots (detachedSnapshots=true): Full copy via zfs send/receive, survives source deletion.
 func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
 	timer := metrics.NewVolumeOperationTimer("snapshot", "create")
 	klog.V(4).Infof("CreateSnapshot called with request: %+v", req)
@@ -292,7 +292,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	}
 
 	// Check if detached snapshots are requested
-	detached := params[DetachedSnapshotsParam] == "true"
+	detached := params[DetachedSnapshotsParam] == VolumeContextValueTrue
 	detachedParentDataset := params[DetachedSnapshotsParentDatasetParam]
 
 	// Try to find the volume's dataset
@@ -340,14 +340,14 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 
 	// Route to appropriate snapshot creation method
 	if detached {
-		return s.createDetachedSnapshot(ctx, timer, req, snapshotName, sourceVolumeID, datasetName, protocol, pool, detachedParentDataset)
+		return s.createDetachedSnapshot(ctx, timer, snapshotName, sourceVolumeID, datasetName, protocol, pool, detachedParentDataset)
 	}
 
-	return s.createRegularSnapshot(ctx, timer, req, snapshotName, sourceVolumeID, datasetName, protocol)
+	return s.createRegularSnapshot(ctx, timer, snapshotName, sourceVolumeID, datasetName, protocol)
 }
 
 // createRegularSnapshot creates a traditional COW ZFS snapshot.
-func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *metrics.OperationTimer, req *csi.CreateSnapshotRequest, snapshotName, sourceVolumeID, datasetName, protocol string) (*csi.CreateSnapshotResponse, error) {
+func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *metrics.OperationTimer, snapshotName, sourceVolumeID, datasetName, protocol string) (*csi.CreateSnapshotResponse, error) {
 	klog.Infof("Creating regular snapshot %s for volume %s (dataset: %s, protocol: %s)",
 		snapshotName, sourceVolumeID, datasetName, protocol)
 
@@ -464,7 +464,7 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 // createDetachedSnapshot creates a detached snapshot using zfs send/receive via TrueNAS replication API.
 // Detached snapshots are stored as full dataset copies, independent of the source volume.
 // They survive deletion of the source volume, making them suitable for backup/DR scenarios.
-func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *metrics.OperationTimer, req *csi.CreateSnapshotRequest, snapshotName, sourceVolumeID, sourceDataset, protocol, pool, detachedParentDataset string) (*csi.CreateSnapshotResponse, error) {
+func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *metrics.OperationTimer, snapshotName, sourceVolumeID, sourceDataset, protocol, pool, detachedParentDataset string) (*csi.CreateSnapshotResponse, error) {
 	// Determine the parent dataset for detached snapshots
 	if detachedParentDataset == "" {
 		if pool == "" {
@@ -496,36 +496,37 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 	}
 
 	for _, ds := range existingDatasets {
-		if ds.Name == targetDataset {
-			klog.Infof("Detached snapshot dataset %s already exists", targetDataset)
-
-			// Create snapshot metadata
-			createdAt := time.Now().Unix()
-			snapshotMeta := SnapshotMetadata{
-				SnapshotName: snapshotName,
-				SourceVolume: sourceVolumeID,
-				DatasetName:  targetDataset,
-				Protocol:     protocol,
-				CreatedAt:    createdAt,
-				Detached:     true,
-			}
-
-			snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
-			if encodeErr != nil {
-				timer.ObserveError()
-				return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
-			}
-
-			timer.ObserveSuccess()
-			return &csi.CreateSnapshotResponse{
-				Snapshot: &csi.Snapshot{
-					SnapshotId:     snapshotID,
-					SourceVolumeId: sourceVolumeID,
-					CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
-					ReadyToUse:     true,
-				},
-			}, nil
+		if ds.Name != targetDataset {
+			continue
 		}
+		klog.Infof("Detached snapshot dataset %s already exists", targetDataset)
+
+		// Create snapshot metadata
+		createdAt := time.Now().Unix()
+		snapshotMeta := SnapshotMetadata{
+			SnapshotName: snapshotName,
+			SourceVolume: sourceVolumeID,
+			DatasetName:  targetDataset,
+			Protocol:     protocol,
+			CreatedAt:    createdAt,
+			Detached:     true,
+		}
+
+		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+		if encodeErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
+		}
+
+		timer.ObserveSuccess()
+		return &csi.CreateSnapshotResponse{
+			Snapshot: &csi.Snapshot{
+				SnapshotId:     snapshotID,
+				SourceVolumeId: sourceVolumeID,
+				CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
+				ReadyToUse:     true,
+			},
+		}, nil
 	}
 
 	// Step 1: Create a temporary ZFS snapshot on the source

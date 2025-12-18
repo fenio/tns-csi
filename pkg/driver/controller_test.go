@@ -213,7 +213,7 @@ func (m *mockAPIClient) ClearDatasetProperties(ctx context.Context, datasetID st
 	return nil // Stub implementation
 }
 
-// Replication methods for detached snapshots
+// Replication methods for detached snapshots.
 func (m *mockAPIClient) RunOnetimeReplication(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
 	return 12345, nil // Stub implementation
 }

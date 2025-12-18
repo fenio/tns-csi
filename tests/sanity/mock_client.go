@@ -912,7 +912,7 @@ func (m *MockClient) RunOnetimeReplication(ctx context.Context, params tnsapi.Re
 			}
 		}
 		if !found {
-			return 0, fmt.Errorf("source dataset %s not found", srcDataset)
+			return 0, fmt.Errorf("source dataset %s: %w", srcDataset, ErrDatasetNotFound)
 		}
 	}
 

@@ -41,7 +41,7 @@ Testing against real infrastructure catches issues that mocks cannot:
 ### CSI Specification Compliance
 
 **Sanity Tests:**
-- Uses [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) v5.2.0
+- Uses [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) v5.4.0
 - Validates full CSI specification compliance
 - Tests all CSI RPC calls and error conditions
 - Location: `tests/sanity/`

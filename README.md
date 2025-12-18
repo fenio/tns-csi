@@ -216,7 +216,7 @@ Every commit triggers comprehensive integration tests:
 - Orphaned resource detection and cleanup
 
 **CSI Specification Compliance:**
-- Passes [Kubernetes CSI sanity tests](https://github.com/kubernetes-csi/csi-test) (v5.2.0)
+- Passes [Kubernetes CSI sanity tests](https://github.com/kubernetes-csi/csi-test) (v5.4.0)
 - Full CSI spec compliance verified
 
 View test results and history: [![Test Dashboard](https://img.shields.io/badge/Test%20Dashboard-View-blue)](https://fenio.github.io/tns-csi/dashboard/)

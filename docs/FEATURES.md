@@ -755,7 +755,7 @@ All features are tested on **real infrastructure** - not mocks or simulators:
 - ✅ Real protocol operations (NFS mounts, NVMe-oF connections, actual I/O)
 
 **CSI Specification Compliance:**
-- ✅ Passes [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) v5.2.0 sanity tests
+- ✅ Passes [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) v5.4.0 sanity tests
 - ✅ Full CSI specification compliance verified
 
 **Integration Test Coverage:**

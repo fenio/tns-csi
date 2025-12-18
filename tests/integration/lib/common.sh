@@ -10,6 +10,11 @@
 #
 # DEBUG MODE:
 #   Set TEST_DEBUG=1 to enable verbose debug output
+#
+# VERBOSITY MODES:
+#   Set TEST_VERBOSE=0 (default) for minimal output - shows only steps, success/error, and summaries
+#   Set TEST_VERBOSE=1 for detailed output - includes YAML manifests, kubectl describe, logs
+#   Set TEST_VERBOSE=2 for full debug output - includes all diagnostic information
 
 set -e
 
@@ -42,8 +47,58 @@ export TEST_CURRENT_STEP=0
 # Debug mode - set TEST_DEBUG=1 for verbose output
 export TEST_DEBUG="${TEST_DEBUG:-0}"
 
+# Verbosity level - controls how much output is shown
+# 0 = minimal (default): steps, success/error messages, summaries only
+# 1 = detailed: adds YAML manifests, kubectl describe output, logs
+# 2 = full: adds all diagnostic information
+export TEST_VERBOSE="${TEST_VERBOSE:-0}"
+
+#######################################
+# Check if verbose output is enabled at given level
+# Arguments:
+#   Level to check (1 or 2)
+# Returns:
+#   0 if verbose output should be shown
+#   1 if verbose output should be suppressed
+#######################################
+is_verbose() {
+    local level=${1:-1}
+    [[ "${TEST_VERBOSE}" -ge "${level}" ]]
+}
+
+#######################################
+# Print output only if verbose mode is enabled
+# Arguments:
+#   Level (1 or 2)
+#   Message or command output
+#######################################
+verbose_output() {
+    local level=${1:-1}
+    shift
+    if is_verbose "${level}"; then
+        echo "$@"
+    fi
+}
+
+#######################################
+# Run a command and show output only if verbose
+# Arguments:
+#   Level (1 or 2)
+#   Command to run
+#######################################
+verbose_run() {
+    local level=${1:-1}
+    shift
+    if is_verbose "${level}"; then
+        "$@"
+    else
+        "$@" >/dev/null 2>&1 || true
+    fi
+}
+
 #######################################
 # Show YAML manifest contents with formatting
+# Only shown when TEST_VERBOSE >= 1
 # Arguments:
 #   Manifest file path
 #   Description (optional)
@@ -51,6 +106,10 @@ export TEST_DEBUG="${TEST_DEBUG:-0}"
 show_yaml_manifest() {
     local manifest=$1
     local description=${2:-"YAML Manifest"}
+    
+    if ! is_verbose 1; then
+        return 0
+    fi
     
     echo ""
     echo "=== ${description} ==="
@@ -62,6 +121,7 @@ show_yaml_manifest() {
 
 #######################################
 # Show Kubernetes resource details in YAML format
+# Only shown when TEST_VERBOSE >= 1
 # Arguments:
 #   Resource type (e.g., pvc, pod, pv)
 #   Resource name
@@ -71,6 +131,10 @@ show_resource_yaml() {
     local resource_type=$1
     local resource_name=$2
     local namespace=${3:-}
+    
+    if ! is_verbose 1; then
+        return 0
+    fi
     
     local namespace_arg=""
     if [[ -n "${namespace}" ]]; then
@@ -84,6 +148,7 @@ show_resource_yaml() {
 
 #######################################
 # Show mount information from pod
+# Only shown when TEST_VERBOSE >= 1
 # Arguments:
 #   Pod name
 #   Namespace
@@ -91,6 +156,10 @@ show_resource_yaml() {
 show_pod_mounts() {
     local pod_name=$1
     local namespace=$2
+    
+    if ! is_verbose 1; then
+        return 0
+    fi
     
     echo ""
     echo "=== Mount Information for ${pod_name} ==="
@@ -109,6 +178,7 @@ show_pod_mounts() {
 
 #######################################
 # Show NVMe-oF device and connection details from pod
+# Only shown when TEST_VERBOSE >= 1
 # Arguments:
 #   Pod name
 #   Namespace
@@ -116,6 +186,10 @@ show_pod_mounts() {
 show_nvmeof_details() {
     local pod_name=$1
     local namespace=$2
+    
+    if ! is_verbose 1; then
+        return 0
+    fi
     
     echo ""
     echo "=== NVMe-oF Device Details for ${pod_name} ==="
@@ -139,9 +213,14 @@ show_nvmeof_details() {
 
 #######################################
 # Show node-level mount and device information
+# Only shown when TEST_VERBOSE >= 1
 # Requires access to node via privileged pod or node debugging
 #######################################
 show_node_mounts() {
+    if ! is_verbose 1; then
+        return 0
+    fi
+    
     echo ""
     echo "=== Node-Level Mount Information ==="
     
@@ -563,37 +642,39 @@ deploy_driver() {
             ;;
     esac
     
-    # Show Helm command for debugging
-    echo ""
-    echo "=== Helm Installation Command ==="
-    echo "helm upgrade --install tns-csi ./charts/tns-csi-driver \\"
-    local all_args=("${base_args[@]}" "${helm_args[@]}")
-    local i=0
-    while [[ $i -lt ${#all_args[@]} ]]; do
-        local arg="${all_args[$i]}"
-        local next_arg="${all_args[$((i+1))]:-}"
-        
-        # Check if this is a flag that takes a value as the next argument
-        if [[ "${arg}" == --* && -n "${next_arg}" && "${next_arg}" != --* ]]; then
-            # Mask sensitive values
-            if [[ "${next_arg}" == *"apiKey"* || "${arg}" == *"apiKey"* ]]; then
-                echo "  ${arg} ***MASKED*** \\"
+    # Show Helm command for debugging (verbose mode only)
+    if is_verbose 1; then
+        echo ""
+        echo "=== Helm Installation Command ==="
+        echo "helm upgrade --install tns-csi ./charts/tns-csi-driver \\"
+        local all_args=("${base_args[@]}" "${helm_args[@]}")
+        local i=0
+        while [[ $i -lt ${#all_args[@]} ]]; do
+            local arg="${all_args[$i]}"
+            local next_arg="${all_args[$((i+1))]:-}"
+            
+            # Check if this is a flag that takes a value as the next argument
+            if [[ "${arg}" == --* && -n "${next_arg}" && "${next_arg}" != --* ]]; then
+                # Mask sensitive values
+                if [[ "${next_arg}" == *"apiKey"* || "${arg}" == *"apiKey"* ]]; then
+                    echo "  ${arg} ***MASKED*** \\"
+                else
+                    echo "  ${arg} ${next_arg} \\"
+                fi
+                i=$((i + 2))
             else
-                echo "  ${arg} ${next_arg} \\"
+                # Standalone flag or flag with = syntax
+                if [[ "${arg}" == *"apiKey="* ]]; then
+                    echo "  ${arg/=*/=***MASKED***} \\"
+                else
+                    echo "  ${arg} \\"
+                fi
+                i=$((i + 1))
             fi
-            i=$((i + 2))
-        else
-            # Standalone flag or flag with = syntax
-            if [[ "${arg}" == *"apiKey="* ]]; then
-                echo "  ${arg/=*/=***MASKED***} \\"
-            else
-                echo "  ${arg} \\"
-            fi
-            i=$((i + 1))
-        fi
-    done
-    echo "  --wait --timeout 5m"
-    echo ""
+        done
+        echo "  --wait --timeout 5m"
+        echo ""
+    fi
     
     # Deploy with Helm
     test_info "Executing Helm deployment..."
@@ -604,7 +685,7 @@ deploy_driver() {
         stop_test_timer "deploy_driver" "FAILED"
         test_error "Helm deployment failed"
         
-        # Show diagnostic info about what went wrong
+        # Always show diagnostics on failure
         echo ""
         echo "=== DIAGNOSTIC: Pod Status After Helm Failure ==="
         kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide || true
@@ -626,47 +707,49 @@ deploy_driver() {
     
     test_success "CSI driver deployed"
     
-    # Verify deployment
-    echo ""
-    echo "=== Helm deployment status ==="
-    helm list -n kube-system
+    # Verify deployment (verbose mode only for detailed output)
+    if is_verbose 1; then
+        echo ""
+        echo "=== Helm deployment status ==="
+        helm list -n kube-system
+        
+        echo ""
+        echo "=== Helm values (deployed) ==="
+        helm get values tns-csi -n kube-system || true
+        
+        echo ""
+        echo "=== CSI driver pods ==="
+        kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide
     
-    echo ""
-    echo "=== Helm values (deployed) ==="
-    helm get values tns-csi -n kube-system || true
-    
-    echo ""
-    echo "=== CSI driver pods ==="
-    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide
-    
-    echo ""
-    echo "=== StorageClasses ==="
-    kubectl get storageclass
-    
-    echo ""
-    echo "=== StorageClass Details (YAML) ==="
-    case "${protocol}" in
-        nfs)
-            kubectl get storageclass tns-csi-nfs -o yaml || true
-            ;;
-        nvmeof)
-            kubectl get storageclass tns-csi-nvmeof -o yaml || true
-            ;;
-        both)
-            echo "--- NFS StorageClass ---"
-            kubectl get storageclass tns-csi-nfs -o yaml || true
-            echo ""
-            echo "--- NVMe-oF StorageClass ---"
-            kubectl get storageclass tns-csi-nvmeof -o yaml || true
-            ;;
-        iscsi)
-            kubectl get storageclass tns-csi-iscsi -o yaml || true
-            ;;
-    esac
-    
-    echo ""
-    echo "=== CSIDriver Resource ==="
-    kubectl get csidriver tns.csi.io -o yaml || true
+        echo ""
+        echo "=== StorageClasses ==="
+        kubectl get storageclass
+        
+        echo ""
+        echo "=== StorageClass Details (YAML) ==="
+        case "${protocol}" in
+            nfs)
+                kubectl get storageclass tns-csi-nfs -o yaml || true
+                ;;
+            nvmeof)
+                kubectl get storageclass tns-csi-nvmeof -o yaml || true
+                ;;
+            both)
+                echo "--- NFS StorageClass ---"
+                kubectl get storageclass tns-csi-nfs -o yaml || true
+                echo ""
+                echo "--- NVMe-oF StorageClass ---"
+                kubectl get storageclass tns-csi-nvmeof -o yaml || true
+                ;;
+            iscsi)
+                kubectl get storageclass tns-csi-iscsi -o yaml || true
+                ;;
+        esac
+        
+        echo ""
+        echo "=== CSIDriver Resource ==="
+        kubectl get csidriver tns.csi.io -o yaml || true
+    fi
     
     stop_test_timer "deploy_driver" "PASSED"
 }
@@ -794,10 +877,9 @@ create_pvc() {
     test_step "Creating PersistentVolumeClaim: ${pvc_name}"
     test_debug "Manifest: ${manifest}, Wait for binding: ${wait_for_binding}"
     
-    # Show manifest contents
+    # Show manifest contents (verbose only)
     show_yaml_manifest "${manifest}" "PVC Manifest - ${pvc_name}"
     
-    echo ""
     test_info "Applying PVC manifest..."
     kubectl apply -f "${manifest}" -n "${TEST_NAMESPACE}"
     
@@ -818,24 +900,27 @@ create_pvc() {
         test_warning "PVC took longer than expected to appear in API server"
     fi
     
-    # Check PVC status
-    echo ""
-    echo "=== PVC Status (describe) ==="
-    kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}"
+    # Check PVC status (verbose only)
+    if is_verbose 1; then
+        echo ""
+        echo "=== PVC Status (describe) ==="
+        kubectl describe pvc "${pvc_name}" -n "${TEST_NAMESPACE}"
+    fi
     
-    # Show full PVC YAML
+    # Show full PVC YAML (verbose only - handled by show_resource_yaml)
     show_resource_yaml "pvc" "${pvc_name}" "${TEST_NAMESPACE}"
     
-    # Check controller logs
-    echo ""
-    echo "=== Controller Logs (last 30 lines) ==="
-    kubectl logs -n kube-system \
-        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
-        --tail=30 || true
+    # Check controller logs (verbose only)
+    if is_verbose 1; then
+        echo ""
+        echo "=== Controller Logs (last 30 lines) ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=30 || true
+    fi
     
     # Wait for PVC to be bound (skip if volumeBindingMode is WaitForFirstConsumer)
     if [[ "${wait_for_binding}" == "true" ]]; then
-        echo ""
         test_info "Waiting for PVC to be bound (timeout: ${TIMEOUT_PVC})..."
         if ! kubectl wait --for=jsonpath='{.status.phase}'=Bound \
             pvc/"${pvc_name}" \
@@ -853,14 +938,15 @@ create_pvc() {
         pv_name=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.volumeName}')
         test_info "Created PV: ${pv_name}"
         
-        # Show PV details
+        # Show PV details (verbose only - handled by show_resource_yaml)
         show_resource_yaml "pv" "${pv_name}"
         
-        echo ""
-        echo "=== PV Details (describe) ==="
-        kubectl describe pv "${pv_name}"
+        if is_verbose 1; then
+            echo ""
+            echo "=== PV Details (describe) ==="
+            kubectl describe pv "${pv_name}"
+        fi
     else
-        echo ""
         test_info "Skipping PVC binding wait (volumeBindingMode: WaitForFirstConsumer)"
         test_success "PVC created (will bind when pod is scheduled)"
     fi
@@ -921,14 +1007,16 @@ create_test_pod() {
     
     test_success "Pod is ready"
     
-    # Show detailed pod information
+    # Show detailed pod information (verbose only)
     show_resource_yaml "pod" "${pod_name}" "${TEST_NAMESPACE}"
     
-    echo ""
-    echo "=== Pod Details (describe) ==="
-    kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}"
+    if is_verbose 1; then
+        echo ""
+        echo "=== Pod Details (describe) ==="
+        kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}"
+    fi
     
-    # Show mount information
+    # Show mount information (verbose only - handled by show_pod_mounts)
     show_pod_mounts "${pod_name}" "${TEST_NAMESPACE}"
     
     # Detect if this is NVMe-oF based on storage class or volume attributes
@@ -940,18 +1028,22 @@ create_test_pod() {
         storage_class=$(kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" -o jsonpath='{.spec.storageClassName}' 2>/dev/null || echo "")
         
         if [[ "${storage_class}" == *"nvmeof"* ]]; then
-            test_info "Detected NVMe-oF volume, showing device details..."
+            if is_verbose 1; then
+                test_info "Detected NVMe-oF volume, showing device details..."
+            fi
             show_nvmeof_details "${pod_name}" "${TEST_NAMESPACE}"
         fi
     fi
     
-    # Show node driver logs for this mount operation
+    # Show node driver logs for this mount operation (verbose only - handled by show_node_mounts)
     show_node_mounts
     
-    # Show pod logs
-    echo ""
-    echo "=== Pod Logs ==="
-    kubectl logs "${pod_name}" -n "${TEST_NAMESPACE}" || true
+    # Show pod logs (verbose only)
+    if is_verbose 1; then
+        echo ""
+        echo "=== Pod Logs ==="
+        kubectl logs "${pod_name}" -n "${TEST_NAMESPACE}" || true
+    fi
     stop_test_timer "create_test_pod" "PASSED"
 }
 
@@ -973,19 +1065,23 @@ test_io_operations() {
     
     if [[ "${test_type}" == "filesystem" ]]; then
         # Filesystem tests
-        echo ""
-        echo "=== I/O Test Command ==="
-        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- sh -c \"echo 'CSI Test Data' > ${path}/test.txt\""
-        echo ""
+        if is_verbose 1; then
+            echo ""
+            echo "=== I/O Test Command ==="
+            echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- sh -c \"echo 'CSI Test Data' > ${path}/test.txt\""
+            echo ""
+        fi
         test_info "Writing test file..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             sh -c "echo 'CSI Test Data' > ${path}/test.txt"
         test_success "Write operation successful"
         
-        echo ""
-        echo "=== Read Test Command ==="
-        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- cat ${path}/test.txt"
-        echo ""
+        if is_verbose 1; then
+            echo ""
+            echo "=== Read Test Command ==="
+            echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- cat ${path}/test.txt"
+            echo ""
+        fi
         test_info "Reading test file..."
         local content
         content=$(kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- cat "${path}/test.txt")
@@ -997,30 +1093,33 @@ test_io_operations() {
             false  # Trigger ERR trap
         fi
         
-        echo ""
-        echo "=== Large File Write Command ==="
-        echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- dd if=/dev/zero of=${path}/iotest.bin bs=1M count=100"
-        echo ""
+        if is_verbose 1; then
+            echo ""
+            echo "=== Large File Write Command ==="
+            echo "Command: kubectl exec ${pod_name} -n ${TEST_NAMESPACE} -- dd if=/dev/zero of=${path}/iotest.bin bs=1M count=100"
+            echo ""
+        fi
         test_info "Writing large test file (100MB)..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             dd if=/dev/zero of="${path}/iotest.bin" bs=1M count=100 2>&1 | tail -3
         test_success "Large file write successful"
         
-        echo ""
-        echo "Verifying file size..."
-        kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
-            ls -lh "${path}/"
+        if is_verbose 1; then
+            echo ""
+            echo "Verifying file size..."
+            kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
+                ls -lh "${path}/"
+        fi
         test_success "I/O operations completed successfully"
         
     elif [[ "${test_type}" == "block" ]]; then
         # Block device tests
-        echo "Writing to block device..."
+        test_info "Writing to block device..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             dd if=/dev/zero of="${path}" bs=1M count=10 2>&1 | tail -3
         test_success "Block device write successful"
         
-        echo ""
-        echo "Reading from block device..."
+        test_info "Reading from block device..."
         kubectl exec "${pod_name}" -n "${TEST_NAMESPACE}" -- \
             dd if="${path}" of=/dev/null bs=1M count=10 2>&1 | tail -3
         test_success "Block device read successful"
@@ -1332,42 +1431,52 @@ verify_metrics() {
     fi
     
     if [[ ${#missing_metrics[@]} -gt 0 ]]; then
-        test_warning "Some metrics are missing (this may be expected if operations weren't performed)"
+        if is_verbose 1; then
+            test_warning "Some metrics are missing (this may be expected if operations weren't performed)"
+        fi
     fi
     
     # Check for metrics with actual data (non-zero values or labels)
-    echo ""
-    test_info "Checking for metrics with collected data..."
+    if is_verbose 1; then
+        echo ""
+        test_info "Checking for metrics with collected data..."
+    fi
     
     local metrics_with_data=0
     if grep -E "^tns_csi_operations_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
-        test_success "CSI operations were recorded"
+        if is_verbose 1; then
+            test_success "CSI operations were recorded"
+        fi
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
     if grep -E "^tns_csi_volume_operations_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
-        test_success "Volume operations were recorded"
+        if is_verbose 1; then
+            test_success "Volume operations were recorded"
+        fi
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
     if grep -E "^tns_csi_websocket_connection_status" <<< "${metrics_output}" >/dev/null; then
-        test_success "WebSocket connection status is tracked"
+        if is_verbose 1; then
+            test_success "WebSocket connection status is tracked"
+        fi
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
     if grep -E "^tns_csi_websocket_messages_total.*[1-9]" <<< "${metrics_output}" >/dev/null; then
-        test_success "WebSocket messages were recorded"
+        if is_verbose 1; then
+            test_success "WebSocket messages were recorded"
+        fi
         metrics_with_data=$((metrics_with_data + 1))
     fi
     
     if [[ ${metrics_with_data} -gt 0 ]]; then
-        echo ""
         test_success "Metrics are being collected during CSI operations (${metrics_with_data} metric types with data)"
     else
         test_warning "Metrics endpoint is available but no operation data was found"
     fi
     
-    echo ""
     test_success "Metrics verification completed"
     stop_test_timer "verify_metrics" "PASSED"
 }

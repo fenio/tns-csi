@@ -13,6 +13,7 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/mount"
+	"github.com/fenio/tns-csi/pkg/retry"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/klog/v2"
@@ -107,7 +108,7 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string, datasetName string) (*csi.NodeStageVolumeResponse, error) {
 	// Connect to NVMe-oF target (this handles both new connections and retries)
 	if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
-		return nil, connectErr
+		return nil, status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target after retries: %v", connectErr)
 	}
 
 	// Wait for device to appear (NSID is always 1 with independent subsystems)
@@ -152,7 +153,9 @@ func (s *NodeService) validateNVMeOFParams(volumeContext map[string]string) (*nv
 	return params, nil
 }
 
-// connectNVMeOFTarget discovers and connects to an NVMe-oF target.
+// connectNVMeOFTarget discovers and connects to an NVMe-oF target with retry logic.
+// This handles transient failures when TrueNAS has just created a new subsystem
+// (e.g., for snapshot-restored volumes) but it's not yet fully ready for connections.
 func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFConnectionParams) error {
 	// Discover the NVMe-oF target
 	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", params.server, params.port)
@@ -164,23 +167,72 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
 	}
 
-	// Connect to the NVMe-oF target
+	// Connect to the NVMe-oF target with retry logic
+	// This is necessary because newly created subsystems (e.g., from snapshot restore)
+	// may not be immediately ready for connections on TrueNAS
 	klog.V(4).Infof("Connecting to NVMe-oF target: %s", params.nqn)
+
+	config := retry.Config{
+		MaxAttempts:       6,               // Up to 6 attempts
+		InitialBackoff:    2 * time.Second, // Start with 2s delay
+		MaxBackoff:        10 * time.Second,
+		BackoffMultiplier: 1.5,
+		RetryableFunc:     isRetryableNVMeConnectError,
+		OperationName:     fmt.Sprintf("nvme-connect(%s)", params.nqn),
+	}
+
+	return retry.WithRetryNoResult(ctx, config, func() error {
+		return s.attemptNVMeConnect(ctx, params)
+	})
+}
+
+// attemptNVMeConnect performs a single NVMe connect attempt.
+func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConnectionParams) error {
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer connectCancel()
+
 	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
 	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect", "-t", params.transport, "-n", params.nqn, "-a", params.server, "-s", params.port)
 	output, err := connectCmd.CombinedOutput()
 	if err != nil {
-		// Check if already connected
+		// Check if already connected (this is success, not an error)
 		if strings.Contains(string(output), "already connected") {
 			klog.V(4).Infof("NVMe device already connected (output: %s)", string(output))
 			return nil
 		}
-		return status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target: %v, output: %s", err, string(output))
+		return fmt.Errorf("nvme connect failed: %w, output: %s", err, string(output))
 	}
 
 	return nil
+}
+
+// isRetryableNVMeConnectError determines if an NVMe connect error is transient
+// and should be retried. This includes errors from newly created subsystems
+// that aren't fully initialized on TrueNAS yet.
+func isRetryableNVMeConnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+
+	// These errors indicate the subsystem isn't ready yet (transient)
+	retryablePatterns := []string{
+		"failed to write to nvme-fabrics device", // Subsystem not yet accepting connections
+		"could not add new controller",           // Controller registration pending
+		"connection refused",                     // Target not listening yet
+		"connection timed out",                   // Target slow to respond
+		"No route to host",                       // Network path not ready
+		"Host is down",                           // Target initializing
+		"Network is unreachable",                 // Transient network issue
+	}
+
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // waitForDeviceInitialization waits for an NVMe device to be fully initialized.

@@ -24,6 +24,9 @@ echo "  • Filesystem reflects new size"
 echo "  • Controller handles expansion requests correctly"
 echo "================================================"
 
+# Set total test steps for progress tracking
+set_test_steps 9
+
 # Trap errors and cleanup
 trap 'show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_test "${POD_NAME}" "${PVC_NAME}"; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 

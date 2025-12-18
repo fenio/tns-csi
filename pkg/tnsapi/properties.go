@@ -69,6 +69,22 @@ const (
 	// When "retain", the volume will not be deleted when the PVC is deleted.
 	PropertyDeleteStrategy = "tns-csi:delete_strategy"
 
+	// PropertySnapshotID stores the CSI snapshot ID for detached snapshots.
+	// Value: e.g., "snapshot-12345678-1234-1234-1234-123456789012".
+	PropertySnapshotID = "tns-csi:snapshot_id"
+
+	// PropertySourceVolumeID stores the source volume ID for detached snapshots.
+	// Value: e.g., "nfs:pool/datasets/pvc-xxx".
+	PropertySourceVolumeID = "tns-csi:source_volume_id"
+
+	// PropertyDetachedSnapshot indicates this dataset is a detached snapshot.
+	// Value: "true" or "false".
+	PropertyDetachedSnapshot = "tns-csi:detached_snapshot"
+
+	// PropertySourceDataset stores the source dataset path for detached snapshots.
+	// Value: e.g., "pool/datasets/pvc-xxx".
+	PropertySourceDataset = "tns-csi:source_dataset"
+
 	// ManagedByValue is the value stored in PropertyManagedBy.
 	ManagedByValue = "tns-csi"
 
@@ -107,6 +123,10 @@ func PropertyNames() []string {
 		PropertyProvisionedAt,
 		PropertyProtocol,
 		PropertyDeleteStrategy,
+		PropertySnapshotID,
+		PropertySourceVolumeID,
+		PropertyDetachedSnapshot,
+		PropertySourceDataset,
 	}
 }
 

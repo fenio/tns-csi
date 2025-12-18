@@ -1900,3 +1900,138 @@ func (c *Client) ClearDatasetProperties(ctx context.Context, datasetID string, p
 	klog.V(4).Infof("Successfully cleared %d user properties from dataset: %s", len(propertyNames), datasetID)
 	return nil
 }
+
+// ReplicationRunOnetimeParams contains parameters for running a one-time replication task.
+// This is used for creating detached snapshots via zfs send/receive.
+type ReplicationRunOnetimeParams struct {
+	Direction               string   `json:"direction"`                  // "PUSH" or "PULL"
+	Transport               string   `json:"transport"`                  // "LOCAL", "SSH", or "SSH+NETCAT"
+	SourceDatasets          []string `json:"source_datasets"`            // Source dataset paths
+	TargetDataset           string   `json:"target_dataset"`             // Target dataset path
+	Recursive               bool     `json:"recursive"`                  // Recursive replication
+	Properties              bool     `json:"properties"`                 // Include ZFS properties
+	PropertiesExclude       []string `json:"properties_exclude"`         // Properties to exclude
+	Replicate               bool     `json:"replicate"`                  // Full filesystem replication
+	Encryption              bool     `json:"encryption"`                 // Enable encryption
+	NamingSchema            []string `json:"naming_schema"`              // Naming schema for snapshots
+	AlsoIncludeNamingSchema []string `json:"also_include_naming_schema"` // Additional naming schemas
+	RetentionPolicy         string   `json:"retention_policy"`           // "SOURCE", "CUSTOM", or "NONE"
+	Readonly                string   `json:"readonly"`                   // "SET", "REQUIRE", "IGNORE"
+	AllowFromScratch        bool     `json:"allow_from_scratch"`         // Allow initial full send
+}
+
+// ReplicationJobState represents the state of a replication job.
+type ReplicationJobState struct {
+	ID          int                    `json:"id"`
+	Method      string                 `json:"method"`
+	State       string                 `json:"state"` // "WAITING", "RUNNING", "SUCCESS", "FAILED"
+	Progress    map[string]interface{} `json:"progress"`
+	Error       string                 `json:"error"`
+	Result      interface{}            `json:"result"`
+	TimeStarted *string                `json:"time_started"`
+	TimeEnded   *string                `json:"time_finished"`
+}
+
+// RunOnetimeReplication runs a one-time replication task using zfs send/receive.
+// This is the core method for creating detached snapshots - it performs a full
+// data copy from source to destination without maintaining ZFS clone dependencies.
+//
+// The replication uses LOCAL transport for same-system operations (detached snapshots),
+// which means the data is copied using zfs send | zfs receive within the same TrueNAS system.
+//
+// Returns the job ID which can be used to poll for completion status.
+func (c *Client) RunOnetimeReplication(ctx context.Context, params ReplicationRunOnetimeParams) (int, error) {
+	klog.V(4).Infof("Running one-time replication: %s -> %s", params.SourceDatasets, params.TargetDataset)
+
+	var jobID int
+	err := c.Call(ctx, "replication.run_onetime", []interface{}{params}, &jobID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to start one-time replication: %w", err)
+	}
+
+	klog.V(4).Infof("Started one-time replication job: %d", jobID)
+	return jobID, nil
+}
+
+// GetJobStatus retrieves the status of a job by its ID.
+// Used to poll for completion of long-running operations like replication.
+func (c *Client) GetJobStatus(ctx context.Context, jobID int) (*ReplicationJobState, error) {
+	klog.V(5).Infof("Getting job status for job %d", jobID)
+
+	var result ReplicationJobState
+	err := c.Call(ctx, "core.get_jobs", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", jobID},
+		},
+	}, &[]ReplicationJobState{result})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job status: %w", err)
+	}
+
+	// Query returns an array, we need to get the first element
+	var jobs []ReplicationJobState
+	err = c.Call(ctx, "core.get_jobs", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", jobID},
+		},
+	}, &jobs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get job status: %w", err)
+	}
+
+	if len(jobs) == 0 {
+		return nil, fmt.Errorf("job %d not found", jobID)
+	}
+
+	return &jobs[0], nil
+}
+
+// WaitForJob waits for a job to complete, polling at the specified interval.
+// Returns nil if the job succeeds, or an error if it fails or times out.
+func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	klog.V(4).Infof("Waiting for job %d to complete", jobID)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled while waiting for job %d: %w", jobID, ctx.Err())
+		case <-ticker.C:
+			status, err := c.GetJobStatus(ctx, jobID)
+			if err != nil {
+				klog.Warningf("Failed to get job %d status: %v", jobID, err)
+				continue
+			}
+
+			klog.V(5).Infof("Job %d state: %s", jobID, status.State)
+
+			switch status.State {
+			case "SUCCESS":
+				klog.V(4).Infof("Job %d completed successfully", jobID)
+				return nil
+			case "FAILED":
+				return fmt.Errorf("job %d failed: %s", jobID, status.Error)
+			case "ABORTED":
+				return fmt.Errorf("job %d was aborted", jobID)
+			case "WAITING", "RUNNING":
+				// Still in progress, continue polling
+				continue
+			default:
+				klog.Warningf("Unknown job state: %s", status.State)
+			}
+		}
+	}
+}
+
+// RunOnetimeReplicationAndWait runs a one-time replication and waits for completion.
+// This is a convenience method that combines RunOnetimeReplication and WaitForJob.
+func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params ReplicationRunOnetimeParams, pollInterval time.Duration) error {
+	jobID, err := c.RunOnetimeReplication(ctx, params)
+	if err != nil {
+		return err
+	}
+
+	return c.WaitForJob(ctx, jobID, pollInterval)
+}

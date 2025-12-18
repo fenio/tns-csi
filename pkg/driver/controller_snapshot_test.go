@@ -262,6 +262,31 @@ func (m *MockAPIClientForSnapshots) ClearDatasetProperties(ctx context.Context, 
 	return nil
 }
 
+// Replication methods for detached snapshots
+func (m *MockAPIClientForSnapshots) RunOnetimeReplication(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	// Mock implementation - return a job ID
+	return 12345, nil
+}
+
+func (m *MockAPIClientForSnapshots) GetJobStatus(ctx context.Context, jobID int) (*tnsapi.ReplicationJobState, error) {
+	// Mock implementation - return completed status
+	return &tnsapi.ReplicationJobState{
+		ID:       jobID,
+		State:    "SUCCESS",
+		Progress: map[string]interface{}{"percent": float64(100)},
+	}, nil
+}
+
+func (m *MockAPIClientForSnapshots) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	// Mock implementation - always succeed immediately
+	return nil
+}
+
+func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
+	// Mock implementation - always succeed
+	return nil
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

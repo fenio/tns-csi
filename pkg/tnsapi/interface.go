@@ -1,7 +1,10 @@
 // Package tnsapi provides a WebSocket client for TrueNAS Scale API.
 package tnsapi
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // ClientInterface defines the interface for TrueNAS API operations.
 // This allows for dependency injection and easier testing.
@@ -56,10 +59,24 @@ type ClientInterface interface {
 	QuerySnapshots(ctx context.Context, filters []interface{}) ([]Snapshot, error)
 	CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error)
 
-	// Dataset promotion (for detached snapshots)
+	// Dataset promotion (for detached clones)
 	// PromoteDataset promotes a cloned dataset to become independent from its origin snapshot.
 	// This breaks the parent-child relationship, making the clone a standalone dataset.
 	PromoteDataset(ctx context.Context, datasetID string) error
+
+	// Replication operations (for detached snapshots)
+	// RunOnetimeReplication runs a one-time zfs send/receive operation.
+	// Returns the job ID for tracking the operation status.
+	RunOnetimeReplication(ctx context.Context, params ReplicationRunOnetimeParams) (int, error)
+
+	// GetJobStatus retrieves the status of a job by its ID.
+	GetJobStatus(ctx context.Context, jobID int) (*ReplicationJobState, error)
+
+	// WaitForJob waits for a job to complete with polling.
+	WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error
+
+	// RunOnetimeReplicationAndWait runs a one-time replication and waits for completion.
+	RunOnetimeReplicationAndWait(ctx context.Context, params ReplicationRunOnetimeParams, pollInterval time.Duration) error
 
 	// Connection management
 	Close()

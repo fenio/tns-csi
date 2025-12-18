@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -209,6 +210,27 @@ func (m *mockAPIClient) InheritDatasetProperty(ctx context.Context, datasetID, p
 }
 
 func (m *mockAPIClient) ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error {
+	return nil // Stub implementation
+}
+
+// Replication methods for detached snapshots
+func (m *mockAPIClient) RunOnetimeReplication(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	return 12345, nil // Stub implementation
+}
+
+func (m *mockAPIClient) GetJobStatus(ctx context.Context, jobID int) (*tnsapi.ReplicationJobState, error) {
+	return &tnsapi.ReplicationJobState{
+		ID:       jobID,
+		State:    "SUCCESS",
+		Progress: map[string]interface{}{"percent": float64(100)},
+	}, nil // Stub implementation
+}
+
+func (m *mockAPIClient) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	return nil // Stub implementation
+}
+
+func (m *mockAPIClient) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
 	return nil // Stub implementation
 }
 

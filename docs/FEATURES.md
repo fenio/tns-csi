@@ -40,7 +40,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 - Better utilization of modern NVMe SSDs
 - Native NVMe command set over fabric
 
-**No SMB/CIFS Support**: Low priority due to Linux-native protocol focus. Consider official TrueNAS CSI driver if Windows file sharing is required.
+**No SMB/CIFS Support**: Low priority due to Linux-native protocol focus. Consider Democratic-CSI driver if Windows file sharing is required.
 
 ## Core CSI Features
 

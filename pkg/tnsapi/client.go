@@ -2042,3 +2042,75 @@ func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params Replic
 
 	return c.WaitForJob(ctx, jobID, pollInterval)
 }
+
+// FindDatasetsByProperty searches for datasets that have a specific ZFS user property value.
+// This is useful for:
+// - Finding all volumes managed by tns-csi (property: tns-csi:managed_by, value: tns-csi)
+// - Finding a volume by its CSI volume name
+// - Orphan detection and volume recovery
+//
+// The search is performed under the specified prefix (e.g., "tank/k8s").
+// Returns a list of DatasetWithProperties that match the property filter.
+func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error) {
+	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %s", propertyName, propertyValue, prefix)
+
+	// Query all datasets under the prefix with user properties included
+	var result []DatasetWithProperties
+	queryOpts := map[string]interface{}{
+		"extra": map[string]interface{}{
+			"properties": true,
+		},
+	}
+
+	// Use "id" with "^" (starts with) filter to get all datasets under the prefix
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "^", prefix},
+		},
+		queryOpts,
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query datasets with properties: %w", err)
+	}
+
+	// Filter datasets that have the matching property value
+	var matched []DatasetWithProperties
+	for _, ds := range result {
+		if ds.UserProperties == nil {
+			continue
+		}
+		if prop, ok := ds.UserProperties[propertyName]; ok && prop.Value == propertyValue {
+			matched = append(matched, ds)
+		}
+	}
+
+	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d total)", len(matched), propertyName, propertyValue, len(result))
+	return matched, nil
+}
+
+// FindManagedDatasets finds all datasets managed by tns-csi under the given prefix.
+// This is a convenience method that searches for datasets with PropertyManagedBy=ManagedByValue.
+// Useful for listing all CSI-provisioned volumes and orphan detection.
+func (c *Client) FindManagedDatasets(ctx context.Context, prefix string) ([]DatasetWithProperties, error) {
+	return c.FindDatasetsByProperty(ctx, prefix, PropertyManagedBy, ManagedByValue)
+}
+
+// FindDatasetByCSIVolumeName finds a dataset by its CSI volume name (PVC name).
+// Returns the dataset if found, or nil if not found.
+// This is useful for volume recovery when the controller restarts.
+func (c *Client) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*DatasetWithProperties, error) {
+	datasets, err := c.FindDatasetsByProperty(ctx, prefix, PropertyCSIVolumeName, csiVolumeName)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(datasets) == 0 {
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil dataset
+	}
+
+	if len(datasets) > 1 {
+		klog.Warningf("Found multiple datasets with CSI volume name %s (returning first): %d datasets", csiVolumeName, len(datasets))
+	}
+
+	return &datasets[0], nil
+}

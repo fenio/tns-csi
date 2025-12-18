@@ -967,6 +967,66 @@ func (m *MockClient) RunOnetimeReplicationAndWait(ctx context.Context, params tn
 	return nil
 }
 
+// FindDatasetsByProperty searches for datasets that have a specific ZFS user property value.
+func (m *MockClient) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {
+	m.logCall("FindDatasetsByProperty", prefix, propertyName, propertyValue)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.DatasetWithProperties
+	for _, ds := range m.datasets {
+		// Check if dataset name starts with prefix
+		if len(ds.Name) < len(prefix) || ds.Name[:len(prefix)] != prefix {
+			continue
+		}
+
+		// Check if dataset has the matching property
+		if ds.UserProperties != nil {
+			if val, ok := ds.UserProperties[propertyName]; ok && val == propertyValue {
+				// Convert UserProperties to tnsapi.UserProperty format
+				userProps := make(map[string]tnsapi.UserProperty)
+				for k, v := range ds.UserProperties {
+					userProps[k] = tnsapi.UserProperty{Value: v}
+				}
+				result = append(result, tnsapi.DatasetWithProperties{
+					Dataset: tnsapi.Dataset{
+						ID:         ds.ID,
+						Name:       ds.Name,
+						Type:       ds.Type,
+						Used:       ds.Used,
+						Available:  ds.Available,
+						Mountpoint: ds.Mountpoint,
+						Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+					},
+					UserProperties: userProps,
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// FindManagedDatasets finds all datasets managed by tns-csi under the given prefix.
+func (m *MockClient) FindManagedDatasets(ctx context.Context, prefix string) ([]tnsapi.DatasetWithProperties, error) {
+	return m.FindDatasetsByProperty(ctx, prefix, tnsapi.PropertyManagedBy, tnsapi.ManagedByValue)
+}
+
+// FindDatasetByCSIVolumeName finds a dataset by its CSI volume name.
+func (m *MockClient) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*tnsapi.DatasetWithProperties, error) {
+	datasets, err := m.FindDatasetsByProperty(ctx, prefix, tnsapi.PropertyCSIVolumeName, csiVolumeName)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(datasets) == 0 {
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil dataset
+	}
+
+	return &datasets[0], nil
+}
+
 // GetCallLog returns the list of API calls made (for debugging).
 func (m *MockClient) GetCallLog() []string {
 	m.mu.Lock()

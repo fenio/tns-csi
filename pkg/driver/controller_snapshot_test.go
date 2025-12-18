@@ -287,6 +287,21 @@ func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Con
 	return nil
 }
 
+func (m *MockAPIClientForSnapshots) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {
+	// Mock implementation - return empty slice
+	return nil, nil
+}
+
+func (m *MockAPIClientForSnapshots) FindManagedDatasets(ctx context.Context, prefix string) ([]tnsapi.DatasetWithProperties, error) {
+	// Mock implementation - return empty slice
+	return nil, nil
+}
+
+func (m *MockAPIClientForSnapshots) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*tnsapi.DatasetWithProperties, error) {
+	// Mock implementation - return nil (not found)
+	return nil, nil //nolint:nilnil // Mock returns "not found"
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 )
@@ -891,6 +892,79 @@ func (m *MockClient) PromoteDataset(ctx context.Context, datasetID string) error
 	}
 
 	return fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// RunOnetimeReplication mocks replication.run_onetime.
+// This simulates a one-time zfs send/receive operation for detached snapshots.
+func (m *MockClient) RunOnetimeReplication(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams) (int, error) {
+	m.logCall("RunOnetimeReplication", params.SourceDatasets, params.TargetDataset)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Validate source datasets exist
+	for _, srcDataset := range params.SourceDatasets {
+		found := false
+		for _, ds := range m.datasets {
+			if ds.Name == srcDataset {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return 0, fmt.Errorf("source dataset %s: %w", srcDataset, ErrDatasetNotFound)
+		}
+	}
+
+	// Create the target dataset as a copy
+	datasetID := fmt.Sprintf("dataset-%d", m.nextDatasetID)
+	m.nextDatasetID++
+
+	m.datasets[params.TargetDataset] = mockDataset{
+		ID:         datasetID,
+		Name:       params.TargetDataset,
+		Type:       "FILESYSTEM",
+		Used:       map[string]any{"parsed": float64(0)},
+		Available:  map[string]any{"parsed": float64(107374182400)},
+		Mountpoint: "/mnt/" + params.TargetDataset,
+	}
+
+	// Return a mock job ID
+	return 12345, nil
+}
+
+// GetJobStatus mocks core.get_jobs to get job status.
+func (m *MockClient) GetJobStatus(ctx context.Context, jobID int) (*tnsapi.ReplicationJobState, error) {
+	m.logCall("GetJobStatus", jobID)
+
+	// Return a completed job status for the mock
+	return &tnsapi.ReplicationJobState{
+		ID:       jobID,
+		State:    "SUCCESS",
+		Progress: map[string]interface{}{"percent": float64(100)},
+	}, nil
+}
+
+// WaitForJob mocks waiting for a job to complete.
+func (m *MockClient) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	m.logCall("WaitForJob", jobID, pollInterval)
+
+	// In mock, jobs complete immediately
+	return nil
+}
+
+// RunOnetimeReplicationAndWait mocks running replication and waiting for completion.
+func (m *MockClient) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
+	m.logCall("RunOnetimeReplicationAndWait", params.SourceDatasets, params.TargetDataset)
+
+	// Run the replication
+	_, err := m.RunOnetimeReplication(ctx, params)
+	if err != nil {
+		return err
+	}
+
+	// In mock, it completes immediately
+	return nil
 }
 
 // GetCallLog returns the list of API calls made (for debugging).

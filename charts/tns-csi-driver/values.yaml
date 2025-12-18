@@ -321,6 +321,20 @@ snapshots:
     create: true
     # Deletion policy: Delete or Retain
     deletionPolicy: Delete
+  
+  # Detached snapshots configuration
+  # Detached snapshots use zfs send/receive to create independent dataset copies
+  # that survive deletion of the source volume. Useful for backup/DR scenarios.
+  detached:
+    # Enable detached VolumeSnapshotClass creation
+    # When enabled, a separate "-snapshot-detached" class will be created
+    enabled: false
+    # Parent dataset for detached snapshots (optional)
+    # If not specified, defaults to {pool}/csi-detached-snapshots
+    # Example: "tank/backups/csi-snapshots"
+    parentDataset: ""
+    # Deletion policy for detached snapshots
+    deletionPolicy: Delete
 
 # Security context for controller pod
 securityContext:

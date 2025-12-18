@@ -214,7 +214,7 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
   - Must restore to same or larger size
   - Same ZFS pool required
 
-### Detached Snapshots (Independent Clones)
+### Detached Clones (Independent Clone Restoration)
 - **Status**: ✅ Implemented
 - **Protocols**: NFS, NVMe-oF
 - **Description**: Create clones that are independent from the source snapshot
@@ -229,7 +229,7 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
   - Creating fully independent copies of data
   - Avoiding clone dependency issues
 
-**Example StorageClass with Detached Snapshots:**
+**Example StorageClass with Detached Clones:**
 ```yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -244,6 +244,39 @@ parameters:
 allowVolumeExpansion: true
 reclaimPolicy: Delete
 ```
+
+### Detached Snapshots (Survive Source Volume Deletion)
+- **Status**: ✅ Implemented
+- **Protocols**: NFS, NVMe-oF
+- **Description**: Create snapshots that survive deletion of the source volume
+- **Features**:
+  - Uses `zfs send | zfs receive` for full data copy
+  - Stored as independent datasets in a dedicated folder
+  - Source volume can be deleted without affecting the snapshot
+  - Snapshots are stored under configurable parent dataset (default: `{pool}/csi-detached-snapshots`)
+- **Parameters**:
+  - `detachedSnapshots: "true"` in VolumeSnapshotClass
+  - `detachedSnapshotsParentDataset` (optional) - where snapshots are stored
+- **Use Cases**:
+  - Backup/DR scenarios requiring snapshots that outlive source volumes
+  - Data migration where source will be deleted
+  - Long-term archival with independent snapshot lifecycle
+  - Compliance requirements for independent backup copies
+
+**Example VolumeSnapshotClass for Detached Snapshots:**
+```yaml
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: truenas-nfs-snapshot-detached
+driver: tns.csi.io
+deletionPolicy: Delete
+parameters:
+  detachedSnapshots: "true"
+  detachedSnapshotsParentDataset: "tank/backups/csi-snapshots"  # optional
+```
+
+**Note:** Detached snapshots take longer to create than regular COW snapshots since they perform a full data copy via `zfs send/receive`. Use regular snapshots for fast point-in-time recovery, and detached snapshots when you need snapshots that survive source volume deletion.
 
 **Example:**
 ```yaml

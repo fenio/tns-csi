@@ -599,7 +599,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
 		tnsapi.PropertySnapshotID:       snapshotName,
 		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
-		tnsapi.PropertyDetachedSnapshot: "true",
+		tnsapi.PropertyDetachedSnapshot: VolumeContextValueTrue,
 		tnsapi.PropertySourceDataset:    sourceDataset,
 		tnsapi.PropertyDeleteStrategy:   "delete",
 	}
@@ -733,7 +733,7 @@ func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *m
 			return nil, status.Errorf(codes.FailedPrecondition,
 				"Dataset %s is not managed by tns-csi", datasetPath)
 		}
-		if props[tnsapi.PropertyDetachedSnapshot] != "true" {
+		if props[tnsapi.PropertyDetachedSnapshot] != VolumeContextValueTrue {
 			klog.Warningf("Dataset %s is not marked as a detached snapshot, refusing to delete", datasetPath)
 			timer.ObserveError()
 			return nil, status.Errorf(codes.FailedPrecondition,
@@ -1137,7 +1137,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	if params == nil {
 		params = make(map[string]string)
 	}
-	detached := params["detached"] == "true"
+	detached := params["detached"] == VolumeContextValueTrue
 
 	// Clone the snapshot (detached or regular)
 	var clonedDataset *tnsapi.Dataset

@@ -1,0 +1,36 @@
+# StorageClass with comprehensive ZFS properties
+# Tests all supported ZFS properties that can be set via StorageClass
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: tns-csi-nfs-zfsprops-full
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  server: "${TRUENAS_HOST}"
+  pool: "${TRUENAS_POOL}"
+  # Compression settings
+  zfs.compression: "lz4"
+  # Access time settings
+  zfs.atime: "off"
+  # Sync settings
+  zfs.sync: "standard"
+  # Record size for filesystem datasets
+  zfs.recordsize: "128K"
+  # Number of copies
+  zfs.copies: "1"
+  # Deduplication (usually off for performance)
+  zfs.dedup: "off"
+  # Snapshot directory visibility
+  zfs.snapdir: "hidden"
+  # Exec permission
+  zfs.exec: "on"
+  # Read-only mode
+  zfs.readonly: "off"
+  # ACL mode
+  zfs.aclmode: "passthrough"
+  # ACL type
+  zfs.acltype: "nfsv4"
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod-block-nvmeof
+spec:
+  containers:
+  - name: test-container
+    image: public.ecr.aws/docker/library/busybox:latest
+    command: ["sleep", "3600"]
+    securityContext:
+      capabilities:
+        add: ["SYS_RAWIO"]
+    volumeDevices:
+    - name: test-volume
+      devicePath: /dev/xvda
+  volumes:
+  - name: test-volume
+    persistentVolumeClaim:
+      claimName: test-pvc-block-nvmeof

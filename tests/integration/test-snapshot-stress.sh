@@ -8,8 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 PROTOCOL="NFS Snapshot Stress"
-PVC_NAME="test-pvc-stress"
-POD_NAME="test-pod-stress"
+PVC_NAME="test-pvc-nfs"
+POD_NAME="test-pod-nfs"
 SNAPSHOT_CLASS_NAME="tns-csi-snapshot-nfs"
 MANIFEST_DIR="${SCRIPT_DIR}/manifests"
 NUM_SNAPSHOTS=5  # Number of snapshots to create

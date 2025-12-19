@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-pvc-clone-nvmeof
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: tns-csi-nvmeof
+  dataSource:
+    name: test-pvc-source-nvmeof
+    kind: PersistentVolumeClaim

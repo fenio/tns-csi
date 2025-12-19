@@ -49,6 +49,8 @@ on:
           - access-modes
           - snapshot-restore
           - volume-stress
+          - orphaned-resources
+          - error-handling
 
 # Restrict permissions to minimum required
 permissions:
@@ -585,6 +587,62 @@ jobs:
           path: /tmp/test-logs/
           retention-days: 7
 
+  nvmeof-delete-strategy-retain:
+    name: "NVMe-oF: Delete Strategy Retain"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-delete-strategy-retain-nvmeof.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nvmeof-delete-strategy-retain-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nvmeof-zfsprops:
+    name: "NVMe-oF: ZFS Properties"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'zfsprops')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-nvmeof-zfsprops.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nvmeof-zfsprops-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # Shared Tests
   # ==========================================
@@ -749,6 +807,60 @@ jobs:
           path: /tmp/test-logs/
           retention-days: 7
 
+  shared-orphaned-resources:
+    name: "Shared: Orphaned Resources"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'orphaned-resources')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-orphaned-resources.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: orphaned-resources-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  shared-error-handling:
+    name: "Shared: Error Handling"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'error-handling')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-error-handling.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: error-handling-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # Summary
   # ==========================================
@@ -756,7 +868,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nfs-clone-volume, nfs-delete-strategy-retain, nvmeof-basic, nvmeof-snapshot, nvmeof-detached-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-clone-volume, nvmeof-block-mode, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress]
+    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nfs-clone-volume, nfs-delete-strategy-retain, nvmeof-basic, nvmeof-snapshot, nvmeof-detached-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-clone-volume, nvmeof-block-mode, nvmeof-delete-strategy-retain, nvmeof-zfsprops, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress, shared-orphaned-resources, shared-error-handling]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -788,6 +900,8 @@ jobs:
               'Volume Expansion': '${{ needs.nvmeof-expansion.result }}',
               'Clone Volume': '${{ needs.nvmeof-clone-volume.result }}',
               'Block Mode': '${{ needs.nvmeof-block-mode.result }}',
+              'Delete Strategy Retain': '${{ needs.nvmeof-delete-strategy-retain.result }}',
+              'ZFS Properties': '${{ needs.nvmeof-zfsprops.result }}',
             };
             
             const sharedResults = {
@@ -798,6 +912,8 @@ jobs:
               'Snapshot Restore': '${{ needs.shared-snapshot-restore.result }}',
               'Volume Stress': '${{ needs.shared-volume-stress.result }}',
               'Snapshot Stress': '${{ needs.shared-snapshot-stress.result }}',
+              'Orphaned Resources': '${{ needs.shared-orphaned-resources.result }}',
+              'Error Handling': '${{ needs.shared-error-handling.result }}',
             };
             
             const getIcon = (result) => {
@@ -827,7 +943,7 @@ jobs:
             const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
             const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 28;
+            const total = 32;
             
             let summary = `# Integration Test Results\n\n`;
             
@@ -850,7 +966,7 @@ jobs:
             summary += `| Test | NFS | NVMe-oF |\n`;
             summary += `|------|:---:|:-------:|\n`;
             
-            const testNames = ['Basic', 'Snapshot', 'Detached Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion', 'Clone Volume'];
+            const testNames = ['Basic', 'Snapshot', 'Detached Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion', 'Clone Volume', 'ZFS Properties', 'Delete Strategy Retain'];
             for (const test of testNames) {
               const nfsResult = results[test];
               const nvmeofResult = nvmeofResults[test];
@@ -861,9 +977,7 @@ jobs:
             summary += `\n## NFS-Only Tests\n\n`;
             summary += `| Test | Status |\n`;
             summary += `|------|:------:|\n`;
-            summary += `| ZFS Properties | ${getIcon(results['ZFS Properties'])} |\n`;
             summary += `| Name Templating | ${getIcon(results['Name Templating'])} |\n`;
-            summary += `| Delete Strategy Retain | ${getIcon(results['Delete Strategy Retain'])} |\n`;
             
             // NVMe-oF-only tests
             summary += `\n## NVMe-oF-Only Tests\n\n`;

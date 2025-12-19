@@ -39,6 +39,10 @@ on:
           - volume-expansion
           - zfsprops
           - name-templating
+          - clone-volume
+          - delete-strategy-retain
+          - block-mode
+          - snapshot-stress
           - dual-mount
           - connection-resilience
           - pod-restart
@@ -287,6 +291,62 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-name-templating.sh
 
+  nfs-clone-volume:
+    name: "NFS: Clone Volume"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'clone-volume')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-clone-volume-nfs.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nfs-clone-volume-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nfs-delete-strategy-retain:
+    name: "NFS: Delete Strategy Retain"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-delete-strategy-retain.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nfs-delete-strategy-retain-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # NVMe-oF Tests
   # ==========================================
@@ -469,6 +529,62 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-volume-expansion-nvmeof.sh
 
+  nvmeof-clone-volume:
+    name: "NVMe-oF: Clone Volume"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'clone-volume')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-clone-volume-nvmeof.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nvmeof-clone-volume-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  nvmeof-block-mode:
+    name: "NVMe-oF: Block Mode"
+    runs-on: new
+    timeout-minutes: 20
+    needs: compute-tag
+    if: |
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
+      (github.event.inputs.test == '' || github.event.inputs.test == 'block-mode')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-block-mode-nvmeof.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: nvmeof-block-mode-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # Shared Tests
   # ==========================================
@@ -605,6 +721,34 @@ jobs:
           echo "=== Volume Stress Test Completed ==="
           date
 
+  shared-snapshot-stress:
+    name: "Shared: Snapshot Stress"
+    runs-on: new
+    timeout-minutes: 30
+    needs: compute-tag
+    if: |
+      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-stress')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Run Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+        run: ./tests/integration/test-snapshot-stress.sh
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: snapshot-stress-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # Summary
   # ==========================================
@@ -612,7 +756,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nvmeof-basic, nvmeof-snapshot, nvmeof-detached-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress]
+    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nfs-clone-volume, nfs-delete-strategy-retain, nvmeof-basic, nvmeof-snapshot, nvmeof-detached-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-clone-volume, nvmeof-block-mode, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -630,6 +774,8 @@ jobs:
               'Volume Expansion': '${{ needs.nfs-expansion.result }}',
               'ZFS Properties': '${{ needs.nfs-zfsprops.result }}',
               'Name Templating': '${{ needs.nfs-name-templating.result }}',
+              'Clone Volume': '${{ needs.nfs-clone-volume.result }}',
+              'Delete Strategy Retain': '${{ needs.nfs-delete-strategy-retain.result }}',
             };
             
             const nvmeofResults = {
@@ -640,6 +786,8 @@ jobs:
               'Persistence': '${{ needs.nvmeof-persistence.result }}',
               'StatefulSet': '${{ needs.nvmeof-statefulset.result }}',
               'Volume Expansion': '${{ needs.nvmeof-expansion.result }}',
+              'Clone Volume': '${{ needs.nvmeof-clone-volume.result }}',
+              'Block Mode': '${{ needs.nvmeof-block-mode.result }}',
             };
             
             const sharedResults = {
@@ -649,6 +797,7 @@ jobs:
               'Access Modes': '${{ needs.shared-access-modes.result }}',
               'Snapshot Restore': '${{ needs.shared-snapshot-restore.result }}',
               'Volume Stress': '${{ needs.shared-volume-stress.result }}',
+              'Snapshot Stress': '${{ needs.shared-snapshot-stress.result }}',
             };
             
             const getIcon = (result) => {
@@ -678,7 +827,7 @@ jobs:
             const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
             const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
             const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 22;
+            const total = 28;
             
             let summary = `# Integration Test Results\n\n`;
             
@@ -701,7 +850,7 @@ jobs:
             summary += `| Test | NFS | NVMe-oF |\n`;
             summary += `|------|:---:|:-------:|\n`;
             
-            const testNames = ['Basic', 'Snapshot', 'Detached Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion'];
+            const testNames = ['Basic', 'Snapshot', 'Detached Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion', 'Clone Volume'];
             for (const test of testNames) {
               const nfsResult = results[test];
               const nvmeofResult = nvmeofResults[test];
@@ -714,6 +863,13 @@ jobs:
             summary += `|------|:------:|\n`;
             summary += `| ZFS Properties | ${getIcon(results['ZFS Properties'])} |\n`;
             summary += `| Name Templating | ${getIcon(results['Name Templating'])} |\n`;
+            summary += `| Delete Strategy Retain | ${getIcon(results['Delete Strategy Retain'])} |\n`;
+            
+            // NVMe-oF-only tests
+            summary += `\n## NVMe-oF-Only Tests\n\n`;
+            summary += `| Test | Status |\n`;
+            summary += `|------|:------:|\n`;
+            summary += `| Block Mode | ${getIcon(nvmeofResults['Block Mode'])} |\n`;
             
             // Shared tests
             summary += `\n## Shared Tests\n\n`;

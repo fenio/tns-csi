@@ -22,6 +22,10 @@ func TestPropertyNames(t *testing.T) {
 		PropertyProvisionedAt,
 		PropertyProtocol,
 		PropertyDeleteStrategy,
+		PropertySnapshotID,
+		PropertySourceVolumeID,
+		PropertyDetachedSnapshot,
+		PropertySourceDataset,
 	}
 
 	if len(names) != len(expectedProps) {
@@ -42,6 +46,7 @@ func TestPropertyNames(t *testing.T) {
 }
 
 func TestNFSVolumeProperties(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
 		name           string
 		volumeName     string
@@ -117,6 +122,7 @@ func TestNFSVolumeProperties(t *testing.T) {
 }
 
 func TestNVMeOFVolumeProperties(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
 		name           string
 		volumeName     string
@@ -187,6 +193,7 @@ func TestNVMeOFVolumeProperties(t *testing.T) {
 }
 
 func TestClonedVolumeProperties(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
 		name       string
 		sourceType string
@@ -242,6 +249,7 @@ func TestClonedVolumeProperties(t *testing.T) {
 }
 
 func TestSnapshotProperties(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
 		name            string
 		snapshotCSIName string
@@ -353,6 +361,7 @@ func TestStringToInt(t *testing.T) {
 func TestIntToString(t *testing.T) {
 	// intToString is unexported, but we can test it indirectly via NFSVolumeProperties
 	// which uses it for shareID conversion
+	//nolint:govet // fieldalignment: test struct optimization not critical
 	tests := []struct {
 		name    string
 		shareID int
@@ -402,6 +411,10 @@ func TestPropertyConstants(t *testing.T) {
 		PropertyProvisionedAt,
 		PropertyProtocol,
 		PropertyDeleteStrategy,
+		PropertySnapshotID,
+		PropertySourceVolumeID,
+		PropertyDetachedSnapshot,
+		PropertySourceDataset,
 	}
 
 	for _, prop := range props {

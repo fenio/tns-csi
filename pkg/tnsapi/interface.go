@@ -28,6 +28,11 @@ type ClientInterface interface {
 	InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error
 	ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error
 
+	// Dataset lookup by ZFS user properties (for volume recovery and orphan detection)
+	FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error)
+	FindManagedDatasets(ctx context.Context, prefix string) ([]DatasetWithProperties, error)
+	FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*DatasetWithProperties, error)
+
 	// NFS share operations
 	CreateNFSShare(ctx context.Context, params NFSShareCreateParams) (*NFSShare, error)
 	DeleteNFSShare(ctx context.Context, shareID int) error

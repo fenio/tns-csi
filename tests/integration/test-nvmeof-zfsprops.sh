@@ -62,6 +62,7 @@ parameters:
   server: "${TRUENAS_HOST}"
   transport: "tcp"
   port: "4420"
+  fsType: "ext4"
   # ZFS properties with zfs. prefix
   # For ZVOLs (NVMe-oF): compression and volblocksize are relevant
   zfs.compression: "lz4"

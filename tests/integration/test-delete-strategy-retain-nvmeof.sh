@@ -51,6 +51,7 @@ parameters:
   pool: "${TRUENAS_POOL}"
   transport: tcp
   port: "4420"
+  fsType: ext4
   deleteStrategy: retain
 reclaimPolicy: Delete
 allowVolumeExpansion: true

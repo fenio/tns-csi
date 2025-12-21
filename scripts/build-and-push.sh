@@ -7,8 +7,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+# Version information - derived from git if available
+VERSION="${VERSION:-$(git describe --tags --always 2>/dev/null || echo "dev")}"
+GIT_COMMIT="${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")}"
+BUILD_DATE="${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+
 # Default values
-IMAGE_TAG="${IMAGE_TAG:-v0.1.0}"
+IMAGE_TAG="${IMAGE_TAG:-${VERSION}}"
 REGISTRY_TYPE="${REGISTRY_TYPE:-dockerhub}"
 
 # Colors for output
@@ -23,16 +28,21 @@ usage() {
     echo "Options:"
     echo "  -t, --type TYPE       Registry type: dockerhub, ghcr, local (default: dockerhub)"
     echo "  -u, --user USER       Registry username (required for dockerhub/ghcr)"
-    echo "  -i, --tag TAG         Image tag (default: v0.1.0)"
+    echo "  -i, --tag TAG         Image tag (default: git-derived version)"
     echo "  -p, --push            Push image after building (default: false)"
     echo "  -h, --help            Show this help message"
     echo ""
+    echo "Environment variables:"
+    echo "  VERSION               Override version (default: git describe)"
+    echo "  GIT_COMMIT            Override commit SHA (default: git rev-parse)"
+    echo "  BUILD_DATE            Override build date (default: current UTC time)"
+    echo ""
     echo "Examples:"
     echo "  # Build for Docker Hub"
-    echo "  $0 --type dockerhub --user myusername --tag v0.1.0 --push"
+    echo "  $0 --type dockerhub --user myusername --tag v0.5.0 --push"
     echo ""
     echo "  # Build for GitHub Container Registry"
-    echo "  $0 --type ghcr --user myusername --tag v0.1.0 --push"
+    echo "  $0 --type ghcr --user myusername --tag v0.5.0 --push"
     echo ""
     echo "  # Build for local testing (kind/minikube)"
     echo "  $0 --type local --tag latest"
@@ -123,7 +133,14 @@ cd "$PROJECT_ROOT"
 
 # Build the image
 info "Building Docker image..."
-docker build -t "$FULL_IMAGE" -t "$LATEST_IMAGE" .
+info "Version: $VERSION"
+info "Git Commit: $GIT_COMMIT"
+info "Build Date: $BUILD_DATE"
+docker build \
+    --build-arg VERSION="$VERSION" \
+    --build-arg GIT_COMMIT="$GIT_COMMIT" \
+    --build-arg BUILD_DATE="$BUILD_DATE" \
+    -t "$FULL_IMAGE" -t "$LATEST_IMAGE" .
 
 if [[ $? -ne 0 ]]; then
     error "Docker build failed"
@@ -204,8 +221,8 @@ if [[ "$PUSH" == true ]]; then
     
     info "Successfully pushed images!"
     info ""
-    info "To use this image, update deploy/controller.yaml and deploy/node.yaml:"
-    info "  image: $FULL_IMAGE"
+    info "To use this image with Helm:"
+    info "  helm install tns-csi oci://registry-1.docker.io/${REGISTRY_USER}/tns-csi-driver --version ${IMAGE_TAG#v}"
 else
     info ""
     info "Image built but not pushed. To push, run:"
@@ -214,7 +231,9 @@ fi
 
 info ""
 info "Next steps:"
-info "1. Update deploy/controller.yaml and deploy/node.yaml with image: $FULL_IMAGE"
-info "2. Configure deploy/secret.yaml with your TrueNAS credentials"
-info "3. Update deploy/storageclass-nfs.yaml with your pool and server details"
-info "4. Deploy: kubectl apply -f deploy/"
+info "1. Deploy with Helm:"
+info "   helm install tns-csi ./charts/tns-csi-driver \\"
+info "     --set truenas.url=\"wss://YOUR-TRUENAS-IP:443/api/current\" \\"
+info "     --set truenas.apiKey=\"YOUR-API-KEY\" \\"
+info "     --set storageClasses.nfs.server=\"YOUR-TRUENAS-IP\" \\"
+info "     --set image.tag=\"$IMAGE_TAG\""

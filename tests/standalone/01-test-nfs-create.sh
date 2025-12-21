@@ -67,7 +67,7 @@ echo "Step 5: Deploy CSI driver"
 helm upgrade --install tns-csi ./charts/tns-csi-driver \
     --namespace kube-system \
     --set image.repository=bfenski/tns-csi \
-    --set image.tag=latest \
+    --set image.tag="${CSI_IMAGE_TAG:-latest}" \
     --set image.pullPolicy=Always \
     --set truenas.existingSecret=tns-csi-secret \
     --set storageClasses.nfs.enabled=true \

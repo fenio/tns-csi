@@ -2,8 +2,12 @@
 
 DRIVER_NAME=tns-csi-driver
 IMAGE_NAME=bfenski/tns-csi
-VERSION?=v0.0.1
 REGISTRY?=docker.io
+
+# Version information - derived from git tags
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Go parameters
 GOCMD=go
@@ -14,8 +18,11 @@ GOGET=$(GOCMD) get
 GOMOD=$(GOCMD) mod
 GOLANGCI_LINT=golangci-lint
 
-# Build parameters
-LDFLAGS=-ldflags "-s -w"
+# Build parameters with version injection
+LDFLAGS=-ldflags "-s -w \
+	-X main.version=$(VERSION) \
+	-X main.gitCommit=$(GIT_COMMIT) \
+	-X main.buildDate=$(BUILD_DATE)"
 BUILD_DIR=bin
 
 all: build
@@ -53,7 +60,11 @@ deps:
 
 docker-build:
 	@echo "Building Docker image $(IMAGE_NAME):$(VERSION)..."
-	docker build -t $(IMAGE_NAME):$(VERSION) .
+	docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg BUILD_DATE=$(BUILD_DATE) \
+		-t $(IMAGE_NAME):$(VERSION) .
 	docker tag $(IMAGE_NAME):$(VERSION) $(IMAGE_NAME):latest
 
 docker-push:

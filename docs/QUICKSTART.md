@@ -20,7 +20,7 @@ The fastest way to get started is using Helm from the OCI registry:
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -64,74 +64,7 @@ helm install tns-csi ./charts/tns-csi-driver \
   --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
 ```
 
-For more Helm configuration options, see the [Helm Chart README](charts/tns-csi-driver/README.md).
-
-## Manual Installation (Alternative)
-
-<details>
-<summary>Click to expand manual installation steps</summary>
-
-### 1. Build and Load Driver Image (for kind)
-```bash
-# Build the driver
-docker build -t tns-csi-driver:test .
-
-# Load into kind cluster
-kind load docker-image tns-csi-driver:test --name truenas-csi-test
-```
-
-### 2. Create TrueNAS Credentials Secret
-Edit `deploy/secret.yaml` with your TrueNAS details:
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: truenas-csi-secret
-  namespace: kube-system
-type: Opaque
-stringData:
-  server: "YOUR-TRUENAS-IP"
-  port: "443"
-  apiKey: "your-api-key-here"
-```
-
-Apply the secret:
-```bash
-kubectl apply -f deploy/secret.yaml
-```
-
-### 3. Deploy CSI Driver Components
-```bash
-# Deploy in order
-kubectl apply -f deploy/rbac.yaml
-kubectl apply -f deploy/csidriver.yaml
-kubectl apply -f deploy/controller.yaml
-kubectl apply -f deploy/node.yaml
-```
-
-### 4. Create Storage Class
-Edit `deploy/storageclass.yaml`:
-```yaml
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: tns-nfs
-provisioner: tns.csi.io
-parameters:
-  protocol: "nfs"
-  pool: "storage"
-  server: "YOUR-TRUENAS-IP"
-volumeBindingMode: Immediate
-allowVolumeExpansion: true
-reclaimPolicy: Delete
-```
-
-Apply the storage class:
-```bash
-kubectl apply -f deploy/storageclass.yaml
-```
-
-</details>
+For more Helm configuration options, see the [Helm Chart README](../charts/tns-csi-driver/README.md).
 
 ## Usage
 
@@ -319,7 +252,7 @@ kubectl describe pvc <pvc-name>
 ### Enable Debug Logging
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --reuse-values \
   --set controller.extraArgs="{--v=5}" \
@@ -377,7 +310,7 @@ storageClasses:
 Install with values file:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --values my-values.yaml
@@ -389,7 +322,7 @@ To keep volumes on TrueNAS even when PVCs are deleted (useful for data protectio
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -417,7 +350,7 @@ To use NVMe-oF instead of NFS:
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -486,7 +419,7 @@ To upgrade to a newer version:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.5.0 \
   --namespace kube-system \
   --reuse-values
 ```

@@ -42,7 +42,7 @@ spec:
       containers:
         # TNS CSI Node Plugin
         - name: tns-csi-plugin
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ include "tns-csi-driver.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - "--endpoint=unix:///csi/csi.sock"

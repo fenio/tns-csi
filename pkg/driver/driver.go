@@ -100,6 +100,7 @@ func (d *Driver) Run() error {
 	if d.config.MetricsAddr != "" {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
+		mux.Handle("/version", metrics.VersionHandler())
 		d.metricsSrv = &http.Server{
 			Addr:              d.config.MetricsAddr,
 			Handler:           mux,

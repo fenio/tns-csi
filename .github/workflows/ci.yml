@@ -86,6 +86,16 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "is_main=$([[ "$BRANCH" == 'main' ]] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
 
+      - name: Get version info
+        id: version
+        run: |
+          # For branch builds, use 0.0.0-<branch> format (valid semver prerelease)
+          BRANCH_TAG=${{ steps.branch.outputs.tag }}
+          VERSION="0.0.0-${BRANCH_TAG}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
       - name: Build and push images
         uses: docker/build-push-action@v6
         with:
@@ -94,6 +104,10 @@ jobs:
           # Multi-arch builds happen in release workflow for tagged versions
           platforms: linux/amd64
           push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            GIT_COMMIT=${{ steps.version.outputs.commit }}
+            BUILD_DATE=${{ steps.version.outputs.date }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi:${{ steps.branch.outputs.tag }}
             ghcr.io/${{ github.repository }}:${{ steps.branch.outputs.tag }}
@@ -107,6 +121,10 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            GIT_COMMIT=${{ steps.version.outputs.commit }}
+            BUILD_DATE=${{ steps.version.outputs.date }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi:latest
             ghcr.io/${{ github.repository }}:latest

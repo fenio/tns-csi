@@ -4,6 +4,11 @@ FROM --platform=$BUILDPLATFORM golang:1.25.5-alpine AS builder
 ARG TARGETOS
 ARG TARGETARCH
 
+# Version information - passed from CI/CD or Makefile
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
 WORKDIR /workspace
 
 # Install build dependencies
@@ -16,8 +21,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the driver for target platform
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} make build
+# Build the driver for target platform with version info
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    VERSION=${VERSION} GIT_COMMIT=${GIT_COMMIT} BUILD_DATE=${BUILD_DATE} \
+    make build
 
 # Final stage - use distroless or minimal base to avoid trigger issues
 FROM alpine:3.23

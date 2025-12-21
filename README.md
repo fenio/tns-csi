@@ -86,9 +86,12 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md) for detailed installation and configurat
 
 The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry as OCI artifacts:
 
+**Always use a specific version in production.** See [docs/VERSIONING.md](docs/VERSIONING.md) for details.
+
 #### Docker Hub (recommended)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -101,6 +104,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **NVMe-oF Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.5.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -116,40 +120,6 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **Note:** Replace `nqn.2025-01.com.truenas:csi` with your actual NVMe-oF subsystem NQN. You must pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) before provisioning volumes.
 
 See the [Helm chart README](charts/tns-csi-driver/README.md) for detailed configuration options.
-
-<details>
-<summary>Manual Installation (kubectl) - Click to expand</summary>
-
-For advanced users who prefer manual deployment without Helm:
-
-1. Create namespace and RBAC:
-```bash
-kubectl apply -f deploy/rbac.yaml
-```
-
-2. Configure TrueNAS credentials:
-```bash
-# Copy the example secret file and edit with your actual credentials
-cp deploy/secret.yaml deploy/secret.local.yaml
-# Edit deploy/secret.local.yaml with your TrueNAS IP and API key
-kubectl apply -f deploy/secret.local.yaml
-```
-
-**Note:** The files in the `deploy/` directory contain placeholder values. Create `*.local.yaml` versions with your actual configuration. These local files are automatically ignored by git.
-
-3. Deploy the CSI driver:
-```bash
-kubectl apply -f deploy/csidriver.yaml
-kubectl apply -f deploy/controller.yaml
-kubectl apply -f deploy/node.yaml
-```
-
-4. Create a storage class:
-```bash
-kubectl apply -f deploy/storageclass.yaml
-```
-
-</details>
 
 ## Configuration
 
@@ -252,22 +222,15 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md#troubleshooting) for detailed troubleshoo
 
 **View Logs:**
 
-For Helm deployments:
 ```bash
 # Controller logs
 kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
 
 # Node logs
 kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
-```
 
-For manual (kubectl) deployments:
-```bash
-# Controller logs
-kubectl logs -n kube-system -l app=tns-csi,component=controller
-
-# Node logs
-kubectl logs -n kube-system -l app=tns-csi,component=node
+# Check version
+kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
 ```
 
 ## Documentation
@@ -277,6 +240,7 @@ kubectl logs -n kube-system -l app=tns-csi,component=node
 - [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
 - [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
 - [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning
+- [Versioning](docs/VERSIONING.md) - Version management and checking installed version
 - [Distro Compatibility](docs/DISTRO-COMPATIBILITY.md) - Kubernetes distribution compatibility testing
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind

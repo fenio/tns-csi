@@ -104,7 +104,7 @@ if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
     --namespace kube-system \
     --create-namespace \
     --set image.repository=bfenski/tns-csi \
-    --set image.tag=latest \
+    --set image.tag="${CSI_IMAGE_TAG:-latest}" \
     --set image.pullPolicy=Always \
     --set truenas.url="${truenas_url}" \
     --set truenas.apiKey="${TRUENAS_API_KEY}" \

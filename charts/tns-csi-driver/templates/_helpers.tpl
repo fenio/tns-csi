@@ -142,3 +142,18 @@ Validate required TrueNAS configuration
   {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.server is required when NVMe-oF is enabled.\nExample: --set storageClasses.nvmeof.server=\"YOUR-TRUENAS-IP\"" }}
 {{- end }}
 {{- end }}
+
+{{/*
+Get the image tag to use.
+Uses .Values.image.tag if explicitly set, otherwise falls back to .Chart.AppVersion.
+This allows users to either:
+1. Pin a specific version: --set image.tag=v0.5.0
+2. Use the chart's default (appVersion): helm install --version 0.5.0
+*/}}
+{{- define "tns-csi-driver.imageTag" -}}
+{{- if .Values.image.tag }}
+{{- .Values.image.tag }}
+{{- else }}
+{{- .Chart.AppVersion }}
+{{- end }}
+{{- end }}

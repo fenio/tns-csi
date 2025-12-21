@@ -2,6 +2,9 @@
 package metrics
 
 import (
+	"encoding/json"
+	"net/http"
+	"runtime"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -11,6 +14,44 @@ import (
 const (
 	namespace = "tns_csi"
 )
+
+// VersionInfo holds version information for the driver.
+type VersionInfo struct {
+	Version   string `json:"version"`
+	GitCommit string `json:"gitCommit"`
+	BuildDate string `json:"buildDate"`
+	GoVersion string `json:"goVersion"`
+	Platform  string `json:"platform"`
+}
+
+// versionInfo holds the current version information (set at startup).
+var versionInfo VersionInfo
+
+// SetVersionInfo sets the version information for the /version endpoint.
+func SetVersionInfo(version, gitCommit, buildDate string) {
+	versionInfo = VersionInfo{
+		Version:   version,
+		GitCommit: gitCommit,
+		BuildDate: buildDate,
+		GoVersion: runtime.Version(),
+		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
+	}
+}
+
+// GetVersionInfo returns the current version information.
+func GetVersionInfo() VersionInfo {
+	return versionInfo
+}
+
+// VersionHandler returns an HTTP handler that serves version information as JSON.
+func VersionHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(versionInfo); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+}
 
 // Operation types for CSI operations.
 const (

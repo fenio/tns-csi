@@ -522,7 +522,9 @@ if grep -q "No TCP NVMe-oF port" <<< "$logs"; then
 fi
 
 # Check for parent dataset errors
-if grep -qE "(dataset.*does not exist|parent.*not found)" <<< "$logs"; then
+# Filter out property-related errors (like "properties.comments: Property does not exist")
+# which are warnings, not actual dataset creation failures
+if echo "$logs" | grep -v "properties\." | grep -qE "(dataset.*does not exist|parent.*not found)"; then
     test_error "Parent dataset does not exist on TrueNAS"
     test_error "Please create the parent dataset on TrueNAS: ${TRUENAS_POOL}/${NESTED_DATASET_PATH}"
     echo ""

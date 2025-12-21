@@ -1745,6 +1745,13 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 	var result Dataset
 	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
 	if err != nil {
+		errStr := err.Error()
+		// Ignore 'comments' property errors - this property doesn't exist on ZVOLs
+		// but TrueNAS may complain about it when the parent dataset has comments set
+		if strings.Contains(errStr, "properties.comments") && strings.Contains(errStr, "does not exist") {
+			klog.V(4).Infof("Ignoring 'comments' property error for ZVOL %s (expected for block devices)", datasetID)
+			return nil
+		}
 		return fmt.Errorf("failed to set user properties on dataset %s: %w", datasetID, err)
 	}
 

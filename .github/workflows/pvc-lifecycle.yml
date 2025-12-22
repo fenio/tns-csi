@@ -58,25 +58,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install websocat
-        run: |
-          # Download websocat binary with retries and -f to fail on HTTP errors
-          for i in 1 2 3; do
-            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
-            echo "Download attempt $i failed, retrying in 5s..."
-            sleep 5
-          done
-          # Verify it's a binary not an HTML error page
-          if file /tmp/websocat | grep -q "ELF"; then
-            chmod +x /tmp/websocat
-            sudo mv /tmp/websocat /usr/local/bin/websocat
-            websocat --version
-          else
-            echo "ERROR: Downloaded file is not a valid ELF binary"
-            file /tmp/websocat
-            head -c 200 /tmp/websocat
-            exit 1
-          fi
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -107,25 +92,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install websocat
-        run: |
-          # Download websocat binary with retries and -f to fail on HTTP errors
-          for i in 1 2 3; do
-            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
-            echo "Download attempt $i failed, retrying in 5s..."
-            sleep 5
-          done
-          # Verify it's a binary not an HTML error page
-          if file /tmp/websocat | grep -q "ELF"; then
-            chmod +x /tmp/websocat
-            sudo mv /tmp/websocat /usr/local/bin/websocat
-            websocat --version
-          else
-            echo "ERROR: Downloaded file is not a valid ELF binary"
-            file /tmp/websocat
-            head -c 200 /tmp/websocat
-            exit 1
-          fi
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -157,25 +127,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof-nested' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install websocat
-        run: |
-          # Download websocat binary with retries and -f to fail on HTTP errors
-          for i in 1 2 3; do
-            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
-            echo "Download attempt $i failed, retrying in 5s..."
-            sleep 5
-          done
-          # Verify it's a binary not an HTML error page
-          if file /tmp/websocat | grep -q "ELF"; then
-            chmod +x /tmp/websocat
-            sudo mv /tmp/websocat /usr/local/bin/websocat
-            websocat --version
-          else
-            echo "ERROR: Downloaded file is not a valid ELF binary"
-            file /tmp/websocat
-            head -c 200 /tmp/websocat
-            exit 1
-          fi
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -281,7 +236,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version: '1.25.5'
       - name: Run TrueNAS Cleanup
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

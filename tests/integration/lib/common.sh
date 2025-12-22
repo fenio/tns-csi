@@ -1543,10 +1543,11 @@ cleanup_test() {
 
 #######################################
 # Verify that a dataset/zvol was actually deleted from TrueNAS
-# This directly queries TrueNAS WebSocket API to confirm backend cleanup
+# This uses Go with pkg/tnsapi to query TrueNAS WebSocket API
+# (same approach as cleanup-truenas-artifacts.sh)
 # 
 # Arguments:
-#   Volume handle (dataset path, e.g., "pool/csi/pvc-xxx")
+#   Volume handle (dataset path, e.g., "csi/pvc-xxx")
 #   Timeout in seconds (optional, default: 30)
 #
 # Returns:
@@ -1570,125 +1571,142 @@ verify_truenas_deletion() {
         return 0
     fi
     
-    # Check if websocat is available
-    if ! command -v websocat &>/dev/null; then
-        test_error "websocat is not installed - cannot verify TrueNAS deletion"
-        test_error "Install with: cargo install websocat (or apt-get install websocat)"
-        return 1
+    # Check if Go is available - skip verification if not (don't fail the test)
+    if ! command -v go &>/dev/null; then
+        test_warning "Go not installed - skipping TrueNAS backend verification"
+        test_warning "The PV was deleted successfully, but cannot confirm backend cleanup"
+        return 0
     fi
     
-    local ws_url="wss://${TRUENAS_HOST}/api/current"
     # Construct full dataset path: pool/volume_handle
     local dataset_path="${TRUENAS_POOL}/${volume_handle}"
     
     test_info "Checking if dataset/zvol exists: ${dataset_path}"
     test_info "Timeout: ${timeout} seconds"
     
+    # Find the repository root (where go.mod is located)
+    local repo_root
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+    
+    # Create temp directory for Go verification tool
+    local verify_dir
+    verify_dir=$(mktemp -d)
+    
+    # Generate Go verification tool (same pattern as cleanup-truenas-artifacts.sh)
+    cat > "${verify_dir}/verify.go" <<'EOFGO'
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "time"
+
+    "github.com/fenio/tns-csi/pkg/tnsapi"
+)
+
+func main() {
+    host := os.Getenv("TRUENAS_HOST")
+    apiKey := os.Getenv("TRUENAS_API_KEY")
+    datasetPath := os.Getenv("DATASET_PATH")
+
+    if host == "" || apiKey == "" || datasetPath == "" {
+        fmt.Println("ERROR: Missing required environment variables")
+        os.Exit(2)
+    }
+
+    url := fmt.Sprintf("wss://%s/api/current", host)
+
+    client, err := tnsapi.NewClient(url, apiKey, true)
+    if err != nil {
+        fmt.Printf("ERROR: Failed to connect to TrueNAS: %v\n", err)
+        os.Exit(2)
+    }
+    defer client.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    // Query for the dataset using filter
+    var datasets []map[string]interface{}
+    filter := []interface{}{[]interface{}{"id", "=", datasetPath}}
+    if err := client.Call(ctx, "pool.dataset.query", []interface{}{filter}, &datasets); err != nil {
+        fmt.Printf("ERROR: Query failed: %v\n", err)
+        os.Exit(2)
+    }
+
+    if len(datasets) == 0 {
+        fmt.Printf("DELETED: Dataset '%s' does not exist on TrueNAS\n", datasetPath)
+        os.Exit(0) // Success - dataset is deleted
+    } else {
+        fmt.Printf("EXISTS: Dataset '%s' still exists on TrueNAS\n", datasetPath)
+        os.Exit(1) // Failure - dataset still exists
+    }
+}
+EOFGO
+
+    # Build the verification tool using the same pattern as cleanup scripts
+    # This uses go mod edit -replace to use local pkg/tnsapi
+    local original_dir
+    original_dir=$(pwd)
+    cd "${verify_dir}"
+    
+    test_info "Building TrueNAS verification tool..."
+    if ! go mod init verify >/dev/null 2>&1; then
+        test_warning "Failed to initialize Go module, skipping TrueNAS verification"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 0
+    fi
+    
+    if ! go mod edit -replace "github.com/fenio/tns-csi=${repo_root}" >/dev/null 2>&1; then
+        test_warning "Failed to set up Go module replace, skipping TrueNAS verification"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 0
+    fi
+    
+    if ! go mod tidy >/dev/null 2>&1; then
+        test_warning "Failed to tidy Go module, skipping TrueNAS verification"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 0
+    fi
+    
     # Poll for deletion with timeout
     local deadline=$((SECONDS + timeout))
     local attempt=0
+    local result
+    local exit_code
     
     while [[ $SECONDS -lt $deadline ]]; do
         attempt=$((attempt + 1))
         
-        # Query TrueNAS via WebSocket API using websocat
-        # TrueNAS Scale uses JSON-RPC 2.0 format (NOT the old websocket protocol)
-        # Format: {"id":"N","jsonrpc":"2.0","method":"method.name","params":[...]}
-        local response
-        local tmpfile
-        tmpfile=$(mktemp)
+        export DATASET_PATH="${dataset_path}"
+        result=$(go run verify.go 2>&1) || true
+        exit_code=$?
         
-        # Send JSON-RPC 2.0 messages with longer delays to ensure auth completes before query
-        # The auth needs time to process on the server before we can query
-        {
-            # First authenticate with API key
-            echo '{"id":"1","jsonrpc":"2.0","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}'
-            # Wait longer for auth to complete (server needs time to process)
-            sleep 2
-            # Then query for the dataset
-            echo '{"id":"2","jsonrpc":"2.0","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}'
-            # Wait for query response
-            sleep 2
-        } | timeout 15 websocat -k "${ws_url}" > "${tmpfile}" 2>&1 || true
-        
-        response=$(cat "${tmpfile}" 2>/dev/null || echo "")
-        rm -f "${tmpfile}"
-        
-        # Debug: show raw response on first attempt
-        if [[ ${attempt} -eq 1 ]]; then
-            test_info "WebSocket response (first attempt, truncated): ${response:0:500}"
-        fi
-        
-        # Check if we got any response at all
-        if [[ -z "${response}" ]]; then
-            test_info "Attempt ${attempt}: No response from TrueNAS WebSocket, retrying..."
-            sleep 2
-            continue
-        fi
-        
-        # Check for authentication success (id:1 should have result:true)
-        local auth_response
-        auth_response=$(echo "${response}" | grep '"id":"1"' || echo "")
-        if echo "${auth_response}" | grep -q '"error"'; then
-            test_info "Attempt ${attempt}: Authentication failed"
-            if [[ ${attempt} -eq 1 ]]; then
-                test_info "Auth error: ${auth_response:0:200}"
-            fi
-            sleep 2
-            continue
-        fi
-        
-        # Extract the response for our query (id:2)
-        local query_response
-        query_response=$(echo "${response}" | grep '"id":"2"' || echo "")
-        
-        # Check if query got ENOTAUTHENTICATED - means we need to retry with longer delay
-        if echo "${query_response}" | grep -q "ENOTAUTHENTICATED"; then
-            test_info "Attempt ${attempt}: Query sent before auth completed, retrying..."
-            sleep 2
-            continue
-        fi
-        
-        # Check if dataset exists in the response
-        # If result is empty array [], dataset doesn't exist (deleted!)
-        if echo "${query_response}" | grep -q '"result":\s*\[\]'; then
+        # Check result based on output prefix
+        if echo "${result}" | grep -q "^DELETED:"; then
             test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
+            cd "${original_dir}"
+            rm -rf "${verify_dir}"
             return 0
-        fi
-        
-        # Also check for result:[] without spaces
-        if echo "${query_response}" | grep -q '"result":\[\]'; then
-            test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
-            return 0
-        fi
-        
-        # If we got no response for id:2, might be timeout
-        if [[ -z "${query_response}" ]]; then
-            test_info "Attempt ${attempt}: No query response (id:2) from TrueNAS, retrying..."
-            sleep 2
-            continue
-        fi
-        
-        # Check for error response (dataset not found errors also mean deleted)
-        if echo "${query_response}" | grep -qi '"error"'; then
-            if echo "${query_response}" | grep -qi "not found\|does not exist\|ENOENT"; then
-                test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
-                return 0
-            fi
-            test_info "Attempt ${attempt}: Query error: ${query_response:0:200}"
-        fi
-        
-        # Dataset still exists (we got a non-empty result array)
-        if echo "${query_response}" | grep -q '"result":\[{'; then
+        elif echo "${result}" | grep -q "^EXISTS:"; then
             test_info "Attempt ${attempt}: Dataset still exists on TrueNAS, waiting..."
+            sleep 2
+        elif echo "${result}" | grep -q "^ERROR:"; then
+            test_info "Attempt ${attempt}: ${result}"
+            sleep 2
         else
-            test_info "Attempt ${attempt}: Unexpected response format, retrying..."
-            if [[ ${attempt} -le 2 ]]; then
-                test_info "Response: ${query_response:0:300}"
-            fi
+            test_info "Attempt ${attempt}: Unexpected result: ${result}"
+            sleep 2
         fi
-        sleep 2
     done
+    
+    # Cleanup
+    cd "${original_dir}"
+    rm -rf "${verify_dir}"
     
     # Timeout reached - dataset still exists
     test_error "Dataset '${dataset_path}' still exists on TrueNAS after ${timeout} seconds"

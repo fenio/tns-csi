@@ -1585,8 +1585,9 @@ verify_truenas_deletion() {
     test_info "Timeout: ${timeout} seconds"
     
     # Find the repository root (where go.mod is located)
+    # BASH_SOURCE[0] is tests/integration/lib/common.sh, so we need ../../.. to get to repo root
     local repo_root
-    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
     
     test_info "Repository root: ${repo_root}"
     

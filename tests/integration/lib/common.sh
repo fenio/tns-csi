@@ -1598,15 +1598,18 @@ verify_truenas_deletion() {
         local tmpfile
         tmpfile=$(mktemp)
         
-        # Send JSON-RPC 2.0 messages with delays to allow responses
+        # Send JSON-RPC 2.0 messages with longer delays to ensure auth completes before query
+        # The auth needs time to process on the server before we can query
         {
             # First authenticate with API key
             echo '{"id":"1","jsonrpc":"2.0","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}'
-            sleep 0.5
+            # Wait longer for auth to complete (server needs time to process)
+            sleep 2
             # Then query for the dataset
             echo '{"id":"2","jsonrpc":"2.0","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}'
-            sleep 1
-        } | timeout 10 websocat -k "${ws_url}" > "${tmpfile}" 2>&1 || true
+            # Wait for query response
+            sleep 2
+        } | timeout 15 websocat -k "${ws_url}" > "${tmpfile}" 2>&1 || true
         
         response=$(cat "${tmpfile}" 2>/dev/null || echo "")
         rm -f "${tmpfile}"
@@ -1623,11 +1626,11 @@ verify_truenas_deletion() {
             continue
         fi
         
-        # Check for authentication failure first
+        # Check for authentication success (id:1 should have result:true)
         local auth_response
         auth_response=$(echo "${response}" | grep '"id":"1"' || echo "")
         if echo "${auth_response}" | grep -q '"error"'; then
-            test_info "Attempt ${attempt}: Authentication failed, retrying..."
+            test_info "Attempt ${attempt}: Authentication failed"
             if [[ ${attempt} -eq 1 ]]; then
                 test_info "Auth error: ${auth_response:0:200}"
             fi
@@ -1638,6 +1641,13 @@ verify_truenas_deletion() {
         # Extract the response for our query (id:2)
         local query_response
         query_response=$(echo "${response}" | grep '"id":"2"' || echo "")
+        
+        # Check if query got ENOTAUTHENTICATED - means we need to retry with longer delay
+        if echo "${query_response}" | grep -q "ENOTAUTHENTICATED"; then
+            test_info "Attempt ${attempt}: Query sent before auth completed, retrying..."
+            sleep 2
+            continue
+        fi
         
         # Check if dataset exists in the response
         # If result is empty array [], dataset doesn't exist (deleted!)

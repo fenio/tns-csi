@@ -320,6 +320,22 @@ delete_pvc_directly() {
         test_success "PVC confirmed deleted"
     fi
     
+    # CRITICAL: Verify the zvol was actually deleted from TrueNAS
+    # This is the key test - PV deletion alone doesn't prove backend cleanup
+    echo ""
+    test_info "Verifying zvol was deleted from TrueNAS backend..."
+    if ! verify_truenas_deletion "${volume_handle}" 30; then
+        test_error "TrueNAS zvol still exists! CSI DeleteVolume did not clean up backend."
+        echo ""
+        echo "=== Controller Logs (DeleteVolume) ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=100 | grep -i -E "(delete|volume|zvol|subsystem)" || true
+        stop_test_timer "delete_pvc_directly" "FAILED"
+        false
+    fi
+    test_success "TrueNAS zvol confirmed deleted - backend cleanup verified!"
+    
     stop_test_timer "delete_pvc_directly" "PASSED"
 }
 

@@ -475,6 +475,23 @@ delete_pvc_directly() {
         test_success "PVC confirmed deleted"
     fi
     
+    # CRITICAL: Verify the zvol was actually deleted from TrueNAS
+    # This is especially important for nested dataset paths where parsing can fail
+    echo ""
+    test_info "Verifying zvol was deleted from TrueNAS backend..."
+    if ! verify_truenas_deletion "${volume_handle}" 30; then
+        test_error "TrueNAS zvol still exists! CSI DeleteVolume did not clean up backend."
+        test_error "This may indicate an issue with nested parentDataset path handling."
+        echo ""
+        echo "=== Controller Logs (DeleteVolume) ==="
+        kubectl logs -n kube-system \
+            -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+            --tail=100 | grep -i -E "(delete|volume|zvol|subsystem|dataset)" || true
+        stop_test_timer "delete_pvc_directly" "FAILED"
+        false
+    fi
+    test_success "TrueNAS zvol confirmed deleted - nested dataset backend cleanup verified!"
+    
     stop_test_timer "delete_pvc_directly" "PASSED"
 }
 

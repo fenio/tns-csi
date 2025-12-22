@@ -58,10 +58,12 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
+      - name: Install websocat
+        run: |
+          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
+          chmod +x /tmp/websocat
+          sudo mv /tmp/websocat /usr/local/bin/websocat
+          websocat --version
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -92,10 +94,12 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
+      - name: Install websocat
+        run: |
+          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
+          chmod +x /tmp/websocat
+          sudo mv /tmp/websocat /usr/local/bin/websocat
+          websocat --version
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -127,10 +131,12 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof-nested' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
+      - name: Install websocat
+        run: |
+          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
+          chmod +x /tmp/websocat
+          sudo mv /tmp/websocat /usr/local/bin/websocat
+          websocat --version
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'

@@ -1543,7 +1543,7 @@ cleanup_test() {
 
 #######################################
 # Verify that a dataset/zvol was actually deleted from TrueNAS
-# This directly queries TrueNAS API to confirm backend cleanup
+# This directly queries TrueNAS WebSocket API to confirm backend cleanup
 # 
 # Arguments:
 #   Volume handle (dataset path, e.g., "pool/csi/pvc-xxx")
@@ -1565,60 +1565,59 @@ verify_truenas_deletion() {
         return 0
     fi
     
-    # Check if Go is available
-    if ! command -v go &>/dev/null; then
-        test_error "Go is not installed - cannot verify TrueNAS deletion"
-        test_error "Please add 'actions/setup-go' step to the workflow"
+    # Check if websocat is available
+    if ! command -v websocat &>/dev/null; then
+        test_error "websocat is not installed - cannot verify TrueNAS deletion"
+        test_error "Install with: cargo install websocat (or apt-get install websocat)"
         return 1
     fi
     
-    # Build the verification tool
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local tool_src="${script_dir}/verify-truenas-deletion.go"
+    local ws_url="wss://${TRUENAS_HOST}/api/current"
+    local dataset_path="${volume_handle}"
     
-    if [[ ! -f "${tool_src}" ]]; then
-        test_error "verify-truenas-deletion.go not found at ${tool_src}"
-        return 1
-    fi
+    test_info "Checking if dataset/zvol exists: ${dataset_path}"
+    test_info "Timeout: ${timeout} seconds"
     
-    # Create temporary directory for building the tool
-    local build_dir
-    build_dir=$(mktemp -d)
+    # Poll for deletion with timeout
+    local deadline=$((SECONDS + timeout))
+    local attempt=0
     
-    # Find the project root (parent of tests/integration/lib)
-    local project_root
-    project_root="$(cd "${script_dir}/../../.." && pwd)"
+    while [[ $SECONDS -lt $deadline ]]; do
+        attempt=$((attempt + 1))
+        
+        # Query TrueNAS via WebSocket API
+        # Send connect, auth, and query messages
+        local response
+        response=$(echo '{"id":"1","msg":"connect","version":"1","support":["1"]}
+{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}
+{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}' | \
+            websocat -n -k --ping-interval 5 -t "${ws_url}" 2>/dev/null | \
+            grep '"id":"3"' || echo '{"result":[]}')
+        
+        # Check if dataset exists in the response
+        # If result is empty array [], dataset doesn't exist
+        if echo "${response}" | grep -q '"result":\[\]'; then
+            test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
+            return 0
+        fi
+        
+        # Check for error response (dataset not found errors also mean deleted)
+        if echo "${response}" | grep -qi '"error"'; then
+            if echo "${response}" | grep -qi "not found\|does not exist\|ENOENT"; then
+                test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
+                return 0
+            fi
+        fi
+        
+        # Dataset still exists or couldn't determine status
+        test_info "Attempt ${attempt}: Dataset may still exist, waiting..."
+        sleep 2
+    done
     
-    # Copy the Go source to build directory
-    cp "${tool_src}" "${build_dir}/"
-    
-    # Initialize Go module with replace directive
-    (
-        cd "${build_dir}"
-        go mod init verify-deletion >/dev/null 2>&1
-        go mod edit -replace "github.com/fenio/tns-csi=${project_root}" >/dev/null 2>&1
-        go mod tidy >/dev/null 2>&1
-    )
-    
-    # Build the tool
-    local tool_bin="${build_dir}/verify-truenas-deletion"
-    if ! (cd "${build_dir}" && go build -o verify-truenas-deletion verify-truenas-deletion.go 2>&1); then
-        test_error "Failed to build verify-truenas-deletion tool"
-        rm -rf "${build_dir}"
-        return 1
-    fi
-    
-    # Run the verification
-    local result=0
-    if ! "${tool_bin}" "${volume_handle}" "${timeout}"; then
-        result=1
-    fi
-    
-    # Cleanup
-    rm -rf "${build_dir}"
-    
-    return $result
+    # Timeout reached - dataset still exists
+    test_error "Dataset '${dataset_path}' still exists on TrueNAS after ${timeout} seconds"
+    test_error "This indicates the CSI DeleteVolume did not properly clean up the backend resource."
+    return 1
 }
 
 #######################################

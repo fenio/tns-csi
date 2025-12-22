@@ -1,20 +1,13 @@
 name: Integration Tests 
 
 on:
-  # Scheduled trigger - run every 2 hours
-  # schedule:
-  #   - cron: '0 */2 * * *'
-  # Automatic trigger disabled - run manually until volume expansion issues are fixed
-  # workflow_run:
-  #   workflows: ["CI"]
-  #   types:
-  #     - completed
-  #   branches:
-  #     - main
-  # Trigger on version tags (after release workflow publishes the image)
-  push:
-    tags:
-      - 'v*'
+  # Run after CI or Release workflow completes
+  # - CI on main: catches issues before release (uses 'latest' image)
+  # - Release on tags: tests the actual released image (uses tag like 'v0.5.0')
+  workflow_run:
+    workflows: ["CI", "Release"]
+    types:
+      - completed
   # Manual trigger for testing specific protocols/tests
   workflow_dispatch:
     inputs:
@@ -72,16 +65,37 @@ jobs:
   compute-tag:
     name: Compute Image Tag
     runs-on: new
-    # Skip if triggered by workflow_run and CI failed
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # Skip if:
+    # - triggered by workflow_run and the workflow failed
+    # - triggered by CI workflow but not on main branch (only run integration tests for main)
+    if: |
+      github.event_name != 'workflow_run' || 
+      (github.event.workflow_run.conclusion == 'success' && 
+       (github.event.workflow_run.name == 'Release' || github.event.workflow_run.head_branch == 'main'))
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
       - name: Compute image tag from ref
         id: tag
         run: |
-          REF_NAME="${{ github.ref_name }}"
-          REF_TYPE="${{ github.ref_type }}"
+          # For workflow_run events, get ref from the triggering workflow
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            REF_NAME="${{ github.event.workflow_run.head_branch }}"
+            # Check if it was triggered by a tag (Release workflow)
+            if [ "${{ github.event.workflow_run.event }}" = "push" ] && [[ "${{ github.event.workflow_run.head_branch }}" == v* ]]; then
+              REF_TYPE="tag"
+            else
+              REF_TYPE="branch"
+            fi
+            WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+            echo "Triggered by workflow: $WORKFLOW_NAME"
+          else
+            # For manual dispatch or other events
+            REF_NAME="${{ github.ref_name }}"
+            REF_TYPE="${{ github.ref_type }}"
+          fi
+          
+          echo "REF_NAME: $REF_NAME, REF_TYPE: $REF_TYPE"
           
           if [ "$REF_TYPE" = "tag" ]; then
             # For tags like v0.5.0, use the tag name directly

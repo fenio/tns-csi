@@ -60,10 +60,23 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install websocat
         run: |
-          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
-          chmod +x /tmp/websocat
-          sudo mv /tmp/websocat /usr/local/bin/websocat
-          websocat --version
+          # Download websocat binary with retries and -f to fail on HTTP errors
+          for i in 1 2 3; do
+            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
+            echo "Download attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          # Verify it's a binary not an HTML error page
+          if file /tmp/websocat | grep -q "ELF"; then
+            chmod +x /tmp/websocat
+            sudo mv /tmp/websocat /usr/local/bin/websocat
+            websocat --version
+          else
+            echo "ERROR: Downloaded file is not a valid ELF binary"
+            file /tmp/websocat
+            head -c 200 /tmp/websocat
+            exit 1
+          fi
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -96,10 +109,23 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install websocat
         run: |
-          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
-          chmod +x /tmp/websocat
-          sudo mv /tmp/websocat /usr/local/bin/websocat
-          websocat --version
+          # Download websocat binary with retries and -f to fail on HTTP errors
+          for i in 1 2 3; do
+            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
+            echo "Download attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          # Verify it's a binary not an HTML error page
+          if file /tmp/websocat | grep -q "ELF"; then
+            chmod +x /tmp/websocat
+            sudo mv /tmp/websocat /usr/local/bin/websocat
+            websocat --version
+          else
+            echo "ERROR: Downloaded file is not a valid ELF binary"
+            file /tmp/websocat
+            head -c 200 /tmp/websocat
+            exit 1
+          fi
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -133,10 +159,23 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install websocat
         run: |
-          curl -sSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat
-          chmod +x /tmp/websocat
-          sudo mv /tmp/websocat /usr/local/bin/websocat
-          websocat --version
+          # Download websocat binary with retries and -f to fail on HTTP errors
+          for i in 1 2 3; do
+            curl -fsSL https://github.com/vi/websocat/releases/download/v1.14.0/websocat.x86_64-unknown-linux-musl -o /tmp/websocat && break
+            echo "Download attempt $i failed, retrying in 5s..."
+            sleep 5
+          done
+          # Verify it's a binary not an HTML error page
+          if file /tmp/websocat | grep -q "ELF"; then
+            chmod +x /tmp/websocat
+            sudo mv /tmp/websocat /usr/local/bin/websocat
+            websocat --version
+          else
+            echo "ERROR: Downloaded file is not a valid ELF binary"
+            file /tmp/websocat
+            head -c 200 /tmp/websocat
+            exit 1
+          fi
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'

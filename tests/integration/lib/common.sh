@@ -1586,31 +1586,43 @@ verify_truenas_deletion() {
         attempt=$((attempt + 1))
         
         # Query TrueNAS via WebSocket API
-        # Send connect, auth, and query messages
+        # Use timeout to prevent hanging if websocat doesn't exit
         local response
-        response=$(echo '{"id":"1","msg":"connect","version":"1","support":["1"]}
-{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}
-{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}' | \
-            websocat -n -k --ping-interval 5 -t "${ws_url}" 2>/dev/null | \
-            grep '"id":"3"' || echo '{"result":[]}')
+        response=$(timeout 10 websocat -n -k -t --no-close -1 "${ws_url}" 2>/dev/null <<EOF
+{"id":"1","msg":"connect","version":"1","support":["1"]}
+{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["${TRUENAS_API_KEY}"]}
+{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","${dataset_path}"]]]}
+EOF
+        )
+        
+        # Extract the response for our query (id:3)
+        local query_response
+        query_response=$(echo "${response}" | grep '"id":"3"' || echo "")
         
         # Check if dataset exists in the response
         # If result is empty array [], dataset doesn't exist
-        if echo "${response}" | grep -q '"result":\[\]'; then
+        if echo "${query_response}" | grep -q '"result":\[\]'; then
             test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
             return 0
         fi
         
+        # If we got no response for id:3, check for errors
+        if [[ -z "${query_response}" ]]; then
+            test_info "Attempt ${attempt}: No response from TrueNAS, retrying..."
+            sleep 2
+            continue
+        fi
+        
         # Check for error response (dataset not found errors also mean deleted)
-        if echo "${response}" | grep -qi '"error"'; then
-            if echo "${response}" | grep -qi "not found\|does not exist\|ENOENT"; then
+        if echo "${query_response}" | grep -qi '"error"'; then
+            if echo "${query_response}" | grep -qi "not found\|does not exist\|ENOENT"; then
                 test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
                 return 0
             fi
         fi
         
-        # Dataset still exists or couldn't determine status
-        test_info "Attempt ${attempt}: Dataset may still exist, waiting..."
+        # Dataset still exists
+        test_info "Attempt ${attempt}: Dataset still exists, waiting..."
         sleep 2
     done
     

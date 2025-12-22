@@ -98,8 +98,9 @@ jobs:
           echo "REF_NAME: $REF_NAME, REF_TYPE: $REF_TYPE"
           
           if [ "$REF_TYPE" = "tag" ]; then
-            # For tags like v0.5.0, use the tag name directly
-            TAG="$REF_NAME"
+            # For tags like v0.5.0, strip the 'v' prefix to match Docker image tags
+            # Release workflow uses semver pattern which produces tags like 0.5.0 (without v)
+            TAG="${REF_NAME#v}"
             echo "Using image tag: $TAG (from tag: $REF_NAME)"
           elif [ "$REF_NAME" = "main" ]; then
             TAG="latest"

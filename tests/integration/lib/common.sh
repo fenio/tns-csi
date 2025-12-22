@@ -1592,19 +1592,19 @@ verify_truenas_deletion() {
         attempt=$((attempt + 1))
         
         # Query TrueNAS via WebSocket API using websocat
-        # The trick is to send all messages then wait a bit for responses before closing
-        # Using process substitution with sleep to keep connection open long enough
+        # TrueNAS Scale uses JSON-RPC 2.0 format (NOT the old websocket protocol)
+        # Format: {"id":"N","jsonrpc":"2.0","method":"method.name","params":[...]}
         local response
         local tmpfile
         tmpfile=$(mktemp)
         
-        # Create a script that sends messages with delays to allow responses
+        # Send JSON-RPC 2.0 messages with delays to allow responses
         {
-            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
+            # First authenticate with API key
+            echo '{"id":"1","jsonrpc":"2.0","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}'
             sleep 0.5
-            echo '{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}'
-            sleep 0.5
-            echo '{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}'
+            # Then query for the dataset
+            echo '{"id":"2","jsonrpc":"2.0","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}'
             sleep 1
         } | timeout 10 websocat -k "${ws_url}" > "${tmpfile}" 2>&1 || true
         
@@ -1623,28 +1623,38 @@ verify_truenas_deletion() {
             continue
         fi
         
-        # Extract the response for our query (id:3)
+        # Check for authentication failure first
+        local auth_response
+        auth_response=$(echo "${response}" | grep '"id":"1"' || echo "")
+        if echo "${auth_response}" | grep -q '"error"'; then
+            test_info "Attempt ${attempt}: Authentication failed, retrying..."
+            if [[ ${attempt} -eq 1 ]]; then
+                test_info "Auth error: ${auth_response:0:200}"
+            fi
+            sleep 2
+            continue
+        fi
+        
+        # Extract the response for our query (id:2)
         local query_response
-        query_response=$(echo "${response}" | grep '"id":"3"' || echo "")
+        query_response=$(echo "${response}" | grep '"id":"2"' || echo "")
         
         # Check if dataset exists in the response
-        # If result is empty array [], dataset doesn't exist
+        # If result is empty array [], dataset doesn't exist (deleted!)
+        if echo "${query_response}" | grep -q '"result":\s*\[\]'; then
+            test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
+            return 0
+        fi
+        
+        # Also check for result:[] without spaces
         if echo "${query_response}" | grep -q '"result":\[\]'; then
             test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
             return 0
         fi
         
-        # If we got no response for id:3, might be auth failure or timeout
+        # If we got no response for id:2, might be timeout
         if [[ -z "${query_response}" ]]; then
-            # Check for auth errors
-            if echo "${response}" | grep -qi '"error"'; then
-                test_info "Attempt ${attempt}: TrueNAS API error in response, retrying..."
-                if [[ ${attempt} -eq 1 ]]; then
-                    test_info "Error response: ${response:0:300}"
-                fi
-            else
-                test_info "Attempt ${attempt}: No query response (id:3) from TrueNAS, retrying..."
-            fi
+            test_info "Attempt ${attempt}: No query response (id:2) from TrueNAS, retrying..."
             sleep 2
             continue
         fi
@@ -1655,13 +1665,17 @@ verify_truenas_deletion() {
                 test_success "Dataset '${dataset_path}' confirmed deleted from TrueNAS (attempt ${attempt})"
                 return 0
             fi
+            test_info "Attempt ${attempt}: Query error: ${query_response:0:200}"
         fi
         
-        # Dataset still exists (we got a non-empty result)
+        # Dataset still exists (we got a non-empty result array)
         if echo "${query_response}" | grep -q '"result":\[{'; then
             test_info "Attempt ${attempt}: Dataset still exists on TrueNAS, waiting..."
         else
             test_info "Attempt ${attempt}: Unexpected response format, retrying..."
+            if [[ ${attempt} -le 2 ]]; then
+                test_info "Response: ${query_response:0:300}"
+            fi
         fi
         sleep 2
     done

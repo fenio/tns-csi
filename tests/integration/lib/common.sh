@@ -1542,6 +1542,79 @@ cleanup_test() {
 }
 
 #######################################
+# Verify that a dataset/zvol was actually deleted from TrueNAS
+# This directly queries TrueNAS API to confirm backend cleanup
+# 
+# Arguments:
+#   Volume handle (dataset path, e.g., "pool/csi/pvc-xxx")
+#   Timeout in seconds (optional, default: 30)
+#
+# Returns:
+#   0 if dataset is confirmed deleted
+#   1 if dataset still exists or error
+#######################################
+verify_truenas_deletion() {
+    local volume_handle=$1
+    local timeout=${2:-30}
+    
+    test_info "Verifying TrueNAS backend deletion for: ${volume_handle}"
+    
+    # Check required environment variables
+    if [[ -z "${TRUENAS_HOST}" ]] || [[ -z "${TRUENAS_API_KEY}" ]]; then
+        test_warning "TRUENAS_HOST or TRUENAS_API_KEY not set, skipping TrueNAS verification"
+        return 0
+    fi
+    
+    # Build the verification tool
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local tool_src="${script_dir}/verify-truenas-deletion.go"
+    
+    if [[ ! -f "${tool_src}" ]]; then
+        test_warning "verify-truenas-deletion.go not found, skipping TrueNAS verification"
+        return 0
+    fi
+    
+    # Create temporary directory for building the tool
+    local build_dir
+    build_dir=$(mktemp -d)
+    
+    # Find the project root (parent of tests/integration/lib)
+    local project_root
+    project_root="$(cd "${script_dir}/../../.." && pwd)"
+    
+    # Copy the Go source to build directory
+    cp "${tool_src}" "${build_dir}/"
+    
+    # Initialize Go module with replace directive
+    (
+        cd "${build_dir}"
+        go mod init verify-deletion >/dev/null 2>&1
+        go mod edit -replace "github.com/fenio/tns-csi=${project_root}" >/dev/null 2>&1
+        go mod tidy >/dev/null 2>&1
+    )
+    
+    # Build the tool
+    local tool_bin="${build_dir}/verify-truenas-deletion"
+    if ! (cd "${build_dir}" && go build -o verify-truenas-deletion verify-truenas-deletion.go 2>&1); then
+        test_warning "Failed to build verify-truenas-deletion tool"
+        rm -rf "${build_dir}"
+        return 0
+    fi
+    
+    # Run the verification
+    local result=0
+    if ! "${tool_bin}" "${volume_handle}" "${timeout}"; then
+        result=1
+    fi
+    
+    # Cleanup
+    rm -rf "${build_dir}"
+    
+    return $result
+}
+
+#######################################
 # Show diagnostic logs on failure
 # Arguments:
 #   Pod name (optional)

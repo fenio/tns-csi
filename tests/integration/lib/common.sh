@@ -1552,7 +1552,7 @@ cleanup_test() {
 #
 # Returns:
 #   0 if dataset is confirmed deleted
-#   1 if dataset still exists or error
+#   1 if dataset still exists or verification failed
 #######################################
 verify_truenas_deletion() {
     local volume_handle=$1
@@ -1560,22 +1560,22 @@ verify_truenas_deletion() {
     
     test_info "Verifying TrueNAS backend deletion for: ${volume_handle}"
     
-    # Check required environment variables
+    # Check required environment variables - these are required, fail if missing
     if [[ -z "${TRUENAS_HOST}" ]] || [[ -z "${TRUENAS_API_KEY}" ]]; then
-        test_warning "TRUENAS_HOST or TRUENAS_API_KEY not set, skipping TrueNAS verification"
-        return 0
+        test_error "TRUENAS_HOST or TRUENAS_API_KEY not set - cannot verify backend deletion"
+        return 1
     fi
     
     if [[ -z "${TRUENAS_POOL}" ]]; then
-        test_warning "TRUENAS_POOL not set, skipping TrueNAS verification"
-        return 0
+        test_error "TRUENAS_POOL not set - cannot verify backend deletion"
+        return 1
     fi
     
-    # Check if Go is available - skip verification if not (don't fail the test)
+    # Check if Go is available - required for verification
     if ! command -v go &>/dev/null; then
-        test_warning "Go not installed - skipping TrueNAS backend verification"
-        test_warning "The PV was deleted successfully, but cannot confirm backend cleanup"
-        return 0
+        test_error "Go not installed - cannot verify backend deletion"
+        test_error "Install Go or add 'actions/setup-go' step to workflow"
+        return 1
     fi
     
     # Construct full dataset path: pool/volume_handle
@@ -1588,9 +1588,13 @@ verify_truenas_deletion() {
     local repo_root
     repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
     
+    test_info "Repository root: ${repo_root}"
+    
     # Create temp directory for Go verification tool
     local verify_dir
     verify_dir=$(mktemp -d)
+    
+    test_info "Building verification tool in: ${verify_dir}"
     
     # Generate Go verification tool (same pattern as cleanup-truenas-artifacts.sh)
     cat > "${verify_dir}/verify.go" <<'EOFGO'
@@ -1651,27 +1655,35 @@ EOFGO
     original_dir=$(pwd)
     cd "${verify_dir}"
     
-    test_info "Building TrueNAS verification tool..."
-    if ! go mod init verify >/dev/null 2>&1; then
-        test_warning "Failed to initialize Go module, skipping TrueNAS verification"
+    test_info "Initializing Go module..."
+    local mod_output
+    if ! mod_output=$(go mod init verify 2>&1); then
+        test_error "Failed to initialize Go module:"
+        test_error "${mod_output}"
         cd "${original_dir}"
         rm -rf "${verify_dir}"
-        return 0
+        return 1
     fi
     
-    if ! go mod edit -replace "github.com/fenio/tns-csi=${repo_root}" >/dev/null 2>&1; then
-        test_warning "Failed to set up Go module replace, skipping TrueNAS verification"
+    test_info "Setting up module replace directive..."
+    if ! mod_output=$(go mod edit -replace "github.com/fenio/tns-csi=${repo_root}" 2>&1); then
+        test_error "Failed to set up Go module replace:"
+        test_error "${mod_output}"
         cd "${original_dir}"
         rm -rf "${verify_dir}"
-        return 0
+        return 1
     fi
     
-    if ! go mod tidy >/dev/null 2>&1; then
-        test_warning "Failed to tidy Go module, skipping TrueNAS verification"
+    test_info "Running go mod tidy..."
+    if ! mod_output=$(go mod tidy 2>&1); then
+        test_error "Failed to tidy Go module:"
+        test_error "${mod_output}"
         cd "${original_dir}"
         rm -rf "${verify_dir}"
-        return 0
+        return 1
     fi
+    
+    test_info "Go module setup complete, starting verification polling..."
     
     # Poll for deletion with timeout
     local deadline=$((SECONDS + timeout))

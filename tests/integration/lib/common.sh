@@ -1587,13 +1587,18 @@ verify_truenas_deletion() {
         
         # Query TrueNAS via WebSocket API
         # Use timeout to prevent hanging if websocat doesn't exit
+        # -n: no newline at end, -k: insecure (skip TLS verify), -t: text mode
         local response
-        response=$(timeout 10 websocat -n -k -t --no-close -1 "${ws_url}" 2>/dev/null <<EOF
-{"id":"1","msg":"connect","version":"1","support":["1"]}
-{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["${TRUENAS_API_KEY}"]}
-{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","${dataset_path}"]]]}
-EOF
-        )
+        local ws_input='{"id":"1","msg":"connect","version":"1","support":["1"]}
+{"id":"2","msg":"method","method":"auth.login_with_api_key","params":["'"${TRUENAS_API_KEY}"'"]}
+{"id":"3","msg":"method","method":"pool.dataset.query","params":[[["id","=","'"${dataset_path}"'"]]]}'
+        
+        response=$(echo "${ws_input}" | timeout 10 websocat -n -k "${ws_url}" 2>&1) || true
+        
+        # Debug: show raw response on first attempt
+        if [[ ${attempt} -eq 1 ]]; then
+            test_info "WebSocket response (first attempt): ${response:0:500}"
+        fi
         
         # Extract the response for our query (id:3)
         local query_response
@@ -1608,7 +1613,7 @@ EOF
         
         # If we got no response for id:3, check for errors
         if [[ -z "${query_response}" ]]; then
-            test_info "Attempt ${attempt}: No response from TrueNAS, retrying..."
+            test_info "Attempt ${attempt}: No query response from TrueNAS, retrying..."
             sleep 2
             continue
         fi

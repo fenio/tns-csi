@@ -1565,14 +1565,21 @@ verify_truenas_deletion() {
         return 0
     fi
     
+    # Check if Go is available
+    if ! command -v go &>/dev/null; then
+        test_error "Go is not installed - cannot verify TrueNAS deletion"
+        test_error "Please add 'actions/setup-go' step to the workflow"
+        return 1
+    fi
+    
     # Build the verification tool
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local tool_src="${script_dir}/verify-truenas-deletion.go"
     
     if [[ ! -f "${tool_src}" ]]; then
-        test_warning "verify-truenas-deletion.go not found, skipping TrueNAS verification"
-        return 0
+        test_error "verify-truenas-deletion.go not found at ${tool_src}"
+        return 1
     fi
     
     # Create temporary directory for building the tool
@@ -1597,9 +1604,9 @@ verify_truenas_deletion() {
     # Build the tool
     local tool_bin="${build_dir}/verify-truenas-deletion"
     if ! (cd "${build_dir}" && go build -o verify-truenas-deletion verify-truenas-deletion.go 2>&1); then
-        test_warning "Failed to build verify-truenas-deletion tool"
+        test_error "Failed to build verify-truenas-deletion tool"
         rm -rf "${build_dir}"
-        return 0
+        return 1
     fi
     
     # Run the verification

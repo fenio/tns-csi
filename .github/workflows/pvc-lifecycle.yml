@@ -58,6 +58,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -88,6 +92,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -119,6 +127,10 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof-nested' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -224,7 +236,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: '1.24'
       - name: Run TrueNAS Cleanup
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}

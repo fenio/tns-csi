@@ -1829,12 +1829,19 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 	klog.V(4).Infof("Getting %d user properties from dataset: %s", len(propertyNames), datasetID)
 	klog.Infof("DEBUG: GetDatasetProperties called for dataset %s, requesting: %v", datasetID, propertyNames)
 
-	// Query the dataset with extra properties
-	// TrueNAS pool.dataset.query supports an "extra" option to include user_properties
+	// Query the dataset with extra options to include user_properties
+	// TrueNAS pool.dataset.query extra options:
+	// - "flat": true - return flat list instead of tree
+	// - "retrieve_children": false - don't retrieve child datasets
+	// - "user_properties": true - include user-defined ZFS properties
+	// Note: "properties": true was causing TypeError in TrueNAS because it expects
+	// a list of ZFS property names, not a boolean. We only need user_properties.
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
 		"extra": map[string]interface{}{
-			"properties": true,
+			"flat":              true,
+			"retrieve_children": false,
+			"user_properties":   true,
 		},
 	}
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
@@ -1884,11 +1891,13 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
 	klog.V(4).Infof("Getting all user properties from dataset: %s", datasetID)
 
-	// Query the dataset with extra properties
+	// Query the dataset with extra options to include user_properties
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
 		"extra": map[string]interface{}{
-			"properties": true,
+			"flat":              true,
+			"retrieve_children": false,
+			"user_properties":   true,
 		},
 	}
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{

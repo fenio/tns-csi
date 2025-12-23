@@ -1699,8 +1699,8 @@ func TestControllerGetVolume(t *testing.T) {
 				if resp.Status.VolumeCondition.Abnormal {
 					t.Errorf("Expected Abnormal to be false, got true with message: %s", resp.Status.VolumeCondition.Message)
 				}
-				if resp.Status.VolumeCondition.Message != "Volume is healthy" {
-					t.Errorf("Expected message 'Volume is healthy', got '%s'", resp.Status.VolumeCondition.Message)
+				if resp.Status.VolumeCondition.Message != msgVolumeIsHealthy {
+					t.Errorf("Expected message '%s', got '%s'", msgVolumeIsHealthy, resp.Status.VolumeCondition.Message)
 				}
 			},
 		},
@@ -1863,8 +1863,8 @@ func TestControllerGetVolume(t *testing.T) {
 				if resp.Status.VolumeCondition.Abnormal {
 					t.Errorf("Expected Abnormal to be false, got true with message: %s", resp.Status.VolumeCondition.Message)
 				}
-				if resp.Status.VolumeCondition.Message != "Volume is healthy" {
-					t.Errorf("Expected message 'Volume is healthy', got '%s'", resp.Status.VolumeCondition.Message)
+				if resp.Status.VolumeCondition.Message != msgVolumeIsHealthy {
+					t.Errorf("Expected message '%s', got '%s'", msgVolumeIsHealthy, resp.Status.VolumeCondition.Message)
 				}
 			},
 		},

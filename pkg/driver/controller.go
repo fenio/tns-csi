@@ -19,6 +19,7 @@ import (
 // Error message constants.
 const (
 	errMsgVolumeIDRequired = "Volume ID is required"
+	msgVolumeIsHealthy     = "Volume is healthy"
 )
 
 // VolumeContext key constants - these are used consistently across the driver.
@@ -1229,7 +1230,7 @@ func (s *ControllerService) getNFSVolumeInfo(ctx context.Context, meta *VolumeMe
 	}
 
 	// Build response message
-	message := "Volume is healthy"
+	message := msgVolumeIsHealthy
 	if abnormal {
 		message = strings.Join(messages, "; ")
 	}
@@ -1336,7 +1337,7 @@ func (s *ControllerService) getNVMeOFVolumeInfo(ctx context.Context, meta *Volum
 	}
 
 	// Build response message
-	message := "Volume is healthy"
+	message := msgVolumeIsHealthy
 	if abnormal {
 		message = strings.Join(messages, "; ")
 	}

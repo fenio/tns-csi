@@ -925,10 +925,12 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 }
 
 // Dataset retrieves dataset information.
+// Returns ErrDatasetNotFound if the dataset does not exist.
 func (c *Client) Dataset(ctx context.Context, datasetID string) (*Dataset, error) {
 	klog.V(4).Infof("Getting dataset: %s", datasetID)
 
-	var result Dataset
+	// pool.dataset.query always returns an array, even when filtering by ID
+	var result []Dataset
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -938,7 +940,12 @@ func (c *Client) Dataset(ctx context.Context, datasetID string) (*Dataset, error
 		return nil, fmt.Errorf("failed to get dataset: %w", err)
 	}
 
-	return &result, nil
+	// Empty array means dataset not found
+	if len(result) == 0 {
+		return nil, ErrDatasetNotFound
+	}
+
+	return &result[0], nil
 }
 
 // NFS Share API methods

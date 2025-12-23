@@ -33,6 +33,13 @@ var (
 	ErrJobNotFound            = errors.New("job not found")
 	ErrJobFailed              = errors.New("job failed")
 	ErrJobAborted             = errors.New("job was aborted")
+
+	// Deletion operation errors - TrueNAS API returned false (unsuccessful).
+	ErrDatasetDeletionFailed   = errors.New("dataset deletion returned false (unsuccessful)")
+	ErrNFSShareDeletionFailed  = errors.New("NFS share deletion returned false (unsuccessful)")
+	ErrSubsystemDeletionFailed = errors.New("NVMe-oF subsystem deletion returned false (unsuccessful)")
+	ErrNamespaceDeletionFailed = errors.New("NVMe-oF namespace deletion returned false (unsuccessful)")
+	ErrSnapshotDeletionFailed  = errors.New("snapshot deletion returned false (unsuccessful)")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -903,6 +910,12 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 		return fmt.Errorf("failed to delete dataset: %w", err)
 	}
 
+	// TrueNAS API returns true on success, false on failure
+	// We must check this because the API may return false without an error
+	if !result {
+		return fmt.Errorf("%w: %s", ErrDatasetDeletionFailed, datasetID)
+	}
+
 	klog.V(4).Infof("Successfully deleted dataset: %s (recursive)", datasetID)
 	return nil
 }
@@ -968,6 +981,11 @@ func (c *Client) DeleteNFSShare(ctx context.Context, shareID int) error {
 	err := c.Call(ctx, "sharing.nfs.delete", []interface{}{shareID}, &result)
 	if err != nil {
 		return fmt.Errorf("failed to delete NFS share: %w", err)
+	}
+
+	// TrueNAS API returns true on success, false on failure
+	if !result {
+		return fmt.Errorf("%w: share ID %d", ErrNFSShareDeletionFailed, shareID)
 	}
 
 	klog.V(4).Infof("Successfully deleted NFS share: %d", shareID)
@@ -1074,6 +1092,11 @@ func (c *Client) DeleteNVMeOFSubsystem(ctx context.Context, subsystemID int) err
 		return fmt.Errorf("failed to delete NVMe-oF subsystem: %w", err)
 	}
 
+	// TrueNAS API returns true on success, false on failure
+	if !result {
+		return fmt.Errorf("%w: subsystem ID %d", ErrSubsystemDeletionFailed, subsystemID)
+	}
+
 	klog.V(4).Infof("Successfully deleted NVMe-oF subsystem: %d", subsystemID)
 	return nil
 }
@@ -1156,6 +1179,11 @@ func (c *Client) DeleteNVMeOFNamespace(ctx context.Context, namespaceID int) err
 	err := c.Call(ctx, "nvmet.namespace.delete", []interface{}{namespaceID}, &result)
 	if err != nil {
 		return fmt.Errorf("failed to delete NVMe-oF namespace: %w", err)
+	}
+
+	// TrueNAS API returns true on success, false on failure
+	if !result {
+		return fmt.Errorf("%w: namespace ID %d", ErrNamespaceDeletionFailed, namespaceID)
 	}
 
 	klog.V(4).Infof("Successfully deleted NVMe-oF namespace: %d", namespaceID)
@@ -1516,6 +1544,11 @@ func (c *Client) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	err := c.Call(ctx, "zfs.snapshot.delete", []interface{}{snapshotID, params}, &result)
 	if err != nil {
 		return fmt.Errorf("failed to delete snapshot: %w", err)
+	}
+
+	// TrueNAS API returns true on success, false on failure
+	if !result {
+		return fmt.Errorf("%w: %s", ErrSnapshotDeletionFailed, snapshotID)
 	}
 
 	klog.V(4).Infof("Successfully deleted snapshot: %s (defer=true)", snapshotID)

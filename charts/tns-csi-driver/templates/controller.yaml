@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: {{ include "tns-csi-driver.fullname" . }}-controller
   namespace: {{ .Values.namespace }}
@@ -11,7 +11,6 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  serviceName: {{ include "tns-csi-driver.fullname" . }}-controller
   replicas: {{ .Values.controller.replicas }}
   selector:
     matchLabels:

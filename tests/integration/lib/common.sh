@@ -1542,12 +1542,289 @@ cleanup_test() {
 }
 
 #######################################
+# Verify that a dataset/zvol EXISTS on TrueNAS (one-shot check)
+# Used to confirm a dataset was created successfully before testing deletion.
+# 
+# Arguments:
+#   Full dataset path (e.g., "csi/pvc-xxx" or "csi/nested/volumes/pvc-xxx")
+#
+# Returns:
+#   0 if dataset exists
+#   1 if dataset does not exist or verification failed
+#######################################
+verify_truenas_exists() {
+    local dataset_path=$1
+    
+    test_info "Verifying TrueNAS dataset exists: ${dataset_path}"
+    
+    # Check required environment variables
+    if [[ -z "${TRUENAS_HOST}" ]] || [[ -z "${TRUENAS_API_KEY}" ]]; then
+        test_error "TRUENAS_HOST or TRUENAS_API_KEY not set - cannot verify dataset exists"
+        return 1
+    fi
+    
+    # Check if Go is available
+    if ! command -v go &>/dev/null; then
+        test_error "Go not installed - cannot verify dataset exists"
+        return 1
+    fi
+    
+    # Find the repository root
+    local repo_root
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+    
+    # Create temp directory for Go verification tool
+    local verify_dir
+    verify_dir=$(mktemp -d)
+    
+    # Generate Go verification tool
+    cat > "${verify_dir}/verify.go" <<'EOFGO'
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "time"
+
+    "github.com/fenio/tns-csi/pkg/tnsapi"
+)
+
+func main() {
+    host := os.Getenv("TRUENAS_HOST")
+    apiKey := os.Getenv("TRUENAS_API_KEY")
+    datasetPath := os.Getenv("DATASET_PATH")
+
+    if host == "" || apiKey == "" || datasetPath == "" {
+        fmt.Println("ERROR: Missing required environment variables")
+        os.Exit(2)
+    }
+
+    url := fmt.Sprintf("wss://%s/api/current", host)
+
+    client, err := tnsapi.NewClient(url, apiKey, true)
+    if err != nil {
+        fmt.Printf("ERROR: Failed to connect to TrueNAS: %v\n", err)
+        os.Exit(2)
+    }
+    defer client.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    // Query for the dataset using filter
+    var datasets []map[string]interface{}
+    filter := []interface{}{[]interface{}{"id", "=", datasetPath}}
+    if err := client.Call(ctx, "pool.dataset.query", []interface{}{filter}, &datasets); err != nil {
+        fmt.Printf("ERROR: Query failed: %v\n", err)
+        os.Exit(2)
+    }
+
+    if len(datasets) > 0 {
+        fmt.Printf("EXISTS: Dataset '%s' exists on TrueNAS\n", datasetPath)
+        os.Exit(0) // Success - dataset exists
+    } else {
+        fmt.Printf("NOT_FOUND: Dataset '%s' does not exist on TrueNAS\n", datasetPath)
+        os.Exit(1) // Failure - dataset not found
+    }
+}
+EOFGO
+
+    # Build the verification tool
+    local original_dir
+    original_dir=$(pwd)
+    cd "${verify_dir}"
+    
+    local mod_output
+    if ! mod_output=$(go mod init verify 2>&1); then
+        test_error "Failed to initialize Go module: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    if ! mod_output=$(go mod edit -replace "github.com/fenio/tns-csi=${repo_root}" 2>&1); then
+        test_error "Failed to set up Go module replace: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    if ! mod_output=$(go mod tidy 2>&1); then
+        test_error "Failed to tidy Go module: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    # Run the verification
+    export DATASET_PATH="${dataset_path}"
+    local result
+    result=$(go run verify.go 2>&1) || true
+    
+    cd "${original_dir}"
+    rm -rf "${verify_dir}"
+    
+    if echo "${result}" | grep -q "^EXISTS:"; then
+        test_success "Dataset '${dataset_path}' confirmed to exist on TrueNAS"
+        return 0
+    elif echo "${result}" | grep -q "^NOT_FOUND:"; then
+        test_error "Dataset '${dataset_path}' NOT FOUND on TrueNAS"
+        return 1
+    else
+        test_error "Unexpected result checking dataset existence: ${result}"
+        return 1
+    fi
+}
+
+#######################################
+# List all CSI-related datasets on TrueNAS
+# Used for debugging when verification fails.
+# 
+# Arguments:
+#   Base path to search under (optional, defaults to pool name from TRUENAS_POOL)
+#
+# Returns:
+#   0 on success, 1 on failure
+#   Outputs the list of datasets to stdout
+#######################################
+list_truenas_datasets() {
+    local base_path=${1:-${TRUENAS_POOL}}
+    
+    test_info "Listing TrueNAS datasets under: ${base_path}"
+    
+    # Check required environment variables
+    if [[ -z "${TRUENAS_HOST}" ]] || [[ -z "${TRUENAS_API_KEY}" ]]; then
+        test_error "TRUENAS_HOST or TRUENAS_API_KEY not set - cannot list datasets"
+        return 1
+    fi
+    
+    # Check if Go is available
+    if ! command -v go &>/dev/null; then
+        test_error "Go not installed - cannot list datasets"
+        return 1
+    fi
+    
+    # Find the repository root
+    local repo_root
+    repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+    
+    # Create temp directory for Go tool
+    local verify_dir
+    verify_dir=$(mktemp -d)
+    
+    # Generate Go tool to list datasets
+    cat > "${verify_dir}/list.go" <<'EOFGO'
+package main
+
+import (
+    "context"
+    "fmt"
+    "os"
+    "strings"
+    "time"
+
+    "github.com/fenio/tns-csi/pkg/tnsapi"
+)
+
+func main() {
+    host := os.Getenv("TRUENAS_HOST")
+    apiKey := os.Getenv("TRUENAS_API_KEY")
+    basePath := os.Getenv("BASE_PATH")
+
+    if host == "" || apiKey == "" {
+        fmt.Println("ERROR: Missing required environment variables")
+        os.Exit(2)
+    }
+
+    url := fmt.Sprintf("wss://%s/api/current", host)
+
+    client, err := tnsapi.NewClient(url, apiKey, true)
+    if err != nil {
+        fmt.Printf("ERROR: Failed to connect to TrueNAS: %v\n", err)
+        os.Exit(2)
+    }
+    defer client.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    // Query all datasets
+    var datasets []map[string]interface{}
+    if err := client.Call(ctx, "pool.dataset.query", []interface{}{}, &datasets); err != nil {
+        fmt.Printf("ERROR: Query failed: %v\n", err)
+        os.Exit(2)
+    }
+
+    fmt.Println("=== TrueNAS Datasets ===")
+    count := 0
+    for _, ds := range datasets {
+        id, ok := ds["id"].(string)
+        if !ok {
+            continue
+        }
+        // Filter to show only datasets under basePath or containing "pvc-" or "csi"
+        if basePath != "" && strings.HasPrefix(id, basePath) {
+            dsType := ds["type"]
+            fmt.Printf("  %s (type: %v)\n", id, dsType)
+            count++
+        } else if strings.Contains(id, "pvc-") || strings.Contains(id, "csi") {
+            dsType := ds["type"]
+            fmt.Printf("  %s (type: %v)\n", id, dsType)
+            count++
+        }
+    }
+    fmt.Printf("=== Found %d CSI-related datasets ===\n", count)
+}
+EOFGO
+
+    # Build the tool
+    local original_dir
+    original_dir=$(pwd)
+    cd "${verify_dir}"
+    
+    local mod_output
+    if ! mod_output=$(go mod init listds 2>&1); then
+        test_error "Failed to initialize Go module: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    if ! mod_output=$(go mod edit -replace "github.com/fenio/tns-csi=${repo_root}" 2>&1); then
+        test_error "Failed to set up Go module replace: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    if ! mod_output=$(go mod tidy 2>&1); then
+        test_error "Failed to tidy Go module: ${mod_output}"
+        cd "${original_dir}"
+        rm -rf "${verify_dir}"
+        return 1
+    fi
+    
+    # Run the listing
+    export BASE_PATH="${base_path}"
+    local result
+    result=$(go run list.go 2>&1)
+    local exit_code=$?
+    
+    cd "${original_dir}"
+    rm -rf "${verify_dir}"
+    
+    echo "${result}"
+    return ${exit_code}
+}
+
+#######################################
 # Verify that a dataset/zvol was actually deleted from TrueNAS
 # This uses Go with pkg/tnsapi to query TrueNAS WebSocket API
 # (same approach as cleanup-truenas-artifacts.sh)
 # 
 # Arguments:
-#   Volume handle (dataset path, e.g., "csi/pvc-xxx")
+#   Full dataset path (e.g., "csi/pvc-xxx" or "csi/nested/volumes/pvc-xxx")
 #   Timeout in seconds (optional, default: 30)
 #
 # Returns:
@@ -1555,19 +1832,14 @@ cleanup_test() {
 #   1 if dataset still exists or verification failed
 #######################################
 verify_truenas_deletion() {
-    local volume_handle=$1
+    local dataset_path=$1
     local timeout=${2:-30}
     
-    test_info "Verifying TrueNAS backend deletion for: ${volume_handle}"
+    test_info "Verifying TrueNAS backend deletion for: ${dataset_path}"
     
     # Check required environment variables - these are required, fail if missing
     if [[ -z "${TRUENAS_HOST}" ]] || [[ -z "${TRUENAS_API_KEY}" ]]; then
         test_error "TRUENAS_HOST or TRUENAS_API_KEY not set - cannot verify backend deletion"
-        return 1
-    fi
-    
-    if [[ -z "${TRUENAS_POOL}" ]]; then
-        test_error "TRUENAS_POOL not set - cannot verify backend deletion"
         return 1
     fi
     
@@ -1578,8 +1850,8 @@ verify_truenas_deletion() {
         return 1
     fi
     
-    # Construct full dataset path: pool/volume_handle
-    local dataset_path="${TRUENAS_POOL}/${volume_handle}"
+    # NOTE: dataset_path is now passed as the full path (e.g., "csi/pvc-xxx" or "csi/nested/volumes/pvc-xxx")
+    # No path construction needed - caller provides the complete path from PV's volumeAttributes.datasetName
     
     test_info "Checking if dataset/zvol exists: ${dataset_path}"
     test_info "Timeout: ${timeout} seconds"

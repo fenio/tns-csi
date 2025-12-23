@@ -127,20 +127,26 @@ test_retain_behavior() {
     local logs
     logs=$(kubectl logs -n kube-system \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
-        --tail=50 2>/dev/null || true)
+        --tail=100 2>/dev/null || true)
     
-    # Check if the retain behavior was logged
-    if echo "${logs}" | grep -q "deleteStrategy.*retain\|retaining\|kept\|skip.*delete"; then
-        test_success "Controller logs indicate retain behavior"
+    # Always show the relevant controller logs for debugging
+    echo ""
+    echo "=== Controller Logs (DeleteVolume operation) ==="
+    echo "${logs}" | grep -E "DEBUG:|DeleteVolume|retain|dataset|share|delete_strategy|deleteStrategy" || echo "No matching log entries found"
+    echo "=== End Controller Logs ==="
+    echo ""
+    
+    # Check for the specific retain behavior message that indicates actual retention
+    # This message is only printed when deleteStrategy=retain is detected and deletion is skipped
+    if echo "${logs}" | grep -q "deleteStrategy=retain, skipping actual deletion"; then
+        test_success "Controller logs confirm volume was retained (found 'skipping actual deletion' message)"
+    elif echo "${logs}" | grep -q "deleteStrategy.*retain\|retaining\|kept"; then
+        test_warning "Found retain-related log message, but not the specific 'skipping actual deletion' message"
+        test_info "This may indicate deleteStrategy was configured but not properly honored"
     else
-        test_info "Retain behavior may have been applied (check TrueNAS directly if needed)"
-    fi
-    
-    # Show the relevant controller logs
-    if is_verbose 1; then
-        echo ""
-        echo "=== Controller Logs (DeleteVolume operation) ==="
-        echo "${logs}" | grep -E "DeleteVolume|retain|dataset|share" || echo "No matching log entries found"
+        test_error "No retain behavior detected in controller logs"
+        test_info "Expected to find: 'deleteStrategy=retain, skipping actual deletion'"
+        return 1
     fi
     
     test_success "Delete strategy retain test completed"

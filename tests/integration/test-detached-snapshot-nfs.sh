@@ -29,6 +29,9 @@ echo "========================================"
 echo "TrueNAS CSI - NFS Detached Snapshot Test"
 echo "========================================"
 
+# Configure test with 11 total steps
+set_test_steps 11
+
 # Trap errors and cleanup
 trap 'save_diagnostic_logs "nfs-detached-snapshot" "${POD_NAME}" "${PVC_NAME}" "/tmp/test-logs"; show_diagnostic_logs "${POD_NAME}" "${PVC_NAME}"; cleanup_detached_snapshot_test; test_summary "${PROTOCOL}" "FAILED"; exit 1' ERR
 

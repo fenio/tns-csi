@@ -29,8 +29,8 @@ echo "This test verifies volume name templating works"
 echo "via StorageClass parameters (nameTemplate, namePrefix, nameSuffix)"
 echo "========================================"
 
-# Configure test with 9 total steps
-set_test_steps 9
+# Configure test with 10 total steps
+set_test_steps 10
 
 # Check if test should be skipped
 if should_skip_test "${TEST_TAGS}"; then

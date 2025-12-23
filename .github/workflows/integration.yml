@@ -1026,31 +1026,3 @@ jobs:
             if (totalFailed > 0) {
               core.setFailed(`${totalFailed} test(s) failed`);
             }
-
-  # ==========================================
-  # TrueNAS Cleanup (runs after all tests)
-  # ==========================================
-  truenas-cleanup:
-    name: "TrueNAS Cleanup"
-    runs-on: new
-    timeout-minutes: 10
-    needs: [test-summary]
-    if: always()
-    steps:
-      - uses: actions/checkout@v6
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-      - name: Run TrueNAS Cleanup
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-        run: |
-          echo "=== Running TrueNAS Cleanup ==="
-          echo "This ensures no orphaned resources remain after test runs"
-          echo ""
-          ./scripts/cleanup-truenas-artifacts.sh
-          echo ""
-          echo "=== TrueNAS Cleanup Complete ==="

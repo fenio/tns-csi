@@ -214,7 +214,7 @@ create_test_pod "${MANIFEST_DIR}/pod-source-nfs.yaml" "${SOURCE_POD_NAME}"
 # Write test data to source volume
 test_step "Writing test data to source volume"
 kubectl exec "${SOURCE_POD_NAME}" -n "${TEST_NAMESPACE}" -- \
-    sh -c "echo 'Source Volume Data' > /data/test.txt"
+    sh -c "echo 'Source Volume Data' > /data/test.txt && sync"
 test_success "Test data written to source volume"
 
 # Test cloning and verify data

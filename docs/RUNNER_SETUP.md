@@ -121,7 +121,7 @@ Required for running Go tests:
 
 ```bash
 # Download and install Go 1.25+
-GO_VERSION=1.25.4
+GO_VERSION=1.25.5
 wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
 sudo rm -rf /usr/local/go
 sudo tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz

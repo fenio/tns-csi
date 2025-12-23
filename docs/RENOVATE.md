@@ -13,7 +13,7 @@ Renovate watches the following dependency types in this project:
    - CSI spec dependencies
 
 2. **Docker base images** (`Dockerfile`):
-   - `golang:1.25.4-alpine` (builder)
+   - `golang:1.25.5-alpine` (builder)
    - `alpine:3.22` (runtime)
 
 3. **GitHub Actions** (`.github/workflows/*.yml`):

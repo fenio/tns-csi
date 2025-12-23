@@ -331,12 +331,13 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	// Store ZFS user properties for CSI metadata tracking
 	// This enables safe deletion (verify ownership before delete) and debugging
 	props := tnsapi.NFSVolumeProperties(params.volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339), params.deleteStrategy)
+	klog.Infof("DEBUG: Storing ZFS properties on dataset %s: deleteStrategy=%q, all props=%v", dataset.ID, params.deleteStrategy, props)
 	if err := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); err != nil {
 		// Log warning but don't fail - properties are not critical for basic operation
 		// Volume will still work, just without the safety features
 		klog.Warningf("Failed to set ZFS user properties on dataset %s: %v (volume will still work)", dataset.ID, err)
 	} else {
-		klog.V(4).Infof("Stored ZFS user properties on dataset %s: %v", dataset.ID, props)
+		klog.Infof("DEBUG: Successfully stored ZFS user properties on dataset %s (deleteStrategy=%q)", dataset.ID, params.deleteStrategy)
 	}
 
 	return nfsShare, nil
@@ -406,6 +407,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 	// This prevents accidental deletion if share IDs were reused after TrueNAS restart
 	// Also check deleteStrategy to determine if we should actually delete
 	deleteStrategy := tnsapi.DeleteStrategyDelete // Default to delete
+	klog.Infof("DEBUG: deleteNFSVolume called for volume %s, datasetID=%q", meta.Name, meta.DatasetID)
 	if meta.DatasetID != "" {
 		props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
 			tnsapi.PropertyManagedBy,
@@ -423,6 +425,8 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 			// For other errors, log warning but continue (backward compatibility)
 			klog.Warningf("Failed to verify dataset ownership via ZFS properties: %v (continuing with deletion)", err)
 		} else {
+			klog.Infof("DEBUG: Retrieved ZFS properties for dataset %s: %v", meta.DatasetID, props)
+
 			// Verify ownership if properties exist
 			if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
 				klog.Errorf("Dataset %s is not managed by tns-csi (managed_by=%s), refusing to delete", meta.DatasetID, managedBy)
@@ -451,14 +455,21 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 
 			// Check deleteStrategy
 			if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
+				klog.Infof("DEBUG: Found deleteStrategy property: %q", strategy)
 				deleteStrategy = strategy
+			} else {
+				klog.Infof("DEBUG: No deleteStrategy property found in props, using default: %q", deleteStrategy)
 			}
 
 			klog.V(4).Infof("Ownership verified for dataset %s via ZFS properties", meta.DatasetID)
 		}
+	} else {
+		klog.Infof("DEBUG: meta.DatasetID is empty, skipping property retrieval")
 	}
 
 	// Check if we should retain the volume instead of deleting
+	klog.Infof("DEBUG: Checking deleteStrategy: got %q, comparing with DeleteStrategyRetain=%q, equal=%v",
+		deleteStrategy, tnsapi.DeleteStrategyRetain, deleteStrategy == tnsapi.DeleteStrategyRetain)
 	if deleteStrategy == tnsapi.DeleteStrategyRetain {
 		klog.Infof("Volume %s has deleteStrategy=retain, skipping actual deletion (dataset: %s, share ID: %d will be kept)",
 			meta.Name, meta.DatasetID, meta.NFSShareID)

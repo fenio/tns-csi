@@ -1766,6 +1766,7 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 // This is used to track CSI metadata like NFS share IDs, NVMe-oF subsystem IDs, etc.
 func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error {
 	klog.V(4).Infof("Setting %d user properties on dataset: %s", len(properties), datasetID)
+	klog.Infof("DEBUG: SetDatasetProperties called for dataset %s with properties: %v", datasetID, properties)
 
 	if len(properties) == 0 {
 		return nil
@@ -1785,6 +1786,7 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 	params := map[string]interface{}{
 		"user_properties": userProps,
 	}
+	klog.Infof("DEBUG: Sending pool.dataset.update with user_properties: %v", userProps)
 
 	var result Dataset
 	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
@@ -1796,9 +1798,11 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 			klog.V(4).Infof("Ignoring 'comments' property error for ZVOL %s (expected for block devices)", datasetID)
 			return nil
 		}
+		klog.Errorf("DEBUG: SetDatasetProperties FAILED for dataset %s: %v", datasetID, err)
 		return fmt.Errorf("failed to set user properties on dataset %s: %w", datasetID, err)
 	}
 
+	klog.Infof("DEBUG: SetDatasetProperties SUCCESS for dataset %s", datasetID)
 	klog.V(4).Infof("Successfully set %d user properties on dataset: %s", len(properties), datasetID)
 	return nil
 }
@@ -1823,6 +1827,7 @@ type UserProperty struct {
 // Properties that don't exist will not be included in the returned map.
 func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
 	klog.V(4).Infof("Getting %d user properties from dataset: %s", len(propertyNames), datasetID)
+	klog.Infof("DEBUG: GetDatasetProperties called for dataset %s, requesting: %v", datasetID, propertyNames)
 
 	// Query the dataset with extra properties
 	// TrueNAS pool.dataset.query supports an "extra" option to include user_properties
@@ -1839,10 +1844,12 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 		queryOpts,
 	}, &result)
 	if err != nil {
+		klog.Errorf("DEBUG: GetDatasetProperties query FAILED for dataset %s: %v", datasetID, err)
 		return nil, fmt.Errorf("failed to query dataset properties for %s: %w", datasetID, err)
 	}
 
 	if len(result) == 0 {
+		klog.Infof("DEBUG: GetDatasetProperties: dataset %s not found", datasetID)
 		return nil, fmt.Errorf("dataset not found: %s: %w", datasetID, ErrDatasetNotFound)
 	}
 
@@ -1850,17 +1857,24 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 	props := make(map[string]string)
 	dataset := result[0]
 
+	klog.Infof("DEBUG: GetDatasetProperties: dataset %s has UserProperties=%v", datasetID, dataset.UserProperties)
+
 	if dataset.UserProperties == nil {
+		klog.Infof("DEBUG: Dataset %s has no user properties (nil)", datasetID)
 		klog.V(4).Infof("Dataset %s has no user properties", datasetID)
 		return props, nil
 	}
 
 	for _, name := range propertyNames {
 		if prop, ok := dataset.UserProperties[name]; ok {
+			klog.Infof("DEBUG: Found property %q = %q", name, prop.Value)
 			props[name] = prop.Value
+		} else {
+			klog.Infof("DEBUG: Property %q NOT found in user_properties", name)
 		}
 	}
 
+	klog.Infof("DEBUG: GetDatasetProperties returning props: %v", props)
 	klog.V(4).Infof("Retrieved %d user properties from dataset: %s", len(props), datasetID)
 	return props, nil
 }

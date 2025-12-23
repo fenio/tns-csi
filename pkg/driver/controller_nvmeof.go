@@ -1001,6 +1001,9 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	}
 
 	// Build volume metadata
+	// IMPORTANT: Use subsystem.NQN (the full NQN from TrueNAS including UUID prefix),
+	// not subsystemNQN (the short name we generated). TrueNAS adds a UUID prefix to create
+	// the subnqn, and the node plugin must use this full NQN to connect.
 	meta := VolumeMetadata{
 		Name:              volumeName,
 		Protocol:          ProtocolNVMeOF,
@@ -1009,7 +1012,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		Server:            server,
 		NVMeOFSubsystemID: subsystem.ID,
 		NVMeOFNamespaceID: namespace.ID,
-		NVMeOFNQN:         subsystemNQN, // Use the NQN we generated, not subsystem.Name
+		NVMeOFNQN:         subsystem.NQN, // Use full NQN from TrueNAS (subnqn), not short name
 	}
 
 	// Volume ID is just the volume name (CSI spec compliant)
@@ -1023,7 +1026,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	// This signals to the node that the volume has existing data and should NEVER be formatted
 	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
 
-	klog.Infof("Created NVMe-oF volume from snapshot: %s (subsystem: %s, NSID: 1)", volumeName, subsystemNQN)
+	klog.Infof("Created NVMe-oF volume from snapshot: %s (subsystem: %s, NSID: 1)", volumeName, subsystem.NQN)
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(volumeID, metrics.ProtocolNVMeOF, requestedCapacity)

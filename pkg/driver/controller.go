@@ -582,10 +582,16 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 				subsystemNQN := ns.GetSubsystemNQN()
 				subsystemID := ns.GetSubsystemID()
 				if subsystemNQN != "" && subsystemID > 0 {
+					// Extract the dataset ID from the device path
+					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
+					// Dataset ID should be "tank/csi/volume-name"
+					datasetID := strings.TrimPrefix(devicePath, "/dev/zvol/")
+					datasetID = strings.TrimPrefix(datasetID, "zvol/")
 					meta := VolumeMetadata{
 						Name:              volumeID,
 						Protocol:          ProtocolNVMeOF,
-						DatasetName:       devicePath, // Device path is the zvol path
+						DatasetID:         datasetID,
+						DatasetName:       datasetID,
 						NVMeOFNQN:         subsystemNQN,
 						NVMeOFSubsystemID: subsystemID,
 						NVMeOFNamespaceID: ns.ID,

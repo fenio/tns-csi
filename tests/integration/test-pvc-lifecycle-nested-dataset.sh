@@ -393,6 +393,21 @@ delete_pvc_directly() {
     dataset_name=$(kubectl get pv "${pv_name}" -o jsonpath='{.spec.csi.volumeAttributes.datasetName}' 2>/dev/null || echo "unknown")
     test_info "Dataset to be deleted: ${dataset_name}"
     
+    # CRITICAL: Verify dataset EXISTS on TrueNAS BEFORE we try to delete it
+    # This confirms we're using the correct path and the creation was successful
+    echo ""
+    test_info "Verifying zvol exists on TrueNAS BEFORE deletion..."
+    if ! verify_truenas_exists "${dataset_name}"; then
+        test_error "Dataset '${dataset_name}' does NOT exist on TrueNAS before deletion!"
+        test_error "This indicates either wrong path or creation failed."
+        echo ""
+        echo "=== Listing all CSI datasets on TrueNAS ==="
+        list_truenas_datasets || true
+        stop_test_timer "delete_pvc_directly" "FAILED"
+        false
+    fi
+    test_success "Confirmed zvol exists on TrueNAS before deletion"
+    
     # This is the key test: deletion with nested parentDataset path
     echo ""
     test_info "Deleting PVC ${pvc_name}..."
@@ -479,9 +494,12 @@ delete_pvc_directly() {
     # This is especially important for nested dataset paths where parsing can fail
     echo ""
     test_info "Verifying zvol was deleted from TrueNAS backend..."
-    if ! verify_truenas_deletion "${volume_handle}" 30; then
+    if ! verify_truenas_deletion "${dataset_name}" 30; then
         test_error "TrueNAS zvol still exists! CSI DeleteVolume did not clean up backend."
         test_error "This may indicate an issue with nested parentDataset path handling."
+        echo ""
+        echo "=== Listing all CSI datasets on TrueNAS ==="
+        list_truenas_datasets || true
         echo ""
         echo "=== Controller Logs (DeleteVolume) ==="
         kubectl logs -n kube-system \

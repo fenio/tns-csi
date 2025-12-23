@@ -248,6 +248,31 @@ delete_pvc_directly() {
     volume_handle=$(kubectl get pv "${pv_name}" -o jsonpath='{.spec.csi.volumeHandle}' 2>/dev/null || echo "unknown")
     test_info "Volume handle to be deleted: ${volume_handle}"
     
+    # Get the full dataset path from PV's volumeAttributes - this is the authoritative path
+    local dataset_name
+    dataset_name=$(kubectl get pv "${pv_name}" -o jsonpath='{.spec.csi.volumeAttributes.datasetName}' 2>/dev/null || echo "")
+    if [[ -z "${dataset_name}" ]]; then
+        test_error "Could not get datasetName from PV volumeAttributes"
+        stop_test_timer "delete_pvc_directly" "FAILED"
+        false
+    fi
+    test_info "Dataset to be deleted: ${dataset_name}"
+    
+    # CRITICAL: Verify dataset EXISTS on TrueNAS BEFORE we try to delete it
+    # This confirms we're using the correct path and the creation was successful
+    echo ""
+    test_info "Verifying zvol exists on TrueNAS BEFORE deletion..."
+    if ! verify_truenas_exists "${dataset_name}"; then
+        test_error "Dataset '${dataset_name}' does NOT exist on TrueNAS before deletion!"
+        test_error "This indicates either wrong path or creation failed."
+        echo ""
+        echo "=== Listing all CSI datasets on TrueNAS ==="
+        list_truenas_datasets || true
+        stop_test_timer "delete_pvc_directly" "FAILED"
+        false
+    fi
+    test_success "Confirmed zvol exists on TrueNAS before deletion"
+    
     # Delete PVC directly (NOT via namespace deletion)
     echo ""
     test_info "Deleting PVC ${pvc_name}..."
@@ -324,8 +349,11 @@ delete_pvc_directly() {
     # This is the key test - PV deletion alone doesn't prove backend cleanup
     echo ""
     test_info "Verifying zvol was deleted from TrueNAS backend..."
-    if ! verify_truenas_deletion "${volume_handle}" 30; then
+    if ! verify_truenas_deletion "${dataset_name}" 30; then
         test_error "TrueNAS zvol still exists! CSI DeleteVolume did not clean up backend."
+        echo ""
+        echo "=== Listing all CSI datasets on TrueNAS ==="
+        list_truenas_datasets || true
         echo ""
         echo "=== Controller Logs (DeleteVolume) ==="
         kubectl logs -n kube-system \

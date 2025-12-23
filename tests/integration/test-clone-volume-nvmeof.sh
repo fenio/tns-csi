@@ -223,7 +223,9 @@ kubectl exec "${SOURCE_POD_NAME}" -n "${TEST_NAMESPACE}" -- \
 test_success "Test data written to source volume"
 
 # Test cloning and verify data
-test_clone_restore "${CLONE_PVC_NAME}" "${CLONE_POD_NAME}" "/data" "Source Volume Data"
+if ! test_clone_restore "${CLONE_PVC_NAME}" "${CLONE_POD_NAME}" "/data" "Source Volume Data"; then
+    exit 1
+fi
 
 # Verify metrics
 verify_metrics

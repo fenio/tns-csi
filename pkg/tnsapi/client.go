@@ -893,7 +893,7 @@ func (c *Client) CreateDataset(ctx context.Context, params DatasetCreateParams) 
 
 // DeleteDataset deletes a ZFS dataset.
 func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
-	klog.V(4).Infof("Deleting dataset: %s", datasetID)
+	klog.Infof("DeleteDataset: Starting deletion of dataset %s", datasetID)
 
 	// Use recursive and force flags to ensure dataset is deleted even if it has snapshots or children
 	// This prevents orphaned datasets when volumes are deleted after creating snapshots
@@ -907,16 +907,20 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 	}
 	err := c.Call(ctx, "pool.dataset.delete", params, &result)
 	if err != nil {
+		klog.Errorf("DeleteDataset: API call failed for %s: %v", datasetID, err)
 		return fmt.Errorf("failed to delete dataset: %w", err)
 	}
+
+	klog.Infof("DeleteDataset: TrueNAS API returned result=%v for dataset %s", result, datasetID)
 
 	// TrueNAS API returns true on success, false on failure
 	// We must check this because the API may return false without an error
 	if !result {
+		klog.Errorf("DeleteDataset: TrueNAS returned false for %s - deletion unsuccessful", datasetID)
 		return fmt.Errorf("%w: %s", ErrDatasetDeletionFailed, datasetID)
 	}
 
-	klog.V(4).Infof("Successfully deleted dataset: %s (recursive)", datasetID)
+	klog.Infof("DeleteDataset: Successfully deleted dataset %s", datasetID)
 	return nil
 }
 

@@ -861,10 +861,11 @@ func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *V
 // deleteZVOL deletes a ZVOL dataset with retry logic for busy resources.
 func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.DatasetID == "" {
+		klog.Infof("deleteZVOL: DatasetID is empty, skipping deletion")
 		return nil
 	}
 
-	klog.V(4).Infof("Deleting ZVOL: %s (with retry for busy resources)", meta.DatasetID)
+	klog.Infof("deleteZVOL: Starting deletion of ZVOL %s for volume %s", meta.DatasetID, meta.Name)
 
 	retryConfig := retry.DeletionConfig("delete-zvol")
 	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
@@ -879,10 +880,11 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 
 	if err != nil {
 		// All retries exhausted or non-retryable error
+		klog.Errorf("deleteZVOL: Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 		return status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 	}
 
-	klog.V(4).Infof("Deleted ZVOL %s", meta.DatasetID)
+	klog.Infof("deleteZVOL: Successfully deleted ZVOL %s for volume %s", meta.DatasetID, meta.Name)
 	return nil
 }
 

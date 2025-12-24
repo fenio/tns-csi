@@ -3,6 +3,7 @@ package nvmeof
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -204,7 +205,7 @@ var _ = Describe("NVMe-oF Block Mode", func() {
 
 		By("Reading pattern from block device in second pod")
 		output, err := f.K8s.ExecInPod(ctx, secondPodName, []string{
-			"sh", "-c", "dd if=" + devicePath + " bs=512 count=1 2>/dev/null | head -c " + string(rune(len(testPattern))),
+			"sh", "-c", fmt.Sprintf("dd if=%s bs=512 count=1 2>/dev/null | head -c %d", devicePath, len(testPattern)),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		// Note: Due to potential alignment issues, we check if pattern is contained

@@ -53,17 +53,33 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 	case "nfs":
 		args = append(args,
 			"--set", "storageClasses.nfs.enabled=true",
+			"--set", "storageClasses.nfs.name=tns-csi-nfs",
+			"--set", "storageClasses.nfs.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.nfs.server="+h.config.TrueNASHost,
 			"--set", "storageClasses.nvmeof.enabled=false",
 		)
 	case "nvmeof":
 		args = append(args,
 			"--set", "storageClasses.nfs.enabled=false",
 			"--set", "storageClasses.nvmeof.enabled=true",
+			"--set", "storageClasses.nvmeof.name=tns-csi-nvmeof",
+			"--set", "storageClasses.nvmeof.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.nvmeof.server="+h.config.TrueNASHost,
+			"--set", "storageClasses.nvmeof.transport=tcp",
+			"--set", "storageClasses.nvmeof.port=4420",
 		)
 	case "both", "all":
 		args = append(args,
 			"--set", "storageClasses.nfs.enabled=true",
+			"--set", "storageClasses.nfs.name=tns-csi-nfs",
+			"--set", "storageClasses.nfs.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.nfs.server="+h.config.TrueNASHost,
 			"--set", "storageClasses.nvmeof.enabled=true",
+			"--set", "storageClasses.nvmeof.name=tns-csi-nvmeof",
+			"--set", "storageClasses.nvmeof.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.nvmeof.server="+h.config.TrueNASHost,
+			"--set", "storageClasses.nvmeof.transport=tcp",
+			"--set", "storageClasses.nvmeof.port=4420",
 		)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownProtocol, protocol)

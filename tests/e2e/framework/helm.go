@@ -127,12 +127,14 @@ func (h *HelmDeployer) IsDeployed() bool {
 // This is handled by --wait in Deploy, but can be called separately if needed.
 func (h *HelmDeployer) WaitForReady(timeout time.Duration) error {
 	// Wait for controller deployment
-	if err := h.waitForDeployment("tns-csi-controller", timeout); err != nil {
+	// Deployment name is: <release-name>-controller = tns-csi-driver-controller
+	if err := h.waitForDeployment("tns-csi-driver-controller", timeout); err != nil {
 		return fmt.Errorf("controller not ready: %w", err)
 	}
 
 	// Wait for node daemonset
-	if err := h.waitForDaemonSet("tns-csi-node", timeout); err != nil {
+	// DaemonSet name is: <release-name>-node = tns-csi-driver-node
+	if err := h.waitForDaemonSet("tns-csi-driver-node", timeout); err != nil {
 		return fmt.Errorf("node daemonset not ready: %w", err)
 	}
 

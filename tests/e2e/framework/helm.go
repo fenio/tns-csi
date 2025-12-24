@@ -1,0 +1,181 @@
+// Package framework provides utilities for E2E testing of the TrueNAS CSI driver.
+package framework
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+const (
+	helmReleaseName = "tns-csi-driver"
+	helmNamespace   = "kube-system"
+	helmChartPath   = "../../charts/tns-csi-driver" // Relative to tests/e2e
+)
+
+// ErrUnknownProtocol is returned when an unknown protocol is specified.
+var ErrUnknownProtocol = errors.New("unknown protocol")
+
+// HelmDeployer handles Helm-based deployment of the CSI driver.
+type HelmDeployer struct {
+	config *Config
+}
+
+// NewHelmDeployer creates a new HelmDeployer.
+func NewHelmDeployer(config *Config) *HelmDeployer {
+	return &HelmDeployer{config: config}
+}
+
+// Deploy installs or upgrades the CSI driver using Helm.
+func (h *HelmDeployer) Deploy(protocol string) error {
+	args := []string{
+		"upgrade", "--install",
+		helmReleaseName,
+		helmChartPath,
+		"--namespace", helmNamespace,
+		"--create-namespace",
+		"--wait",
+		"--timeout", "5m",
+		"--set", "truenas.url=wss://" + h.config.TrueNASHost + "/api/current",
+		"--set", "truenas.apiKey=" + h.config.TrueNASAPIKey,
+		"--set", "truenas.pool=" + h.config.TrueNASPool,
+		"--set", "image.repository=" + h.config.CSIImageRepo,
+		"--set", "image.tag=" + h.config.CSIImageTag,
+		"--set", "truenas.skipTLSVerify=true",
+	}
+
+	// Enable protocol-specific storage class
+	switch protocol {
+	case "nfs":
+		args = append(args,
+			"--set", "storageClasses.nfs.enabled=true",
+			"--set", "storageClasses.nvmeof.enabled=false",
+		)
+	case "nvmeof":
+		args = append(args,
+			"--set", "storageClasses.nfs.enabled=false",
+			"--set", "storageClasses.nvmeof.enabled=true",
+		)
+	case "both", "all":
+		args = append(args,
+			"--set", "storageClasses.nfs.enabled=true",
+			"--set", "storageClasses.nvmeof.enabled=true",
+		)
+	default:
+		return fmt.Errorf("%w: %s", ErrUnknownProtocol, protocol)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
+	defer cancel()
+	return h.runHelm(ctx, args...)
+}
+
+// Undeploy removes the CSI driver using Helm.
+func (h *HelmDeployer) Undeploy() error {
+	args := []string{
+		"uninstall",
+		helmReleaseName,
+		"--namespace", helmNamespace,
+		"--wait",
+		"--timeout", "2m",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	err := h.runHelm(ctx, args...)
+	if err != nil && strings.Contains(err.Error(), "not found") {
+		// Release doesn't exist, that's fine
+		return nil
+	}
+	return err
+}
+
+// IsDeployed checks if the CSI driver is currently deployed.
+func (h *HelmDeployer) IsDeployed() bool {
+	args := []string{
+		"status",
+		helmReleaseName,
+		"--namespace", helmNamespace,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return h.runHelm(ctx, args...) == nil
+}
+
+// WaitForReady waits for the CSI driver pods to be ready.
+// This is handled by --wait in Deploy, but can be called separately if needed.
+func (h *HelmDeployer) WaitForReady(timeout time.Duration) error {
+	// Wait for controller deployment
+	if err := h.waitForDeployment("tns-csi-controller", timeout); err != nil {
+		return fmt.Errorf("controller not ready: %w", err)
+	}
+
+	// Wait for node daemonset
+	if err := h.waitForDaemonSet("tns-csi-node", timeout); err != nil {
+		return fmt.Errorf("node daemonset not ready: %w", err)
+	}
+
+	return nil
+}
+
+// waitForDeployment waits for a deployment to be available.
+func (h *HelmDeployer) waitForDeployment(name string, timeout time.Duration) error {
+	args := []string{
+		"wait", "--for=condition=available",
+		"deployment/" + name,
+		"--namespace", helmNamespace,
+		"--timeout", timeout.String(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
+	defer cancel()
+	return runKubectl(ctx, args...)
+}
+
+// waitForDaemonSet waits for a daemonset to have all pods ready.
+func (h *HelmDeployer) waitForDaemonSet(name string, timeout time.Duration) error {
+	// kubectl wait doesn't work well with daemonsets, so we use rollout status
+	args := []string{
+		"rollout", "status",
+		"daemonset/" + name,
+		"--namespace", helmNamespace,
+		"--timeout", timeout.String(),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
+	defer cancel()
+	return runKubectl(ctx, args...)
+}
+
+// runHelm executes a helm command.
+func (h *HelmDeployer) runHelm(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "helm", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("helm %s failed: %w\nstdout: %s\nstderr: %s",
+			args[0], err, stdout.String(), stderr.String())
+	}
+	return nil
+}
+
+// runKubectl executes a kubectl command.
+func runKubectl(ctx context.Context, args ...string) error {
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("kubectl %s failed: %w\nstdout: %s\nstderr: %s",
+			args[0], err, stdout.String(), stderr.String())
+	}
+	return nil
+}

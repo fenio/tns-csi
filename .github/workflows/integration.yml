@@ -140,7 +140,8 @@ jobs:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           echo "=== Running Ginkgo NFS E2E Tests ==="
-          ginkgo -v --timeout=25m --focus="NFS" ./tests/e2e/...
+          # Run only NFS-specific tests from the nfs/ directory
+          ginkgo -v --timeout=25m ./tests/e2e/nfs/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -176,7 +177,8 @@ jobs:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           echo "=== Running Ginkgo NVMe-oF E2E Tests ==="
-          ginkgo -v --timeout=40m --focus="NVMe-oF" ./tests/e2e/...
+          # Run only NVMe-oF-specific tests from the nvmeof/ directory
+          ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -210,8 +212,9 @@ jobs:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           echo "=== Running Ginkgo Shared E2E Tests ==="
-          # Run tests that are not NFS or NVMe-oF specific
-          ginkgo -v --timeout=25m --skip="NFS|NVMe-oF" ./tests/e2e/...
+          # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
+          # These tests use "both" protocol setup
+          ginkgo -v --timeout=25m ./tests/e2e/
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6

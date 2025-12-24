@@ -23,6 +23,7 @@ import (
 var (
 	ErrPVCNoCapacity = errors.New("PVC has no capacity set")
 	ErrPVCNotBound   = errors.New("PVC is not bound to a PV")
+	ErrNotCSIVolume  = errors.New("PV is not a CSI volume")
 )
 
 // Default access mode for PVCs.
@@ -719,4 +720,106 @@ func (k *KubernetesClient) WaitForPodToBeDeleted(ctx context.Context, name strin
 		return fmt.Errorf("wait for pod delete failed: %w\nstderr: %s", err, stderr.String())
 	}
 	return nil
+}
+
+// CreateStorageClassWithParams creates a StorageClass with custom parameters.
+func (k *KubernetesClient) CreateStorageClassWithParams(ctx context.Context, name, provisioner string, params map[string]string) error {
+	// Build parameters YAML
+	var paramsBuilder strings.Builder
+	for key, value := range params {
+		paramsBuilder.WriteString("  ")
+		paramsBuilder.WriteString(key)
+		paramsBuilder.WriteString(": \"")
+		paramsBuilder.WriteString(value)
+		paramsBuilder.WriteString("\"\n")
+	}
+
+	yaml := fmt.Sprintf(`apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: %s
+provisioner: %s
+parameters:
+%sreclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+`, name, provisioner, paramsBuilder.String())
+
+	return k.applyYAML(ctx, yaml)
+}
+
+// CreateStorageClassWithParamsAndBindingMode creates a StorageClass with custom parameters and binding mode.
+func (k *KubernetesClient) CreateStorageClassWithParamsAndBindingMode(ctx context.Context, name, provisioner string, params map[string]string, bindingMode string) error {
+	// Build parameters YAML
+	var paramsBuilder strings.Builder
+	for key, value := range params {
+		paramsBuilder.WriteString("  ")
+		paramsBuilder.WriteString(key)
+		paramsBuilder.WriteString(": \"")
+		paramsBuilder.WriteString(value)
+		paramsBuilder.WriteString("\"\n")
+	}
+
+	yaml := fmt.Sprintf(`apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: %s
+provisioner: %s
+parameters:
+%sreclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: %s
+`, name, provisioner, paramsBuilder.String(), bindingMode)
+
+	return k.applyYAML(ctx, yaml)
+}
+
+// DeleteStorageClass deletes a StorageClass using kubectl.
+func (k *KubernetesClient) DeleteStorageClass(ctx context.Context, name string) error {
+	args := []string{
+		"delete", "storageclass", name,
+		"--ignore-not-found=true",
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	return cmd.Run()
+}
+
+// GetPVName returns the PV name bound to a PVC.
+func (k *KubernetesClient) GetPVName(ctx context.Context, pvcName string) (string, error) {
+	pvc, err := k.GetPVC(ctx, pvcName)
+	if err != nil {
+		return "", err
+	}
+	if pvc.Spec.VolumeName == "" {
+		return "", fmt.Errorf("%w: %s", ErrPVCNotBound, pvcName)
+	}
+	return pvc.Spec.VolumeName, nil
+}
+
+// GetVolumeHandle returns the CSI volume handle for a PV.
+func (k *KubernetesClient) GetVolumeHandle(ctx context.Context, pvName string) (string, error) {
+	pv, err := k.clientset.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+	if err != nil {
+		return "", err
+	}
+	if pv.Spec.CSI == nil {
+		return "", fmt.Errorf("%w: %s", ErrNotCSIVolume, pvName)
+	}
+	return pv.Spec.CSI.VolumeHandle, nil
+}
+
+// GetControllerLogs returns recent logs from the CSI controller.
+func (k *KubernetesClient) GetControllerLogs(ctx context.Context, tailLines int) (string, error) {
+	args := []string{
+		"logs",
+		"-n", "kube-system",
+		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		fmt.Sprintf("--tail=%d", tailLines),
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get controller logs: %w", err)
+	}
+	return string(output), nil
 }

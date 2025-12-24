@@ -808,6 +808,11 @@ func (k *KubernetesClient) GetVolumeHandle(ctx context.Context, pvName string) (
 	return pv.Spec.CSI.VolumeHandle, nil
 }
 
+// GetPV retrieves a PersistentVolume by name.
+func (k *KubernetesClient) GetPV(ctx context.Context, pvName string) (*corev1.PersistentVolume, error) {
+	return k.clientset.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+}
+
 // GetControllerLogs returns recent logs from the CSI controller.
 func (k *KubernetesClient) GetControllerLogs(ctx context.Context, tailLines int) (string, error) {
 	args := []string{

@@ -190,3 +190,27 @@ func (f *Framework) Namespace() string {
 func (f *Framework) Protocol() string {
 	return f.protocol
 }
+
+// UniqueName generates a unique name for test resources with a given prefix.
+func (f *Framework) UniqueName(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+}
+
+// SetupProtocol changes the protocol without doing a full setup.
+// This is useful for tests that need to test multiple protocols.
+func (f *Framework) SetupProtocol(protocol string) error {
+	f.protocol = protocol
+	klog.Infof("Switching to protocol %s", protocol)
+
+	// Re-deploy the CSI driver with the new protocol
+	if deployErr := f.Helm.Deploy(protocol); deployErr != nil {
+		return fmt.Errorf("failed to deploy CSI driver for protocol %s: %w", protocol, deployErr)
+	}
+
+	// Wait for driver to be ready
+	if waitErr := f.Helm.WaitForReady(2 * time.Minute); waitErr != nil {
+		return fmt.Errorf("CSI driver not ready for protocol %s: %w", protocol, waitErr)
+	}
+
+	return nil
+}

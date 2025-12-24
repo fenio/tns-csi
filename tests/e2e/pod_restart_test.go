@@ -66,8 +66,8 @@ var _ = Describe("Pod Restart", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
 		// Note: cleanup for pod is handled manually in this test due to restarts
 
-		By("Waiting for pod to be ready")
-		err = f.K8s.WaitForPodReady(ctx, pod.Name, 6*time.Minute)
+		By("Waiting for pod to be ready (NVMe-oF uses WaitForFirstConsumer, may take longer)")
+		err = f.K8s.WaitForPodReady(ctx, pod.Name, 8*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
 		By("Verifying both PVCs are bound")
@@ -118,7 +118,7 @@ var _ = Describe("Pod Restart", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to recreate pod")
 
 		By("Waiting for recreated pod to be ready")
-		err = f.K8s.WaitForPodReady(ctx, pod.Name, 6*time.Minute)
+		err = f.K8s.WaitForPodReady(ctx, pod.Name, 8*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Recreated pod did not become ready")
 
 		By("Recording node after graceful restart")
@@ -161,7 +161,7 @@ var _ = Describe("Pod Restart", func() {
 		})
 
 		By("Waiting for pod to be ready after forced restart")
-		err = f.K8s.WaitForPodReady(ctx, pod.Name, 6*time.Minute)
+		err = f.K8s.WaitForPodReady(ctx, pod.Name, 8*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready after forced termination")
 
 		By("Verifying all data persisted after forced restart")

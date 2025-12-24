@@ -36,7 +36,7 @@ var _ = Describe("NVMe-oF Snapshots", func() {
 		snapshotName := "test-snapshot-nvmeof"
 
 		By("Creating VolumeSnapshotClass")
-		err := f.K8s.CreateVolumeSnapshotClass(ctx, snapshotClassName, "csi.truenas.com", "Delete")
+		err := f.K8s.CreateVolumeSnapshotClass(ctx, snapshotClassName, "tns.csi.io", "Delete")
 		Expect(err).NotTo(HaveOccurred(), "Failed to create VolumeSnapshotClass")
 		f.DeferCleanup(func() error {
 			return f.K8s.DeleteVolumeSnapshotClass(context.Background(), snapshotClassName)

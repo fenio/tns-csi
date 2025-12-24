@@ -73,9 +73,10 @@ type mockNVMeOFTarget struct {
 }
 
 type mockSnapshot struct {
-	ID      string
-	Name    string
-	Dataset string
+	ID         string
+	Name       string
+	Dataset    string
+	Properties map[string]interface{}
 }
 
 type mockSubsystem struct {
@@ -321,6 +322,33 @@ func (m *MockClient) SetDatasetProperties(ctx context.Context, datasetID string,
 	}
 
 	return fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
+}
+
+// SetSnapshotProperties mocks pool.dataset.update with user_properties.
+func (m *MockClient) SetSnapshotProperties(ctx context.Context, snapshotID string, updateProperties map[string]string, removeProperties []string) error {
+	m.logCall("SetSnapshotProperties", snapshotID, updateProperties, removeProperties)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Find snapshot by ID or name
+	for name, snap := range m.snapshots {
+		if snap.ID == snapshotID || snap.Name == snapshotID {
+			if snap.Properties == nil {
+				snap.Properties = make(map[string]interface{})
+			}
+			for k, v := range updateProperties {
+				snap.Properties[k] = v
+			}
+			for _, k := range removeProperties {
+				delete(snap.Properties, k)
+			}
+			m.snapshots[name] = snap
+			return nil
+		}
+	}
+
+	return fmt.Errorf("snapshot %s: %w", snapshotID, ErrSnapshotNotFound)
 }
 
 // GetDatasetProperties mocks pool.dataset.query with extra properties.

@@ -3,7 +3,7 @@ name: Integration Tests
 on:
   # Run after CI or Release workflow completes
   # - CI on main: catches issues before release (uses 'latest' image)
-  # - Release on tags: tests the actual released image (uses tag like 'v0.5.0')
+  # - Release on tags: tests the actual released image (uses tag like 'v0.6.0')
   workflow_run:
     workflows: ["CI", "Release"]
     types:

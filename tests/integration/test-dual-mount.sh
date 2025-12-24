@@ -99,12 +99,17 @@ test_info "TrueNAS URL: ${truenas_url}"
 # Only the NVMe-oF port needs to be pre-configured in TrueNAS
 test_info "NVMe-oF subsystems will be auto-created per volume"
 
+# Use GHCR image repository to avoid Docker Hub rate limiting
+image_repo="${CSI_IMAGE_REPOSITORY:-ghcr.io/fenio/tns-csi}"
+image_tag="${CSI_IMAGE_TAG:-latest}"
+test_info "Using image: ${image_repo}:${image_tag}"
+
 # Deploy with Helm - enable BOTH NFS and NVMe-oF
 if ! helm upgrade --install tns-csi ./charts/tns-csi-driver \
     --namespace kube-system \
     --create-namespace \
-    --set image.repository=bfenski/tns-csi \
-    --set image.tag="${CSI_IMAGE_TAG:-latest}" \
+    --set image.repository="${image_repo}" \
+    --set image.tag="${image_tag}" \
     --set image.pullPolicy=Always \
     --set truenas.url="${truenas_url}" \
     --set truenas.apiKey="${TRUENAS_API_KEY}" \
@@ -126,9 +131,12 @@ fi
 
 test_success "CSI driver deployed with dual protocol support"
 
-echo ""
-echo "=== Helm deployment status ==="
-helm list -n kube-system
+# Show deployed version for clarity
+deployed_chart=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null | jq -r '.[0].chart' 2>/dev/null || echo "")
+deployed_version=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null | jq -r '.[0].app_version' 2>/dev/null || echo "")
+if [[ -n "${deployed_chart}" ]]; then
+    test_info "Deployed: ${deployed_chart} (app_version=${deployed_version})"
+fi
 
 echo ""
 echo "=== CSI driver pods ==="

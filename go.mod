@@ -6,14 +6,14 @@ require (
 	github.com/container-storage-interface/spec v1.12.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/kubernetes-csi/csi-test/v5 v5.4.0
-	github.com/onsi/ginkgo/v2 v2.27.2
+	github.com/onsi/ginkgo/v2 v2.27.3
 	github.com/onsi/gomega v1.38.2
 	github.com/prometheus/client_golang v1.23.2
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
-	k8s.io/api v0.35.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
+	k8s.io/api v0.35.0-alpha.2
+	k8s.io/apimachinery v0.35.0-alpha.2
+	k8s.io/client-go v0.35.0-alpha.2
 	k8s.io/klog/v2 v2.130.1
 )
 

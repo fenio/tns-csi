@@ -707,6 +707,14 @@ deploy_driver() {
     
     test_success "CSI driver deployed"
     
+    # Always show the deployed Helm release version for clarity
+    local deployed_chart deployed_version
+    deployed_chart=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null | jq -r '.[0].chart' 2>/dev/null || echo "")
+    deployed_version=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null | jq -r '.[0].app_version' 2>/dev/null || echo "")
+    if [[ -n "${deployed_chart}" ]]; then
+        test_info "Deployed: ${deployed_chart} (app_version=${deployed_version})"
+    fi
+    
     # Verify deployment (verbose mode only for detailed output)
     if is_verbose 1; then
         echo ""
@@ -804,13 +812,19 @@ wait_for_driver() {
         false  # Trigger ERR trap
     fi
     
-    test_success "CSI driver is ready"
+    # Get Helm release info and image version for display
+    local helm_info
+    helm_info=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null | jq -r '.[0] | "chart=\(.chart) app_version=\(.app_version)"' 2>/dev/null || echo "")
     
-    # Verify image version
-    echo ""
-    echo "=== Driver image version ==="
-    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
-        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].image}{"\n"}{end}'
+    local image_version
+    image_version=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
+        -o jsonpath='{.items[0].spec.containers[?(@.name=="tns-csi-driver")].image}' 2>/dev/null | sed 's/.*://' || echo "unknown")
+    
+    if [[ -n "${helm_info}" ]]; then
+        test_success "CSI driver is ready (${helm_info} image=${image_version})"
+    else
+        test_success "CSI driver is ready (image=${image_version})"
+    fi
     
     # Wait for StorageClasses to be fully registered in API server
     # This prevents race conditions where PVC creation happens before StorageClass is available

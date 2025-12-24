@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -14,7 +15,6 @@ import (
 const (
 	helmReleaseName = "tns-csi-driver"
 	helmNamespace   = "kube-system"
-	helmChartPath   = "./charts/tns-csi-driver" // Relative to repo root (where CI runs from)
 )
 
 // ErrUnknownProtocol is returned when an unknown protocol is specified.
@@ -30,12 +30,31 @@ func NewHelmDeployer(config *Config) *HelmDeployer {
 	return &HelmDeployer{config: config}
 }
 
+// getChartPath returns the absolute path to the Helm chart.
+func getChartPath() (string, error) {
+	// Get the git repo root
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo root: %w", err)
+	}
+	repoRoot := strings.TrimSpace(string(output))
+	return filepath.Join(repoRoot, "charts", "tns-csi-driver"), nil
+}
+
 // Deploy installs or upgrades the CSI driver using Helm.
 func (h *HelmDeployer) Deploy(protocol string) error {
+	chartPath, err := getChartPath()
+	if err != nil {
+		return fmt.Errorf("failed to get chart path: %w", err)
+	}
+
 	args := []string{
 		"upgrade", "--install",
 		helmReleaseName,
-		helmChartPath,
+		chartPath,
 		"--namespace", helmNamespace,
 		"--create-namespace",
 		"--wait",

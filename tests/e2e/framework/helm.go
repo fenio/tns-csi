@@ -14,7 +14,7 @@ import (
 const (
 	helmReleaseName = "tns-csi-driver"
 	helmNamespace   = "kube-system"
-	helmChartPath   = "charts/tns-csi-driver" // Relative to repo root
+	helmChartPath   = "./charts/tns-csi-driver" // Relative to repo root (where CI runs from)
 )
 
 // ErrUnknownProtocol is returned when an unknown protocol is specified.

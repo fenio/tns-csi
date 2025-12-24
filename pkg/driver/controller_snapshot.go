@@ -433,6 +433,19 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 
 	klog.Infof("Successfully created snapshot: %s", snapshot.ID)
 
+	// Step 4: Set CSI metadata properties on the detached snapshot dataset
+	props := map[string]string{
+		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
+		tnsapi.PropertySnapshotID:       snapshotName,
+		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
+		tnsapi.PropertyDetachedSnapshot: VolumeContextValueFalse,
+		tnsapi.PropertyDeleteStrategy:   "delete",
+	}
+	if err := s.apiClient.SetSnapshotProperties(ctx, snapshot.ID, props, nil); err != nil {
+		klog.Warningf("Failed to set CSI properties on snapshot: %v", err)
+		// Non-fatal - the snapshot is still usable
+	}
+
 	// Create snapshot metadata
 	createdAt := time.Now().Unix()
 	snapshotMeta := SnapshotMetadata{
@@ -566,7 +579,8 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		PropertiesExclude:       []string{"mountpoint", "sharenfs", "sharesmb"},
 		Replicate:               false,
 		Encryption:              false,
-		NamingSchema:            []string{tempSnapshotName},
+		NameRegex:               &tempSnapshotName,
+		NamingSchema:            []string{},
 		AlsoIncludeNamingSchema: []string{},
 		RetentionPolicy:         "NONE",
 		Readonly:                "IGNORE",
@@ -709,7 +723,7 @@ func (s *ControllerService) deleteRegularSnapshot(ctx context.Context, timer *me
 // Detached snapshots are stored as full dataset copies, so we delete the dataset instead of a ZFS snapshot.
 func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *metrics.OperationTimer, snapshotMeta *SnapshotMetadata) (*csi.DeleteSnapshotResponse, error) {
 	// For detached snapshots, DatasetName contains the full dataset path
-	datasetPath := snapshotMeta.DatasetName
+	datasetPath := snapshotMeta.DatasetName // TODO: This is empty according to decodeCompactSnapshotID and breaks functionality
 
 	klog.Infof("Deleting detached snapshot dataset: %s (snapshot: %s)", datasetPath, snapshotMeta.SnapshotName)
 

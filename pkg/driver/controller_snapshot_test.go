@@ -242,6 +242,11 @@ func (m *MockAPIClientForSnapshots) SetDatasetProperties(ctx context.Context, da
 	return nil
 }
 
+func (m *MockAPIClientForSnapshots) SetSnapshotProperties(ctx context.Context, snapshotID string, updateProperties map[string]string, removeProperties []string) error {
+	// Mock implementation - always succeed
+	return nil
+}
+
 func (m *MockAPIClientForSnapshots) GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error) {
 	// Mock implementation - return empty map (no properties)
 	return make(map[string]string), nil

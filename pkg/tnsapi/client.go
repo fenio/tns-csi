@@ -79,20 +79,35 @@ type Response struct {
 
 // Error represents a storage API error.
 type Error struct {
-	Data      interface{} `json:"data,omitempty"`
+	Data      *ErrorData `json:"data,omitempty"`
+	ErrorName string     `json:"errname"`
+	Reason    string     `json:"reason"`
+	Type      string     `json:"type"`
+	Message   string     `json:"message"`
+	ErrorCode int        `json:"error"`
+	Code      int        `json:"code"`
+}
+
+type ErrorData struct {
+	Error     int         `json:"error"`
 	ErrorName string      `json:"errname"`
 	Reason    string      `json:"reason"`
-	Type      string      `json:"type"`
-	Message   string      `json:"message"`
-	ErrorCode int         `json:"error"`
-	Code      int         `json:"code"`
+	Trace     *ErrorTrace `json:"trace,omitempty"`
+	Extra     interface{} `json:"extra,omitempty"`
+}
+
+type ErrorTrace struct {
+	Class     string      `json:"class"`
+	Frames    interface{} `json:"-"` // Stack frames (omitted from JSON)
+	Formatted string      `json:"-"` // Formatted trace (omitted from JSON)
+	Repr      string      `json:"repr"`
 }
 
 func (e *Error) Error() string {
 	// Try storage API error format first
-	if e.Reason != "" {
-		return fmt.Sprintf("Storage API error [%s]: %s", e.ErrorName, e.Reason)
-	}
+	// if e.Reason != "" {
+	// 	return fmt.Sprintf("Storage API error [%s]: %s", e.ErrorName, e.Reason)
+	// }
 	// Fallback to JSON-RPC 2.0 format
 	if e.Data != nil {
 		// Try to format Data as JSON for better error messages
@@ -1516,11 +1531,11 @@ type SnapshotCreateParams struct {
 
 // Snapshot represents a ZFS snapshot.
 type Snapshot struct {
-	Properties map[string]interface{} `json:"properties"` // ZFS properties
 	ID         string                 `json:"id"`         // Full snapshot name (dataset@snapshot)
 	Name       string                 `json:"name"`       // Snapshot name portion
 	Dataset    string                 `json:"dataset"`    // Parent dataset name
 	CreateTXG  string                 `json:"createtxg"`  // Creation transaction group
+	Properties map[string]interface{} `json:"properties"` // ZFS properties
 }
 
 // CreateSnapshot creates a new ZFS snapshot.
@@ -1528,7 +1543,7 @@ func (c *Client) CreateSnapshot(ctx context.Context, params SnapshotCreateParams
 	klog.V(4).Infof("Creating snapshot %s for dataset %s", params.Name, params.Dataset)
 
 	var result Snapshot
-	err := c.Call(ctx, "zfs.snapshot.create", []interface{}{params}, &result)
+	err := c.Call(ctx, "pool.snapshot.create", []interface{}{params}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create snapshot: %w", err)
 	}
@@ -1772,8 +1787,8 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 		return nil
 	}
 
-	// TrueNAS pool.dataset.update accepts user_properties as a list of objects
-	// The API expects: {"user_properties": [{"key": "property_name", "value": "property_value"}, ...]}
+	// TrueNAS pool.dataset.update accepts user_properties_update as a list of objects
+	// The API expects: {"user_properties_update": [{"key": "property_name", "value": "property_value"}, ...]}
 	// Convert our simple map to the list format expected by TrueNAS
 	userProps := make([]map[string]string, 0, len(properties))
 	for key, value := range properties {
@@ -1784,26 +1799,62 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 	}
 
 	params := map[string]interface{}{
-		"user_properties": userProps,
+		"user_properties_update": userProps,
 	}
-	klog.Infof("DEBUG: Sending pool.dataset.update with user_properties: %v", userProps)
+	klog.Infof("DEBUG: Sending pool.dataset.update with user_properties_update: %v", userProps)
 
 	var result Dataset
 	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
 	if err != nil {
-		errStr := err.Error()
-		// Ignore 'comments' property errors - this property doesn't exist on ZVOLs
-		// but TrueNAS may complain about it when the parent dataset has comments set
-		if strings.Contains(errStr, "properties.comments") && strings.Contains(errStr, "does not exist") {
-			klog.V(4).Infof("Ignoring 'comments' property error for ZVOL %s (expected for block devices)", datasetID)
-			return nil
-		}
 		klog.Errorf("DEBUG: SetDatasetProperties FAILED for dataset %s: %v", datasetID, err)
 		return fmt.Errorf("failed to set user properties on dataset %s: %w", datasetID, err)
 	}
 
 	klog.Infof("DEBUG: SetDatasetProperties SUCCESS for dataset %s", datasetID)
 	klog.V(4).Infof("Successfully set %d user properties on dataset: %s", len(properties), datasetID)
+	return nil
+}
+
+// SetSnapshotProperties sets ZFS user properties on a snapshot.
+// Properties are stored in the ZFS snapshot's user_properties field.
+// This is used to track CSI metadata like NFS share IDs, NVMe-oF subsystem IDs, etc.
+func (c *Client) SetSnapshotProperties(ctx context.Context, snapshotID string, updateProperties map[string]string, removeProperties []string) error {
+	klog.V(4).Infof("Setting %d user properties on snapshot: %s", len(updateProperties), snapshotID)
+	klog.Infof("DEBUG: SetSnapshotProperties called for snapshot %s with properties: %v", snapshotID, updateProperties)
+
+	if len(updateProperties) == 0 && len(removeProperties) == 0 {
+		return nil
+	}
+
+	// TrueNAS pool.snapshot.update accepts user_properties_update as a list of objects
+	// The API expects: {"user_properties_update": [{"key": "property_name", "value": "property_value"}, ...]}
+	// Convert our simple map to the list format expected by TrueNAS
+	userPropsUpdate := make([]map[string]string, 0, len(updateProperties))
+	for key, value := range updateProperties {
+		userPropsUpdate = append(userPropsUpdate, map[string]string{
+			"key":   key,
+			"value": value,
+		})
+	}
+
+	params := map[string]interface{}{
+		"user_properties_update": userPropsUpdate,
+	}
+	if len(removeProperties) > 0 {
+		params["user_properties_remove"] = removeProperties
+	}
+
+	klog.Infof("DEBUG: Sending pool.snapshot.update with user_properties_update: %v", userPropsUpdate)
+
+	var result Snapshot
+	err := c.Call(ctx, "pool.snapshot.update", []interface{}{snapshotID, params}, &result)
+	if err != nil {
+		klog.Errorf("DEBUG: SetSnapshotProperties FAILED for snapshot %s: %v", snapshotID, err)
+		return fmt.Errorf("failed to set user properties on snapshot %s: %w", snapshotID, err)
+	}
+
+	klog.Infof("DEBUG: SetSnapshotProperties SUCCESS for snapshot %s", snapshotID)
+	klog.V(4).Infof("Successfully set %d user properties on snapshot: %s", len(updateProperties), snapshotID)
 	return nil
 }
 
@@ -1992,6 +2043,8 @@ type ReplicationRunOnetimeParams struct {
 	PropertiesExclude       []string `json:"properties_exclude"`         // Properties to exclude
 	Replicate               bool     `json:"replicate"`                  // Full filesystem replication
 	Encryption              bool     `json:"encryption"`                 // Enable encryption
+	Name                    *string  `json:"name,omitempty"`             // Snapshot name to create
+	NameRegex               *string  `json:"name_regex,omitempty"`       // Regex for snapshot names
 	NamingSchema            []string `json:"naming_schema"`              // Naming schema for snapshots
 	AlsoIncludeNamingSchema []string `json:"also_include_naming_schema"` // Additional naming schemas
 	RetentionPolicy         string   `json:"retention_policy"`           // "SOURCE", "CUSTOM", or "NONE"
@@ -2009,8 +2062,31 @@ type ReplicationJobState struct {
 	Progress    map[string]interface{} `json:"progress"`
 	Error       string                 `json:"error"`
 	Result      interface{}            `json:"result"`
-	TimeStarted *string                `json:"time_started"`
-	TimeEnded   *string                `json:"time_finished"`
+	TimeStarted *ejsonDate             `json:"time_started,omitempty"`
+	TimeEnded   *ejsonDate             `json:"time_finished,omitempty"`
+}
+
+type ejsonDate struct {
+	time.Time
+}
+
+func (e *ejsonDate) UnmarshalJSON(data []byte) error {
+	aux := struct {
+		Time int64 `json:"$date"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	e.Time = time.UnixMilli(aux.Time)
+	return nil
+}
+
+func (e ejsonDate) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Time int64 `json:"$date"`
+	}{
+		Time: e.Time.UnixMilli(),
+	})
 }
 
 // RunOnetimeReplication runs a one-time replication task using zfs send/receive.

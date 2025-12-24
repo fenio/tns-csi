@@ -25,6 +25,9 @@ var (
 	ErrPVCNotBound   = errors.New("PVC is not bound to a PV")
 )
 
+// Default access mode for PVCs.
+const defaultAccessMode = "ReadWriteOnce"
+
 // KubernetesClient wraps a Kubernetes clientset with helper methods.
 type KubernetesClient struct {
 	clientset *kubernetes.Clientset
@@ -364,7 +367,7 @@ func (k *KubernetesClient) WaitForPVCDeleted(ctx context.Context, name string, t
 
 // CreatePVCFromSnapshot creates a PVC from a VolumeSnapshot using kubectl.
 func (k *KubernetesClient) CreatePVCFromSnapshot(ctx context.Context, pvcName, snapshotName, storageClass, size string, accessModes []corev1.PersistentVolumeAccessMode) error {
-	accessModeStr := "ReadWriteOnce"
+	accessModeStr := defaultAccessMode
 	if len(accessModes) > 0 {
 		accessModeStr = string(accessModes[0])
 	}
@@ -392,7 +395,7 @@ spec:
 
 // CreatePVCFromPVC creates a clone PVC from an existing PVC using kubectl.
 func (k *KubernetesClient) CreatePVCFromPVC(ctx context.Context, cloneName, sourcePVCName, storageClass, size string, accessModes []corev1.PersistentVolumeAccessMode) error {
-	accessModeStr := "ReadWriteOnce"
+	accessModeStr := defaultAccessMode
 	if len(accessModes) > 0 {
 		accessModeStr = string(accessModes[0])
 	}
@@ -520,4 +523,200 @@ func (k *KubernetesClient) ForceDeletePod(ctx context.Context, name string) erro
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
 	return cmd.Run()
+}
+
+// StatefulSetOptions configures a StatefulSet creation.
+type StatefulSetOptions struct {
+	Labels           map[string]string
+	Name             string
+	ServiceName      string
+	StorageClassName string
+	StorageSize      string
+	MountPath        string
+	Image            string
+	AccessModes      []corev1.PersistentVolumeAccessMode
+	Command          []string
+	Replicas         int32
+}
+
+// CreateHeadlessService creates a headless service for StatefulSet.
+func (k *KubernetesClient) CreateHeadlessService(ctx context.Context, name string, labels map[string]string) error {
+	yaml := fmt.Sprintf(`apiVersion: v1
+kind: Service
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app: %s
+spec:
+  ports:
+  - port: 80
+    name: web
+  clusterIP: None
+  selector:
+    app: %s
+`, name, k.namespace, labels["app"], labels["app"])
+
+	return k.applyYAML(ctx, yaml)
+}
+
+// CreateStatefulSet creates a StatefulSet with volumeClaimTemplates using kubectl.
+func (k *KubernetesClient) CreateStatefulSet(ctx context.Context, opts StatefulSetOptions) error {
+	if opts.Image == "" {
+		opts.Image = "public.ecr.aws/docker/library/busybox:latest"
+	}
+	if opts.MountPath == "" {
+		opts.MountPath = "/data"
+	}
+
+	// Build access modes string
+	accessModeStr := defaultAccessMode
+	if len(opts.AccessModes) > 0 {
+		accessModeStr = string(opts.AccessModes[0])
+	}
+
+	// Build labels
+	appLabel := opts.Labels["app"]
+	if appLabel == "" {
+		appLabel = opts.Name
+	}
+
+	// Build command - the command writes pod identity to the volume
+	commandYAML := `command:
+          - sh
+          - -c
+          - |
+            echo "Pod: ${HOSTNAME}" > /data/pod-identity.txt
+            echo "Started at: $(date)" >> /data/pod-identity.txt
+            sync
+            while true; do sleep 30; done`
+
+	yaml := fmt.Sprintf(`apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  serviceName: %s
+  replicas: %d
+  selector:
+    matchLabels:
+      app: %s
+  template:
+    metadata:
+      labels:
+        app: %s
+    spec:
+      containers:
+      - name: test
+        image: %s
+        %s
+        volumeMounts:
+        - name: data
+          mountPath: %s
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "%s" ]
+      storageClassName: %s
+      resources:
+        requests:
+          storage: %s
+`, opts.Name, k.namespace, opts.ServiceName, opts.Replicas, appLabel, appLabel, opts.Image, commandYAML, opts.MountPath, accessModeStr, opts.StorageClassName, opts.StorageSize)
+
+	return k.applyYAML(ctx, yaml)
+}
+
+// ScaleStatefulSet scales a StatefulSet to the specified number of replicas.
+func (k *KubernetesClient) ScaleStatefulSet(ctx context.Context, name string, replicas int32) error {
+	args := []string{
+		"scale", "statefulset", name,
+		"-n", k.namespace,
+		fmt.Sprintf("--replicas=%d", replicas),
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("scale statefulset failed: %w\nstderr: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// WaitForStatefulSetReady waits for all pods in a StatefulSet to be ready.
+func (k *KubernetesClient) WaitForStatefulSetReady(ctx context.Context, name string, replicas int32, timeout time.Duration) error {
+	// Wait for each pod to be ready (StatefulSets create pods in order)
+	for i := range replicas {
+		podName := fmt.Sprintf("%s-%d", name, i)
+		if err := k.WaitForPodReady(ctx, podName, timeout); err != nil {
+			return fmt.Errorf("pod %s not ready: %w", podName, err)
+		}
+	}
+	return nil
+}
+
+// DeleteStatefulSet deletes a StatefulSet using kubectl.
+func (k *KubernetesClient) DeleteStatefulSet(ctx context.Context, name string) error {
+	args := []string{
+		"delete", "statefulset", name,
+		"-n", k.namespace,
+		"--ignore-not-found=true",
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	return cmd.Run()
+}
+
+// DeleteService deletes a Service using kubectl.
+func (k *KubernetesClient) DeleteService(ctx context.Context, name string) error {
+	args := []string{
+		"delete", "service", name,
+		"-n", k.namespace,
+		"--ignore-not-found=true",
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	return cmd.Run()
+}
+
+// GetStatefulSetPodName returns the pod name for a given StatefulSet replica index.
+func (k *KubernetesClient) GetStatefulSetPodName(stsName string, index int) string {
+	return fmt.Sprintf("%s-%d", stsName, index)
+}
+
+// GetStatefulSetPVCName returns the PVC name for a given StatefulSet replica index.
+// StatefulSet PVC naming convention: <volumeClaimTemplate.name>-<statefulset.name>-<ordinal>.
+func (k *KubernetesClient) GetStatefulSetPVCName(stsName, volumeName string, index int) string {
+	return fmt.Sprintf("%s-%s-%d", volumeName, stsName, index)
+}
+
+// ListStatefulSetPods returns all pods belonging to a StatefulSet.
+func (k *KubernetesClient) ListStatefulSetPods(ctx context.Context, stsName string, replicas int32) ([]string, error) {
+	pods := make([]string, replicas)
+	for i := range replicas {
+		pods[i] = k.GetStatefulSetPodName(stsName, int(i))
+	}
+	return pods, nil
+}
+
+// WaitForPodToBeDeleted waits for a specific pod to be deleted (used for scale down).
+func (k *KubernetesClient) WaitForPodToBeDeleted(ctx context.Context, name string, timeout time.Duration) error {
+	args := []string{
+		"wait", "--for=delete",
+		"pod/" + name,
+		"-n", k.namespace,
+		"--timeout=" + timeout.String(),
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// Ignore if pod is already deleted
+		if strings.Contains(stderr.String(), "not found") {
+			return nil
+		}
+		return fmt.Errorf("wait for pod delete failed: %w\nstderr: %s", err, stderr.String())
+	}
+	return nil
 }

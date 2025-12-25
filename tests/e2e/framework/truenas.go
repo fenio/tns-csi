@@ -180,7 +180,8 @@ func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string)
 	}
 
 	// Step 3: Remove all port associations for this subsystem
-	if err := v.deleteRelatedResources(ctx, subsystemIDInt, "nvmet.port.subsys.query", "nvmet.port.subsys.delete", "subsys", "port binding"); err != nil {
+	// Note: TrueNAS uses underscore in port_subsys API methods, not dot
+	if err := v.deleteRelatedResources(ctx, subsystemIDInt, "nvmet.port_subsys.query", "nvmet.port_subsys.delete", "subsys", "port binding"); err != nil {
 		return fmt.Errorf("failed to remove port bindings for subsystem %s: %w", nqn, err)
 	}
 

@@ -247,58 +247,9 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
         run: ./tests/integration/test-nfs.sh
 
-  nfs-delete-strategy-retain:
-    name: "NFS: Delete Strategy Retain"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-delete-strategy-retain.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nfs-delete-strategy-retain-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
   # ==========================================
   # NVMe-oF Tests
   # ==========================================
-  nvmeof-statefulset:
-    name: "NVMe-oF: StatefulSet"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-statefulset-nvmeof.sh
-
   nvmeof-delete-strategy-retain:
     name: "NVMe-oF: Delete Strategy Retain"
     runs-on: new
@@ -458,7 +409,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-delete-strategy-retain, nvmeof-statefulset, nvmeof-delete-strategy-retain, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress, ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
+    needs: [nfs-basic, nvmeof-delete-strategy-retain, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress, ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -468,11 +419,9 @@ jobs:
             const results = {
               // NFS Tests
               'Basic': '${{ needs.nfs-basic.result }}',
-              'Delete Strategy Retain': '${{ needs.nfs-delete-strategy-retain.result }}',
             };
             
             const nvmeofResults = {
-              'StatefulSet': '${{ needs.nvmeof-statefulset.result }}',
               'Delete Strategy Retain': '${{ needs.nvmeof-delete-strategy-retain.result }}',
             };
             

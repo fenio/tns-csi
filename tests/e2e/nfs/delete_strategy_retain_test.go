@@ -78,11 +78,12 @@ var _ = Describe("NFS Delete Strategy Retain", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(volumeHandle).NotTo(BeEmpty())
 
-		By("Extracting dataset path from volume handle")
-		// Volume handle format: protocol#server#datasetPath
-		parts := strings.Split(volumeHandle, "#")
-		Expect(len(parts)).To(BeNumerically(">=", 3), "Volume handle should have at least 3 parts")
-		datasetPath := parts[2]
+		// Volume handle is just the volume name (e.g., pvc-xxx)
+		// The dataset path on TrueNAS will be: pool/parentDataset/volumeName
+		// Since we use the default parentDataset (same as pool), the path is: pool/volumeName
+		datasetPath := fmt.Sprintf("%s/%s", f.Config.TrueNASPool, volumeHandle)
+		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
+		GinkgoWriter.Printf("Expected dataset path on TrueNAS: %s\n", datasetPath)
 
 		By("Creating a pod to verify volume works")
 		podName := "test-pod-retain"

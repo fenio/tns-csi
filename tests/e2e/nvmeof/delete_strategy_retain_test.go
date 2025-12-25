@@ -95,11 +95,12 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(volumeHandle).NotTo(BeEmpty())
 
-		By("Extracting ZVOL path from volume handle")
-		// Volume handle format: protocol#server#zvolPath
-		parts := strings.Split(volumeHandle, "#")
-		Expect(len(parts)).To(BeNumerically(">=", 3), "Volume handle should have at least 3 parts")
-		zvolPath := parts[2]
+		// Volume handle is just the volume name (e.g., pvc-xxx)
+		// The ZVOL path on TrueNAS will be: pool/parentDataset/volumeName
+		// Since we use the default parentDataset (same as pool), the path is: pool/volumeName
+		zvolPath := fmt.Sprintf("%s/%s", f.Config.TrueNASPool, volumeHandle)
+		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
+		GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
 
 		By("Writing test data to verify volume is working")
 		testData := "Retain Test Data NVMe-oF"

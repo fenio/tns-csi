@@ -48,7 +48,8 @@ var _ = Describe("NVMe-oF Nested Dataset", func() {
 			"transport":     "tcp",
 			"port":          "4420",
 		}
-		err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
+		// NVMe-oF requires WaitForFirstConsumer binding mode
+		err := f.K8s.CreateStorageClassWithParamsAndBindingMode(ctx, scName, "tns.csi.io", params, "WaitForFirstConsumer")
 		if err != nil {
 			// If we can't create the storage class, skip the test (NVMe-oF may not be configured)
 			GinkgoWriter.Printf("Skipping nested dataset test: %v\n", err)
@@ -156,7 +157,8 @@ var _ = Describe("NVMe-oF Nested Dataset", func() {
 			"transport":     "tcp",
 			"port":          "4420",
 		}
-		err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
+		// NVMe-oF requires WaitForFirstConsumer binding mode
+		err := f.K8s.CreateStorageClassWithParamsAndBindingMode(ctx, scName, "tns.csi.io", params, "WaitForFirstConsumer")
 		if err != nil {
 			Skip("NVMe-oF nested dataset test requires proper TrueNAS configuration")
 		}

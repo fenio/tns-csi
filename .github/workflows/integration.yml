@@ -141,7 +141,7 @@ jobs:
         run: |
           echo "=== Running NFS E2E Tests ==="
           # Run only NFS-specific tests from the nfs/ directory
-          ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+          ginkgo -v --timeout=25m --poll-progress-after=30s --poll-progress-interval=15s ./tests/e2e/nfs/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -178,7 +178,7 @@ jobs:
         run: |
           echo "=== Running NVMe-oF E2E Tests ==="
           # Run only NVMe-oF-specific tests from the nvmeof/ directory
-          ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+          ginkgo -v --timeout=40m --poll-progress-after=30s --poll-progress-interval=15s ./tests/e2e/nvmeof/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -214,7 +214,7 @@ jobs:
           echo "=== Running Shared E2E Tests ==="
           # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
           # These tests use "both" protocol setup
-          ginkgo -v --timeout=25m ./tests/e2e/
+          ginkgo -v --timeout=25m --poll-progress-after=30s --poll-progress-interval=15s ./tests/e2e/
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -228,7 +228,7 @@ jobs:
   # ==========================================
   # Note: All integration tests have been migrated to Ginkgo E2E tests.
   # - Protocol-specific tests: tests/e2e/nfs/ and tests/e2e/nvmeof/
-  # - Shared tests (both protocols): tests/e2e/snapshot_restore_test.go, tests/e2e/stress_test.go
+  # - Shared tests (both protocols): tests/e2e/*.go (snapshot_restore, stress, name_templating, etc.)
 
   test-summary:
     name: "Test Summary"

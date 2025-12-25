@@ -129,10 +129,22 @@ func (f *Framework) CreatePVC(ctx context.Context, opts PVCOptions) (*corev1.Per
 		return nil, err
 	}
 
-	// Register cleanup
+	klog.Infof("Created PVC %s (waiting for bind to get volume handle)", opts.Name)
+
+	// Register cleanup that also logs the volume handle for debugging
 	f.Cleanup.Add(func() error { //nolint:contextcheck // Cleanup uses fresh context
-		klog.Infof("Cleaning up PVC %s", opts.Name)
-		return f.K8s.DeletePVC(context.Background(), opts.Name)
+		cleanupCtx := context.Background()
+		// Try to get the volume handle before deletion for debugging
+		if boundPVC, getErr := f.K8s.GetPVC(cleanupCtx, opts.Name); getErr == nil && boundPVC.Spec.VolumeName != "" {
+			if volumeHandle, handleErr := f.K8s.GetVolumeHandle(cleanupCtx, boundPVC.Spec.VolumeName); handleErr == nil {
+				klog.Infof("Cleaning up PVC %s (PV: %s, VolumeHandle: %s)", opts.Name, boundPVC.Spec.VolumeName, volumeHandle)
+			} else {
+				klog.Infof("Cleaning up PVC %s (PV: %s)", opts.Name, boundPVC.Spec.VolumeName)
+			}
+		} else {
+			klog.Infof("Cleaning up PVC %s", opts.Name)
+		}
+		return f.K8s.DeletePVC(cleanupCtx, opts.Name)
 	})
 
 	return pvc, nil

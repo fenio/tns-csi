@@ -153,13 +153,26 @@ func (k *KubernetesClient) DeletePVC(ctx context.Context, name string) error {
 
 // WaitForPVCBound waits for a PVC to reach the Bound phase.
 func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pvc, err := k.GetPVC(ctx, name)
 		if err != nil {
 			return false, nil //nolint:nilerr // Continue polling on transient errors
 		}
 		return pvc.Status.Phase == corev1.ClaimBound, nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Log the volume handle for debugging - this is the TrueNAS dataset/zvol name
+	pvc, getErr := k.GetPVC(ctx, name)
+	if getErr == nil && pvc.Spec.VolumeName != "" {
+		if volumeHandle, handleErr := k.GetVolumeHandle(ctx, pvc.Spec.VolumeName); handleErr == nil {
+			fmt.Printf("PVC %s bound to PV %s (VolumeHandle/TrueNAS path: %s)\n", name, pvc.Spec.VolumeName, volumeHandle)
+		}
+	}
+
+	return nil
 }
 
 // ExpandPVC updates a PVC to request more storage.

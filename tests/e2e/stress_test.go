@@ -143,18 +143,16 @@ var _ = Describe("Snapshot Stress", func() {
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore1PVC, snapshotNames[0], proto.storageClass, "1Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from first snapshot")
-			f.Cleanup.Add(func() error {
-				return f.K8s.DeletePVC(context.Background(), restore1PVC)
-			})
+			// Register cleanup with PV wait (restored PVCs are clones)
+			f.RegisterPVCCleanup(restore1PVC)
 
 			// Restore from last snapshot
 			restoreLastPVC := "snapshot-stress-restore-last-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restoreLastPVC, snapshotNames[numSnapshots-1], proto.storageClass, "1Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from last snapshot")
-			f.Cleanup.Add(func() error {
-				return f.K8s.DeletePVC(context.Background(), restoreLastPVC)
-			})
+			// Register cleanup with PV wait (restored PVCs are clones)
+			f.RegisterPVCCleanup(restoreLastPVC)
 
 			By("Creating pods to verify restored data")
 			restore1PodName := "snapshot-stress-restore-pod-1-" + proto.id

@@ -166,9 +166,8 @@ var _ = Describe("Snapshot Restore", func() {
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore1PVC, snapshot1, proto.storageClass, "2Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 1")
-			f.Cleanup.Add(func() error {
-				return f.K8s.DeletePVC(context.Background(), restore1PVC)
-			})
+			// Register cleanup with PV wait (restored PVCs are clones)
+			f.RegisterPVCCleanup(restore1PVC)
 
 			By("Creating pod for restored PVC 1")
 			restore1PodName := "snapshot-restore-pod-1-" + proto.id
@@ -208,9 +207,8 @@ var _ = Describe("Snapshot Restore", func() {
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore2PVC, snapshot2, proto.storageClass, "2Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 2")
-			f.Cleanup.Add(func() error {
-				return f.K8s.DeletePVC(context.Background(), restore2PVC)
-			})
+			// Register cleanup with PV wait (restored PVCs are clones)
+			f.RegisterPVCCleanup(restore2PVC)
 
 			By("Creating pod for restored PVC 2")
 			restore2PodName := "snapshot-restore-pod-2-" + proto.id

@@ -41,6 +41,10 @@ var _ = Describe("NFS Detached Snapshot", func() {
 	})
 
 	It("should create detached clone that survives snapshot deletion", func() {
+		// NOTE: Cleanup is LIFO (Last In, First Out). For ZFS clone dependencies,
+		// the detached PVC (clone) must be deleted BEFORE the source PVC.
+		// Registration order: source PVC first, then detached PVC, so cleanup deletes detached first.
+
 		By("Creating a source PVC")
 		sourcePVCName := "source-pvc"
 		pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -51,9 +55,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).NotTo(BeNil())
-		f.Cleanup.Add(func() error {
-			return f.K8s.DeletePVC(ctx, sourcePVCName)
-		})
+		// Note: f.CreatePVC already registers cleanup with PV wait - no manual cleanup needed
 
 		By("Waiting for source PVC to be bound")
 		err = f.K8s.WaitForPVCBound(ctx, sourcePVCName, pvcTimeout)
@@ -68,9 +70,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pod).NotTo(BeNil())
-		f.Cleanup.Add(func() error {
-			return f.K8s.DeletePod(ctx, sourcePodName)
-		})
+		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
 		By("Waiting for source pod to be ready")
 		err = f.K8s.WaitForPodReady(ctx, sourcePodName, podTimeout)
@@ -121,9 +121,8 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		err = f.K8s.CreatePVCFromSnapshot(ctx, detachedPVCName, snapshotName, detachedStorageClass, "1Gi",
 			[]corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany})
 		Expect(err).NotTo(HaveOccurred())
-		f.Cleanup.Add(func() error {
-			return f.K8s.DeletePVC(ctx, detachedPVCName)
-		})
+		// Register cleanup with PV wait (clone must be fully deleted before source)
+		f.RegisterPVCCleanup(detachedPVCName)
 
 		By("Waiting for detached PVC to be bound")
 		err = f.K8s.WaitForPVCBound(ctx, detachedPVCName, pvcTimeout)
@@ -138,9 +137,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(detachedPod).NotTo(BeNil())
-		f.Cleanup.Add(func() error {
-			return f.K8s.DeletePod(ctx, detachedPodName)
-		})
+		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
 		By("Waiting for detached pod to be ready")
 		err = f.K8s.WaitForPodReady(ctx, detachedPodName, podTimeout)

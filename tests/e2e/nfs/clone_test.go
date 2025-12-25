@@ -72,9 +72,8 @@ var _ = Describe("NFS Volume Clone", func() {
 		err = f.K8s.CreatePVCFromPVC(ctx, clonePVCName, sourcePVC.Name, "tns-csi-nfs", "1Gi",
 			[]corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany})
 		Expect(err).NotTo(HaveOccurred(), "Failed to create clone PVC")
-		f.DeferCleanup(func() error {
-			return f.K8s.DeletePVC(context.Background(), clonePVCName)
-		})
+		// Register cleanup with PV wait (clone must be fully deleted before source)
+		f.RegisterPVCCleanup(clonePVCName)
 
 		By("Waiting for clone PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, clonePVCName, 2*time.Minute)

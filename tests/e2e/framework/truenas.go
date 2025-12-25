@@ -196,6 +196,12 @@ func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string)
 
 // deleteRelatedResources deletes all resources that reference a parent resource ID.
 // This is used to delete namespaces/port-bindings associated with a subsystem.
+//
+// TrueNAS API returns the parent reference (e.g., "subsys") as a nested object like:
+//
+//	{"id": 123, "name": "nqn...", "subnqn": "..."}
+//
+// NOT as a direct integer. This function handles both formats for robustness.
 func (v *TrueNASVerifier) deleteRelatedResources(
 	ctx context.Context,
 	parentID int,
@@ -217,7 +223,9 @@ func (v *TrueNASVerifier) deleteRelatedResources(
 		if !ok {
 			continue
 		}
-		resParentIDInt, err := toInt(resParentID)
+
+		// Extract parent ID - handle both nested object and direct int formats
+		resParentIDInt, err := extractID(resParentID)
 		if err != nil {
 			continue
 		}
@@ -258,6 +266,29 @@ func toInt(v any) (int, error) {
 	default:
 		return 0, ErrInvalidIDType
 	}
+}
+
+// extractID extracts an ID from a value that can be either:
+// - A direct number (int, int64, float64)
+// - A nested object with an "id" field (map[string]any)
+//
+// TrueNAS API returns parent references (like "subsys" in namespaces) as nested objects:
+//
+//	{"id": 123, "name": "nqn...", "subnqn": "..."}
+func extractID(v any) (int, error) {
+	// Try direct number first
+	if id, err := toInt(v); err == nil {
+		return id, nil
+	}
+
+	// Try nested object with "id" field
+	if obj, ok := v.(map[string]any); ok {
+		if idVal, exists := obj["id"]; exists {
+			return toInt(idVal)
+		}
+	}
+
+	return 0, ErrInvalidIDType
 }
 
 // DeleteNFSShare deletes an NFS share from TrueNAS.

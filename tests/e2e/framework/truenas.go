@@ -84,10 +84,12 @@ func (v *TrueNASVerifier) NFSShareExists(ctx context.Context, path string) (bool
 }
 
 // NVMeOFSubsystemExists checks if an NVMe-oF subsystem exists with the given NQN.
+// Note: TrueNAS uses "nvmet.subsys" API namespace, not "nvmeof.subsystem".
 func (v *TrueNASVerifier) NVMeOFSubsystemExists(ctx context.Context, nqn string) (bool, error) {
 	var subsystems []map[string]any
-	filter := []any{[]any{"nqn", "=", nqn}}
-	if err := v.client.Call(ctx, "nvmeof.subsystem.query", []any{filter}, &subsystems); err != nil {
+	filter := []any{[]any{"name", "=", nqn}}
+	// Try nvmet.subsys.query first (current TrueNAS API)
+	if err := v.client.Call(ctx, "nvmet.subsys.query", []any{filter}, &subsystems); err != nil {
 		return false, fmt.Errorf("failed to query NVMe-oF subsystems: %w", err)
 	}
 	return len(subsystems) > 0, nil
@@ -139,12 +141,14 @@ func (v *TrueNASVerifier) deleteResourceByFilter(
 
 // DeleteNVMeOFSubsystem deletes an NVMe-oF subsystem from TrueNAS.
 // This is used for cleaning up retained NVMe-oF subsystems after tests.
+// Note: TrueNAS uses "nvmet.subsys" API namespace, not "nvmeof.subsystem".
+// The filter key is "name" (which contains the NQN), not "nqn".
 func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string) error {
 	return v.deleteResourceByFilter(
 		ctx,
-		"nvmeof.subsystem.query",
-		"nvmeof.subsystem.delete",
-		"nqn",
+		"nvmet.subsys.query",
+		"nvmet.subsys.delete",
+		"name",
 		nqn,
 		"NVMe-oF subsystem "+nqn,
 	)

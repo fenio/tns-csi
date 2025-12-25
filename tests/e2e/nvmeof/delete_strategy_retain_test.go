@@ -3,7 +3,6 @@ package nvmeof_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -18,11 +17,11 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 	var ctx context.Context
 	var err error
 
-	// Timeouts (longer for NVMe-oF)
+	// Timeouts
 	const (
-		pvcTimeout    = 360 * time.Second
-		podTimeout    = 360 * time.Second
-		deleteTimeout = 120 * time.Second
+		pvcTimeout    = 120 * time.Second
+		podTimeout    = 120 * time.Second
+		deleteTimeout = 60 * time.Second
 	)
 
 	BeforeEach(func() {
@@ -43,7 +42,7 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 	It("should retain TrueNAS resources when deleteStrategy=retain is set", func() {
 		By("Creating StorageClass with deleteStrategy=retain")
 		retainStorageClass := "tns-csi-nvmeof-retain"
-		err = f.K8s.CreateStorageClassWithParamsAndBindingMode(ctx, retainStorageClass, "tns.csi.io", map[string]string{
+		err = f.K8s.CreateStorageClassWithParams(ctx, retainStorageClass, "tns.csi.io", map[string]string{
 			"protocol":       "nvmeof",
 			"server":         f.Config.TrueNASHost,
 			"pool":           f.Config.TrueNASPool,
@@ -51,7 +50,7 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 			"port":           "4420",
 			"fsType":         "ext4",
 			"deleteStrategy": "retain",
-		}, "WaitForFirstConsumer")
+		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {
 			return f.K8s.DeleteStorageClass(ctx, retainStorageClass)
@@ -67,20 +66,6 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).NotTo(BeNil())
-
-		By("Creating a pod to trigger PVC binding and verify volume works")
-		podName := "test-pod-retain"
-		pod, err := f.CreatePod(ctx, framework.PodOptions{
-			Name:      podName,
-			PVCName:   pvcName,
-			MountPath: "/data",
-		})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pod).NotTo(BeNil())
-
-		By("Waiting for pod to be ready")
-		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
-		Expect(err).NotTo(HaveOccurred())
 
 		By("Waiting for PVC to be bound")
 		err = f.K8s.WaitForPVCBound(ctx, pvcName, pvcTimeout)
@@ -101,6 +86,20 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 		zvolPath := fmt.Sprintf("%s/%s", f.Config.TrueNASPool, volumeHandle)
 		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
 		GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
+
+		By("Creating a pod to verify volume works")
+		podName := "test-pod-retain"
+		pod, err := f.CreatePod(ctx, framework.PodOptions{
+			Name:      podName,
+			PVCName:   pvcName,
+			MountPath: "/data",
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(pod).NotTo(BeNil())
+
+		By("Waiting for pod to be ready")
+		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
+		Expect(err).NotTo(HaveOccurred())
 
 		By("Writing test data to verify volume is working")
 		testData := "Retain Test Data NVMe-oF"
@@ -125,26 +124,25 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 		err = f.K8s.WaitForPVDeleted(ctx, pvName, deleteTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Checking controller logs for retain behavior")
-		logs, err := f.K8s.GetControllerLogs(ctx, 100)
+		By("Verifying ZVOL still exists on TrueNAS")
+		Expect(f.TrueNAS).NotTo(BeNil(), "TrueNAS verifier must be available for this test")
+		exists, err := f.TrueNAS.DatasetExists(ctx, zvolPath)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(BeTrue(), "ZVOL should still exist on TrueNAS after PVC deletion with deleteStrategy=retain")
 
-		// Check for retain behavior indicators
-		containsRetainMessage := strings.Contains(logs, "deleteStrategy=retain") ||
-			strings.Contains(logs, "skipping actual deletion") ||
-			strings.Contains(logs, "retaining") ||
-			strings.Contains(logs, "skip.*delete")
+		By("ZVOL confirmed to still exist on TrueNAS - retain strategy working correctly")
+		GinkgoWriter.Printf("Successfully verified ZVOL %s was retained on TrueNAS\n", zvolPath)
 
-		if containsRetainMessage {
-			By("Controller logs confirm volume was retained")
-		} else {
-			By("Retain behavior may have been applied - manual TrueNAS verification recommended")
-		}
+		By("Cleaning up retained ZVOL from TrueNAS")
+		err = f.TrueNAS.DeleteDataset(ctx, zvolPath)
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete retained ZVOL from TrueNAS")
 
-		By("Logging ZVOL path for manual verification if needed")
-		GinkgoWriter.Printf("ZVOL path that should still exist on TrueNAS: %s\n", zvolPath)
+		By("Verifying ZVOL was successfully deleted from TrueNAS")
+		exists, err = f.TrueNAS.DatasetExists(ctx, zvolPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(BeFalse(), "ZVOL should no longer exist on TrueNAS after cleanup")
 
-		// Note: TrueNAS resources are intentionally retained
-		// Manual cleanup of the TrueNAS ZVOL may be required
+		By("Cleanup verified - ZVOL successfully removed from TrueNAS")
+		GinkgoWriter.Printf("Successfully cleaned up ZVOL %s from TrueNAS\n", zvolPath)
 	})
 })

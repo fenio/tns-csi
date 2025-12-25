@@ -3,7 +3,6 @@ package nfs_test
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -122,25 +121,25 @@ var _ = Describe("NFS Delete Strategy Retain", func() {
 		err = f.K8s.WaitForPVDeleted(ctx, pvName, deleteTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Checking controller logs for retain behavior")
-		logs, err := f.K8s.GetControllerLogs(ctx, 100)
+		By("Verifying dataset still exists on TrueNAS")
+		Expect(f.TrueNAS).NotTo(BeNil(), "TrueNAS verifier must be available for this test")
+		exists, err := f.TrueNAS.DatasetExists(ctx, datasetPath)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(BeTrue(), "Dataset should still exist on TrueNAS after PVC deletion with deleteStrategy=retain")
 
-		// Check for the specific retain behavior message
-		containsRetainMessage := strings.Contains(logs, "deleteStrategy=retain") ||
-			strings.Contains(logs, "skipping actual deletion") ||
-			strings.Contains(logs, "retaining")
+		By("Dataset confirmed to still exist on TrueNAS - retain strategy working correctly")
+		GinkgoWriter.Printf("Successfully verified dataset %s was retained on TrueNAS\n", datasetPath)
 
-		if containsRetainMessage {
-			By("Controller logs confirm volume was retained")
-		} else {
-			By("Retain behavior may have been applied - manual TrueNAS verification recommended")
-		}
+		By("Cleaning up retained dataset from TrueNAS")
+		err = f.TrueNAS.DeleteDataset(ctx, datasetPath)
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete retained dataset from TrueNAS")
 
-		By("Logging dataset path for manual verification if needed")
-		GinkgoWriter.Printf("Dataset path that should still exist on TrueNAS: %s\n", datasetPath)
+		By("Verifying dataset was successfully deleted from TrueNAS")
+		exists, err = f.TrueNAS.DatasetExists(ctx, datasetPath)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(exists).To(BeFalse(), "Dataset should no longer exist on TrueNAS after cleanup")
 
-		// Note: TrueNAS resources are intentionally retained
-		// Manual cleanup of the TrueNAS dataset may be required
+		By("Cleanup verified - dataset successfully removed from TrueNAS")
+		GinkgoWriter.Printf("Successfully cleaned up dataset %s from TrueNAS\n", datasetPath)
 	})
 })

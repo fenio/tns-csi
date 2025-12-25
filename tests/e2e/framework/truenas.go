@@ -89,3 +89,13 @@ func (v *TrueNASVerifier) NVMeOFSubsystemExists(ctx context.Context, nqn string)
 	}
 	return len(subsystems) > 0, nil
 }
+
+// DeleteDataset deletes a dataset from TrueNAS.
+// This is used for cleaning up retained datasets after tests.
+func (v *TrueNASVerifier) DeleteDataset(ctx context.Context, datasetPath string) error {
+	var result any
+	if err := v.client.Call(ctx, "pool.dataset.delete", []any{datasetPath}, &result); err != nil {
+		return fmt.Errorf("failed to delete dataset %s: %w", datasetPath, err)
+	}
+	return nil
+}

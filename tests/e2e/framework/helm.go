@@ -67,6 +67,11 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 		"--set", "truenas.skipTLSVerify=true",
 	}
 
+	// Enable snapshots for all protocols (required for snapshot tests)
+	args = append(args,
+		"--set", "snapshots.enabled=true",
+	)
+
 	// Enable protocol-specific storage class
 	switch protocol {
 	case "nfs":

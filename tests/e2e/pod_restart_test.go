@@ -21,8 +21,8 @@ var _ = Describe("Pod Restart", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with nvmeof which enables both NFS and NVMe-oF storage classes
-		err = f.Setup("nvmeof")
+		// Setup with "both" to enable both NFS and NVMe-oF storage classes
+		err = f.Setup("both")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 

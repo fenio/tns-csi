@@ -35,7 +35,8 @@ var _ = Describe("Snapshot Stress", func() {
 
 	// Test parameters for each protocol
 	type protocolConfig struct {
-		name          string
+		name          string // Display name for test output
+		id            string // Lowercase identifier for K8s resource names (RFC 1123)
 		storageClass  string
 		snapshotClass string
 		accessMode    corev1.PersistentVolumeAccessMode
@@ -45,6 +46,7 @@ var _ = Describe("Snapshot Stress", func() {
 	protocols := []protocolConfig{
 		{
 			name:          "NFS",
+			id:            "nfs",
 			storageClass:  "tns-csi-nfs",
 			snapshotClass: "tns-csi-nfs-snapshot-stress",
 			accessMode:    corev1.ReadWriteMany,
@@ -52,6 +54,7 @@ var _ = Describe("Snapshot Stress", func() {
 		},
 		{
 			name:          "NVMe-oF",
+			id:            "nvmeof",
 			storageClass:  "tns-csi-nvmeof",
 			snapshotClass: "tns-csi-nvmeof-snapshot-stress",
 			accessMode:    corev1.ReadWriteOnce,
@@ -72,7 +75,7 @@ var _ = Describe("Snapshot Stress", func() {
 			})
 
 			By("Creating source PVC")
-			pvcName := "snapshot-stress-source-" + proto.name
+			pvcName := "snapshot-stress-source-" + proto.id
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
 				Name:             pvcName,
 				StorageClassName: proto.storageClass,
@@ -82,7 +85,7 @@ var _ = Describe("Snapshot Stress", func() {
 			Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
 			By("Creating source pod")
-			podName := "snapshot-stress-pod-" + proto.name
+			podName := "snapshot-stress-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
@@ -106,7 +109,7 @@ var _ = Describe("Snapshot Stress", func() {
 
 			By(fmt.Sprintf("Creating %d snapshots with unique data each", numSnapshots))
 			for i := range numSnapshots {
-				snapshotName := fmt.Sprintf("snapshot-stress-%d-%s", i+1, proto.name)
+				snapshotName := fmt.Sprintf("snapshot-stress-%d-%s", i+1, proto.id)
 				snapshotNames[i] = snapshotName
 
 				// Write unique data before each snapshot
@@ -136,7 +139,7 @@ var _ = Describe("Snapshot Stress", func() {
 
 			By("Restoring from first and last snapshots to verify data integrity")
 			// Restore from first snapshot
-			restore1PVC := "snapshot-stress-restore-1-" + proto.name
+			restore1PVC := "snapshot-stress-restore-1-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore1PVC, snapshotNames[0], proto.storageClass, "1Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from first snapshot")
@@ -145,7 +148,7 @@ var _ = Describe("Snapshot Stress", func() {
 			})
 
 			// Restore from last snapshot
-			restoreLastPVC := "snapshot-stress-restore-last-" + proto.name
+			restoreLastPVC := "snapshot-stress-restore-last-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restoreLastPVC, snapshotNames[numSnapshots-1], proto.storageClass, "1Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from last snapshot")
@@ -154,7 +157,7 @@ var _ = Describe("Snapshot Stress", func() {
 			})
 
 			By("Creating pods to verify restored data")
-			restore1PodName := "snapshot-stress-restore-pod-1-" + proto.name
+			restore1PodName := "snapshot-stress-restore-pod-1-" + proto.id
 			restore1Pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      restore1PodName,
 				PVCName:   restore1PVC,
@@ -162,7 +165,7 @@ var _ = Describe("Snapshot Stress", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			restoreLastPodName := "snapshot-stress-restore-pod-last-" + proto.name
+			restoreLastPodName := "snapshot-stress-restore-pod-last-" + proto.id
 			restoreLastPod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      restoreLastPodName,
 				PVCName:   restoreLastPVC,
@@ -222,7 +225,8 @@ var _ = Describe("Volume Stress", func() {
 
 	// Test parameters for each protocol
 	type protocolConfig struct {
-		name         string
+		name         string // Display name for test output
+		id           string // Lowercase identifier for K8s resource names (RFC 1123)
 		storageClass string
 		accessMode   corev1.PersistentVolumeAccessMode
 		podTimeout   time.Duration
@@ -231,12 +235,14 @@ var _ = Describe("Volume Stress", func() {
 	protocols := []protocolConfig{
 		{
 			name:         "NFS",
+			id:           "nfs",
 			storageClass: "tns-csi-nfs",
 			accessMode:   corev1.ReadWriteMany,
 			podTimeout:   2 * time.Minute,
 		},
 		{
 			name:         "NVMe-oF",
+			id:           "nvmeof",
 			storageClass: "tns-csi-nvmeof",
 			accessMode:   corev1.ReadWriteOnce,
 			podTimeout:   6 * time.Minute,
@@ -257,7 +263,7 @@ var _ = Describe("Volume Stress", func() {
 				wg.Add(1)
 				go func(index int) {
 					defer wg.Done()
-					pvcName := fmt.Sprintf("stress-%s-pvc-%d", proto.name, index+1)
+					pvcName := fmt.Sprintf("stress-%s-pvc-%d", proto.id, index+1)
 					pvcNames[index] = pvcName
 
 					_, err := f.K8s.CreatePVC(ctx, framework.PVCOptions{
@@ -302,7 +308,7 @@ var _ = Describe("Volume Stress", func() {
 				wg.Add(1)
 				go func(index int) {
 					defer wg.Done()
-					podName := fmt.Sprintf("stress-%s-pod-%d", proto.name, index+1)
+					podName := fmt.Sprintf("stress-%s-pod-%d", proto.id, index+1)
 					podNames[index] = podName
 
 					_, err := f.K8s.CreatePod(ctx, framework.PodOptions{

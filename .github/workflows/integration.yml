@@ -111,10 +111,10 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
   # ==========================================
-  # Ginkgo E2E Tests (Experimental)
+  # E2E Tests
   # ==========================================
   ginkgo-e2e-nfs:
-    name: "Ginkgo E2E: NFS"
+    name: "E2E: NFS"
     runs-on: new
     timeout-minutes: 30
     needs: compute-tag
@@ -131,7 +131,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
-      - name: Run Ginkgo NFS E2E Tests
+      - name: Run NFS E2E Tests
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
@@ -139,19 +139,19 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
-          echo "=== Running Ginkgo NFS E2E Tests ==="
+          echo "=== Running NFS E2E Tests ==="
           # Run only NFS-specific tests from the nfs/ directory
           ginkgo -v --timeout=25m ./tests/e2e/nfs/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: ginkgo-e2e-nfs-diagnostics
+          name: e2e-nfs-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
   ginkgo-e2e-nvmeof:
-    name: "Ginkgo E2E: NVMe-oF"
+    name: "E2E: NVMe-oF"
     runs-on: new
     timeout-minutes: 45
     needs: compute-tag
@@ -168,7 +168,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
-      - name: Run Ginkgo NVMe-oF E2E Tests
+      - name: Run NVMe-oF E2E Tests
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
@@ -176,19 +176,19 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
-          echo "=== Running Ginkgo NVMe-oF E2E Tests ==="
+          echo "=== Running NVMe-oF E2E Tests ==="
           # Run only NVMe-oF-specific tests from the nvmeof/ directory
           ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: ginkgo-e2e-nvmeof-diagnostics
+          name: e2e-nvmeof-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
   ginkgo-e2e-shared:
-    name: "Ginkgo E2E: Shared"
+    name: "E2E: Shared"
     runs-on: new
     timeout-minutes: 30
     needs: compute-tag
@@ -203,7 +203,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
-      - name: Run Ginkgo Shared E2E Tests
+      - name: Run Shared E2E Tests
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
@@ -211,7 +211,7 @@ jobs:
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
-          echo "=== Running Ginkgo Shared E2E Tests ==="
+          echo "=== Running Shared E2E Tests ==="
           # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
           # These tests use "both" protocol setup
           ginkgo -v --timeout=25m ./tests/e2e/
@@ -219,7 +219,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: ginkgo-e2e-shared-diagnostics
+          name: e2e-shared-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
@@ -303,11 +303,11 @@ jobs:
             };
             
             const nvmeofCounts = countResults(nvmeofResults);
-            const ginkgoCounts = countResults(ginkgoResults);
+            const e2eCounts = countResults(ginkgoResults);
             
-            const totalPassed = nvmeofCounts.passed + ginkgoCounts.passed;
-            const totalFailed = nvmeofCounts.failed + ginkgoCounts.failed;
-            const totalSkipped = nvmeofCounts.skipped + ginkgoCounts.skipped;
+            const totalPassed = nvmeofCounts.passed + e2eCounts.passed;
+            const totalFailed = nvmeofCounts.failed + e2eCounts.failed;
+            const totalSkipped = nvmeofCounts.skipped + e2eCounts.skipped;
             const total = Object.keys(nvmeofResults).length + Object.keys(ginkgoResults).length;
             
             let summary = `# Integration Test Results\n\n`;
@@ -326,8 +326,8 @@ jobs:
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
             summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${total} |\n\n`;
             
-            // Ginkgo E2E Tests
-            summary += `## Ginkgo E2E Tests\n\n`;
+            // E2E Tests
+            summary += `## E2E Tests\n\n`;
             summary += `| Test Suite | Status |\n`;
             summary += `|------------|:------:|\n`;
             for (const [test, result] of Object.entries(ginkgoResults)) {

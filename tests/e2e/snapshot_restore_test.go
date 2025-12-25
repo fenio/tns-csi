@@ -33,7 +33,8 @@ var _ = Describe("Snapshot Restore", func() {
 
 	// Test parameters for each protocol
 	type protocolConfig struct {
-		name          string
+		name          string // Display name for test output
+		id            string // Lowercase identifier for K8s resource names (RFC 1123)
 		storageClass  string
 		snapshotClass string
 		accessMode    corev1.PersistentVolumeAccessMode
@@ -44,6 +45,7 @@ var _ = Describe("Snapshot Restore", func() {
 	protocols := []protocolConfig{
 		{
 			name:          "NFS",
+			id:            "nfs",
 			storageClass:  "tns-csi-nfs",
 			snapshotClass: "tns-csi-nfs-snapshot",
 			accessMode:    corev1.ReadWriteMany,
@@ -52,6 +54,7 @@ var _ = Describe("Snapshot Restore", func() {
 		},
 		{
 			name:          "NVMe-oF",
+			id:            "nvmeof",
 			storageClass:  "tns-csi-nvmeof",
 			snapshotClass: "tns-csi-nvmeof-snapshot",
 			accessMode:    corev1.ReadWriteOnce,
@@ -73,7 +76,7 @@ var _ = Describe("Snapshot Restore", func() {
 
 			By("Creating source PVC")
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
-				Name:             "snapshot-restore-source-" + proto.name,
+				Name:             "snapshot-restore-source-" + proto.id,
 				StorageClassName: proto.storageClass,
 				Size:             "2Gi",
 				AccessModes:      []corev1.PersistentVolumeAccessMode{proto.accessMode},
@@ -81,7 +84,7 @@ var _ = Describe("Snapshot Restore", func() {
 			Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
 			By("Creating source pod")
-			podName := "snapshot-restore-source-pod-" + proto.name
+			podName := "snapshot-restore-source-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
@@ -125,7 +128,7 @@ var _ = Describe("Snapshot Restore", func() {
 			Expect(v1Data).To(ContainSubstring("Version 1 data"))
 
 			By("Creating first snapshot")
-			snapshot1 := "snapshot-restore-1-" + proto.name
+			snapshot1 := "snapshot-restore-1-" + proto.id
 			err = f.K8s.CreateVolumeSnapshot(ctx, snapshot1, pvc.Name, proto.snapshotClass)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create first snapshot")
 			f.Cleanup.Add(func() error {
@@ -145,7 +148,7 @@ var _ = Describe("Snapshot Restore", func() {
 			Expect(err).NotTo(HaveOccurred(), "Failed to add modified file")
 
 			By("Creating second snapshot")
-			snapshot2 := "snapshot-restore-2-" + proto.name
+			snapshot2 := "snapshot-restore-2-" + proto.id
 			err = f.K8s.CreateVolumeSnapshot(ctx, snapshot2, pvc.Name, proto.snapshotClass)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create second snapshot")
 			f.Cleanup.Add(func() error {
@@ -159,7 +162,7 @@ var _ = Describe("Snapshot Restore", func() {
 			// ========== Restore from snapshot 1 ==========
 
 			By("Restoring PVC from first snapshot")
-			restore1PVC := "snapshot-restore-pvc-1-" + proto.name
+			restore1PVC := "snapshot-restore-pvc-1-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore1PVC, snapshot1, proto.storageClass, "2Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 1")
@@ -168,7 +171,7 @@ var _ = Describe("Snapshot Restore", func() {
 			})
 
 			By("Creating pod for restored PVC 1")
-			restore1PodName := "snapshot-restore-pod-1-" + proto.name
+			restore1PodName := "snapshot-restore-pod-1-" + proto.id
 			restore1Pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      restore1PodName,
 				PVCName:   restore1PVC,
@@ -201,7 +204,7 @@ var _ = Describe("Snapshot Restore", func() {
 			// ========== Restore from snapshot 2 ==========
 
 			By("Restoring PVC from second snapshot")
-			restore2PVC := "snapshot-restore-pvc-2-" + proto.name
+			restore2PVC := "snapshot-restore-pvc-2-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restore2PVC, snapshot2, proto.storageClass, "2Gi",
 				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 2")
@@ -210,7 +213,7 @@ var _ = Describe("Snapshot Restore", func() {
 			})
 
 			By("Creating pod for restored PVC 2")
-			restore2PodName := "snapshot-restore-pod-2-" + proto.name
+			restore2PodName := "snapshot-restore-pod-2-" + proto.id
 			restore2Pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      restore2PodName,
 				PVCName:   restore2PVC,

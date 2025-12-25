@@ -95,6 +95,30 @@ var _ = Describe("NVMe-oF Nested Dataset", func() {
 
 		By("Waiting for pod to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 6*time.Minute)
+		if err != nil {
+			// Capture diagnostics on failure
+			GinkgoWriter.Printf("Pod failed to become ready, capturing diagnostics...\n")
+
+			// Get pod status
+			podInfo, getErr := f.K8s.GetPod(ctx, pod.Name)
+			if getErr == nil {
+				GinkgoWriter.Printf("Pod phase: %s\n", podInfo.Status.Phase)
+				for _, cond := range podInfo.Status.Conditions {
+					GinkgoWriter.Printf("Pod condition: %s=%s (reason: %s, message: %s)\n",
+						cond.Type, cond.Status, cond.Reason, cond.Message)
+				}
+				for _, cs := range podInfo.Status.ContainerStatuses {
+					GinkgoWriter.Printf("Container %s: ready=%v, state=%+v\n",
+						cs.Name, cs.Ready, cs.State)
+				}
+			}
+
+			// Get controller logs
+			logs, _ := f.K8s.GetControllerLogs(ctx, 100)
+			if logs != "" {
+				GinkgoWriter.Printf("Controller logs:\n%s\n", logs)
+			}
+		}
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
 		By("Verifying volume is functional")

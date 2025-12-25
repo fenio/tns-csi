@@ -181,10 +181,27 @@ func (f *Framework) CreatePod(ctx context.Context, opts PodOptions) (*corev1.Pod
 		return nil, err
 	}
 
-	// Register cleanup
+	// Register cleanup that waits for pod to be fully deleted.
+	// This is critical: if we don't wait, the PVC cleanup may run while
+	// the pod is still terminating, causing EBUSY errors when the CSI driver
+	// tries to unmount/delete the volume that's still in use.
 	f.Cleanup.Add(func() error { //nolint:contextcheck // Cleanup uses fresh context
+		cleanupCtx := context.Background()
 		klog.Infof("Cleaning up Pod %s", opts.Name)
-		return f.K8s.DeletePod(context.Background(), opts.Name)
+
+		if deleteErr := f.K8s.DeletePod(cleanupCtx, opts.Name); deleteErr != nil {
+			return deleteErr
+		}
+
+		// Wait for pod to be fully deleted to ensure volumes are unmounted
+		if waitErr := f.K8s.WaitForPodDeleted(cleanupCtx, opts.Name, 2*time.Minute); waitErr != nil {
+			klog.Warningf("Timeout waiting for Pod %s deletion: %v", opts.Name, waitErr)
+			// Don't return error - we still want to continue with PVC cleanup
+		} else {
+			klog.Infof("Pod %s deleted successfully", opts.Name)
+		}
+
+		return nil
 	})
 
 	return pod, nil

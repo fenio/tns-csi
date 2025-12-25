@@ -16,6 +16,9 @@ var ErrDatasetDeleteTimeout = errors.New("timeout waiting for dataset to be dele
 // ErrMissingIDField is returned when a TrueNAS resource is missing its ID field.
 var ErrMissingIDField = errors.New("resource has no ID field")
 
+// ErrInvalidIDType is returned when a TrueNAS resource ID cannot be converted to int.
+var ErrInvalidIDType = errors.New("cannot convert resource ID to int")
+
 // TrueNASVerifier provides methods for verifying TrueNAS backend state.
 type TrueNASVerifier struct {
 	client *tnsapi.Client
@@ -143,15 +146,117 @@ func (v *TrueNASVerifier) deleteResourceByFilter(
 // This is used for cleaning up retained NVMe-oF subsystems after tests.
 // Note: TrueNAS uses "nvmet.subsys" API namespace, not "nvmeof.subsystem".
 // The filter key is "name" (which contains the NQN), not "nqn".
+//
+// TrueNAS requires the following order for deletion:
+//  1. Delete all namespaces attached to the subsystem.
+//  2. Remove all port associations (port-subsystem bindings).
+//  3. Delete the subsystem itself.
 func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string) error {
-	return v.deleteResourceByFilter(
-		ctx,
-		"nvmet.subsys.query",
-		"nvmet.subsys.delete",
-		"name",
-		nqn,
-		"NVMe-oF subsystem "+nqn,
-	)
+	// Step 1: Query the subsystem to get its ID
+	var subsystems []map[string]any
+	filter := []any{[]any{"name", "=", nqn}}
+	if err := v.client.Call(ctx, "nvmet.subsys.query", []any{filter}, &subsystems); err != nil {
+		return fmt.Errorf("failed to query NVMe-oF subsystem: %w", err)
+	}
+	if len(subsystems) == 0 {
+		// Subsystem doesn't exist, nothing to delete
+		return nil
+	}
+
+	subsystemID, ok := subsystems[0]["id"]
+	if !ok {
+		return fmt.Errorf("NVMe-oF subsystem %s: %w", nqn, ErrMissingIDField)
+	}
+
+	// Convert subsystemID to int (JSON numbers come as float64)
+	subsystemIDInt, err := toInt(subsystemID)
+	if err != nil {
+		return fmt.Errorf("invalid subsystem ID type: %w", err)
+	}
+
+	// Step 2: Delete all namespaces attached to this subsystem
+	if err := v.deleteRelatedResources(ctx, subsystemIDInt, "nvmet.namespace.query", "nvmet.namespace.delete", "subsys", "namespace"); err != nil {
+		return fmt.Errorf("failed to delete namespaces for subsystem %s: %w", nqn, err)
+	}
+
+	// Step 3: Remove all port associations for this subsystem
+	if err := v.deleteRelatedResources(ctx, subsystemIDInt, "nvmet.port.subsys.query", "nvmet.port.subsys.delete", "subsys", "port binding"); err != nil {
+		return fmt.Errorf("failed to remove port bindings for subsystem %s: %w", nqn, err)
+	}
+
+	// Step 4: Delete the subsystem itself
+	var result any
+	if err := v.client.Call(ctx, "nvmet.subsys.delete", []any{subsystemIDInt}, &result); err != nil {
+		return fmt.Errorf("failed to delete NVMe-oF subsystem %s (id=%d): %w", nqn, subsystemIDInt, err)
+	}
+
+	return nil
+}
+
+// deleteRelatedResources deletes all resources that reference a parent resource ID.
+// This is used to delete namespaces/port-bindings associated with a subsystem.
+func (v *TrueNASVerifier) deleteRelatedResources(
+	ctx context.Context,
+	parentID int,
+	queryMethod string,
+	deleteMethod string,
+	parentIDField string,
+	resourceDesc string,
+) error {
+	// Query all resources
+	var resources []map[string]any
+	if err := v.client.Call(ctx, queryMethod, []any{}, &resources); err != nil {
+		return fmt.Errorf("failed to query %ss: %w", resourceDesc, err)
+	}
+
+	// Find and delete resources belonging to the parent
+	for _, res := range resources {
+		// Check if this resource belongs to our parent
+		resParentID, ok := res[parentIDField]
+		if !ok {
+			continue
+		}
+		resParentIDInt, err := toInt(resParentID)
+		if err != nil {
+			continue
+		}
+		if resParentIDInt != parentID {
+			continue
+		}
+
+		// Get the resource ID
+		resID, ok := res["id"]
+		if !ok {
+			continue
+		}
+		resIDInt, err := toInt(resID)
+		if err != nil {
+			continue
+		}
+
+		// Delete this resource
+		var result any
+		if err := v.client.Call(ctx, deleteMethod, []any{resIDInt}, &result); err != nil {
+			return fmt.Errorf("failed to delete %s %d: %w", resourceDesc, resIDInt, err)
+		}
+	}
+
+	return nil
+}
+
+// toInt converts a value (typically from JSON unmarshaling) to int.
+// JSON numbers are unmarshaled as float64 in Go.
+func toInt(v any) (int, error) {
+	switch n := v.(type) {
+	case int:
+		return n, nil
+	case int64:
+		return int(n), nil
+	case float64:
+		return int(n), nil
+	default:
+		return 0, ErrInvalidIDType
+	}
 }
 
 // DeleteNFSShare deletes an NFS share from TrueNAS.

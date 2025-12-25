@@ -224,59 +224,24 @@ jobs:
           retention-days: 7
 
   # ==========================================
-  # NVMe-oF Tests
-  # ==========================================
-  nvmeof-delete-strategy-retain:
-    name: "NVMe-oF: Delete Strategy Retain"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-delete-strategy-retain-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-delete-strategy-retain-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  # ==========================================
   # Summary
   # ==========================================
-  # Note: Shared bash tests (Snapshot Restore, Volume Stress, Snapshot Stress)
-  # have been migrated to Ginkgo E2E tests in tests/e2e/snapshot_restore_test.go
-  # and tests/e2e/stress_test.go. They run as part of ginkgo-e2e-shared.
+  # Note: All integration tests have been migrated to Ginkgo E2E tests.
+  # - Protocol-specific tests: tests/e2e/nfs/ and tests/e2e/nvmeof/
+  # - Shared tests (both protocols): tests/e2e/snapshot_restore_test.go, tests/e2e/stress_test.go
 
   test-summary:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nvmeof-delete-strategy-retain, ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
+    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
     if: always()
     steps:
       - name: Generate Test Summary
         uses: actions/github-script@v8
         with:
           script: |
-            const nvmeofResults = {
-              'Delete Strategy Retain': '${{ needs.nvmeof-delete-strategy-retain.result }}',
-            };
-            
-            const ginkgoResults = {
+            const e2eResults = {
               'NFS E2E': '${{ needs.ginkgo-e2e-nfs.result }}',
               'NVMe-oF E2E': '${{ needs.ginkgo-e2e-nvmeof.result }}',
               'Shared E2E': '${{ needs.ginkgo-e2e-shared.result }}',
@@ -292,61 +257,43 @@ jobs:
               }
             };
             
-            const countResults = (obj) => {
-              let passed = 0, failed = 0, skipped = 0;
-              for (const result of Object.values(obj)) {
-                if (result === 'success') passed++;
-                else if (result === 'failure') failed++;
-                else if (result === 'skipped') skipped++;
-              }
-              return { passed, failed, skipped };
-            };
-            
-            const nvmeofCounts = countResults(nvmeofResults);
-            const e2eCounts = countResults(ginkgoResults);
-            
-            const totalPassed = nvmeofCounts.passed + e2eCounts.passed;
-            const totalFailed = nvmeofCounts.failed + e2eCounts.failed;
-            const totalSkipped = nvmeofCounts.skipped + e2eCounts.skipped;
-            const total = Object.keys(nvmeofResults).length + Object.keys(ginkgoResults).length;
+            let passed = 0, failed = 0, skipped = 0;
+            for (const result of Object.values(e2eResults)) {
+              if (result === 'success') passed++;
+              else if (result === 'failure') failed++;
+              else if (result === 'skipped') skipped++;
+            }
+            const total = Object.keys(e2eResults).length;
             
             let summary = `# Integration Test Results\n\n`;
             
             // Overall status banner
-            if (totalFailed > 0) {
-              summary += `> ### ${totalFailed} test(s) failed\n\n`;
-            } else if (totalPassed === total) {
+            if (failed > 0) {
+              summary += `> ### ${failed} test(s) failed\n\n`;
+            } else if (passed === total) {
               summary += `> ### All ${total} tests passed!\n\n`;
             } else {
-              summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
+              summary += `> ### ${passed}/${passed + failed} tests passed (${skipped} skipped)\n\n`;
             }
             
             // Quick stats
             summary += `| Passed | Failed | Skipped | Total |\n`;
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
-            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${total} |\n\n`;
+            summary += `| ${passed} | ${failed} | ${skipped} | ${total} |\n\n`;
             
             // E2E Tests
             summary += `## E2E Tests\n\n`;
             summary += `| Test Suite | Status |\n`;
             summary += `|------------|:------:|\n`;
-            for (const [test, result] of Object.entries(ginkgoResults)) {
+            for (const [test, result] of Object.entries(e2eResults)) {
               summary += `| ${test} | ${getIcon(result)} |\n`;
             }
             summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for both NFS and NVMe-oF._\n`;
-            
-            // NVMe-oF Bash Tests
-            summary += `\n## NVMe-oF Bash Tests\n\n`;
-            summary += `| Test | Status |\n`;
-            summary += `|------|:------:|\n`;
-            for (const [test, result] of Object.entries(nvmeofResults)) {
-              summary += `| ${test} | ${getIcon(result)} |\n`;
-            }
             
             // Write to job summary
             await core.summary.addRaw(summary).write();
             
             // Fail if any test failed
-            if (totalFailed > 0) {
-              core.setFailed(`${totalFailed} test(s) failed`);
+            if (failed > 0) {
+              core.setFailed(`${failed} test(s) failed`);
             }

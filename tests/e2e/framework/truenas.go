@@ -13,6 +13,9 @@ import (
 // ErrDatasetDeleteTimeout is returned when waiting for a dataset to be deleted times out.
 var ErrDatasetDeleteTimeout = errors.New("timeout waiting for dataset to be deleted")
 
+// ErrMissingIDField is returned when a TrueNAS resource is missing its ID field.
+var ErrMissingIDField = errors.New("resource has no ID field")
+
 // TrueNASVerifier provides methods for verifying TrueNAS backend state.
 type TrueNASVerifier struct {
 	client *tnsapi.Client
@@ -98,4 +101,64 @@ func (v *TrueNASVerifier) DeleteDataset(ctx context.Context, datasetPath string)
 		return fmt.Errorf("failed to delete dataset %s: %w", datasetPath, err)
 	}
 	return nil
+}
+
+// deleteResourceByFilter is a helper that queries for a resource by filter, gets its ID, and deletes it.
+func (v *TrueNASVerifier) deleteResourceByFilter(
+	ctx context.Context,
+	queryMethod string,
+	deleteMethod string,
+	filterKey string,
+	filterValue string,
+	resourceDesc string,
+) error {
+	// Query for the resource
+	var resources []map[string]any
+	filter := []any{[]any{filterKey, "=", filterValue}}
+	if err := v.client.Call(ctx, queryMethod, []any{filter}, &resources); err != nil {
+		return fmt.Errorf("failed to query %s: %w", resourceDesc, err)
+	}
+	if len(resources) == 0 {
+		// Resource doesn't exist, nothing to delete
+		return nil
+	}
+
+	// Get the resource ID
+	resourceID, ok := resources[0]["id"]
+	if !ok {
+		return fmt.Errorf("%s: %w", resourceDesc, ErrMissingIDField)
+	}
+
+	// Delete the resource
+	var result any
+	if err := v.client.Call(ctx, deleteMethod, []any{resourceID}, &result); err != nil {
+		return fmt.Errorf("failed to delete %s (id=%v): %w", resourceDesc, resourceID, err)
+	}
+	return nil
+}
+
+// DeleteNVMeOFSubsystem deletes an NVMe-oF subsystem from TrueNAS.
+// This is used for cleaning up retained NVMe-oF subsystems after tests.
+func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string) error {
+	return v.deleteResourceByFilter(
+		ctx,
+		"nvmeof.subsystem.query",
+		"nvmeof.subsystem.delete",
+		"nqn",
+		nqn,
+		"NVMe-oF subsystem "+nqn,
+	)
+}
+
+// DeleteNFSShare deletes an NFS share from TrueNAS.
+// This is used for cleaning up retained NFS shares after tests.
+func (v *TrueNASVerifier) DeleteNFSShare(ctx context.Context, path string) error {
+	return v.deleteResourceByFilter(
+		ctx,
+		"sharing.nfs.query",
+		"sharing.nfs.delete",
+		"path",
+		path,
+		"NFS share for path "+path,
+	)
 }

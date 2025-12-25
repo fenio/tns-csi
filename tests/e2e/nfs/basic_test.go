@@ -12,7 +12,7 @@ import (
 	"github.com/fenio/tns-csi/tests/e2e/framework"
 )
 
-var _ = Describe("NFS Basic", func() {
+var _ = Describe("NFS Mount and Expansion", func() {
 	var f *framework.Framework
 
 	BeforeEach(func() {

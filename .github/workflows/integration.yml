@@ -111,806 +111,140 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
   # ==========================================
-  # NFS Tests
+  # E2E Tests
   # ==========================================
-  nfs-basic:
-    name: "NFS: Basic"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-nfs.sh
-
-  nfs-snapshot:
-    name: "NFS: Snapshot"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-snapshot-nfs.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nfs-snapshot-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nfs-detached-snapshot:
-    name: "NFS: Detached Snapshot"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'detached-snapshot')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-detached-snapshot-nfs.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nfs-detached-snapshot-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nfs-concurrent:
-    name: "NFS: Concurrent"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-concurrent-nfs.sh
-
-  nfs-persistence:
-    name: "NFS: Persistence"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-persistence-nfs.sh
-
-  nfs-statefulset:
-    name: "NFS: StatefulSet"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-statefulset-nfs.sh
-
-  nfs-expansion:
-    name: "NFS: Volume Expansion"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-volume-expansion-nfs.sh
-
-  nfs-zfsprops:
-    name: "NFS: ZFS Properties"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'zfsprops')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-nfs-zfsprops.sh
-
-  nfs-name-templating:
-    name: "NFS: Name Templating"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'name-templating')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-name-templating.sh
-
-  nfs-clone-volume:
-    name: "NFS: Clone Volume"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'clone-volume')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-clone-volume-nfs.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nfs-clone-volume-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nfs-delete-strategy-retain:
-    name: "NFS: Delete Strategy Retain"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-delete-strategy-retain.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nfs-delete-strategy-retain-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  # ==========================================
-  # NVMe-oF Tests
-  # ==========================================
-  nvmeof-basic:
-    name: "NVMe-oF: Basic"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'basic')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-nvmeof.sh
-
-  nvmeof-snapshot:
-    name: "NVMe-oF: Snapshot"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-snapshot-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-snapshot-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nvmeof-detached-snapshot:
-    name: "NVMe-oF: Detached Snapshot"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'detached-snapshot')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-detached-snapshot-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-detached-snapshot-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nvmeof-concurrent:
-    name: "NVMe-oF: Concurrent"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'concurrent')
-    steps:
-      - uses: actions/checkout@v6
-      - name: Debug shell environment
-        run: |
-          echo "=== Shell info ==="
-          echo "SHELL: $SHELL"
-          echo "BASH_VERSION: $BASH_VERSION"
-          ls -la /bin/sh
-          
-          echo "=== grep info ==="
-          which grep
-          grep --version || true
-          
-          echo "=== Test grep -c behavior ==="
-          echo -e "a\nb\nc" | grep -c "x" || echo "fallback"
-          RESULT=$(echo -e "a\nb\nc" | grep -c "x" || echo "0")
-          echo "RESULT='$RESULT'"
-          echo "RESULT bytes: $(echo -n "$RESULT" | xxd)"
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-concurrent-nvmeof.sh
-
-  nvmeof-persistence:
-    name: "NVMe-oF: Persistence"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'persistence')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-persistence-nvmeof.sh
-
-  nvmeof-statefulset:
-    name: "NVMe-oF: StatefulSet"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'statefulset')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-statefulset-nvmeof.sh
-
-  nvmeof-expansion:
-    name: "NVMe-oF: Volume Expansion"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-expansion')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-volume-expansion-nvmeof.sh
-
-  nvmeof-clone-volume:
-    name: "NVMe-oF: Clone Volume"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'clone-volume')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-clone-volume-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-clone-volume-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nvmeof-block-mode:
-    name: "NVMe-oF: Block Mode"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'block-mode')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-block-mode-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-block-mode-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nvmeof-delete-strategy-retain:
-    name: "NVMe-oF: Delete Strategy Retain"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'delete-strategy-retain')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-delete-strategy-retain-nvmeof.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-delete-strategy-retain-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  nvmeof-zfsprops:
-    name: "NVMe-oF: ZFS Properties"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '') &&
-      (github.event.inputs.test == '' || github.event.inputs.test == 'zfsprops')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-nvmeof-zfsprops.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: nvmeof-zfsprops-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  # ==========================================
-  # Shared Tests
-  # ==========================================
-  shared-dual-mount:
-    name: "Shared: Dual Mount"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'dual-mount')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-dual-mount.sh
-
-  shared-connection-resilience:
-    name: "Shared: Connection Resilience"
-    runs-on: new
-    timeout-minutes: 15
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'connection-resilience')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-connection-resilience.sh
-
-  shared-pod-restart:
-    name: "Shared: Pod Restart"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'pod-restart')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-pod-restart.sh
-
-  shared-access-modes:
-    name: "Shared: Access Modes"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'access-modes')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-access-modes.sh
-
-  shared-snapshot-restore:
-    name: "Shared: Snapshot Restore"
-    runs-on: new
-    timeout-minutes: 20
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-restore')
-    steps:
-      - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
-        with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-snapshot-restore.sh
-      - name: Upload diagnostic logs
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: snapshot-restore-diagnostics
-          path: /tmp/test-logs/
-          retention-days: 7
-
-  shared-volume-stress:
-    name: "Shared: Volume Stress"
+  ginkgo-e2e-nfs:
+    name: "E2E: NFS"
     runs-on: new
     timeout-minutes: 30
     needs: compute-tag
     if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'volume-stress')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-k3s@v5
+      - uses: actions/setup-go@v5
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: |
-          echo "=== Starting Volume Stress Test ==="
-          date
-          stdbuf -o0 ./tests/integration/test-volume-stress.sh
-          echo "=== Volume Stress Test Completed ==="
-          date
-
-  shared-snapshot-stress:
-    name: "Shared: Snapshot Stress"
-    runs-on: new
-    timeout-minutes: 30
-    needs: compute-tag
-    if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'snapshot-stress')
-    steps:
-      - uses: actions/checkout@v6
+          go-version-file: go.mod
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
-      - name: Run Test
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run NFS E2E Tests
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-snapshot-stress.sh
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running NFS E2E Tests ==="
+          # Run only NFS-specific tests from the nfs/ directory
+          ginkgo -v --timeout=25m ./tests/e2e/nfs/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: snapshot-stress-diagnostics
+          name: e2e-nfs-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
-  shared-error-handling:
-    name: "Shared: Error Handling"
+  ginkgo-e2e-nvmeof:
+    name: "E2E: NVMe-oF"
     runs-on: new
-    timeout-minutes: 20
+    timeout-minutes: 45
     needs: compute-tag
     if: |
-      (github.event.inputs.test == '' || github.event.inputs.test == 'error-handling')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - name: Run Test
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run NVMe-oF E2E Tests
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-        run: ./tests/integration/test-error-handling.sh
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running NVMe-oF E2E Tests ==="
+          # Run only NVMe-oF-specific tests from the nvmeof/ directory
+          ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: error-handling-diagnostics
+          name: e2e-nvmeof-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  ginkgo-e2e-shared:
+    name: "E2E: Shared"
+    runs-on: new
+    timeout-minutes: 30
+    needs: compute-tag
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run Shared E2E Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running Shared E2E Tests ==="
+          # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
+          # These tests use "both" protocol setup
+          ginkgo -v --timeout=25m ./tests/e2e/
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-shared-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
 
   # ==========================================
   # Summary
   # ==========================================
+  # Note: All integration tests have been migrated to Ginkgo E2E tests.
+  # - Protocol-specific tests: tests/e2e/nfs/ and tests/e2e/nvmeof/
+  # - Shared tests (both protocols): tests/e2e/*.go (snapshot_restore, stress, name_templating, etc.)
+
   test-summary:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [nfs-basic, nfs-snapshot, nfs-detached-snapshot, nfs-concurrent, nfs-persistence, nfs-statefulset, nfs-expansion, nfs-zfsprops, nfs-name-templating, nfs-clone-volume, nfs-delete-strategy-retain, nvmeof-basic, nvmeof-snapshot, nvmeof-detached-snapshot, nvmeof-concurrent, nvmeof-persistence, nvmeof-statefulset, nvmeof-expansion, nvmeof-clone-volume, nvmeof-block-mode, nvmeof-delete-strategy-retain, nvmeof-zfsprops, shared-dual-mount, shared-connection-resilience, shared-pod-restart, shared-access-modes, shared-snapshot-restore, shared-volume-stress, shared-snapshot-stress, shared-error-handling]
+    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
     if: always()
     steps:
       - name: Generate Test Summary
         uses: actions/github-script@v8
         with:
           script: |
-            const results = {
-              // NFS Tests
-              'Basic': '${{ needs.nfs-basic.result }}',
-              'Snapshot': '${{ needs.nfs-snapshot.result }}',
-              'Detached Snapshot': '${{ needs.nfs-detached-snapshot.result }}',
-              'Concurrent': '${{ needs.nfs-concurrent.result }}',
-              'Persistence': '${{ needs.nfs-persistence.result }}',
-              'StatefulSet': '${{ needs.nfs-statefulset.result }}',
-              'Volume Expansion': '${{ needs.nfs-expansion.result }}',
-              'ZFS Properties': '${{ needs.nfs-zfsprops.result }}',
-              'Name Templating': '${{ needs.nfs-name-templating.result }}',
-              'Clone Volume': '${{ needs.nfs-clone-volume.result }}',
-              'Delete Strategy Retain': '${{ needs.nfs-delete-strategy-retain.result }}',
-            };
-            
-            const nvmeofResults = {
-              'Basic': '${{ needs.nvmeof-basic.result }}',
-              'Snapshot': '${{ needs.nvmeof-snapshot.result }}',
-              'Detached Snapshot': '${{ needs.nvmeof-detached-snapshot.result }}',
-              'Concurrent': '${{ needs.nvmeof-concurrent.result }}',
-              'Persistence': '${{ needs.nvmeof-persistence.result }}',
-              'StatefulSet': '${{ needs.nvmeof-statefulset.result }}',
-              'Volume Expansion': '${{ needs.nvmeof-expansion.result }}',
-              'Clone Volume': '${{ needs.nvmeof-clone-volume.result }}',
-              'Block Mode': '${{ needs.nvmeof-block-mode.result }}',
-              'Delete Strategy Retain': '${{ needs.nvmeof-delete-strategy-retain.result }}',
-              'ZFS Properties': '${{ needs.nvmeof-zfsprops.result }}',
-            };
-            
-            const sharedResults = {
-              'Dual Mount': '${{ needs.shared-dual-mount.result }}',
-              'Connection Resilience': '${{ needs.shared-connection-resilience.result }}',
-              'Pod Restart': '${{ needs.shared-pod-restart.result }}',
-              'Access Modes': '${{ needs.shared-access-modes.result }}',
-              'Snapshot Restore': '${{ needs.shared-snapshot-restore.result }}',
-              'Volume Stress': '${{ needs.shared-volume-stress.result }}',
-              'Snapshot Stress': '${{ needs.shared-snapshot-stress.result }}',
-              'Error Handling': '${{ needs.shared-error-handling.result }}',
+            const e2eResults = {
+              'NFS E2E': '${{ needs.ginkgo-e2e-nfs.result }}',
+              'NVMe-oF E2E': '${{ needs.ginkgo-e2e-nvmeof.result }}',
+              'Shared E2E': '${{ needs.ginkgo-e2e-shared.result }}',
             };
             
             const getIcon = (result) => {
@@ -923,77 +257,43 @@ jobs:
               }
             };
             
-            const countResults = (obj) => {
-              let passed = 0, failed = 0, skipped = 0;
-              for (const result of Object.values(obj)) {
-                if (result === 'success') passed++;
-                else if (result === 'failure') failed++;
-                else if (result === 'skipped') skipped++;
-              }
-              return { passed, failed, skipped };
-            };
-            
-            const nfsCounts = countResults(results);
-            const nvmeofCounts = countResults(nvmeofResults);
-            const sharedCounts = countResults(sharedResults);
-            
-            const totalPassed = nfsCounts.passed + nvmeofCounts.passed + sharedCounts.passed;
-            const totalFailed = nfsCounts.failed + nvmeofCounts.failed + sharedCounts.failed;
-            const totalSkipped = nfsCounts.skipped + nvmeofCounts.skipped + sharedCounts.skipped;
-            const total = 32;
+            let passed = 0, failed = 0, skipped = 0;
+            for (const result of Object.values(e2eResults)) {
+              if (result === 'success') passed++;
+              else if (result === 'failure') failed++;
+              else if (result === 'skipped') skipped++;
+            }
+            const total = Object.keys(e2eResults).length;
             
             let summary = `# Integration Test Results\n\n`;
             
             // Overall status banner
-            if (totalFailed > 0) {
-              summary += `> ### ${totalFailed} test(s) failed\n\n`;
-            } else if (totalPassed === total) {
+            if (failed > 0) {
+              summary += `> ### ${failed} test(s) failed\n\n`;
+            } else if (passed === total) {
               summary += `> ### All ${total} tests passed!\n\n`;
             } else {
-              summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
+              summary += `> ### ${passed}/${passed + failed} tests passed (${skipped} skipped)\n\n`;
             }
             
             // Quick stats
             summary += `| Passed | Failed | Skipped | Total |\n`;
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
-            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${total} |\n\n`;
+            summary += `| ${passed} | ${failed} | ${skipped} | ${total} |\n\n`;
             
-            // Side-by-side NFS and NVMe-oF tables
-            summary += `## Protocol Tests\n\n`;
-            summary += `| Test | NFS | NVMe-oF |\n`;
-            summary += `|------|:---:|:-------:|\n`;
-            
-            const testNames = ['Basic', 'Snapshot', 'Detached Snapshot', 'Concurrent', 'Persistence', 'StatefulSet', 'Volume Expansion', 'Clone Volume', 'ZFS Properties', 'Delete Strategy Retain'];
-            for (const test of testNames) {
-              const nfsResult = results[test];
-              const nvmeofResult = nvmeofResults[test];
-              summary += `| ${test} | ${getIcon(nfsResult)} | ${getIcon(nvmeofResult)} |\n`;
-            }
-            
-            // NFS-only tests
-            summary += `\n## NFS-Only Tests\n\n`;
-            summary += `| Test | Status |\n`;
-            summary += `|------|:------:|\n`;
-            summary += `| Name Templating | ${getIcon(results['Name Templating'])} |\n`;
-            
-            // NVMe-oF-only tests
-            summary += `\n## NVMe-oF-Only Tests\n\n`;
-            summary += `| Test | Status |\n`;
-            summary += `|------|:------:|\n`;
-            summary += `| Block Mode | ${getIcon(nvmeofResults['Block Mode'])} |\n`;
-            
-            // Shared tests
-            summary += `\n## Shared Tests\n\n`;
-            summary += `| Test | Status |\n`;
-            summary += `|------|:------:|\n`;
-            for (const [test, result] of Object.entries(sharedResults)) {
+            // E2E Tests
+            summary += `## E2E Tests\n\n`;
+            summary += `| Test Suite | Status |\n`;
+            summary += `|------------|:------:|\n`;
+            for (const [test, result] of Object.entries(e2eResults)) {
               summary += `| ${test} | ${getIcon(result)} |\n`;
             }
+            summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for both NFS and NVMe-oF._\n`;
             
             // Write to job summary
             await core.summary.addRaw(summary).write();
             
             // Fail if any test failed
-            if (totalFailed > 0) {
-              core.setFailed(`${totalFailed} test(s) failed`);
+            if (failed > 0) {
+              core.setFailed(`${failed} test(s) failed`);
             }

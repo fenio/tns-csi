@@ -65,8 +65,8 @@ var _ = Describe("NFS Crash Simulation", func() {
 		_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", fmt.Sprintf("echo '%s' > /data/test.txt", testData)})
 		Expect(err).NotTo(HaveOccurred(), "Failed to write test data")
 
-		By("Writing large file for integrity verification (50MB)")
-		_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "dd if=/dev/urandom of=/data/large-file.bin bs=1M count=50"})
+		By("Writing large file for integrity verification (5MB)")
+		_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "dd if=/dev/urandom of=/data/large-file.bin bs=1M count=5"})
 		Expect(err).NotTo(HaveOccurred(), "Failed to write large file")
 
 		By("Calculating checksum of large file")

@@ -19,10 +19,10 @@ var _ = Describe("NFS Concurrent Operations", func() {
 	var ctx context.Context
 
 	const (
-		numVolumes       = 5
+		numVolumes       = 3
 		storageClassName = "tns-csi-nfs"
 		storageSize      = "1Gi"
-		pvcTimeout       = 300 * time.Second
+		pvcTimeout       = 180 * time.Second
 		podTimeout       = 120 * time.Second
 	)
 

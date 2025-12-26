@@ -4,11 +4,99 @@ package framework
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
+
+// suiteState holds suite-level state for Helm deployment.
+// This allows us to deploy Helm once per suite instead of per test.
+type suiteState struct {
+	helm         *HelmDeployer
+	config       *Config
+	truenas      *TrueNASVerifier
+	truenasError error
+	protocol     string
+	mu           sync.Mutex
+	deployed     bool
+}
+
+var suite = &suiteState{}
+
+// SetupSuite initializes the suite-level resources (Helm deployment).
+// This should be called from BeforeSuite in each test suite.
+func SetupSuite(protocol string) error {
+	suite.mu.Lock()
+	defer suite.mu.Unlock()
+
+	if suite.deployed && suite.protocol == protocol {
+		klog.Infof("Suite already set up for protocol %s, skipping Helm deployment", protocol)
+		return nil
+	}
+
+	klog.Infof("Setting up suite for protocol %s", protocol)
+
+	// Load config
+	config, err := NewConfig()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+	suite.config = config
+
+	// Create Helm deployer
+	suite.helm = NewHelmDeployer(config)
+
+	// Deploy the CSI driver
+	klog.Infof("Deploying CSI driver with protocol %s", protocol)
+	if deployErr := suite.helm.Deploy(protocol); deployErr != nil {
+		return fmt.Errorf("failed to deploy CSI driver: %w", deployErr)
+	}
+
+	// Wait for driver to be ready
+	klog.Infof("Waiting for CSI driver to be ready")
+	if waitErr := suite.helm.WaitForReady(2 * time.Minute); waitErr != nil {
+		return fmt.Errorf("CSI driver not ready: %w", waitErr)
+	}
+	klog.Infof("CSI driver is ready")
+
+	// Create TrueNAS verifier (store any error for later)
+	truenas, truenasErr := NewTrueNASVerifier(config.TrueNASHost, config.TrueNASAPIKey)
+	if truenasErr != nil {
+		klog.Warningf("Failed to create TrueNAS verifier: %v (TrueNAS verification will be skipped)", truenasErr)
+		suite.truenasError = truenasErr
+	} else {
+		suite.truenas = truenas
+	}
+
+	suite.deployed = true
+	suite.protocol = protocol
+
+	klog.Infof("Suite setup complete for protocol %s", protocol)
+	return nil
+}
+
+// TeardownSuite cleans up suite-level resources.
+// This should be called from AfterSuite in each test suite.
+func TeardownSuite() {
+	suite.mu.Lock()
+	defer suite.mu.Unlock()
+
+	if suite.truenas != nil {
+		suite.truenas.Close()
+		suite.truenas = nil
+	}
+
+	// Note: We don't undeploy the Helm chart here because:
+	// 1. It's useful for debugging if tests fail
+	// 2. The next suite will just upgrade it anyway
+	// 3. CI cleanup handles final cleanup
+
+	suite.deployed = false
+	suite.protocol = ""
+	klog.Infof("Suite teardown complete")
+}
 
 // Framework provides a unified interface for E2E testing.
 type Framework struct {
@@ -34,7 +122,8 @@ func NewFramework() (*Framework, error) {
 }
 
 // Setup initializes the framework for testing.
-// It creates a unique namespace, deploys the CSI driver, and waits for it to be ready.
+// It creates a unique namespace and sets up the K8s client.
+// Helm deployment is handled at suite level via SetupSuite.
 func (f *Framework) Setup(protocol string) error {
 	f.protocol = protocol
 	ctx := context.Background()
@@ -63,38 +152,39 @@ func (f *Framework) Setup(protocol string) error {
 		return f.K8s.DeleteNamespace(context.Background(), 3*time.Minute)
 	})
 
-	// Create Helm deployer
-	f.Helm = NewHelmDeployer(f.Config)
-
-	// Deploy the CSI driver
-	klog.Infof("Deploying CSI driver with protocol %s", protocol)
-	if deployErr := f.Helm.Deploy(protocol); deployErr != nil {
-		return fmt.Errorf("failed to deploy CSI driver: %w", deployErr)
-	}
-
-	// Register driver undeployment for cleanup (optional - may want to keep driver for debugging)
-	// f.Cleanup.Add(func() error {
-	// 	klog.Infof("Undeploying CSI driver")
-	// 	return f.Helm.Undeploy()
-	// })
-
-	// Wait for driver to be ready
-	klog.Infof("Waiting for CSI driver to be ready")
-	if waitErr := f.Helm.WaitForReady(2 * time.Minute); waitErr != nil {
-		return fmt.Errorf("CSI driver not ready: %w", waitErr)
-	}
-	klog.Infof("CSI driver is ready")
-
-	// Create TrueNAS verifier
-	truenas, err := NewTrueNASVerifier(f.Config.TrueNASHost, f.Config.TrueNASAPIKey)
-	if err != nil {
-		klog.Warningf("Failed to create TrueNAS verifier: %v (TrueNAS verification will be skipped)", err)
+	// Use suite-level Helm deployer if available, otherwise create one
+	suite.mu.Lock()
+	if suite.deployed && (suite.protocol == protocol || suite.protocol == "both" || suite.protocol == "all") {
+		// Suite already deployed with compatible protocol
+		f.Helm = suite.helm
+		f.TrueNAS = suite.truenas
+		suite.mu.Unlock()
+		klog.Infof("Using suite-level Helm deployment for protocol %s", protocol)
 	} else {
-		f.TrueNAS = truenas
-		f.Cleanup.Add(func() error {
-			f.TrueNAS.Close()
-			return nil
-		})
+		suite.mu.Unlock()
+		// Fallback: deploy Helm per-test (for backwards compatibility or if suite setup wasn't called)
+		klog.Infof("Suite not set up, deploying Helm for protocol %s", protocol)
+		f.Helm = NewHelmDeployer(f.Config)
+
+		if deployErr := f.Helm.Deploy(protocol); deployErr != nil {
+			return fmt.Errorf("failed to deploy CSI driver: %w", deployErr)
+		}
+
+		if waitErr := f.Helm.WaitForReady(2 * time.Minute); waitErr != nil {
+			return fmt.Errorf("CSI driver not ready: %w", waitErr)
+		}
+
+		// Create TrueNAS verifier
+		truenas, truenasErr := NewTrueNASVerifier(f.Config.TrueNASHost, f.Config.TrueNASAPIKey)
+		if truenasErr != nil {
+			klog.Warningf("Failed to create TrueNAS verifier: %v (TrueNAS verification will be skipped)", truenasErr)
+		} else {
+			f.TrueNAS = truenas
+			f.Cleanup.Add(func() error {
+				f.TrueNAS.Close()
+				return nil
+			})
+		}
 	}
 
 	klog.Infof("Framework setup complete")

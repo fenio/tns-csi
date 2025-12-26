@@ -19,10 +19,10 @@ var _ = Describe("NVMe-oF Detached Snapshot", func() {
 
 	// Timeouts for NVMe-oF operations (longer due to block device setup)
 	const (
-		pvcTimeout      = 360 * time.Second
-		podTimeout      = 360 * time.Second
-		snapshotTimeout = 180 * time.Second
-		deleteTimeout   = 120 * time.Second
+		pvcTimeout      = 180 * time.Second
+		podTimeout      = 180 * time.Second
+		snapshotTimeout = 120 * time.Second
+		deleteTimeout   = 60 * time.Second
 	)
 
 	BeforeEach(func() {

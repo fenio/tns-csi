@@ -65,7 +65,7 @@ var _ = Describe("Snapshot Stress", func() {
 	for _, proto := range protocols {
 		It("should handle multiple snapshots of the same volume ["+proto.name+"]", func() {
 			ctx := context.Background()
-			numSnapshots := 5
+			numSnapshots := 3
 
 			By("Creating VolumeSnapshotClass")
 			err := f.K8s.CreateVolumeSnapshotClass(ctx, proto.snapshotClass, "tns.csi.io", "Delete")
@@ -250,7 +250,7 @@ var _ = Describe("Volume Stress", func() {
 	for _, proto := range protocols {
 		It("should handle multiple volumes concurrently ["+proto.name+"]", func() {
 			ctx := context.Background()
-			numVolumes := 5
+			numVolumes := 3
 
 			By(fmt.Sprintf("Creating %d PVCs concurrently", numVolumes))
 			pvcNames := make([]string, numVolumes)

@@ -18,8 +18,8 @@ var _ = Describe("NVMe-oF Access Modes", func() {
 
 	// Timeouts (longer for NVMe-oF)
 	const (
-		pvcTimeout = 360 * time.Second
-		podTimeout = 360 * time.Second
+		pvcTimeout = 180 * time.Second
+		podTimeout = 180 * time.Second
 	)
 
 	BeforeEach(func() {

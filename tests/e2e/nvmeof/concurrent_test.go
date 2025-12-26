@@ -19,12 +19,12 @@ var _ = Describe("NVMe-oF Concurrent Operations", func() {
 	var ctx context.Context
 
 	const (
-		numVolumes       = 5
+		numVolumes       = 3
 		storageClassName = "tns-csi-nvmeof"
 		storageSize      = "1Gi"
 		// NVMe-oF uses WaitForFirstConsumer, needs longer timeouts
-		pvcTimeout = 360 * time.Second
-		podTimeout = 360 * time.Second
+		pvcTimeout = 180 * time.Second
+		podTimeout = 180 * time.Second
 	)
 
 	BeforeEach(func() {

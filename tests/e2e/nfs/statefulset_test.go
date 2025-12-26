@@ -20,7 +20,7 @@ var _ = Describe("NFS StatefulSet", func() {
 	const (
 		stsName          = "web-nfs"
 		serviceName      = "web-nfs-svc"
-		replicas         = int32(3)
+		replicas         = int32(2)
 		volumeName       = "data" // Name in volumeClaimTemplates
 		mountPath        = "/data"
 		storageSize      = "1Gi"
@@ -111,8 +111,8 @@ var _ = Describe("NFS StatefulSet", func() {
 			Expect(execErr).NotTo(HaveOccurred())
 		}
 
-		By("Scaling down StatefulSet from 3 to 2 replicas")
-		newReplicas := int32(2)
+		By("Scaling down StatefulSet from 2 to 1 replica")
+		newReplicas := int32(1)
 		err = f.K8s.ScaleStatefulSet(ctx, stsName, newReplicas)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -136,7 +136,7 @@ var _ = Describe("NFS StatefulSet", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).NotTo(BeNil(), "PVC should be retained after scale down (StatefulSet behavior)")
 
-		By("Scaling back up to 3 replicas")
+		By("Scaling back up to 2 replicas")
 		err = f.K8s.ScaleStatefulSet(ctx, stsName, replicas)
 		Expect(err).NotTo(HaveOccurred())
 

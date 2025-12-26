@@ -71,9 +71,7 @@ Compatibility tests run weekly and on-demand. See [Distro Compatibility Tests](d
 - For NVMe-oF: 
   - TrueNAS Scale 25.10+
   - **TrueNAS must have a static IP configured** (DHCP not supported for NVMe-oF)
-  - At least one NVMe-oF subsystem with:
-    - Initial ZVOL namespace configured
-    - TCP port configured (default: 4420)
+  - At least one NVMe-oF TCP port configured in TrueNAS (Shares > NVMe-oF Targets > Ports, default: 4420)
   - `nvme-cli` package installed on all Kubernetes nodes
   - Kernel modules: `nvme-tcp`, `nvme-fabrics`
   - Network connectivity from Kubernetes nodes to TrueNAS on port 4420
@@ -112,12 +110,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
   --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi" \
   --set storageClasses.nvmeof.transport=tcp \
   --set storageClasses.nvmeof.port=4420
 ```
 
-**Note:** Replace `nqn.2025-01.com.truenas:csi` with your actual NVMe-oF subsystem NQN. You must pre-configure the subsystem in TrueNAS (Shares > NVMe-oF Subsystems) before provisioning volumes.
+**Note:** NVMe-oF requires a TCP port to be pre-configured in TrueNAS (Shares > NVMe-oF Targets > Ports). Subsystems are automatically created per volume.
 
 See the [Helm chart README](charts/tns-csi-driver/README.md) for detailed configuration options.
 
@@ -150,12 +147,11 @@ parameters:
   protocol: nvmeof
   server: YOUR-TRUENAS-IP
   pool: tank
-  subsystemNQN: nqn.2025-01.com.truenas:csi  # REQUIRED: Pre-configured subsystem NQN
   path: /mnt/tank/k8s/nvmeof
   fsType: ext4  # or xfs
 ```
 
-**Important:** The `subsystemNQN` parameter is required and must match a pre-configured NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems). The CSI driver creates namespaces within this shared subsystem for each volume.
+**Note:** Subsystems are automatically created per volume. Ensure an NVMe-oF TCP port is configured in TrueNAS (Shares > NVMe-oF Targets > Ports).
 
 ## Testing
 

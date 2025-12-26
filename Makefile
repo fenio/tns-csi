@@ -1,4 +1,4 @@
-.PHONY: all build clean test docker-build docker-push lint lint-fix test-coverage
+.PHONY: all build clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof
 
 DRIVER_NAME=tns-csi-driver
 IMAGE_NAME=bfenski/tns-csi
@@ -94,3 +94,16 @@ test-coverage:
 
 test-all: test-unit test-sanity
 	@echo "All tests completed"
+
+# E2E tests (requires Ginkgo CLI and TrueNAS connection)
+test-e2e:
+	@echo "Running all E2E tests..."
+	ginkgo -v --timeout=60m ./tests/e2e/...
+
+test-e2e-nfs:
+	@echo "Running NFS E2E tests..."
+	ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+
+test-e2e-nvmeof:
+	@echo "Running NVMe-oF E2E tests..."
+	ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...

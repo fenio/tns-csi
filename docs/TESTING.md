@@ -36,6 +36,15 @@ Testing against real infrastructure catches issues that mocks cannot:
 - Connection resilience and recovery
 - Cleanup and resource management
 
+## Test Framework
+
+All integration tests use [Ginkgo](https://onsi.github.io/ginkgo/) v2 and [Gomega](https://onsi.github.io/gomega/) for BDD-style testing with:
+- Structured `Describe`/`It` blocks for clear test organization
+- `Eventually` for robust async waiting (no brittle `sleep` calls)
+- LIFO cleanup stack ensuring resources are always cleaned up
+- Parallel test execution support
+- JUnit report generation for CI integration
+
 ## Automated Test Suite
 
 ### CSI Specification Compliance
@@ -47,69 +56,71 @@ Testing against real infrastructure catches issues that mocks cannot:
 - Location: `tests/sanity/`
 - Run on: Every CI build
 
-### Integration Tests
+### Ginkgo E2E Integration Tests
 
-Every push to main triggers comprehensive integration tests:
+Every push to main triggers comprehensive integration tests organized into three test suites:
 
-#### Core Functionality Tests
+#### NFS Test Suite (`tests/e2e/nfs/`)
 
-**Basic Volume Operations (NFS & NVMe-oF):**
-- `test-nfs.sh` - NFS volume provisioning and deletion
-- `test-nvmeof.sh` - NVMe-oF volume provisioning and deletion
-- Tests: Create PVC → Bind PV → Mount to pod → Write data → Verify → Cleanup
+| Test File | Description |
+|-----------|-------------|
+| `basic_test.go` | Volume provisioning, mounting, I/O operations, deletion |
+| `access_modes_test.go` | RWO/RWX access mode validation |
+| `clone_test.go` | Volume cloning from snapshots |
+| `concurrent_test.go` | 5 simultaneous volume creations |
+| `delete_strategy_retain_test.go` | Volume retention on PVC deletion |
+| `detached_snapshot_test.go` | Snapshot lifecycle without attached pods |
+| `persistence_test.go` | Data survives pod restarts |
+| `statefulset_test.go` | StatefulSet with VolumeClaimTemplates |
+| `zfsprops_test.go` | Custom ZFS properties via StorageClass |
 
-**Volume Expansion:**
-- `test-volume-expansion-nfs.sh` - NFS volume resizing
-- `test-volume-expansion-nvmeof.sh` - NVMe-oF volume resizing
-- Tests dynamic volume resizing
-- Verifies both storage backend and filesystem expansion
+#### NVMe-oF Test Suite (`tests/e2e/nvmeof/`)
 
-**Snapshot Operations (NFS & NVMe-oF):**
-- `test-snapshot-nfs.sh` - NFS snapshot creation and restoration
-- `test-snapshot-nvmeof.sh` - NVMe-oF snapshot creation and restoration
-- `test-snapshot-restore.sh` - Volume restoration from snapshots
-- Tests: Create volume → Write data → Snapshot → Restore from snapshot → Verify data
+| Test File | Description |
+|-----------|-------------|
+| `basic_test.go` | Volume provisioning, mounting, I/O operations, deletion |
+| `access_modes_test.go` | RWO access mode validation |
+| `block_mode_test.go` | Raw block device mode testing |
+| `clone_test.go` | Volume cloning from snapshots |
+| `concurrent_test.go` | 5 simultaneous volume creations |
+| `delete_strategy_retain_test.go` | Volume retention on PVC deletion |
+| `detached_snapshot_test.go` | Snapshot lifecycle without attached pods |
+| `persistence_test.go` | Data survives pod restarts |
+| `statefulset_test.go` | StatefulSet with VolumeClaimTemplates |
+| `zfsprops_test.go` | Custom ZFS properties via StorageClass |
 
-**StatefulSet Support:**
-- `test-statefulset-nfs.sh` - NFS StatefulSet with 3 replicas
-- `test-statefulset-nvmeof.sh` - NVMe-oF StatefulSet with 3 replicas
-- Tests: VolumeClaimTemplates → Pod identity persistence → Volume management
+#### Shared Test Suite (`tests/e2e/`)
 
-**Data Persistence:**
-- `test-persistence-nfs.sh` - NFS data survives pod restarts
-- `test-persistence-nvmeof.sh` - NVMe-oF data survives pod restarts
-- `test-pod-restart.sh` - Pod restart behavior
-- Tests: Write data → Delete pod → Recreate pod → Verify data intact
-
-**Access Modes:**
-- `test-access-modes.sh` - RWO/RWX access mode testing
-- `test-dual-mount.sh` - Dual mount scenarios
-
-#### Stress & Reliability Tests
-
-**Concurrent Operations:**
-- `test-concurrent-nfs.sh` - 5 simultaneous NFS volume creations
-- `test-concurrent-nvmeof.sh` - 5 simultaneous NVMe-oF volume creations
-- `test-volume-stress.sh` - Volume stress testing
-- Tests: Race condition detection, concurrent API calls, resource locking
-
-**Connection Resilience:**
-- `test-connection-resilience.sh` - WebSocket reconnection testing
-- Tests: Controller restart during operations, automatic reconnection
-
-**Resource Cleanup:**
-- `test-orphaned-resources.sh` - Orphaned resource detection
-- Tests: Cleanup of abandoned resources, TrueNAS state consistency
+| Test File | Description |
+|-----------|-------------|
+| `snapshot_restore_test.go` | Snapshot creation and restoration (both protocols) |
+| `stress_test.go` | Volume stress testing |
+| `name_templating_test.go` | Custom volume naming templates |
+| `error_handling_test.go` | Error condition handling |
+| `dual_mount_test.go` | Simultaneous NFS + NVMe-oF mounting |
+| `connection_resilience_test.go` | WebSocket reconnection testing |
 
 ### Test Execution
 
-Tests run sequentially on a single self-hosted runner with:
-- Fresh k3s cluster for each test (destroyed and recreated)
-- Real CSI driver deployment via Helm charts
-- Actual TrueNAS API connections and storage operations
-- Full cleanup after each test (PVs, datasets, NFS shares, NVMe-oF namespaces)
+Tests run via GitHub Actions workflow (`.github/workflows/integration.yml`):
 
-**Total test suite runtime:** ~10-15 minutes (optimized with caching)
+```bash
+# NFS tests (~25 minutes)
+ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+
+# NVMe-oF tests (~40 minutes)
+ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+
+# Shared tests (~25 minutes)
+ginkgo -v --timeout=25m ./tests/e2e/
+```
+
+Each test run:
+- Deploys CSI driver via Helm to a fresh namespace
+- Creates test resources (PVCs, pods, snapshots)
+- Validates operations with `Eventually` for robustness
+- Cleans up all resources automatically (LIFO stack)
+- Verifies TrueNAS backend cleanup
 
 **View test results:** [Test Dashboard](https://fenio.github.io/tns-csi/dashboard/)
 
@@ -118,7 +129,7 @@ Tests run sequentially on a single self-hosted runner with:
 ### CI/CD Badges
 
 - [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml) - Unit tests and sanity tests
-- [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml) - Full integration test suite
+- [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml) - Full Ginkgo E2E test suite
 
 ### Test Dashboard
 
@@ -132,72 +143,106 @@ Interactive test results dashboard with history and metrics:
 
 ### Prerequisites
 
+- Go 1.21+
+- [Ginkgo CLI](https://onsi.github.io/ginkgo/#getting-started): `go install github.com/onsi/ginkgo/v2/ginkgo@latest`
 - Access to a TrueNAS Scale 25.10+ server
-- Kubernetes cluster (k3s, Kind, or full cluster)
+- Kubernetes cluster (k3s recommended)
 - TrueNAS API key with admin privileges
 - For NFS: `nfs-common` installed
 - For NVMe-oF: `nvme-cli` installed, kernel modules loaded
+
+### Environment Variables
+
+```bash
+export TRUENAS_HOST="your-truenas-ip"
+export TRUENAS_API_KEY="your-api-key"
+export TRUENAS_POOL="your-pool"
+export KUBECONFIG="$HOME/.kube/config"
+```
 
 ### CSI Sanity Tests
 
 ```bash
 cd tests/sanity
-export TRUENAS_HOST="your-truenas-ip"
-export TRUENAS_API_KEY="your-api-key"
-export TRUENAS_POOL="your-pool"
 ./test-sanity.sh
 ```
 
-### Integration Tests
+### Ginkgo E2E Tests
 
 ```bash
-cd tests/integration
+# Run all E2E tests
+ginkgo -v --timeout=60m ./tests/e2e/...
 
-# Set environment variables
-export TRUENAS_HOST="your-truenas-ip"
-export TRUENAS_API_KEY="your-api-key"
-export TRUENAS_POOL="your-pool"
+# Run NFS tests only
+ginkgo -v --timeout=25m ./tests/e2e/nfs/...
 
-# Run individual tests
-./test-nfs.sh
-./test-nvmeof.sh
-./test-snapshot-nfs.sh
-./test-concurrent-nfs.sh
-./test-statefulset-nfs.sh
+# Run NVMe-oF tests only
+ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+
+# Run shared tests only
+ginkgo -v --timeout=25m ./tests/e2e/
+
+# Run specific test by name
+ginkgo -v --focus="expand" ./tests/e2e/nfs/...
+
+# Run with verbose output
+ginkgo -v -vv ./tests/e2e/nfs/...
+
+# Generate JUnit report
+ginkgo -v --junit-report=junit-nfs.xml ./tests/e2e/nfs/...
 ```
 
-**Note:** Integration tests assume a clean k3s cluster. They will deploy the CSI driver, run tests, and clean up.
+**Note:** E2E tests assume a Kubernetes cluster with kubectl access. They will deploy the CSI driver, run tests, and clean up.
+
+### Using Makefile Targets
+
+```bash
+# Run all E2E tests
+make test-e2e
+
+# Run NFS E2E tests
+make test-e2e-nfs
+
+# Run NVMe-oF E2E tests
+make test-e2e-nvmeof
+```
 
 ## Test Coverage
 
 ### What's Tested
 
-✅ **CSI Spec Compliance** - Full CSI spec validation via csi-test  
-✅ **Volume Lifecycle** - Create, attach, mount, unmount, detach, delete  
-✅ **Volume Expansion** - Dynamic resizing (NFS & NVMe-oF)  
-✅ **Snapshots** - Create, restore, clone (NFS & NVMe-oF)  
-✅ **StatefulSets** - VolumeClaimTemplates and pod identity  
-✅ **Data Persistence** - Data survives pod restarts  
-✅ **Concurrent Operations** - Race condition detection  
-✅ **Connection Resilience** - WebSocket reconnection  
-✅ **Resource Cleanup** - Orphaned resource detection  
+- **CSI Spec Compliance** - Full CSI spec validation via csi-test
+- **Volume Lifecycle** - Create, attach, mount, unmount, detach, delete
+- **Volume Expansion** - Dynamic resizing (NFS & NVMe-oF)
+- **Snapshots** - Create, restore, clone (NFS & NVMe-oF)
+- **StatefulSets** - VolumeClaimTemplates and pod identity
+- **Data Persistence** - Data survives pod restarts
+- **Concurrent Operations** - Race condition detection
+- **Connection Resilience** - WebSocket reconnection
+- **Resource Cleanup** - Orphaned resource detection
+- **ZFS Properties** - Custom compression, recordsize, etc.
+- **Block Mode** - Raw block device support (NVMe-oF)
 
 ### What's Not Yet Tested
 
-⚠️ **Multi-node scenarios** - Tests run on single-node k3s  
-⚠️ **Network partitions** - Not tested yet  
-⚠️ **Storage pool failures** - Not tested yet  
-⚠️ **Long-running workloads** - No soak tests yet  
-⚠️ **Performance benchmarks** - No formal performance testing  
+- **Multi-node scenarios** - Tests run on single-node k3s
+- **Network partitions** - Not tested yet
+- **Storage pool failures** - Not tested yet
+- **Long-running workloads** - No soak tests yet
+- **Performance benchmarks** - No formal performance testing
 
 ## Contributing Tests
 
 When adding new features:
 
 1. Add unit tests in `pkg/*/`
-2. Add integration test in `tests/integration/`
-3. Update this documentation
-4. Ensure tests run on real infrastructure (no mocks for integration tests)
+2. Add Ginkgo E2E test in appropriate `tests/e2e/` subdirectory:
+   - `tests/e2e/nfs/` for NFS-specific tests
+   - `tests/e2e/nvmeof/` for NVMe-oF-specific tests
+   - `tests/e2e/` for shared/cross-protocol tests
+3. Follow the existing test patterns (see `tests/e2e/README.md` for templates)
+4. Ensure tests run on real infrastructure (no mocks for E2E tests)
+5. Update this documentation if adding new test categories
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 
@@ -227,6 +272,11 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 - Check `cleanup-truenas-artifacts.sh` for orphaned resources
 - May need to manually delete datasets/shares in TrueNAS UI
 
+**Ginkgo-specific issues:**
+- Use `-v -vv` for verbose output
+- Check `GinkgoWriter` output in test logs
+- Use `--focus` to isolate failing tests
+
 ### Getting Help
 
 - Check test logs in GitHub Actions runs
@@ -235,6 +285,8 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 
 ## References
 
+- [Ginkgo Documentation](https://onsi.github.io/ginkgo/) - BDD testing framework
+- [Gomega Documentation](https://onsi.github.io/gomega/) - Matcher/assertion library
 - [kubernetes-csi/csi-test](https://github.com/kubernetes-csi/csi-test) - CSI specification sanity tests
 - [CSI Specification](https://github.com/container-storage-interface/spec) - Official CSI spec
 - [GitHub Actions Workflows](../.github/workflows/) - CI/CD configuration

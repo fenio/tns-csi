@@ -76,17 +76,22 @@ jobs:
     steps:
       - name: Compute image tag from ref
         id: tag
+        env:
+          # Use environment variables to safely pass workflow_run context
+          # This prevents shell injection via malicious branch names
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_EVENT: ${{ github.event.workflow_run.event }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
         run: |
           # For workflow_run events, get ref from the triggering workflow
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            REF_NAME="${{ github.event.workflow_run.head_branch }}"
+            REF_NAME="$WORKFLOW_HEAD_BRANCH"
             # Check if it was triggered by a tag (Release workflow)
-            if [ "${{ github.event.workflow_run.event }}" = "push" ] && [[ "${{ github.event.workflow_run.head_branch }}" == v* ]]; then
+            if [ "$WORKFLOW_EVENT" = "push" ] && [[ "$WORKFLOW_HEAD_BRANCH" == v* ]]; then
               REF_TYPE="tag"
             else
               REF_TYPE="branch"
             fi
-            WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
             echo "Triggered by workflow: $WORKFLOW_NAME"
           else
             # For manual dispatch or other events

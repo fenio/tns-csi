@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Restrict permissions to minimum required at workflow level
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint

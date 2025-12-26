@@ -269,7 +269,6 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 - Verify port 4420 is accessible
 
 **Test cleanup fails:**
-- Check `cleanup-truenas-artifacts.sh` for orphaned resources
 - May need to manually delete datasets/shares in TrueNAS UI
 
 **Ginkgo-specific issues:**

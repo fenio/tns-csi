@@ -102,8 +102,10 @@ function updateStatusCounters(counters, status, isSkipped) {
  * @returns {boolean} - True if this is a test job
  */
 function isTestJob(jobName) {
-  // Test jobs follow patterns: "NFS: *", "NVMe-oF: *", "Shared: *"
-  return jobName.startsWith('NFS:') || 
+  // Test jobs follow patterns: "E2E: *", "NFS: *", "NVMe-oF: *", "Shared: *"
+  // The Ginkgo-based tests use "E2E: NFS", "E2E: NVMe-oF", "E2E: Shared" naming
+  return jobName.startsWith('E2E:') ||
+         jobName.startsWith('NFS:') || 
          jobName.startsWith('NVMe-oF:') || 
          jobName.startsWith('Shared:');
 }
@@ -114,19 +116,33 @@ function isTestJob(jobName) {
  * @returns {string|null} - 'nfs', 'nvmeof', or null if not found
  */
 function parseProtocolFromJobName(jobName) {
-  if (jobName.startsWith('NFS:')) return 'nfs';
-  if (jobName.startsWith('NVMe-oF:')) return 'nvmeof';
+  // Handle both old format ("NFS: Basic") and new Ginkgo format ("E2E: NFS")
+  if (jobName.startsWith('NFS:') || jobName.includes('NFS')) return 'nfs';
+  if (jobName.startsWith('NVMe-oF:') || jobName.includes('NVMe-oF') || jobName.includes('NVMeoF')) return 'nvmeof';
   // Shared tests count for both protocols, but we return null to avoid double-counting
   return null;
 }
 
 /**
  * Extracts the test type from a job name.
- * @param {string} jobName - The job name (e.g., "NFS: Basic", "Shared: Dual Mount")
+ * @param {string} jobName - The job name (e.g., "NFS: Basic", "E2E: NFS", "Shared: Dual Mount")
  * @returns {string} - The test type (normalized to lowercase)
  */
 function extractTestType(jobName) {
-  // Job names follow pattern: "Protocol: Test Name"
+  // Handle Ginkgo-based E2E job names: "E2E: NFS" -> "nfs", "E2E: NVMe-oF" -> "nvmeof"
+  if (jobName.startsWith('E2E:')) {
+    const parts = jobName.split(':');
+    if (parts.length >= 2) {
+      const testName = parts[1].trim().toLowerCase();
+      // Normalize NVMe-oF variations
+      if (testName === 'nvme-of' || testName === 'nvmeof') {
+        return 'nvmeof';
+      }
+      return testName;
+    }
+  }
+  
+  // Handle old format: "Protocol: Test Name" -> extract test name
   const parts = jobName.split(':');
   if (parts.length >= 2) {
     return parts[1].trim().toLowerCase();

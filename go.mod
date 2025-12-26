@@ -12,7 +12,7 @@ require (
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.11
 	k8s.io/api v0.35.0-alpha.2
-	k8s.io/apimachinery v0.35.0-alpha.2
+	k8s.io/apimachinery v0.36.0-alpha.0
 	k8s.io/client-go v0.35.0-alpha.2
 	k8s.io/klog/v2 v2.130.1
 )

@@ -275,9 +275,13 @@ go test -v ./pkg/driver/...
 
 # Run CSI sanity tests (requires TrueNAS connection)
 cd tests/sanity && ./test-sanity.sh
+
+# Run Ginkgo E2E tests (requires TrueNAS and Kubernetes cluster)
+ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
 ```
 
-See the Testing section above for details on the comprehensive integration test suite.
+See [docs/TESTING.md](docs/TESTING.md) for comprehensive testing documentation.
 
 ### Building Container Image
 

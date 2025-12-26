@@ -135,18 +135,33 @@ go test -v ./pkg/driver/
 go test -cover ./...
 ```
 
-### Integration Tests
+### Ginkgo E2E Tests
 
-Integration tests run automatically in CI using self-hosted runners. To run locally:
+Integration tests use [Ginkgo](https://onsi.github.io/ginkgo/) and run automatically in CI using self-hosted runners. To run locally:
 
 ```bash
-# NFS tests (requires Kind cluster)
-cd tests/e2e
-go test -v -tags=nfs
+# Install Ginkgo CLI
+go install github.com/onsi/ginkgo/v2/ginkgo@latest
 
-# NVMe-oF tests (requires proper setup)
-go test -v -tags=nvmeof
+# Set required environment variables
+export TRUENAS_HOST="your-truenas-ip"
+export TRUENAS_API_KEY="your-api-key"
+export TRUENAS_POOL="your-pool"
+
+# Run NFS E2E tests
+ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+
+# Run NVMe-oF E2E tests
+ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+
+# Run all E2E tests
+ginkgo -v --timeout=60m ./tests/e2e/...
+
+# Run specific test by name
+ginkgo -v --focus="expand" ./tests/e2e/nfs/...
 ```
+
+See [tests/e2e/README.md](tests/e2e/README.md) for detailed E2E test documentation.
 
 ### Linting
 

@@ -175,8 +175,8 @@ Eventually(func() string {
 
 Tests run automatically via GitHub Actions:
 
-- **Workflow**: `.github/workflows/integration-e2e.yml`
-- **Trigger**: Manual dispatch (workflow_dispatch)
+- **Workflow**: `.github/workflows/integration.yml`
+- **Trigger**: Push to main, pull requests, and manual dispatch
 - **Runner**: Self-hosted (`new`)
 
 To run manually:

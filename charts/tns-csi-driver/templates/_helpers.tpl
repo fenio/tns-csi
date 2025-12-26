@@ -146,6 +146,7 @@ Validate required TrueNAS configuration
 {{/*
 Get the image tag to use.
 Uses .Values.image.tag if explicitly set, otherwise falls back to .Chart.AppVersion.
+If neither is set, defaults to "latest" as a last resort.
 This allows users to either:
 1. Pin a specific version: --set image.tag=v0.5.0
 2. Use the chart's default (appVersion): helm install --version 0.5.0
@@ -153,7 +154,9 @@ This allows users to either:
 {{- define "tns-csi-driver.imageTag" -}}
 {{- if .Values.image.tag }}
 {{- .Values.image.tag }}
-{{- else }}
+{{- else if .Chart.AppVersion }}
 {{- .Chart.AppVersion }}
+{{- else }}
+{{- "latest" }}
 {{- end }}
 {{- end }}

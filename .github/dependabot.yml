@@ -11,6 +11,12 @@ updates:
       - "go"
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # Ignore alpha, beta, and rc versions for Kubernetes packages
+      - dependency-name: "k8s.io/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "k8s.io/*"
+        versions: ["*-alpha*", "*-beta*", "*-rc*"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"

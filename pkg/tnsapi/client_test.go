@@ -503,7 +503,11 @@ func TestErrorFormatting(t *testing.T) {
 			err: &Error{
 				Code:    404,
 				Message: "Not found",
-				Data:    map[string]string{"detail": "resource missing"},
+				Data: &ErrorData{
+					Error:     1,
+					ErrorName: "ResourceMissing",
+					Reason:    "resource cannot be located",
+				},
 			},
 			wantContain: "Storage API error 404: Not found",
 		},

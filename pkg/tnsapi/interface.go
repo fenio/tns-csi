@@ -22,6 +22,7 @@ type ClientInterface interface {
 	QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error)
 
 	// ZFS User Property operations (for CSI metadata tracking)
+	SetSnapshotProperties(ctx context.Context, snapshotID string, updateProperties map[string]string, removeProperties []string) error
 	SetDatasetProperties(ctx context.Context, datasetID string, properties map[string]string) error
 	GetDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) (map[string]string, error)
 	GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error)

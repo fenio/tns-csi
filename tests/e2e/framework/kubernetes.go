@@ -337,11 +337,8 @@ func (k *KubernetesClient) WaitForPodDeleted(ctx context.Context, name string, t
 // ExecInPod executes a command in a pod and returns the output.
 // Uses kubectl exec for simplicity and better compatibility across environments.
 func (k *KubernetesClient) ExecInPod(ctx context.Context, podName string, command []string) (string, error) {
-	args := []string{
-		"exec", podName,
-		"-n", k.namespace,
-		"--",
-	}
+	args := make([]string, 0, 5+len(command))
+	args = append(args, "exec", podName, "-n", k.namespace, "--")
 	args = append(args, command...)
 
 	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework

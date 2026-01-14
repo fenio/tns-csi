@@ -131,17 +131,15 @@ func getProtocolFromVolumeContext(ctx map[string]string) string {
 // ControllerService implements the CSI Controller service.
 type ControllerService struct {
 	csi.UnimplementedControllerServer
-	apiClient        APIClient
-	snapshotRegistry *SnapshotRegistry
-	nodeRegistry     *NodeRegistry
+	apiClient    APIClient
+	nodeRegistry *NodeRegistry
 }
 
 // NewControllerService creates a new controller service.
 func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *ControllerService {
 	return &ControllerService{
-		apiClient:        apiClient,
-		snapshotRegistry: NewSnapshotRegistry(),
-		nodeRegistry:     nodeRegistry,
+		apiClient:    apiClient,
+		nodeRegistry: nodeRegistry,
 	}
 }
 

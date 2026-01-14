@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -42,7 +41,6 @@ const (
 
 // Static errors for snapshot operations.
 var (
-	ErrSnapshotNameExists           = errors.New("snapshot name already exists for different dataset")
 	ErrProtocolRequired             = errors.New("protocol is required for snapshot ID encoding")
 	ErrSourceVolumeRequired         = errors.New("source volume is required for snapshot ID encoding")
 	ErrSnapshotNameRequired         = errors.New("snapshot name is required for snapshot ID encoding")
@@ -52,54 +50,6 @@ var (
 	ErrDetachedSnapshotFailed       = errors.New("detached snapshot creation failed")
 	ErrDetachedParentDatasetMissing = errors.New("detached snapshots parent dataset is required")
 )
-
-// SnapshotRegistry maintains a global registry of snapshot names to enforce
-// CSI's requirement that snapshot names be globally unique.
-// This bridges the gap between CSI (global uniqueness) and ZFS (per-dataset uniqueness).
-type SnapshotRegistry struct {
-	snapshots map[string]string // snapshot name -> dataset name
-	mu        sync.RWMutex
-}
-
-// NewSnapshotRegistry creates a new snapshot registry.
-func NewSnapshotRegistry() *SnapshotRegistry {
-	return &SnapshotRegistry{
-		snapshots: make(map[string]string),
-	}
-}
-
-// Register attempts to register a snapshot name with its dataset.
-// Returns an error if the snapshot name already exists with a different dataset.
-func (r *SnapshotRegistry) Register(snapshotName, datasetName string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if existingDataset, exists := r.snapshots[snapshotName]; exists {
-		if existingDataset != datasetName {
-			return fmt.Errorf("%w: snapshot name %q already exists for dataset %q",
-				ErrSnapshotNameExists, snapshotName, existingDataset)
-		}
-		// Already registered with same dataset - idempotent
-		return nil
-	}
-
-	r.snapshots[snapshotName] = datasetName
-	return nil
-}
-
-// Unregister removes a snapshot name from the registry.
-func (r *SnapshotRegistry) Unregister(snapshotName string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.snapshots, snapshotName)
-}
-
-// Dataset returns the dataset name for a registered snapshot, or empty string if not found.
-func (r *SnapshotRegistry) Dataset(snapshotName string) string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.snapshots[snapshotName]
-}
 
 // SnapshotMetadata contains information needed to manage a snapshot.
 type SnapshotMetadata struct {
@@ -368,69 +318,65 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 	klog.Infof("Creating regular snapshot %s for volume %s (dataset: %s, protocol: %s)",
 		snapshotName, sourceVolumeID, datasetName, protocol)
 
-	// CRITICAL: Check snapshot name registry FIRST to enforce global uniqueness
-	// This is required by CSI spec - snapshot names must be globally unique across all volumes
-	if regErr := s.snapshotRegistry.Register(snapshotName, datasetName); regErr != nil {
-		// Snapshot name already exists for a different dataset
-		timer.ObserveError()
-		return nil, status.Errorf(codes.AlreadyExists,
-			"Snapshot name %q is already in use for a different volume: %v", snapshotName, regErr)
-	}
-
-	// Check if snapshot already exists (idempotency)
+	// Check for global uniqueness by querying TrueNAS for any snapshot with this name.
+	// CSI spec requires snapshot names to be globally unique across all volumes.
+	// ZFS only enforces per-dataset uniqueness, so we must check across all datasets.
 	existingSnapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
-		[]interface{}{"id", "=", fmt.Sprintf("%s@%s", datasetName, snapshotName)},
+		[]interface{}{"name", "=", snapshotName},
 	})
 	if err != nil {
 		klog.Warningf("Failed to query existing snapshots: %v", err)
+		// Continue anyway - creation will fail if snapshot exists
 	} else if len(existingSnapshots) > 0 {
-		// Snapshot already exists
-		klog.Infof("Snapshot %s already exists, verifying source volume", snapshotName)
-		snapshot := existingSnapshots[0]
+		// Found snapshot(s) with this name - check if it's on our dataset (idempotent) or different (conflict)
+		for _, snapshot := range existingSnapshots {
+			klog.V(4).Infof("Found existing snapshot with name %s: %s", snapshotName, snapshot.ID)
 
-		// Extract dataset name from snapshot ID (format: dataset@snapname)
-		parts := strings.Split(snapshot.ID, "@")
-		if len(parts) != 2 {
-			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Invalid snapshot ID format: %s", snapshot.ID)
-		}
-		existingDataset := parts[0]
+			// Extract dataset name from snapshot ID (format: dataset@snapname)
+			parts := strings.Split(snapshot.ID, "@")
+			if len(parts) != 2 {
+				klog.Warningf("Invalid snapshot ID format: %s", snapshot.ID)
+				continue
+			}
+			existingDataset := parts[0]
 
-		// Verify the existing snapshot is for the same source volume
-		// by comparing dataset names
-		if existingDataset != datasetName {
+			if existingDataset == datasetName {
+				// Snapshot exists on the same dataset - this is idempotent, return existing
+				klog.Infof("Snapshot %s already exists on dataset %s (idempotent)", snapshotName, datasetName)
+
+				createdAt := time.Now().Unix() // Use current time as we don't have creation time from API
+				snapshotMeta := SnapshotMetadata{
+					SnapshotName: snapshot.ID,
+					SourceVolume: sourceVolumeID,
+					DatasetName:  datasetName,
+					Protocol:     protocol,
+					CreatedAt:    createdAt,
+					Detached:     false,
+				}
+
+				snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
+				if encodeErr != nil {
+					timer.ObserveError()
+					return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
+				}
+
+				timer.ObserveSuccess()
+				return &csi.CreateSnapshotResponse{
+					Snapshot: &csi.Snapshot{
+						SnapshotId:     snapshotID,
+						SourceVolumeId: sourceVolumeID,
+						CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
+						ReadyToUse:     true, // ZFS snapshots are immediately available
+					},
+				}, nil
+			}
+
+			// Snapshot exists on a different dataset - this is a conflict
 			timer.ObserveError()
 			return nil, status.Errorf(codes.AlreadyExists,
-				"snapshot %s already exists but for different source volume (dataset: %s vs %s)",
+				"snapshot name %q already exists on different volume (dataset: %s vs %s)",
 				snapshotName, existingDataset, datasetName)
 		}
-
-		// Create snapshot metadata
-		createdAt := time.Now().Unix() // Use current time as we don't have creation time from API
-		snapshotMeta := SnapshotMetadata{
-			SnapshotName: snapshot.ID,
-			SourceVolume: sourceVolumeID,
-			DatasetName:  datasetName,
-			Protocol:     protocol,
-			CreatedAt:    createdAt,
-			Detached:     false,
-		}
-
-		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
-		if encodeErr != nil {
-			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
-		}
-
-		timer.ObserveSuccess()
-		return &csi.CreateSnapshotResponse{
-			Snapshot: &csi.Snapshot{
-				SnapshotId:     snapshotID,
-				SourceVolumeId: sourceVolumeID,
-				CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
-				ReadyToUse:     true, // ZFS snapshots are immediately available
-			},
-		}, nil
 	}
 
 	// Create snapshot using TrueNAS API
@@ -442,8 +388,6 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 
 	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
 	if err != nil {
-		// Unregister the snapshot name since creation failed
-		s.snapshotRegistry.Unregister(snapshotName)
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create snapshot: %v", err)
 	}
@@ -720,18 +664,12 @@ func (s *ControllerService) deleteRegularSnapshot(ctx context.Context, timer *me
 		// Check if error is because snapshot doesn't exist
 		if isNotFoundError(err) {
 			klog.Infof("Snapshot %s not found, assuming already deleted", zfsSnapshotName)
-			// Unregister from registry since it doesn't exist anymore
-			s.snapshotRegistry.Unregister(snapshotMeta.SnapshotName)
 			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil
 		}
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to delete snapshot: %v", err)
 	}
-
-	// Unregister the snapshot name from the registry
-	s.snapshotRegistry.Unregister(snapshotMeta.SnapshotName)
-	klog.V(4).Infof("Unregistered snapshot name %q from registry", snapshotMeta.SnapshotName)
 
 	klog.Infof("Successfully deleted snapshot: %s", zfsSnapshotName)
 	timer.ObserveSuccess()

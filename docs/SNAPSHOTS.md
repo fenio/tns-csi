@@ -721,11 +721,14 @@ kubectl get volumesnapshot my-detached-snapshot
 #### Detached Snapshots: How It Works
 
 1. User creates VolumeSnapshot with `detachedSnapshots: "true"` VolumeSnapshotClass
-2. Driver creates a temporary ZFS snapshot on the source volume
-3. Driver runs `replication.run_onetime` with LOCAL transport (zfs send | zfs receive)
-4. Data is copied to a new dataset under the detached snapshots parent folder
-5. Temporary snapshots are cleaned up
-6. Result: Independent dataset at `{pool}/csi-detached-snapshots/{snapshot-name}`
+2. Driver ensures the parent dataset exists (e.g., `{pool}/csi-detached-snapshots/`) - **created automatically if missing**
+3. Driver creates a temporary ZFS snapshot on the source volume
+4. Driver runs `replication.run_onetime` with LOCAL transport (zfs send | zfs receive)
+5. Data is copied to a new dataset under the detached snapshots parent folder
+6. Temporary snapshots are cleaned up
+7. Result: Independent dataset at `{pool}/csi-detached-snapshots/{snapshot-name}`
+
+**Note:** The parent dataset for detached snapshots is automatically created on first use if it doesn't exist. No manual setup required.
 
 #### Detached Snapshots vs Regular Snapshots
 

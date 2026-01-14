@@ -433,12 +433,13 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 
 	klog.Infof("Successfully created snapshot: %s", snapshot.ID)
 
-	// Step 4: Set CSI metadata properties on the detached snapshot dataset
+	// Step 4: Set CSI metadata properties on the snapshot
 	props := map[string]string{
 		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
 		tnsapi.PropertySnapshotID:       snapshotName,
 		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
 		tnsapi.PropertyDetachedSnapshot: VolumeContextValueFalse,
+		tnsapi.PropertyProtocol:         protocol,
 		tnsapi.PropertyDeleteStrategy:   "delete",
 	}
 	if err := s.apiClient.SetSnapshotProperties(ctx, snapshot.ID, props, nil); err != nil {
@@ -615,6 +616,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
 		tnsapi.PropertyDetachedSnapshot: VolumeContextValueTrue,
 		tnsapi.PropertySourceDataset:    sourceDataset,
+		tnsapi.PropertyProtocol:         protocol,
 		tnsapi.PropertyDeleteStrategy:   "delete",
 	}
 	if err := s.apiClient.SetDatasetProperties(ctx, targetDataset, props); err != nil {

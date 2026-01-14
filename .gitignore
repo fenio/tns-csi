@@ -1,5 +1,6 @@
-# Agent instructions (local only)
+# AI assistant instructions (local only - do not commit)
 AGENTS.md
+CLAUDE.md
 
 # Credentials and secrets
 .tns-credentials

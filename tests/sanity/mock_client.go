@@ -72,6 +72,7 @@ type mockNVMeOFTarget struct {
 	NamespaceID int
 }
 
+//nolint:govet // fieldalignment: keeping fields in logical order for readability
 type mockSnapshot struct {
 	ID         string
 	Name       string
@@ -333,19 +334,20 @@ func (m *MockClient) SetSnapshotProperties(ctx context.Context, snapshotID strin
 
 	// Find snapshot by ID or name
 	for name, snap := range m.snapshots {
-		if snap.ID == snapshotID || snap.Name == snapshotID {
-			if snap.Properties == nil {
-				snap.Properties = make(map[string]interface{})
-			}
-			for k, v := range updateProperties {
-				snap.Properties[k] = v
-			}
-			for _, k := range removeProperties {
-				delete(snap.Properties, k)
-			}
-			m.snapshots[name] = snap
-			return nil
+		if snap.ID != snapshotID && snap.Name != snapshotID {
+			continue
 		}
+		if snap.Properties == nil {
+			snap.Properties = make(map[string]interface{})
+		}
+		for k, v := range updateProperties {
+			snap.Properties[k] = v
+		}
+		for _, k := range removeProperties {
+			delete(snap.Properties, k)
+		}
+		m.snapshots[name] = snap
+		return nil
 	}
 
 	return fmt.Errorf("snapshot %s: %w", snapshotID, ErrSnapshotNotFound)

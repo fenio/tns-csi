@@ -88,6 +88,9 @@ type Error struct {
 	Code      int        `json:"code"`
 }
 
+// ErrorData represents the structured error data from TrueNAS API responses.
+//
+//nolint:govet // fieldalignment: keeping fields in logical order for readability
 type ErrorData struct {
 	Error     int         `json:"error"`
 	ErrorName string      `json:"errname"`
@@ -96,6 +99,7 @@ type ErrorData struct {
 	Extra     interface{} `json:"extra,omitempty"`
 }
 
+// ErrorTrace represents stack trace information from TrueNAS API errors.
 type ErrorTrace struct {
 	Class     string      `json:"class"`
 	Frames    interface{} `json:"-"` // Stack frames (omitted from JSON)
@@ -104,11 +108,11 @@ type ErrorTrace struct {
 }
 
 func (e *Error) Error() string {
-	// Try storage API error format first
-	// if e.Reason != "" {
-	// 	return fmt.Sprintf("Storage API error [%s]: %s", e.ErrorName, e.Reason)
-	// }
-	// Fallback to JSON-RPC 2.0 format
+	// Try storage API error format first (using top-level Reason field)
+	if e.Reason != "" {
+		return fmt.Sprintf("Storage API error [%s]: %s", e.ErrorName, e.Reason)
+	}
+	// Fallback to JSON-RPC 2.0 format with structured error data
 	if e.Data != nil {
 		// Try to format Data as JSON for better error messages
 		if dataBytes, err := json.Marshal(e.Data); err == nil {
@@ -1530,6 +1534,8 @@ type SnapshotCreateParams struct {
 }
 
 // Snapshot represents a ZFS snapshot.
+//
+//nolint:govet // fieldalignment: keeping fields in logical order for readability
 type Snapshot struct {
 	ID         string                 `json:"id"`         // Full snapshot name (dataset@snapshot)
 	Name       string                 `json:"name"`       // Snapshot name portion
@@ -2085,7 +2091,7 @@ func (e ejsonDate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Time int64 `json:"$date"`
 	}{
-		Time: e.Time.UnixMilli(),
+		Time: e.UnixMilli(),
 	})
 }
 

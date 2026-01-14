@@ -145,6 +145,119 @@ func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *Cont
 	}
 }
 
+// lookupVolumeByCSIName finds a volume by its CSI volume name using ZFS properties.
+// This is the preferred method for volume discovery as it uses the source of truth (ZFS properties).
+// Returns nil, nil if volume not found; returns error only on API failures.
+func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatasetPrefix, volumeName string) (*VolumeMetadata, error) {
+	klog.V(4).Infof("Looking up volume by CSI name: %s (prefix: %s)", volumeName, poolDatasetPrefix)
+
+	dataset, err := s.apiClient.FindDatasetByCSIVolumeName(ctx, poolDatasetPrefix, volumeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find dataset by CSI volume name: %w", err)
+	}
+	if dataset == nil {
+		klog.V(4).Infof("Volume not found by CSI name: %s", volumeName)
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
+	}
+
+	// Extract metadata from ZFS properties
+	props := dataset.UserProperties
+	if props == nil {
+		klog.Warningf("Dataset %s has no user properties, may not be managed by tns-csi", dataset.ID)
+		return nil, nil //nolint:nilnil // Dataset exists but no properties - treat as not found
+	}
+
+	// Verify ownership
+	if managedBy, ok := props[tnsapi.PropertyManagedBy]; !ok || managedBy.Value != tnsapi.ManagedByValue {
+		klog.Warningf("Dataset %s not managed by tns-csi (managed_by=%v)", dataset.ID, props[tnsapi.PropertyManagedBy])
+		return nil, nil //nolint:nilnil // Not our volume - treat as not found
+	}
+
+	// Build VolumeMetadata from properties
+	meta := &VolumeMetadata{
+		Name:        volumeName,
+		DatasetID:   dataset.ID,
+		DatasetName: dataset.Name,
+	}
+
+	// Extract protocol
+	if protocol, ok := props[tnsapi.PropertyProtocol]; ok {
+		meta.Protocol = protocol.Value
+	}
+
+	// Extract protocol-specific IDs
+	if nfsShareID, ok := props[tnsapi.PropertyNFSShareID]; ok {
+		meta.NFSShareID = tnsapi.StringToInt(nfsShareID.Value)
+	}
+	if nvmeSubsystemID, ok := props[tnsapi.PropertyNVMeSubsystemID]; ok {
+		meta.NVMeOFSubsystemID = tnsapi.StringToInt(nvmeSubsystemID.Value)
+	}
+	if nvmeNamespaceID, ok := props[tnsapi.PropertyNVMeNamespaceID]; ok {
+		meta.NVMeOFNamespaceID = tnsapi.StringToInt(nvmeNamespaceID.Value)
+	}
+	if nvmeNQN, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; ok {
+		meta.NVMeOFNQN = nvmeNQN.Value
+	}
+
+	klog.V(4).Infof("Found volume: %s (dataset=%s, protocol=%s)", volumeName, dataset.ID, meta.Protocol)
+	return meta, nil
+}
+
+// lookupSnapshotByCSIName finds a detached snapshot by its CSI snapshot name using ZFS properties.
+// This searches for datasets with PropertySnapshotID matching the given name.
+// Note: This only finds detached snapshots (stored as datasets). Regular ZFS snapshots
+// store properties differently and should be queried via QuerySnapshots.
+// Returns nil, nil if snapshot not found; returns error only on API failures.
+//
+//nolint:unused // Will be used in future ListSnapshots implementation for detached snapshots
+func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDatasetPrefix, snapshotName string) (*SnapshotMetadata, error) {
+	klog.V(4).Infof("Looking up snapshot by CSI name: %s (prefix: %s)", snapshotName, poolDatasetPrefix)
+
+	// Search for datasets with matching snapshot ID property
+	datasets, err := s.apiClient.FindDatasetsByProperty(ctx, poolDatasetPrefix, tnsapi.PropertySnapshotID, snapshotName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find snapshot by CSI name: %w", err)
+	}
+
+	if len(datasets) == 0 {
+		klog.V(4).Infof("Snapshot not found by CSI name: %s", snapshotName)
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
+	}
+
+	if len(datasets) > 1 {
+		klog.Warningf("Found multiple datasets with snapshot ID %s (using first): %d datasets", snapshotName, len(datasets))
+	}
+
+	dataset := datasets[0]
+	props := dataset.UserProperties
+
+	// Verify ownership
+	if managedBy, ok := props[tnsapi.PropertyManagedBy]; !ok || managedBy.Value != tnsapi.ManagedByValue {
+		klog.Warningf("Snapshot dataset %s not managed by tns-csi", dataset.ID)
+		return nil, nil //nolint:nilnil // Not our snapshot - treat as not found
+	}
+
+	// Build SnapshotMetadata from properties (uses existing struct from controller_snapshot.go)
+	meta := &SnapshotMetadata{
+		SnapshotName: snapshotName, // CSI snapshot name
+		DatasetName:  dataset.ID,   // Dataset ID where snapshot data lives
+	}
+
+	// Extract properties
+	if protocol, ok := props[tnsapi.PropertyProtocol]; ok {
+		meta.Protocol = protocol.Value
+	}
+	if sourceVolumeID, ok := props[tnsapi.PropertySourceVolumeID]; ok {
+		meta.SourceVolume = sourceVolumeID.Value
+	}
+	if detached, ok := props[tnsapi.PropertyDetachedSnapshot]; ok {
+		meta.Detached = detached.Value == VolumeContextValueTrue
+	}
+
+	klog.V(4).Infof("Found snapshot: %s (dataset=%s, protocol=%s, detached=%v)", snapshotName, dataset.ID, meta.Protocol, meta.Detached)
+	return meta, nil
+}
+
 // CreateVolume creates a new volume.
 func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("CreateVolume called with request: %+v", req)

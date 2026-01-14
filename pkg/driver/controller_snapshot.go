@@ -295,12 +295,29 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	detached := params[DetachedSnapshotsParam] == VolumeContextValueTrue
 	detachedParentDataset := params[DetachedSnapshotsParentDatasetParam]
 
-	// Try to find the volume's dataset
+	// Try to find the volume's dataset using property-based lookup (preferred method)
 	var datasetName string
 	if parentDataset != "" {
-		datasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+		// Use property-based lookup to find the volume by its CSI name
+		volumeMeta, err := s.lookupVolumeByCSIName(ctx, parentDataset, sourceVolumeID)
+		if err != nil {
+			klog.Warningf("Property-based lookup failed for volume %s: %v, falling back to name-based lookup", sourceVolumeID, err)
+		} else if volumeMeta != nil {
+			datasetName = volumeMeta.DatasetID
+			if volumeMeta.Protocol != "" {
+				protocol = volumeMeta.Protocol
+			}
+			klog.V(4).Infof("Found volume %s via property lookup: dataset=%s, protocol=%s", sourceVolumeID, datasetName, protocol)
+		}
+
+		// Fallback to name-based lookup if property lookup didn't find the volume
+		// (backward compatibility with volumes created before properties were set)
+		if datasetName == "" {
+			datasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+			klog.V(4).Infof("Using name-based dataset path for volume %s: %s", sourceVolumeID, datasetName)
+		}
 	} else {
-		// If no parent dataset specified, try to find the volume
+		// If no parent dataset specified, try to find the volume by searching shares/namespaces
 		// First try NFS shares
 		shares, err := s.apiClient.QueryAllNFSShares(ctx, sourceVolumeID)
 		if err == nil && len(shares) > 0 {

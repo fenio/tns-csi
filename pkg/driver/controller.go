@@ -657,9 +657,28 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	volumeID := req.GetVolumeId()
 	klog.V(4).Infof("Deleting volume %s", volumeID)
 
-	// With plain volume IDs, we need to look up the volume in TrueNAS to find its metadata.
-	// We try to find it as both NFS and NVMe-oF volume since we don't have the protocol info.
-	// First, try to find NFS shares matching this volume name
+	// Try property-based lookup first (preferred method - uses ZFS properties as source of truth)
+	// Pass empty prefix to search all datasets across all pools
+	volumeMeta, err := s.lookupVolumeByCSIName(ctx, "", volumeID)
+	if err != nil {
+		klog.Warningf("Property-based lookup failed for volume %s: %v, falling back to share/namespace search", volumeID, err)
+	} else if volumeMeta != nil {
+		klog.V(4).Infof("Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
+		switch volumeMeta.Protocol {
+		case ProtocolNFS:
+			return s.deleteNFSVolume(ctx, volumeMeta)
+		case ProtocolNVMeOF:
+			return s.deleteNVMeOFVolume(ctx, volumeMeta)
+		default:
+			klog.Warningf("Unknown protocol %s for volume %s, falling back to share/namespace search", volumeMeta.Protocol, volumeID)
+		}
+	}
+
+	// Fallback: search through NFS shares and NVMe namespaces
+	// This handles volumes created before property-based tracking was implemented
+	klog.V(4).Infof("Property lookup did not find volume %s, searching shares/namespaces", volumeID)
+
+	// Try to find NFS shares matching this volume name
 	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
 	if err == nil && len(shares) > 0 {
 		// Found as NFS volume - find the matching dataset
@@ -677,7 +696,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 						DatasetName: datasets[0].Name,
 						NFSShareID:  share.ID,
 					}
-					klog.V(4).Infof("Deleting NFS volume %s with dataset %s", volumeID, meta.DatasetName)
+					klog.V(4).Infof("Deleting NFS volume %s with dataset %s (found via share search)", volumeID, meta.DatasetName)
 					return s.deleteNFSVolume(ctx, &meta)
 				}
 			}
@@ -709,7 +728,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 						NVMeOFSubsystemID: subsystemID,
 						NVMeOFNamespaceID: ns.ID,
 					}
-					klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s", volumeID, meta.DatasetName)
+					klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s (found via namespace search)", volumeID, meta.DatasetName)
 					return s.deleteNVMeOFVolume(ctx, &meta)
 				}
 			}
@@ -1234,6 +1253,28 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	klog.Infof("ControllerExpandVolume: Expanding volume %s to %d bytes", volumeID, requiredBytes)
 
+	// Try property-based lookup first (preferred method - uses ZFS properties as source of truth)
+	volumeMeta, err := s.lookupVolumeByCSIName(ctx, "", volumeID)
+	if err != nil {
+		klog.Warningf("ControllerExpandVolume: Property-based lookup failed for volume %s: %v, falling back to share/namespace search", volumeID, err)
+	} else if volumeMeta != nil {
+		klog.V(4).Infof("ControllerExpandVolume: Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
+		switch volumeMeta.Protocol {
+		case ProtocolNFS:
+			klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+			return s.expandNFSVolume(ctx, volumeMeta, requiredBytes)
+		case ProtocolNVMeOF:
+			klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+			return s.expandNVMeOFVolume(ctx, volumeMeta, requiredBytes)
+		default:
+			klog.Warningf("ControllerExpandVolume: Unknown protocol %s for volume %s, falling back to share/namespace search", volumeMeta.Protocol, volumeID)
+		}
+	}
+
+	// Fallback: search through NFS shares and NVMe namespaces
+	// This handles volumes created before property-based tracking was implemented
+	klog.V(4).Infof("ControllerExpandVolume: Property lookup did not find volume %s, searching shares/namespaces", volumeID)
+
 	// Try to find the volume in NFS shares
 	klog.V(4).Infof("ControllerExpandVolume: Looking up volume %s in NFS shares", volumeID)
 	nfsMeta, err := s.lookupNFSVolume(ctx, volumeID)
@@ -1244,7 +1285,7 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	if nfsMeta != nil {
-		klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes", volumeID, nfsMeta.DatasetName, requiredBytes)
+		klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes (found via share search)", volumeID, nfsMeta.DatasetName, requiredBytes)
 		return s.expandNFSVolume(ctx, nfsMeta, requiredBytes)
 	}
 
@@ -1258,7 +1299,7 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	}
 
 	if nvmeofMeta != nil {
-		klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes", volumeID, nvmeofMeta.DatasetName, requiredBytes)
+		klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes (found via namespace search)", volumeID, nvmeofMeta.DatasetName, requiredBytes)
 		return s.expandNVMeOFVolume(ctx, nvmeofMeta, requiredBytes)
 	}
 

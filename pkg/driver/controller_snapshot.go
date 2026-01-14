@@ -458,6 +458,12 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		detachedParentDataset = fmt.Sprintf("%s/%s", pool, DefaultDetachedSnapshotsFolder)
 	}
 
+	// Ensure the parent dataset exists (creates it if not)
+	if err := s.ensureDetachedSnapshotsParentDataset(ctx, detachedParentDataset); err != nil {
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to ensure detached snapshots parent dataset %s exists: %v", detachedParentDataset, err)
+	}
+
 	// Target dataset for the detached snapshot
 	targetDataset := fmt.Sprintf("%s/%s", detachedParentDataset, snapshotName)
 
@@ -611,6 +617,50 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 			ReadyToUse:     true,
 		},
 	}, nil
+}
+
+// ensureDetachedSnapshotsParentDataset ensures the parent dataset for detached snapshots exists.
+// Creates it if it doesn't exist and marks it as managed by tns-csi.
+// This keeps detached snapshot datasets separate from volume datasets (democratic-csi pattern).
+func (s *ControllerService) ensureDetachedSnapshotsParentDataset(ctx context.Context, parentDataset string) error {
+	klog.V(4).Infof("Ensuring detached snapshots parent dataset exists: %s", parentDataset)
+
+	// Check if the dataset already exists
+	datasets, err := s.apiClient.QueryAllDatasets(ctx, parentDataset)
+	if err != nil {
+		return fmt.Errorf("failed to query dataset %s: %w", parentDataset, err)
+	}
+
+	for _, ds := range datasets {
+		if ds.Name == parentDataset || ds.ID == parentDataset {
+			klog.V(4).Infof("Detached snapshots parent dataset already exists: %s", parentDataset)
+			return nil
+		}
+	}
+
+	// Dataset doesn't exist - create it
+	klog.Infof("Creating detached snapshots parent dataset: %s", parentDataset)
+
+	createParams := tnsapi.DatasetCreateParams{
+		Name: parentDataset,
+		Type: "FILESYSTEM",
+	}
+
+	_, err = s.apiClient.CreateDataset(ctx, createParams)
+	if err != nil {
+		return fmt.Errorf("failed to create parent dataset %s: %w", parentDataset, err)
+	}
+
+	// Set properties to mark it as managed by tns-csi
+	props := map[string]string{
+		tnsapi.PropertyManagedBy: tnsapi.ManagedByValue,
+	}
+	if propErr := s.apiClient.SetDatasetProperties(ctx, parentDataset, props); propErr != nil {
+		klog.Warningf("Failed to set properties on parent dataset %s: %v (non-fatal)", parentDataset, propErr)
+	}
+
+	klog.Infof("Successfully created detached snapshots parent dataset: %s", parentDataset)
+	return nil
 }
 
 // DeleteSnapshot deletes a snapshot.

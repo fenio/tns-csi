@@ -2,8 +2,6 @@ package driver
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -105,8 +103,7 @@ func encodeSnapshotID(meta SnapshotMetadata) (string, error) {
 // decodeSnapshotID decodes a snapshotID string into snapshot metadata.
 // Supports:
 // - Detached format: detached:{protocol}:{volume_id}@{snapshot_name}
-// - New compact format: {protocol}:{volume_id}@{snapshot_name}.
-// - Legacy base64-encoded JSON format (for backward compatibility).
+// - Compact format: {protocol}:{volume_id}@{snapshot_name}.
 func decodeSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 	// Check for detached snapshot prefix first
 	if strings.HasPrefix(snapshotID, DetachedSnapshotPrefix) {
@@ -120,13 +117,8 @@ func decodeSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 		return meta, nil
 	}
 
-	// Try compact format first (has colon before @)
-	if meta, err := decodeCompactSnapshotID(snapshotID); err == nil {
-		return meta, nil
-	}
-
-	// Fall back to legacy base64 JSON format
-	return decodeLegacySnapshotID(snapshotID)
+	// Decode compact format
+	return decodeCompactSnapshotID(snapshotID)
 }
 
 // decodeCompactSnapshotID decodes the new compact format: {protocol}:{volume_id}@{snapshot_name}.
@@ -172,21 +164,6 @@ func decodeCompactSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 		DatasetName:  "",           // Must be resolved by caller
 		Detached:     false,
 	}, nil
-}
-
-// decodeLegacySnapshotID decodes the old base64-encoded JSON format for backward compatibility.
-func decodeLegacySnapshotID(snapshotID string) (*SnapshotMetadata, error) {
-	data, err := base64.RawURLEncoding.DecodeString(snapshotID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode snapshot ID: %w", err)
-	}
-
-	var meta SnapshotMetadata
-	if err := json.Unmarshal(data, &meta); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal snapshot metadata: %w", err)
-	}
-
-	return &meta, nil
 }
 
 // encodeSnapshotToken encodes an offset as a pagination token.

@@ -7,25 +7,44 @@ import (
 func TestPropertyNames(t *testing.T) {
 	names := PropertyNames()
 
-	// Verify we have all expected properties
+	// Verify we have all expected properties (Schema v1)
 	expectedProps := []string{
+		// Schema v1 core properties
+		PropertySchemaVersion,
 		PropertyManagedBy,
 		PropertyCSIVolumeName,
+		PropertyCapacityBytes,
+		PropertyProtocol,
+		PropertyDeleteStrategy,
+		PropertyCreatedAt,
+		// Adoption properties
+		PropertyAdoptable,
+		PropertyPVCName,
+		PropertyPVCNamespace,
+		PropertyStorageClass,
+		// NFS properties
 		PropertyNFSShareID,
+		PropertyNFSSharePath,
+		// NVMe-oF properties
 		PropertyNVMeSubsystemID,
 		PropertyNVMeNamespaceID,
 		PropertyNVMeSubsystemNQN,
-		PropertySnapshotSourceVolume,
-		PropertySnapshotCSIName,
-		PropertyContentSourceType,
-		PropertyContentSourceID,
-		PropertyProvisionedAt,
-		PropertyProtocol,
-		PropertyDeleteStrategy,
+		// iSCSI properties (future)
+		PropertyISCSIIQN,
+		PropertyISCSITargetID,
+		PropertyISCSIExtentID,
+		// Snapshot properties
 		PropertySnapshotID,
 		PropertySourceVolumeID,
 		PropertyDetachedSnapshot,
 		PropertySourceDataset,
+		PropertySnapshotSourceVolume,
+		PropertySnapshotCSIName,
+		// Clone properties
+		PropertyContentSourceType,
+		PropertyContentSourceID,
+		// Legacy
+		PropertyProvisionedAt,
 	}
 
 	if len(names) != len(expectedProps) {
@@ -62,11 +81,12 @@ func TestNFSVolumeProperties(t *testing.T) {
 			provisionedAt:  "2024-01-15T10:30:00Z",
 			deleteStrategy: DeleteStrategyDelete,
 			wantProps: map[string]string{
+				PropertySchemaVersion:  SchemaVersionV1,
 				PropertyManagedBy:      ManagedByValue,
 				PropertyCSIVolumeName:  "pvc-12345678-1234-1234-1234-123456789012",
 				PropertyNFSShareID:     "42",
 				PropertyProtocol:       ProtocolNFS,
-				PropertyProvisionedAt:  "2024-01-15T10:30:00Z",
+				PropertyCreatedAt:      "2024-01-15T10:30:00Z",
 				PropertyDeleteStrategy: DeleteStrategyDelete,
 			},
 		},
@@ -77,11 +97,12 @@ func TestNFSVolumeProperties(t *testing.T) {
 			provisionedAt:  "2025-06-20T14:00:00Z",
 			deleteStrategy: DeleteStrategyRetain,
 			wantProps: map[string]string{
+				PropertySchemaVersion:  SchemaVersionV1,
 				PropertyManagedBy:      ManagedByValue,
 				PropertyCSIVolumeName:  "my-persistent-volume",
 				PropertyNFSShareID:     "100",
 				PropertyProtocol:       ProtocolNFS,
-				PropertyProvisionedAt:  "2025-06-20T14:00:00Z",
+				PropertyCreatedAt:      "2025-06-20T14:00:00Z",
 				PropertyDeleteStrategy: DeleteStrategyRetain,
 			},
 		},
@@ -92,11 +113,12 @@ func TestNFSVolumeProperties(t *testing.T) {
 			provisionedAt:  "2024-12-01T00:00:00Z",
 			deleteStrategy: DeleteStrategyDelete,
 			wantProps: map[string]string{
+				PropertySchemaVersion:  SchemaVersionV1,
 				PropertyManagedBy:      ManagedByValue,
 				PropertyCSIVolumeName:  "test-volume",
 				PropertyNFSShareID:     "0",
 				PropertyProtocol:       ProtocolNFS,
-				PropertyProvisionedAt:  "2024-12-01T00:00:00Z",
+				PropertyCreatedAt:      "2024-12-01T00:00:00Z",
 				PropertyDeleteStrategy: DeleteStrategyDelete,
 			},
 		},
@@ -142,13 +164,14 @@ func TestNVMeOFVolumeProperties(t *testing.T) {
 			provisionedAt:  "2024-01-15T10:30:00Z",
 			deleteStrategy: DeleteStrategyDelete,
 			wantProps: map[string]string{
+				PropertySchemaVersion:    SchemaVersionV1,
 				PropertyManagedBy:        ManagedByValue,
 				PropertyCSIVolumeName:    "pvc-abcdef00-1234-5678-9abc-def012345678",
 				PropertyNVMeSubsystemID:  "338",
 				PropertyNVMeNamespaceID:  "456",
 				PropertyNVMeSubsystemNQN: "nqn.2137.csi.tns:pvc-abcdef00-1234-5678-9abc-def012345678",
 				PropertyProtocol:         ProtocolNVMeOF,
-				PropertyProvisionedAt:    "2024-01-15T10:30:00Z",
+				PropertyCreatedAt:        "2024-01-15T10:30:00Z",
 				PropertyDeleteStrategy:   DeleteStrategyDelete,
 			},
 		},
@@ -161,13 +184,14 @@ func TestNVMeOFVolumeProperties(t *testing.T) {
 			provisionedAt:  "2025-12-19T08:00:00Z",
 			deleteStrategy: DeleteStrategyRetain,
 			wantProps: map[string]string{
+				PropertySchemaVersion:    SchemaVersionV1,
 				PropertyManagedBy:        ManagedByValue,
 				PropertyCSIVolumeName:    "database-volume",
 				PropertyNVMeSubsystemID:  "1",
 				PropertyNVMeNamespaceID:  "1",
 				PropertyNVMeSubsystemNQN: "nqn.2024.io.example:database",
 				PropertyProtocol:         ProtocolNVMeOF,
-				PropertyProvisionedAt:    "2025-12-19T08:00:00Z",
+				PropertyCreatedAt:        "2025-12-19T08:00:00Z",
 				PropertyDeleteStrategy:   DeleteStrategyRetain,
 			},
 		},
@@ -398,23 +422,42 @@ func TestIntToString(t *testing.T) {
 func TestPropertyConstants(t *testing.T) {
 	// Verify all property constants have the correct prefix
 	props := []string{
+		// Schema v1 core properties
+		PropertySchemaVersion,
 		PropertyManagedBy,
 		PropertyCSIVolumeName,
+		PropertyCapacityBytes,
+		PropertyProtocol,
+		PropertyDeleteStrategy,
+		PropertyCreatedAt,
+		// Adoption properties
+		PropertyAdoptable,
+		PropertyPVCName,
+		PropertyPVCNamespace,
+		PropertyStorageClass,
+		// NFS properties
 		PropertyNFSShareID,
+		PropertyNFSSharePath,
+		// NVMe-oF properties
 		PropertyNVMeSubsystemID,
 		PropertyNVMeNamespaceID,
 		PropertyNVMeSubsystemNQN,
-		PropertySnapshotSourceVolume,
-		PropertySnapshotCSIName,
-		PropertyContentSourceType,
-		PropertyContentSourceID,
-		PropertyProvisionedAt,
-		PropertyProtocol,
-		PropertyDeleteStrategy,
+		// iSCSI properties
+		PropertyISCSIIQN,
+		PropertyISCSITargetID,
+		PropertyISCSIExtentID,
+		// Snapshot properties
 		PropertySnapshotID,
 		PropertySourceVolumeID,
 		PropertyDetachedSnapshot,
 		PropertySourceDataset,
+		PropertySnapshotSourceVolume,
+		PropertySnapshotCSIName,
+		// Clone properties
+		PropertyContentSourceType,
+		PropertyContentSourceID,
+		// Legacy
+		PropertyProvisionedAt,
 	}
 
 	for _, prop := range props {
@@ -452,5 +495,311 @@ func TestValueConstants(t *testing.T) {
 
 	if DeleteStrategyRetain != "retain" {
 		t.Errorf("DeleteStrategyRetain = %q, want %q", DeleteStrategyRetain, "retain")
+	}
+
+	if ProtocolISCSI != "iscsi" {
+		t.Errorf("ProtocolISCSI = %q, want %q", ProtocolISCSI, "iscsi")
+	}
+
+	if SchemaVersionV1 != "1" {
+		t.Errorf("SchemaVersionV1 = %q, want %q", SchemaVersionV1, "1")
+	}
+}
+
+func TestNFSVolumePropertiesV1(t *testing.T) {
+	params := NFSVolumeParams{
+		VolumeID:       "pvc-12345678-1234-1234-1234-123456789012",
+		CreatedAt:      "2024-01-15T10:30:00Z",
+		DeleteStrategy: DeleteStrategyDelete,
+		SharePath:      "/mnt/tank/csi/pvc-12345678",
+		PVCName:        "my-data",
+		PVCNamespace:   "default",
+		StorageClass:   "truenas-nfs",
+		CapacityBytes:  10737418240,
+		ShareID:        42,
+	}
+
+	props := NFSVolumePropertiesV1(params)
+
+	// Check core properties
+	if props[PropertySchemaVersion] != SchemaVersionV1 {
+		t.Errorf("PropertySchemaVersion = %q, want %q", props[PropertySchemaVersion], SchemaVersionV1)
+	}
+	if props[PropertyManagedBy] != ManagedByValue {
+		t.Errorf("PropertyManagedBy = %q, want %q", props[PropertyManagedBy], ManagedByValue)
+	}
+	if props[PropertyCSIVolumeName] != params.VolumeID {
+		t.Errorf("PropertyCSIVolumeName = %q, want %q", props[PropertyCSIVolumeName], params.VolumeID)
+	}
+	if props[PropertyProtocol] != ProtocolNFS {
+		t.Errorf("PropertyProtocol = %q, want %q", props[PropertyProtocol], ProtocolNFS)
+	}
+	if props[PropertyCapacityBytes] != "10737418240" {
+		t.Errorf("PropertyCapacityBytes = %q, want %q", props[PropertyCapacityBytes], "10737418240")
+	}
+	if props[PropertyCreatedAt] != params.CreatedAt {
+		t.Errorf("PropertyCreatedAt = %q, want %q", props[PropertyCreatedAt], params.CreatedAt)
+	}
+	if props[PropertyDeleteStrategy] != params.DeleteStrategy {
+		t.Errorf("PropertyDeleteStrategy = %q, want %q", props[PropertyDeleteStrategy], params.DeleteStrategy)
+	}
+
+	// Check NFS-specific properties
+	if props[PropertyNFSShareID] != "42" {
+		t.Errorf("PropertyNFSShareID = %q, want %q", props[PropertyNFSShareID], "42")
+	}
+	if props[PropertyNFSSharePath] != params.SharePath {
+		t.Errorf("PropertyNFSSharePath = %q, want %q", props[PropertyNFSSharePath], params.SharePath)
+	}
+
+	// Check adoption properties
+	if props[PropertyPVCName] != params.PVCName {
+		t.Errorf("PropertyPVCName = %q, want %q", props[PropertyPVCName], params.PVCName)
+	}
+	if props[PropertyPVCNamespace] != params.PVCNamespace {
+		t.Errorf("PropertyPVCNamespace = %q, want %q", props[PropertyPVCNamespace], params.PVCNamespace)
+	}
+	if props[PropertyStorageClass] != params.StorageClass {
+		t.Errorf("PropertyStorageClass = %q, want %q", props[PropertyStorageClass], params.StorageClass)
+	}
+}
+
+func TestNFSVolumePropertiesV1_OptionalAdoption(t *testing.T) {
+	// Test that adoption properties are omitted when empty
+	params := NFSVolumeParams{
+		VolumeID:       "pvc-test",
+		CreatedAt:      "2024-01-15T10:30:00Z",
+		DeleteStrategy: DeleteStrategyDelete,
+		SharePath:      "/mnt/tank/csi/pvc-test",
+		CapacityBytes:  1073741824,
+		ShareID:        1,
+		// Adoption fields left empty
+	}
+
+	props := NFSVolumePropertiesV1(params)
+
+	if _, ok := props[PropertyPVCName]; ok {
+		t.Error("PropertyPVCName should not be set when empty")
+	}
+	if _, ok := props[PropertyPVCNamespace]; ok {
+		t.Error("PropertyPVCNamespace should not be set when empty")
+	}
+	if _, ok := props[PropertyStorageClass]; ok {
+		t.Error("PropertyStorageClass should not be set when empty")
+	}
+}
+
+func TestNVMeOFVolumePropertiesV1(t *testing.T) {
+	params := NVMeOFVolumeParams{
+		VolumeID:       "pvc-abcdef00-1234-5678-9abc-def012345678",
+		CreatedAt:      "2024-01-15T10:30:00Z",
+		DeleteStrategy: DeleteStrategyRetain,
+		SubsystemNQN:   "nqn.2024.io.truenas:nvme:pvc-abcdef00",
+		PVCName:        "database",
+		PVCNamespace:   "production",
+		StorageClass:   "truenas-nvmeof",
+		CapacityBytes:  53687091200,
+		SubsystemID:    338,
+		NamespaceID:    456,
+	}
+
+	props := NVMeOFVolumePropertiesV1(params)
+
+	// Check core properties
+	if props[PropertySchemaVersion] != SchemaVersionV1 {
+		t.Errorf("PropertySchemaVersion = %q, want %q", props[PropertySchemaVersion], SchemaVersionV1)
+	}
+	if props[PropertyProtocol] != ProtocolNVMeOF {
+		t.Errorf("PropertyProtocol = %q, want %q", props[PropertyProtocol], ProtocolNVMeOF)
+	}
+	if props[PropertyCapacityBytes] != "53687091200" {
+		t.Errorf("PropertyCapacityBytes = %q, want %q", props[PropertyCapacityBytes], "53687091200")
+	}
+
+	// Check NVMe-oF-specific properties
+	if props[PropertyNVMeSubsystemID] != "338" {
+		t.Errorf("PropertyNVMeSubsystemID = %q, want %q", props[PropertyNVMeSubsystemID], "338")
+	}
+	if props[PropertyNVMeNamespaceID] != "456" {
+		t.Errorf("PropertyNVMeNamespaceID = %q, want %q", props[PropertyNVMeNamespaceID], "456")
+	}
+	if props[PropertyNVMeSubsystemNQN] != params.SubsystemNQN {
+		t.Errorf("PropertyNVMeSubsystemNQN = %q, want %q", props[PropertyNVMeSubsystemNQN], params.SubsystemNQN)
+	}
+
+	// Check adoption properties
+	if props[PropertyPVCName] != params.PVCName {
+		t.Errorf("PropertyPVCName = %q, want %q", props[PropertyPVCName], params.PVCName)
+	}
+}
+
+func TestSnapshotPropertiesV1(t *testing.T) {
+	params := SnapshotParams{
+		SnapshotID:     "snapshot-12345678-1234-1234-1234-123456789012",
+		SourceVolumeID: "pvc-source-volume",
+		Protocol:       ProtocolNFS,
+		SourceDataset:  "pool/datasets/pvc-source",
+		Detached:       false,
+	}
+
+	props := SnapshotPropertiesV1(params)
+
+	if props[PropertySchemaVersion] != SchemaVersionV1 {
+		t.Errorf("PropertySchemaVersion = %q, want %q", props[PropertySchemaVersion], SchemaVersionV1)
+	}
+	if props[PropertyManagedBy] != ManagedByValue {
+		t.Errorf("PropertyManagedBy = %q, want %q", props[PropertyManagedBy], ManagedByValue)
+	}
+	if props[PropertySnapshotID] != params.SnapshotID {
+		t.Errorf("PropertySnapshotID = %q, want %q", props[PropertySnapshotID], params.SnapshotID)
+	}
+	if props[PropertySourceVolumeID] != params.SourceVolumeID {
+		t.Errorf("PropertySourceVolumeID = %q, want %q", props[PropertySourceVolumeID], params.SourceVolumeID)
+	}
+	if props[PropertyProtocol] != params.Protocol {
+		t.Errorf("PropertyProtocol = %q, want %q", props[PropertyProtocol], params.Protocol)
+	}
+	if props[PropertyDetachedSnapshot] != "false" {
+		t.Errorf("PropertyDetachedSnapshot = %q, want %q", props[PropertyDetachedSnapshot], "false")
+	}
+	if props[PropertySourceDataset] != params.SourceDataset {
+		t.Errorf("PropertySourceDataset = %q, want %q", props[PropertySourceDataset], params.SourceDataset)
+	}
+	if props[PropertyDeleteStrategy] != DeleteStrategyDelete {
+		t.Errorf("PropertyDeleteStrategy = %q, want %q", props[PropertyDeleteStrategy], DeleteStrategyDelete)
+	}
+}
+
+func TestSnapshotPropertiesV1_Detached(t *testing.T) {
+	params := SnapshotParams{
+		SnapshotID:     "snapshot-detached",
+		SourceVolumeID: "pvc-source",
+		Protocol:       ProtocolNVMeOF,
+		Detached:       true,
+	}
+
+	props := SnapshotPropertiesV1(params)
+
+	if props[PropertyDetachedSnapshot] != "true" {
+		t.Errorf("PropertyDetachedSnapshot = %q, want %q", props[PropertyDetachedSnapshot], "true")
+	}
+	// SourceDataset should not be set when empty
+	if _, ok := props[PropertySourceDataset]; ok {
+		t.Error("PropertySourceDataset should not be set when empty")
+	}
+}
+
+func TestStringToInt64(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  int64
+	}{
+		{
+			name:  "positive integer",
+			input: "10737418240",
+			want:  10737418240,
+		},
+		{
+			name:  "zero",
+			input: "0",
+			want:  0,
+		},
+		{
+			name:  "negative integer",
+			input: "-1000000",
+			want:  -1000000,
+		},
+		{
+			name:  "empty string returns 0",
+			input: "",
+			want:  0,
+		},
+		{
+			name:  "non-numeric string returns 0",
+			input: "not-a-number",
+			want:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := StringToInt64(tt.input)
+			if got != tt.want {
+				t.Errorf("StringToInt64(%q) = %d, want %d", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetSchemaVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		props map[string]string
+		want  string
+	}{
+		{
+			name:  "schema v1",
+			props: map[string]string{PropertySchemaVersion: "1"},
+			want:  "1",
+		},
+		{
+			name:  "no schema version (legacy)",
+			props: map[string]string{PropertyManagedBy: ManagedByValue},
+			want:  "0",
+		},
+		{
+			name:  "empty schema version",
+			props: map[string]string{PropertySchemaVersion: ""},
+			want:  "0",
+		},
+		{
+			name:  "empty props",
+			props: map[string]string{},
+			want:  "0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetSchemaVersion(tt.props)
+			if got != tt.want {
+				t.Errorf("GetSchemaVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSchemaV1(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
+	tests := []struct {
+		name  string
+		props map[string]string
+		want  bool
+	}{
+		{
+			name:  "is schema v1",
+			props: map[string]string{PropertySchemaVersion: "1"},
+			want:  true,
+		},
+		{
+			name:  "not schema v1 (legacy)",
+			props: map[string]string{PropertyManagedBy: ManagedByValue},
+			want:  false,
+		},
+		{
+			name:  "not schema v1 (future version)",
+			props: map[string]string{PropertySchemaVersion: "2"},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsSchemaV1(tt.props)
+			if got != tt.want {
+				t.Errorf("IsSchemaV1() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

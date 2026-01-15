@@ -347,11 +347,6 @@ func TestParseNFSShareCapacity(t *testing.T) {
 			want:    1073741824,
 		},
 		{
-			name:    "comma separator format (legacy)",
-			comment: "CSI Volume: test-vol, Capacity: 2147483648",
-			want:    2147483648,
-		},
-		{
 			name:    "empty comment",
 			comment: "",
 			want:    0,
@@ -364,6 +359,11 @@ func TestParseNFSShareCapacity(t *testing.T) {
 		{
 			name:    "invalid format - wrong separator",
 			comment: "CSI Volume: test-vol - Capacity: 1073741824",
+			want:    0,
+		},
+		{
+			name:    "invalid format - comma separator (legacy format no longer supported)",
+			comment: "CSI Volume: test-vol, Capacity: 2147483648",
 			want:    0,
 		},
 		{
@@ -819,23 +819,22 @@ func TestControllerExpandVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock finding the NFS share
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{
-						{
-							ID:   42,
-							Path: "/mnt/tank/csi/" + nfsVolumeID,
-						},
-					}, nil
-				}
-				// Mock finding the dataset
-				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					return []tnsapi.Dataset{
-						{
-							ID:   "tank/csi/" + nfsVolumeID,
-							Name: "tank/csi/" + nfsVolumeID,
-						},
-					}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nfsVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nfsVolumeID,
+								Name: "tank/csi/" + nfsVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:  {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:   {Value: tnsapi.ProtocolNFS},
+								tnsapi.PropertyNFSShareID: {Value: "42"},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
 				m.UpdateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
@@ -870,28 +869,24 @@ func TestControllerExpandVolume(t *testing.T) {
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing for NVMe-oF volume
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
-				}
-				// Mock finding the NVMe-oF namespace
-				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
-					return []tnsapi.NVMeOFNamespace{
-						{
-							ID:     200,
-							Subsys: &tnsapi.NVMeOFNamespaceSubsystem{ID: 100, Name: "nqn.2005-03.org.truenas:test"},
-							Device: "/dev/zvol/tank/csi/" + nvmeofVolumeID,
-						},
-					}, nil
-				}
-				// Mock finding the subsystem
-				m.ListAllNVMeOFSubsystemsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
-					return []tnsapi.NVMeOFSubsystem{
-						{
-							ID:  100,
-							NQN: "nqn.2005-03.org.truenas:test",
-						},
-					}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nvmeofVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nvmeofVolumeID,
+								Name: "tank/csi/" + nvmeofVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+								tnsapi.PropertyNVMeSubsystemID:  {Value: "100"},
+								tnsapi.PropertyNVMeNamespaceID:  {Value: "200"},
+								tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2005-03.org.truenas:test"},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
 				m.UpdateDatasetFunc = func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
 					return &tnsapi.Dataset{
@@ -918,11 +913,9 @@ func TestControllerExpandVolume(t *testing.T) {
 				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
-				}
-				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
-					return []tnsapi.NVMeOFNamespace{}, nil
+				// Return nil from property-based lookup (volume not found)
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
 			},
 			wantErr:  true,
@@ -1629,18 +1622,14 @@ func TestControllerGetVolume(t *testing.T) {
 			wantCode:  codes.InvalidArgument,
 		},
 		{
-			name: "volume not found - NFS and NVMe-oF both empty",
+			name: "volume not found",
 			req: &csi.ControllerGetVolumeRequest{
 				VolumeId: "nonexistent-volume",
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
-				}
-				// Mock NVMe-oF namespaces returning nothing
-				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
-					return []tnsapi.NVMeOFNamespace{}, nil
+				// Return nil from property-based lookup (volume not found)
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
 			},
 			wantErr:  true,
@@ -1652,26 +1641,32 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nfsVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock finding the NFS share
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nfsVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:         "tank/csi/" + nfsVolumeID,
+								Name:       "tank/csi/" + nfsVolumeID,
+								Type:       "FILESYSTEM",
+								Mountpoint: "/mnt/tank/csi/" + nfsVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:  {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:   {Value: tnsapi.ProtocolNFS},
+								tnsapi.PropertyNFSShareID: {Value: "42"},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
+				}
+				// Mock NFS shares for health check
 				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
 					return []tnsapi.NFSShare{
 						{
 							ID:      42,
 							Path:    "/mnt/tank/csi/" + nfsVolumeID,
 							Enabled: true,
-							Comment: "CSI Volume: " + nfsVolumeID + " | Capacity: 1073741824",
-						},
-					}, nil
-				}
-				// Mock datasets query for lookupNFSVolume
-				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					return []tnsapi.Dataset{
-						{
-							ID:         "tank/csi/" + nfsVolumeID,
-							Name:       "tank/csi/" + nfsVolumeID,
-							Type:       "FILESYSTEM",
-							Mountpoint: "/mnt/tank/csi/" + nfsVolumeID,
-							Available:  map[string]interface{}{"parsed": float64(5368709120)}, // 5GB
 						},
 					}, nil
 				}
@@ -1714,25 +1709,30 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nfsVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock finding the NFS share
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nfsVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nfsVolumeID,
+								Name: "tank/csi/" + nfsVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:  {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:   {Value: tnsapi.ProtocolNFS},
+								tnsapi.PropertyNFSShareID: {Value: "42"},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
+				}
+				// Mock NFS shares for health check
 				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
 					return []tnsapi.NFSShare{
 						{
 							ID:      42,
 							Path:    "/mnt/tank/csi/" + nfsVolumeID,
 							Enabled: true,
-							Comment: "CSI Volume: " + nfsVolumeID + " | Capacity: 1073741824",
-						},
-					}, nil
-				}
-				// Mock datasets query for lookupNFSVolume - returns the dataset so lookup succeeds
-				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					return []tnsapi.Dataset{
-						{
-							ID:         "tank/csi/" + nfsVolumeID,
-							Name:       "tank/csi/" + nfsVolumeID,
-							Type:       "FILESYSTEM",
-							Mountpoint: "/mnt/tank/csi/" + nfsVolumeID,
 						},
 					}, nil
 				}
@@ -1762,6 +1762,23 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nfsVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nfsVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nfsVolumeID,
+								Name: "tank/csi/" + nfsVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:  {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:   {Value: tnsapi.ProtocolNFS},
+								tnsapi.PropertyNFSShareID: {Value: "42"},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
+				}
 				// Mock finding the NFS share (disabled)
 				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
 					return []tnsapi.NFSShare{
@@ -1769,18 +1786,6 @@ func TestControllerGetVolume(t *testing.T) {
 							ID:      42,
 							Path:    "/mnt/tank/csi/" + nfsVolumeID,
 							Enabled: false, // Share is disabled
-							Comment: "CSI Volume: " + nfsVolumeID + " | Capacity: 1073741824",
-						},
-					}, nil
-				}
-				// Mock datasets query for lookupNFSVolume
-				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
-					return []tnsapi.Dataset{
-						{
-							ID:         "tank/csi/" + nfsVolumeID,
-							Name:       "tank/csi/" + nfsVolumeID,
-							Type:       "FILESYSTEM",
-							Mountpoint: "/mnt/tank/csi/" + nfsVolumeID,
 						},
 					}, nil
 				}
@@ -1815,11 +1820,26 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nvmeofVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing for NVMe-oF volume
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nvmeofVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nvmeofVolumeID,
+								Name: "tank/csi/" + nvmeofVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+								tnsapi.PropertyNVMeSubsystemID:  {Value: "100"},
+								tnsapi.PropertyNVMeNamespaceID:  {Value: "200"},
+								tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2005-03.org.truenas:" + nvmeofVolumeID},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
-				// Mock finding the NVMe-oF namespace
+				// Mock finding the NVMe-oF namespace for health check
 				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
 					return []tnsapi.NVMeOFNamespace{
 						{
@@ -1829,7 +1849,7 @@ func TestControllerGetVolume(t *testing.T) {
 						},
 					}, nil
 				}
-				// Mock finding the subsystem
+				// Mock finding the subsystem for health check
 				m.ListAllNVMeOFSubsystemsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
 					return []tnsapi.NVMeOFSubsystem{
 						{
@@ -1838,7 +1858,7 @@ func TestControllerGetVolume(t *testing.T) {
 						},
 					}, nil
 				}
-				// Mock ZVOL exists
+				// Mock ZVOL exists for health check
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
 					return []tnsapi.Dataset{
 						{
@@ -1878,11 +1898,26 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nvmeofVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing for NVMe-oF volume
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nvmeofVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nvmeofVolumeID,
+								Name: "tank/csi/" + nvmeofVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+								tnsapi.PropertyNVMeSubsystemID:  {Value: "100"},
+								tnsapi.PropertyNVMeNamespaceID:  {Value: "200"},
+								tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2005-03.org.truenas:" + nvmeofVolumeID},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
-				// Mock finding the NVMe-oF namespace
+				// Mock finding the NVMe-oF namespace for health check
 				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
 					return []tnsapi.NVMeOFNamespace{
 						{
@@ -1892,7 +1927,7 @@ func TestControllerGetVolume(t *testing.T) {
 						},
 					}, nil
 				}
-				// Mock finding the subsystem
+				// Mock finding the subsystem for health check
 				m.ListAllNVMeOFSubsystemsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
 					return []tnsapi.NVMeOFSubsystem{
 						{
@@ -1927,11 +1962,26 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nvmeofVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing for NVMe-oF volume
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nvmeofVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nvmeofVolumeID,
+								Name: "tank/csi/" + nvmeofVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+								tnsapi.PropertyNVMeSubsystemID:  {Value: "100"},
+								tnsapi.PropertyNVMeNamespaceID:  {Value: "200"},
+								tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2005-03.org.truenas:" + nvmeofVolumeID},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
-				// Mock finding the NVMe-oF namespace
+				// Mock finding the NVMe-oF namespace for health check
 				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
 					return []tnsapi.NVMeOFNamespace{
 						{
@@ -1977,9 +2027,24 @@ func TestControllerGetVolume(t *testing.T) {
 				VolumeId: nvmeofVolumeID,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				// Mock NFS shares returning nothing for NVMe-oF volume
-				m.QueryAllNFSSharesFunc = func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error) {
-					return []tnsapi.NFSShare{}, nil
+				// Mock property-based lookup
+				m.FindDatasetByCSIVolumeNameFunc = func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+					if volumeName == nvmeofVolumeID {
+						return &tnsapi.DatasetWithProperties{
+							Dataset: tnsapi.Dataset{
+								ID:   "tank/csi/" + nvmeofVolumeID,
+								Name: "tank/csi/" + nvmeofVolumeID,
+							},
+							UserProperties: map[string]tnsapi.UserProperty{
+								tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+								tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+								tnsapi.PropertyNVMeSubsystemID:  {Value: "100"},
+								tnsapi.PropertyNVMeNamespaceID:  {Value: "200"},
+								tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2005-03.org.truenas:" + nvmeofVolumeID},
+							},
+						}, nil
+					}
+					return nil, nil //nolint:nilnil // intentional: volume not found
 				}
 				// Mock finding the NVMe-oF namespace with proper subsystem info
 				m.QueryAllNVMeOFNamespacesFunc = func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error) {
@@ -2014,16 +2079,12 @@ func TestControllerGetVolume(t *testing.T) {
 			wantErr: false,
 			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
 				t.Helper()
-				// This test verifies the namespace check in getNVMeOFVolumeInfo
-				// The mock returns namespace ID 200 in lookupNVMeOFVolume
-				// Then when checking health, it should find the namespace exists
-				// So this will actually return healthy unless we modify the mock behavior
+				// This test verifies health check with namespace present
 				if resp.Status == nil || resp.Status.VolumeCondition == nil {
 					t.Error("Expected volume status with condition to be non-nil")
 					return
 				}
-				// Since the namespace is returned in the initial lookup AND in the health check,
-				// the volume should be healthy
+				// Since the namespace is found in the health check, volume should be healthy
 				if resp.Status.VolumeCondition.Abnormal {
 					t.Errorf("Expected healthy volume but got abnormal: %s", resp.Status.VolumeCondition.Message)
 				}
@@ -2061,5 +2122,472 @@ func TestControllerGetVolume(t *testing.T) {
 				tt.checkResponse(t, resp)
 			}
 		})
+	}
+}
+
+// TestIsVolumeAdoptable tests the IsVolumeAdoptable function.
+func TestIsVolumeAdoptable(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimization not critical
+	tests := []struct {
+		name  string
+		props map[string]tnsapi.UserProperty
+		want  bool
+	}{
+		{
+			name: "valid NFS volume with all properties",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:      {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertySchemaVersion:  {Value: tnsapi.SchemaVersionV1},
+				tnsapi.PropertyProtocol:       {Value: tnsapi.ProtocolNFS},
+				tnsapi.PropertyNFSSharePath:   {Value: "/mnt/tank/csi/pvc-123"},
+				tnsapi.PropertyCSIVolumeName:  {Value: "pvc-123"},
+				tnsapi.PropertyCapacityBytes:  {Value: "1073741824"},
+				tnsapi.PropertyDeleteStrategy: {Value: tnsapi.DeleteStrategyDelete},
+			},
+			want: true,
+		},
+		{
+			name: "valid NVMe-oF volume with all properties",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:        {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertySchemaVersion:    {Value: tnsapi.SchemaVersionV1},
+				tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNVMeOF},
+				tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.2024.io.truenas:nvme:pvc-123"},
+				tnsapi.PropertyCSIVolumeName:    {Value: "pvc-123"},
+			},
+			want: true,
+		},
+		{
+			name: "NFS volume without schema version (still valid)",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:    {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertyProtocol:     {Value: tnsapi.ProtocolNFS},
+				tnsapi.PropertyNFSSharePath: {Value: "/mnt/tank/csi/pvc-123"},
+			},
+			want: true,
+		},
+		{
+			name: "missing managed_by property",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyProtocol:     {Value: tnsapi.ProtocolNFS},
+				tnsapi.PropertyNFSSharePath: {Value: "/mnt/tank/csi/pvc-123"},
+			},
+			want: false,
+		},
+		{
+			name: "wrong managed_by value",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:    {Value: "other-csi-driver"},
+				tnsapi.PropertyProtocol:     {Value: tnsapi.ProtocolNFS},
+				tnsapi.PropertyNFSSharePath: {Value: "/mnt/tank/csi/pvc-123"},
+			},
+			want: false,
+		},
+		{
+			name: "unknown schema version",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:     {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertySchemaVersion: {Value: "2"}, // Unknown version
+				tnsapi.PropertyProtocol:      {Value: tnsapi.ProtocolNFS},
+				tnsapi.PropertyNFSSharePath:  {Value: "/mnt/tank/csi/pvc-123"},
+			},
+			want: false,
+		},
+		{
+			name: "missing protocol",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy:    {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertyNFSSharePath: {Value: "/mnt/tank/csi/pvc-123"},
+			},
+			want: false,
+		},
+		{
+			name: "NFS volume missing share path",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy: {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertyProtocol:  {Value: tnsapi.ProtocolNFS},
+			},
+			want: false,
+		},
+		{
+			name: "NVMe-oF volume missing NQN",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy: {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertyProtocol:  {Value: tnsapi.ProtocolNVMeOF},
+			},
+			want: false,
+		},
+		{
+			name: "unknown protocol",
+			props: map[string]tnsapi.UserProperty{
+				tnsapi.PropertyManagedBy: {Value: tnsapi.ManagedByValue},
+				tnsapi.PropertyProtocol:  {Value: "iscsi"},
+			},
+			want: false,
+		},
+		{
+			name:  "empty properties",
+			props: map[string]tnsapi.UserProperty{},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsVolumeAdoptable(tt.props)
+			if got != tt.want {
+				t.Errorf("IsVolumeAdoptable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetAdoptionInfo tests the GetAdoptionInfo function.
+func TestGetAdoptionInfo(t *testing.T) {
+	props := map[string]tnsapi.UserProperty{
+		tnsapi.PropertyCSIVolumeName:    {Value: "pvc-12345678"},
+		tnsapi.PropertyProtocol:         {Value: tnsapi.ProtocolNFS},
+		tnsapi.PropertyCapacityBytes:    {Value: "10737418240"},
+		tnsapi.PropertyDeleteStrategy:   {Value: tnsapi.DeleteStrategyRetain},
+		tnsapi.PropertyPVCName:          {Value: "my-data"},
+		tnsapi.PropertyPVCNamespace:     {Value: "production"},
+		tnsapi.PropertyStorageClass:     {Value: "truenas-nfs"},
+		tnsapi.PropertyNFSSharePath:     {Value: "/mnt/tank/csi/pvc-12345678"},
+		tnsapi.PropertyNVMeSubsystemNQN: {Value: "nqn.test"}, // Should be extracted even for NFS
+	}
+
+	info := GetAdoptionInfo(props)
+
+	expectedFields := map[string]string{
+		"volumeID":       "pvc-12345678",
+		"protocol":       "nfs",
+		"capacityBytes":  "10737418240",
+		"deleteStrategy": "retain",
+		"pvcName":        "my-data",
+		"pvcNamespace":   "production",
+		"storageClass":   "truenas-nfs",
+		"nfsSharePath":   "/mnt/tank/csi/pvc-12345678",
+		"nvmeofNQN":      "nqn.test",
+	}
+
+	for key, want := range expectedFields {
+		if got := info[key]; got != want {
+			t.Errorf("GetAdoptionInfo()[%s] = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// TestGetAdoptionInfo_Partial tests GetAdoptionInfo with partial properties.
+func TestGetAdoptionInfo_Partial(t *testing.T) {
+	// Minimal properties - only protocol and volume name
+	props := map[string]tnsapi.UserProperty{
+		tnsapi.PropertyCSIVolumeName: {Value: "minimal-volume"},
+		tnsapi.PropertyProtocol:      {Value: tnsapi.ProtocolNVMeOF},
+	}
+
+	info := GetAdoptionInfo(props)
+
+	// These should be present
+	if info["volumeID"] != "minimal-volume" {
+		t.Errorf("Expected volumeID to be 'minimal-volume', got %q", info["volumeID"])
+	}
+	if info["protocol"] != "nvmeof" {
+		t.Errorf("Expected protocol to be 'nvmeof', got %q", info["protocol"])
+	}
+
+	// These should be empty (not set)
+	if info["pvcName"] != "" {
+		t.Errorf("Expected pvcName to be empty, got %q", info["pvcName"])
+	}
+	if info["storageClass"] != "" {
+		t.Errorf("Expected storageClass to be empty, got %q", info["storageClass"])
+	}
+}
+
+// TestCheckAndAdoptVolume_AdoptableVolumeFound tests the checkAndAdoptVolume function
+// when an adoptable volume is found and adoption is allowed.
+func TestCheckAndAdoptVolume_AdoptableVolumeFound(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &MockAPIClientForSnapshots{
+		// Volume is found by CSI name
+		FindDatasetByCSIVolumeNameFunc: func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+			if volumeName == "pvc-adoptable" {
+				return &tnsapi.DatasetWithProperties{
+					Dataset: tnsapi.Dataset{
+						ID:         "tank/csi/pvc-adoptable",
+						Name:       "tank/csi/pvc-adoptable",
+						Mountpoint: "/mnt/tank/csi/pvc-adoptable",
+					},
+					UserProperties: map[string]tnsapi.UserProperty{
+						tnsapi.PropertyManagedBy:      {Value: tnsapi.ManagedByValue},
+						tnsapi.PropertySchemaVersion:  {Value: tnsapi.SchemaVersionV1},
+						tnsapi.PropertyProtocol:       {Value: tnsapi.ProtocolNFS},
+						tnsapi.PropertyAdoptable:      {Value: "true"},
+						tnsapi.PropertyNFSSharePath:   {Value: "/mnt/tank/csi/pvc-adoptable"},
+						tnsapi.PropertyCapacityBytes:  {Value: "1073741824"},
+						tnsapi.PropertyCSIVolumeName:  {Value: "pvc-adoptable"},
+						tnsapi.PropertyDeleteStrategy: {Value: tnsapi.DeleteStrategyDelete},
+					},
+				}, nil
+			}
+			return nil, nil //nolint:nilnil // intentional: volume not found
+		},
+		// NFS share query - no existing share
+		QueryNFSShareFunc: func(ctx context.Context, path string) ([]tnsapi.NFSShare, error) {
+			return []tnsapi.NFSShare{}, nil
+		},
+		// NFS share creation
+		CreateNFSShareFunc: func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
+			return &tnsapi.NFSShare{
+				ID:      99,
+				Path:    params.Path,
+				Enabled: true,
+			}, nil
+		},
+	}
+
+	service := NewControllerService(mockClient, NewNodeRegistry())
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-adoptable",
+		Parameters: map[string]string{
+			"protocol": "nfs",
+			"server":   "192.168.1.100",
+			"pool":     "tank",
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1073741824, // 1GB
+		},
+	}
+	params := req.GetParameters()
+
+	resp, adopted, err := service.checkAndAdoptVolume(ctx, req, params, "nfs")
+
+	if err != nil {
+		t.Fatalf("checkAndAdoptVolume() unexpected error: %v", err)
+	}
+	if !adopted {
+		t.Fatal("checkAndAdoptVolume() expected adopted=true")
+	}
+	if resp == nil {
+		t.Fatal("checkAndAdoptVolume() expected non-nil response")
+	}
+	if resp.Volume.VolumeId != "pvc-adoptable" {
+		t.Errorf("Expected volume ID 'pvc-adoptable', got '%s'", resp.Volume.VolumeId)
+	}
+}
+
+// TestCheckAndAdoptVolume_NotAdoptable tests the checkAndAdoptVolume function
+// when a volume is found but not marked as adoptable and adoptExisting is not set.
+func TestCheckAndAdoptVolume_NotAdoptable(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &MockAPIClientForSnapshots{
+		// Volume is found by CSI name but not marked adoptable
+		FindDatasetByCSIVolumeNameFunc: func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+			if volumeName == "pvc-not-adoptable" {
+				return &tnsapi.DatasetWithProperties{
+					Dataset: tnsapi.Dataset{
+						ID:         "tank/csi/pvc-not-adoptable",
+						Name:       "tank/csi/pvc-not-adoptable",
+						Mountpoint: "/mnt/tank/csi/pvc-not-adoptable",
+					},
+					UserProperties: map[string]tnsapi.UserProperty{
+						tnsapi.PropertyManagedBy:      {Value: tnsapi.ManagedByValue},
+						tnsapi.PropertySchemaVersion:  {Value: tnsapi.SchemaVersionV1},
+						tnsapi.PropertyProtocol:       {Value: tnsapi.ProtocolNFS},
+						tnsapi.PropertyNFSSharePath:   {Value: "/mnt/tank/csi/pvc-not-adoptable"},
+						tnsapi.PropertyCapacityBytes:  {Value: "1073741824"},
+						tnsapi.PropertyCSIVolumeName:  {Value: "pvc-not-adoptable"},
+						tnsapi.PropertyDeleteStrategy: {Value: tnsapi.DeleteStrategyDelete},
+						// No PropertyAdoptable set
+					},
+				}, nil
+			}
+			return nil, nil //nolint:nilnil // intentional: volume not found
+		},
+	}
+
+	service := NewControllerService(mockClient, NewNodeRegistry())
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-not-adoptable",
+		Parameters: map[string]string{
+			"protocol": "nfs",
+			"server":   "192.168.1.100",
+			"pool":     "tank",
+			// No adoptExisting parameter
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1073741824,
+		},
+	}
+	params := req.GetParameters()
+
+	resp, adopted, err := service.checkAndAdoptVolume(ctx, req, params, "nfs")
+
+	if err != nil {
+		t.Fatalf("checkAndAdoptVolume() unexpected error: %v", err)
+	}
+	if adopted {
+		t.Fatal("checkAndAdoptVolume() expected adopted=false (volume not adoptable)")
+	}
+	if resp != nil {
+		t.Fatal("checkAndAdoptVolume() expected nil response when not adopted")
+	}
+}
+
+// TestCheckAndAdoptVolume_AdoptExisting tests the checkAndAdoptVolume function
+// when adoptExisting=true is set in StorageClass, allowing adoption of any managed volume.
+func TestCheckAndAdoptVolume_AdoptExisting(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &MockAPIClientForSnapshots{
+		// Volume is found by CSI name (not marked adoptable, but adoptExisting=true)
+		FindDatasetByCSIVolumeNameFunc: func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+			if volumeName == "pvc-adopt-existing" {
+				return &tnsapi.DatasetWithProperties{
+					Dataset: tnsapi.Dataset{
+						ID:         "tank/csi/pvc-adopt-existing",
+						Name:       "tank/csi/pvc-adopt-existing",
+						Mountpoint: "/mnt/tank/csi/pvc-adopt-existing",
+					},
+					UserProperties: map[string]tnsapi.UserProperty{
+						tnsapi.PropertyManagedBy:      {Value: tnsapi.ManagedByValue},
+						tnsapi.PropertySchemaVersion:  {Value: tnsapi.SchemaVersionV1},
+						tnsapi.PropertyProtocol:       {Value: tnsapi.ProtocolNFS},
+						tnsapi.PropertyNFSSharePath:   {Value: "/mnt/tank/csi/pvc-adopt-existing"},
+						tnsapi.PropertyCapacityBytes:  {Value: "1073741824"},
+						tnsapi.PropertyCSIVolumeName:  {Value: "pvc-adopt-existing"},
+						tnsapi.PropertyDeleteStrategy: {Value: tnsapi.DeleteStrategyDelete},
+						// No PropertyAdoptable - but adoptExisting will be true
+					},
+				}, nil
+			}
+			return nil, nil //nolint:nilnil // intentional: volume not found
+		},
+		QueryNFSShareFunc: func(ctx context.Context, path string) ([]tnsapi.NFSShare, error) {
+			// Existing share found
+			return []tnsapi.NFSShare{
+				{ID: 88, Path: path, Enabled: true},
+			}, nil
+		},
+	}
+
+	service := NewControllerService(mockClient, NewNodeRegistry())
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-adopt-existing",
+		Parameters: map[string]string{
+			"protocol":      "nfs",
+			"server":        "192.168.1.100",
+			"pool":          "tank",
+			"adoptExisting": "true", // This allows adoption even without adoptable=true
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1073741824,
+		},
+	}
+	params := req.GetParameters()
+
+	resp, adopted, err := service.checkAndAdoptVolume(ctx, req, params, "nfs")
+
+	if err != nil {
+		t.Fatalf("checkAndAdoptVolume() unexpected error: %v", err)
+	}
+	if !adopted {
+		t.Fatal("checkAndAdoptVolume() expected adopted=true (adoptExisting=true)")
+	}
+	if resp == nil {
+		t.Fatal("checkAndAdoptVolume() expected non-nil response")
+	}
+}
+
+// TestCheckAndAdoptVolume_ProtocolMismatch tests that adoption fails when
+// the volume's protocol doesn't match the requested protocol.
+func TestCheckAndAdoptVolume_ProtocolMismatch(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &MockAPIClientForSnapshots{
+		// NFS volume found, but NVMe-oF protocol requested
+		FindDatasetByCSIVolumeNameFunc: func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+			if volumeName == "pvc-protocol-mismatch" {
+				return &tnsapi.DatasetWithProperties{
+					Dataset: tnsapi.Dataset{
+						ID:   "tank/csi/pvc-protocol-mismatch",
+						Name: "tank/csi/pvc-protocol-mismatch",
+					},
+					UserProperties: map[string]tnsapi.UserProperty{
+						tnsapi.PropertyManagedBy:      {Value: tnsapi.ManagedByValue},
+						tnsapi.PropertySchemaVersion:  {Value: tnsapi.SchemaVersionV1},
+						tnsapi.PropertyProtocol:       {Value: tnsapi.ProtocolNFS}, // Volume is NFS
+						tnsapi.PropertyAdoptable:      {Value: "true"},
+						tnsapi.PropertyNFSSharePath:   {Value: "/mnt/tank/csi/pvc-protocol-mismatch"},
+						tnsapi.PropertyCSIVolumeName:  {Value: "pvc-protocol-mismatch"},
+						tnsapi.PropertyCapacityBytes:  {Value: "1073741824"},
+						tnsapi.PropertyDeleteStrategy: {Value: tnsapi.DeleteStrategyDelete},
+					},
+				}, nil
+			}
+			return nil, nil //nolint:nilnil // intentional: volume not found
+		},
+	}
+
+	service := NewControllerService(mockClient, NewNodeRegistry())
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-protocol-mismatch",
+		Parameters: map[string]string{
+			"protocol": "nvmeof", // Requested NVMe-oF but volume is NFS
+			"server":   "192.168.1.100",
+			"pool":     "tank",
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1073741824,
+		},
+	}
+	params := req.GetParameters()
+
+	resp, adopted, err := service.checkAndAdoptVolume(ctx, req, params, "nvmeof")
+
+	// Should fail with protocol mismatch error
+	if err == nil {
+		t.Fatal("checkAndAdoptVolume() expected error for protocol mismatch")
+	}
+	if !adopted {
+		t.Fatal("checkAndAdoptVolume() expected adopted=true (indicates we tried to adopt)")
+	}
+	if resp != nil {
+		t.Fatal("checkAndAdoptVolume() expected nil response on error")
+	}
+}
+
+// TestCheckAndAdoptVolume_NoVolumeFound tests that checkAndAdoptVolume returns
+// adopted=false when no volume is found.
+func TestCheckAndAdoptVolume_NoVolumeFound(t *testing.T) {
+	ctx := context.Background()
+	mockClient := &MockAPIClientForSnapshots{
+		FindDatasetByCSIVolumeNameFunc: func(ctx context.Context, prefix, volumeName string) (*tnsapi.DatasetWithProperties, error) {
+			return nil, nil //nolint:nilnil // No volume found
+		},
+	}
+
+	service := NewControllerService(mockClient, NewNodeRegistry())
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-new",
+		Parameters: map[string]string{
+			"protocol": "nfs",
+			"server":   "192.168.1.100",
+			"pool":     "tank",
+		},
+		CapacityRange: &csi.CapacityRange{
+			RequiredBytes: 1073741824,
+		},
+	}
+	params := req.GetParameters()
+
+	resp, adopted, err := service.checkAndAdoptVolume(ctx, req, params, "nfs")
+
+	if err != nil {
+		t.Fatalf("checkAndAdoptVolume() unexpected error: %v", err)
+	}
+	if adopted {
+		t.Fatal("checkAndAdoptVolume() expected adopted=false (no volume found)")
+	}
+	if resp != nil {
+		t.Fatal("checkAndAdoptVolume() expected nil response when no volume found")
 	}
 }

@@ -46,8 +46,14 @@ type nvmeofVolumeParams struct {
 	portID int
 	// deleteStrategy controls what happens on volume deletion: "delete" (default) or "retain"
 	deleteStrategy string
+	// markAdoptable marks volumes as adoptable for cross-cluster adoption (StorageClass parameter)
+	markAdoptable bool
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsZvolProperties
+	// Adoption metadata from CSI parameters
+	pvcName      string
+	pvcNamespace string
+	storageClass string
 }
 
 // zfsZvolProperties holds ZFS properties for ZVOL creation.
@@ -175,6 +181,14 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
 
+	// Parse markAdoptable from StorageClass parameters (default: false)
+	markAdoptable := params["markAdoptable"] == "true"
+
+	// Extract adoption metadata from CSI parameters
+	pvcName := params["csi.storage.k8s.io/pvc/name"]
+	pvcNamespace := params["csi.storage.k8s.io/pvc/namespace"]
+	storageClass := params["csi.storage.k8s.io/sc/name"]
+
 	return &nvmeofVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -185,7 +199,11 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		subsystemNQN:      subsystemNQN,
 		portID:            portID,
 		deleteStrategy:    deleteStrategy,
+		markAdoptable:     markAdoptable,
 		zfsProps:          zfsProps,
+		pvcName:           pvcName,
+		pvcNamespace:      pvcNamespace,
+		storageClass:      storageClass,
 	}, nil
 }
 
@@ -416,15 +434,20 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		return nil, err
 	}
 
-	// Step 5: Store ZFS user properties for metadata tracking and ownership verification
-	props := tnsapi.NVMeOFVolumeProperties(
-		params.volumeName,
-		subsystem.ID,
-		namespace.ID,
-		subsystem.NQN,
-		time.Now().UTC().Format(time.RFC3339),
-		params.deleteStrategy,
-	)
+	// Step 5: Store ZFS user properties for metadata tracking and ownership verification (Schema v1)
+	props := tnsapi.NVMeOFVolumePropertiesV1(tnsapi.NVMeOFVolumeParams{
+		VolumeID:       params.volumeName,
+		CapacityBytes:  params.requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: params.deleteStrategy,
+		SubsystemID:    subsystem.ID,
+		NamespaceID:    namespace.ID,
+		SubsystemNQN:   subsystem.NQN,
+		PVCName:        params.pvcName,
+		PVCNamespace:   params.pvcNamespace,
+		StorageClass:   params.storageClass,
+		Adoptable:      params.markAdoptable,
+	})
 	if err := s.apiClient.SetDatasetProperties(ctx, zvol.ID, props); err != nil {
 		// Non-fatal: volume works without properties, but deletion safety is reduced
 		klog.Warningf("Failed to set ZFS properties on ZVOL %s: %v (volume will still work)", zvol.ID, err)
@@ -968,21 +991,31 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	klog.Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
 
+	// Get requested capacity
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
 	// Get deleteStrategy from StorageClass parameters (default: "delete")
 	deleteStrategy := params["deleteStrategy"]
 	if deleteStrategy == "" {
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
 
-	// Step 4: Store ZFS user properties for metadata tracking and ownership verification
-	props := tnsapi.NVMeOFVolumeProperties(
-		volumeName,
-		subsystem.ID,
-		namespace.ID,
-		subsystem.NQN,
-		time.Now().UTC().Format(time.RFC3339),
-		deleteStrategy,
-	)
+	// Step 4: Store ZFS user properties for metadata tracking and ownership verification (Schema v1)
+	props := tnsapi.NVMeOFVolumePropertiesV1(tnsapi.NVMeOFVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		SubsystemID:    subsystem.ID,
+		NamespaceID:    namespace.ID,
+		SubsystemNQN:   subsystem.NQN,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+	})
 	// Add clone source properties
 	for k, v := range tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID) {
 		props[k] = v
@@ -992,12 +1025,6 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		klog.Warningf("Failed to set ZFS properties on cloned ZVOL %s: %v (volume will still work)", zvol.ID, err)
 	} else {
 		klog.V(4).Infof("Set ZFS properties on cloned ZVOL %s: %v", zvol.ID, props)
-	}
-
-	// Get requested capacity
-	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if requestedCapacity == 0 {
-		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
 	// Build volume metadata
@@ -1044,6 +1071,157 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 					},
 				},
 			},
+		},
+	}, nil
+}
+
+// adoptNVMeOFVolume adopts an orphaned NVMe-oF volume by re-creating its subsystem and namespace.
+// This is called when a volume is found by CSI name but needs to be adopted into a new cluster.
+func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.DatasetWithProperties, params map[string]string) (*csi.CreateVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "adopt")
+	volumeName := req.GetName()
+	klog.Infof("Adopting NVMe-oF volume: %s (dataset=%s)", volumeName, dataset.ID)
+
+	// Get server parameter
+	server := params["server"]
+	if server == "" {
+		timer.ObserveError()
+		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NVMe-oF volumes")
+	}
+
+	// Get requested capacity
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	// Parse optional port ID from StorageClass parameters
+	var portID int
+	if portIDStr := params["portID"]; portIDStr != "" {
+		var err error
+		portID, err = strconv.Atoi(portIDStr)
+		if err != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.InvalidArgument, "invalid portID parameter: %v", err)
+		}
+	}
+
+	// Check if subsystem already exists (by looking up stored NQN in properties)
+	var subsystem *tnsapi.NVMeOFSubsystem
+	var namespace *tnsapi.NVMeOFNamespace
+	devicePath := "zvol/" + dataset.Name
+
+	// Try to find existing subsystem by stored NQN
+	if nqnProp, ok := dataset.UserProperties[tnsapi.PropertyNVMeSubsystemNQN]; ok && nqnProp.Value != "" {
+		existingSubsys, err := s.apiClient.NVMeOFSubsystemByNQN(ctx, nqnProp.Value)
+		if err == nil && existingSubsys != nil {
+			subsystem = existingSubsys
+			klog.Infof("Found existing subsystem for adopted volume: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
+
+			// Check if namespace exists in this subsystem
+			ns, err := s.findExistingNVMeOFNamespace(ctx, devicePath, subsystem.ID)
+			if err == nil && ns != nil {
+				namespace = ns
+				klog.Infof("Found existing namespace for adopted volume: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
+			}
+		}
+	}
+
+	// If no subsystem found, create new one
+	if subsystem == nil {
+		subsystemNQN := generateNQN(volumeName)
+		klog.Infof("Creating new subsystem for adopted volume: %s", subsystemNQN)
+
+		newSubsys, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
+			Name:         subsystemNQN,
+			AllowAnyHost: true,
+		})
+		if err != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create subsystem for adopted volume: %v", err)
+		}
+		subsystem = newSubsys
+		klog.Infof("Created subsystem for adopted volume: ID=%d, NQN=%s", subsystem.ID, subsystem.NQN)
+
+		// Bind to port
+		if bindErr := s.bindSubsystemToPort(ctx, subsystem.ID, portID, timer); bindErr != nil {
+			// Cleanup subsystem on failure
+			if delErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, subsystem.ID); delErr != nil {
+				klog.Errorf("Failed to cleanup subsystem after port bind failure: %v", delErr)
+			}
+			return nil, bindErr
+		}
+	}
+
+	// If no namespace found, create one
+	if namespace == nil {
+		klog.Infof("Creating namespace for adopted volume: device=%s, subsystem=%d", devicePath, subsystem.ID)
+
+		newNS, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
+			SubsysID:   subsystem.ID,
+			DevicePath: devicePath,
+			DeviceType: "ZVOL",
+			NSID:       1, // Always NSID 1 with independent subsystems
+		})
+		if err != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create namespace for adopted volume: %v", err)
+		}
+		namespace = newNS
+		klog.Infof("Created namespace for adopted volume: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
+	}
+
+	// Update ZFS properties with new IDs
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+	markAdoptable := params["markAdoptable"] == "true"
+
+	props := tnsapi.NVMeOFVolumePropertiesV1(tnsapi.NVMeOFVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		SubsystemID:    subsystem.ID,
+		NamespaceID:    namespace.ID,
+		SubsystemNQN:   subsystem.NQN,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+		Adoptable:      markAdoptable,
+	})
+	if propErr := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); propErr != nil {
+		klog.Warningf("Failed to update ZFS properties on adopted volume %s: %v", dataset.ID, propErr)
+	}
+
+	// Build response
+	meta := VolumeMetadata{
+		Name:              volumeName,
+		Protocol:          ProtocolNVMeOF,
+		DatasetID:         dataset.ID,
+		DatasetName:       dataset.Name,
+		Server:            server,
+		NVMeOFSubsystemID: subsystem.ID,
+		NVMeOFNamespaceID: namespace.ID,
+		NVMeOFNQN:         subsystem.NQN,
+	}
+
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyNSID] = "1"
+	volumeContext[VolumeContextKeyExpectedCapacity] = strconv.FormatInt(requestedCapacity, 10)
+
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolNVMeOF, requestedCapacity)
+
+	klog.Infof("Successfully adopted NVMe-oF volume: %s (subsystem=%s, namespaceID=%d)", volumeName, subsystem.NQN, namespace.ID)
+	timer.ObserveSuccess()
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeName,
+			CapacityBytes: requestedCapacity,
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }

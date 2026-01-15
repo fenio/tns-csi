@@ -22,6 +22,11 @@ const (
 	msgVolumeIsHealthy     = "Volume is healthy"
 )
 
+// Default values.
+const (
+	defaultServerAddress = "defaultServerAddress"
+)
+
 // VolumeContext key constants - these are used consistently across the driver.
 const (
 	VolumeContextKeyProtocol          = "protocol"
@@ -52,10 +57,6 @@ var (
 func mountpointToDatasetID(mountpoint string) string {
 	return strings.TrimPrefix(mountpoint, "/mnt/")
 }
-
-// APIClient is an alias for the TrueNAS API client interface.
-// Kept for backwards compatibility with existing tests.
-type APIClient = tnsapi.ClientInterface
 
 // VolumeMetadata contains information needed to manage a volume.
 // This is used internally and for building VolumeContext.
@@ -131,12 +132,12 @@ func getProtocolFromVolumeContext(ctx map[string]string) string {
 // ControllerService implements the CSI Controller service.
 type ControllerService struct {
 	csi.UnimplementedControllerServer
-	apiClient    APIClient
+	apiClient    tnsapi.ClientInterface
 	nodeRegistry *NodeRegistry
 }
 
 // NewControllerService creates a new controller service.
-func NewControllerService(apiClient APIClient, nodeRegistry *NodeRegistry) *ControllerService {
+func NewControllerService(apiClient tnsapi.ClientInterface, nodeRegistry *NodeRegistry) *ControllerService {
 	return &ControllerService{
 		apiClient:    apiClient,
 		nodeRegistry: nodeRegistry,
@@ -286,6 +287,15 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if existingVolume != nil {
 		klog.V(4).Infof("Returning existing volume for idempotency: %s", req.GetName())
 		return existingVolume, nil
+	}
+
+	// Check for adoption: if volume exists elsewhere (different parentDataset) and can be adopted
+	if resp, adopted, err := s.checkAndAdoptVolume(ctx, req, params, protocol); adopted {
+		if err != nil {
+			return nil, err
+		}
+		klog.Infof("Successfully adopted orphaned volume: %s", req.GetName())
+		return resp, nil
 	}
 
 	// Check if creating from snapshot or volume clone
@@ -493,7 +503,7 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 	// Get server parameter
 	server := params["server"]
 	if server == "" {
-		server = "truenas.local" // Default for testing
+		server = "defaultServerAddress" // Default for testing
 	}
 
 	volumeMeta := VolumeMetadata{
@@ -528,15 +538,11 @@ func parseNFSShareCapacity(comment string) int64 {
 
 	klog.V(4).Infof("DEBUG: Parsing comment: %s", comment)
 
-	// Try pipe separator first (preferred format)
+	// Parse pipe separator format: "volume-name | Capacity: 1073741824"
 	parts := strings.Split(comment, " | Capacity: ")
 	if len(parts) != 2 {
-		// Try comma separator (legacy format)
-		parts = strings.Split(comment, ", Capacity: ")
-		if len(parts) != 2 {
-			klog.V(4).Infof("Comment does not match expected format: %s", comment)
-			return 0
-		}
+		klog.V(4).Infof("Comment does not match expected format: %s", comment)
+		return 0
 	}
 
 	parsed, err := strconv.ParseInt(parts[1], 10, 64)
@@ -659,83 +665,25 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	// Pass empty prefix to search all datasets across all pools
 	volumeMeta, err := s.lookupVolumeByCSIName(ctx, "", volumeID)
 	if err != nil {
-		klog.Warningf("Property-based lookup failed for volume %s: %v, falling back to share/namespace search", volumeID, err)
-	} else if volumeMeta != nil {
-		klog.V(4).Infof("Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
-		switch volumeMeta.Protocol {
-		case ProtocolNFS:
-			return s.deleteNFSVolume(ctx, volumeMeta)
-		case ProtocolNVMeOF:
-			return s.deleteNVMeOFVolume(ctx, volumeMeta)
-		default:
-			klog.Warningf("Unknown protocol %s for volume %s, falling back to share/namespace search", volumeMeta.Protocol, volumeID)
-		}
+		klog.Errorf("Property-based lookup failed for volume %s: %v", volumeID, err)
+		return nil, status.Errorf(codes.Internal, "Failed to lookup volume: %v", err)
 	}
 
-	// Fallback: search through NFS shares and NVMe namespaces
-	// This handles volumes created before property-based tracking was implemented
-	klog.V(4).Infof("Property lookup did not find volume %s, searching shares/namespaces", volumeID)
-
-	// Try to find NFS shares matching this volume name
-	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
-	if err == nil && len(shares) > 0 {
-		// Found as NFS volume - find the matching dataset
-		for _, share := range shares {
-			if strings.HasSuffix(share.Path, "/"+volumeID) {
-				// Query the dataset for this share
-				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
-				datasetID := mountpointToDatasetID(share.Path)
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
-				if dsErr == nil && len(datasets) > 0 {
-					meta := VolumeMetadata{
-						Name:        volumeID,
-						Protocol:    ProtocolNFS,
-						DatasetID:   datasets[0].ID,
-						DatasetName: datasets[0].Name,
-						NFSShareID:  share.ID,
-					}
-					klog.V(4).Infof("Deleting NFS volume %s with dataset %s (found via share search)", volumeID, meta.DatasetName)
-					return s.deleteNFSVolume(ctx, &meta)
-				}
-			}
-		}
+	if volumeMeta == nil {
+		// Volume not found - return success per CSI spec (idempotent delete)
+		klog.V(4).Infof("Volume %s not found, returning success (idempotent)", volumeID)
+		return &csi.DeleteVolumeResponse{}, nil
 	}
 
-	// Try to find NVMe-oF namespaces matching this volume name
-	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-	if err == nil {
-		for _, ns := range namespaces {
-			// Check if the namespace device path contains the volume name
-			devicePath := ns.GetDevice()
-			if strings.Contains(devicePath, volumeID) {
-				// The subsystem NQN is directly in the nested subsys object
-				subsystemNQN := ns.GetSubsystemNQN()
-				subsystemID := ns.GetSubsystemID()
-				if subsystemNQN != "" && subsystemID > 0 {
-					// Extract the dataset ID from the device path
-					// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
-					// Dataset ID should be "tank/csi/volume-name"
-					datasetID := strings.TrimPrefix(devicePath, "/dev/zvol/")
-					datasetID = strings.TrimPrefix(datasetID, "zvol/")
-					meta := VolumeMetadata{
-						Name:              volumeID,
-						Protocol:          ProtocolNVMeOF,
-						DatasetID:         datasetID,
-						DatasetName:       datasetID,
-						NVMeOFNQN:         subsystemNQN,
-						NVMeOFSubsystemID: subsystemID,
-						NVMeOFNamespaceID: ns.ID,
-					}
-					klog.V(4).Infof("Deleting NVMe-oF volume %s with dataset %s (found via namespace search)", volumeID, meta.DatasetName)
-					return s.deleteNVMeOFVolume(ctx, &meta)
-				}
-			}
-		}
+	klog.V(4).Infof("Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
+	switch volumeMeta.Protocol {
+	case ProtocolNFS:
+		return s.deleteNFSVolume(ctx, volumeMeta)
+	case ProtocolNVMeOF:
+		return s.deleteNVMeOFVolume(ctx, volumeMeta)
+	default:
+		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
-
-	// Volume not found in either protocol - return success per CSI spec (idempotent delete)
-	klog.V(4).Infof("Volume %s not found, returning success (idempotent)", volumeID)
-	return &csi.DeleteVolumeResponse{}, nil
 }
 
 // ControllerPublishVolume attaches a volume to a node.
@@ -1060,6 +1008,232 @@ func (s *ControllerService) GetCapacity(ctx context.Context, req *csi.GetCapacit
 	}, nil
 }
 
+// ========================================
+// Volume Adoption Foundation
+// ========================================
+// These functions provide the foundation for cross-cluster volume adoption.
+// A volume is "adoptable" if it has tns-csi metadata but its TrueNAS resources
+// (NFS share or NVMe-oF namespace) no longer exist.
+
+// IsVolumeAdoptable checks if a volume can be adopted based on its ZFS properties.
+// A volume is adoptable if:
+// 1. It has the managed_by property set to tns-csi
+// 2. It has a valid schema version
+// 3. It has the required protocol-specific properties
+// Returns false if the volume doesn't have proper tns-csi metadata.
+func IsVolumeAdoptable(props map[string]tnsapi.UserProperty) bool {
+	// Check managed_by property
+	managedBy, ok := props[tnsapi.PropertyManagedBy]
+	if !ok || managedBy.Value != tnsapi.ManagedByValue {
+		return false
+	}
+
+	// Check schema version (optional for v1, but good practice)
+	schemaVersion, hasSchema := props[tnsapi.PropertySchemaVersion]
+	if hasSchema && schemaVersion.Value != tnsapi.SchemaVersionV1 {
+		// Unknown schema version - don't adopt
+		return false
+	}
+
+	// Check protocol is set
+	protocol, ok := props[tnsapi.PropertyProtocol]
+	if !ok || protocol.Value == "" {
+		return false
+	}
+
+	// Verify protocol-specific required properties exist
+	switch protocol.Value {
+	case tnsapi.ProtocolNFS:
+		// NFS requires share path
+		if _, ok := props[tnsapi.PropertyNFSSharePath]; !ok {
+			return false
+		}
+	case tnsapi.ProtocolNVMeOF:
+		// NVMe-oF requires NQN
+		if _, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; !ok {
+			return false
+		}
+	default:
+		// Unknown protocol - don't adopt
+		return false
+	}
+
+	return true
+}
+
+// GetAdoptionInfo extracts adoption-relevant information from volume properties.
+// This is useful for building static PV manifests for adopted volumes.
+func GetAdoptionInfo(props map[string]tnsapi.UserProperty) map[string]string {
+	info := make(map[string]string)
+
+	// Extract core properties
+	if v, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
+		info["volumeID"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyProtocol]; ok {
+		info["protocol"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyCapacityBytes]; ok {
+		info["capacityBytes"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyDeleteStrategy]; ok {
+		info["deleteStrategy"] = v.Value
+	}
+
+	// Extract adoption properties
+	if v, ok := props[tnsapi.PropertyPVCName]; ok {
+		info["pvcName"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyPVCNamespace]; ok {
+		info["pvcNamespace"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyStorageClass]; ok {
+		info["storageClass"] = v.Value
+	}
+
+	// Extract protocol-specific properties
+	if v, ok := props[tnsapi.PropertyNFSSharePath]; ok {
+		info["nfsSharePath"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; ok {
+		info["nvmeofNQN"] = v.Value
+	}
+
+	return info
+}
+
+// checkAndAdoptVolume searches for an orphaned volume by CSI name and adopts it if eligible.
+// This enables GitOps workflows where clusters are recreated and need to adopt existing volumes.
+// Returns (response, true, nil) if adopted successfully, (nil, true, error) if adoption failed,
+// or (nil, false, nil) if no adoptable volume found.
+func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) (*csi.CreateVolumeResponse, bool, error) {
+	volumeName := req.GetName()
+	adoptExisting := params["adoptExisting"] == "true"
+
+	klog.V(4).Infof("Checking for adoptable volume: %s (adoptExisting=%v)", volumeName, adoptExisting)
+
+	// Search for volume by CSI name across ALL pools (empty prefix)
+	// This finds volumes even if they exist in a different parentDataset than what's configured
+	dataset, err := s.apiClient.FindDatasetByCSIVolumeName(ctx, "", volumeName)
+	if err != nil {
+		klog.V(4).Infof("Error searching for orphaned volume %s: %v", volumeName, err)
+		return nil, false, nil // Not found or error - continue with normal creation
+	}
+	if dataset == nil {
+		klog.V(4).Infof("No orphaned volume found for %s", volumeName)
+		return nil, false, nil // Not found - continue with normal creation
+	}
+
+	// Found a dataset with matching CSI volume name - check if adoption is allowed
+	props := dataset.UserProperties
+	if props == nil {
+		klog.V(4).Infof("Dataset %s has no user properties, cannot adopt", dataset.ID)
+		return nil, false, nil
+	}
+
+	// Verify it's managed by tns-csi
+	if !IsVolumeAdoptable(props) {
+		klog.V(4).Infof("Dataset %s is not adoptable (missing required properties)", dataset.ID)
+		return nil, false, nil
+	}
+
+	// Check if adoption is allowed: either volume has adoptable=true OR StorageClass has adoptExisting=true
+	volumeAdoptable := false
+	if adoptableProp, ok := props[tnsapi.PropertyAdoptable]; ok && adoptableProp.Value == "true" {
+		volumeAdoptable = true
+	}
+
+	if !volumeAdoptable && !adoptExisting {
+		klog.V(4).Infof("Volume %s found but adoption not allowed (adoptable=%v, adoptExisting=%v)",
+			volumeName, volumeAdoptable, adoptExisting)
+		return nil, false, nil
+	}
+
+	// Verify protocol matches
+	volumeProtocol := ""
+	if protocolProp, ok := props[tnsapi.PropertyProtocol]; ok {
+		volumeProtocol = protocolProp.Value
+	}
+	if volumeProtocol != protocol {
+		klog.Warningf("Cannot adopt volume %s: protocol mismatch (volume=%s, requested=%s)",
+			volumeName, volumeProtocol, protocol)
+		return nil, true, status.Errorf(codes.FailedPrecondition,
+			"Cannot adopt volume %s: protocol mismatch (volume has %s, requested %s)",
+			volumeName, volumeProtocol, protocol)
+	}
+
+	klog.Infof("Found adoptable volume %s (dataset=%s, protocol=%s, adoptable=%v, adoptExisting=%v)",
+		volumeName, dataset.ID, volumeProtocol, volumeAdoptable, adoptExisting)
+
+	// Handle capacity: expand if requested is larger than existing
+	existingCapacity := int64(0)
+	if capacityProp, ok := props[tnsapi.PropertyCapacityBytes]; ok {
+		existingCapacity = tnsapi.StringToInt64(capacityProp.Value)
+	}
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	if requestedCapacity > existingCapacity && existingCapacity > 0 {
+		klog.Infof("Expanding adopted volume %s from %d to %d bytes", volumeName, existingCapacity, requestedCapacity)
+		if expandErr := s.expandAdoptedVolume(ctx, dataset, protocol, requestedCapacity); expandErr != nil {
+			return nil, true, status.Errorf(codes.Internal,
+				"Failed to expand adopted volume %s: %v", volumeName, expandErr)
+		}
+	}
+
+	// Adopt the volume: re-create missing TrueNAS resources based on protocol
+	switch protocol {
+	case ProtocolNFS:
+		resp, err := s.adoptNFSVolume(ctx, req, dataset, params)
+		if err != nil {
+			return nil, true, err
+		}
+		return resp, true, nil
+
+	case ProtocolNVMeOF:
+		resp, err := s.adoptNVMeOFVolume(ctx, req, dataset, params)
+		if err != nil {
+			return nil, true, err
+		}
+		return resp, true, nil
+
+	default:
+		return nil, true, status.Errorf(codes.InvalidArgument,
+			"Unsupported protocol for adoption: %s", protocol)
+	}
+}
+
+// expandAdoptedVolume expands a volume during adoption if requested capacity is larger.
+func (s *ControllerService) expandAdoptedVolume(ctx context.Context, dataset *tnsapi.DatasetWithProperties, protocol string, newCapacityBytes int64) error {
+	updateParams := tnsapi.DatasetUpdateParams{}
+
+	switch protocol {
+	case ProtocolNFS:
+		// NFS uses quota
+		updateParams.Quota = &newCapacityBytes
+	case ProtocolNVMeOF:
+		// NVMe-oF uses volsize
+		updateParams.Volsize = &newCapacityBytes
+	}
+
+	_, err := s.apiClient.UpdateDataset(ctx, dataset.ID, updateParams)
+	if err != nil {
+		return fmt.Errorf("failed to expand dataset %s: %w", dataset.ID, err)
+	}
+
+	// Update capacity property
+	capacityProps := map[string]string{
+		tnsapi.PropertyCapacityBytes: strconv.FormatInt(newCapacityBytes, 10),
+	}
+	if propErr := s.apiClient.SetDatasetProperties(ctx, dataset.ID, capacityProps); propErr != nil {
+		klog.Warningf("Failed to update capacity property on %s: %v", dataset.ID, propErr)
+	}
+
+	return nil
+}
+
 // ControllerGetCapabilities returns controller capabilities.
 func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	klog.V(4).Info("ControllerGetCapabilities called")
@@ -1135,104 +1309,6 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 
 // Snapshot operations are implemented in controller_snapshot.go
 
-// lookupNFSVolume looks up an NFS volume by ID and returns its metadata.
-// Returns ErrVolumeNotFound if the volume is not found or is not an NFS volume.
-func (s *ControllerService) lookupNFSVolume(ctx context.Context, volumeID string) (*VolumeMetadata, error) {
-	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query NFS shares: %w", err)
-	}
-
-	if len(shares) == 0 {
-		klog.Infof("lookupNFSVolume: No NFS shares found")
-		return nil, ErrVolumeNotFound
-	}
-
-	klog.Infof("lookupNFSVolume: Found %d NFS shares, searching for volume %s", len(shares), volumeID)
-
-	// Try to find a matching share for this volume
-	for _, share := range shares {
-		klog.Infof("lookupNFSVolume: Checking NFS share ID=%d, Path=%s", share.ID, share.Path)
-		if !strings.HasSuffix(share.Path, "/"+volumeID) {
-			continue
-		}
-
-		// Convert mountpoint to dataset ID (strip /mnt/ prefix)
-		datasetID := mountpointToDatasetID(share.Path)
-		klog.Infof("lookupNFSVolume: Found matching NFS share, mountpoint=%s, datasetID=%s", share.Path, datasetID)
-
-		datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
-		if dsErr != nil {
-			return nil, fmt.Errorf("failed to query dataset %s: %w", datasetID, dsErr)
-		}
-
-		if len(datasets) == 0 {
-			return nil, fmt.Errorf("%w: %s", ErrDatasetNotFound, datasetID)
-		}
-
-		klog.Infof("lookupNFSVolume: Found NFS volume %s with dataset %s", volumeID, datasets[0].Name)
-		return &VolumeMetadata{
-			Name:        volumeID,
-			Protocol:    ProtocolNFS,
-			DatasetID:   datasets[0].ID,
-			DatasetName: datasets[0].Name,
-			NFSShareID:  share.ID,
-		}, nil
-	}
-
-	klog.Warningf("lookupNFSVolume: No NFS share found with path suffix /%s after checking %d shares", volumeID, len(shares))
-	return nil, ErrVolumeNotFound
-}
-
-// lookupNVMeOFVolume looks up an NVMe-oF volume by ID and returns its metadata.
-// Returns ErrVolumeNotFound if the volume is not found or is not an NVMe-oF volume.
-func (s *ControllerService) lookupNVMeOFVolume(ctx context.Context, volumeID string) (*VolumeMetadata, error) {
-	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query NVMe-oF namespaces: %w", err)
-	}
-
-	if len(namespaces) == 0 {
-		klog.V(4).Infof("lookupNVMeOFVolume: No NVMe-oF namespaces found")
-		return nil, ErrVolumeNotFound
-	}
-
-	klog.Infof("lookupNVMeOFVolume: Found %d NVMe-oF namespaces, searching for volume %s", len(namespaces), volumeID)
-
-	for _, ns := range namespaces {
-		device := ns.GetDevice()
-		subsystemID := ns.GetSubsystemID()
-		subsystemNQN := ns.GetSubsystemNQN()
-		klog.Infof("lookupNVMeOFVolume: Checking namespace ID=%d, Device=%s, DevicePath=%s, SubsystemID=%d, SubsystemNQN=%s", ns.ID, ns.Device, ns.DevicePath, subsystemID, subsystemNQN)
-		if strings.Contains(device, volumeID) {
-			klog.Infof("lookupNVMeOFVolume: Found matching NVMe-oF namespace device=%s", device)
-
-			// The subsystem NQN is directly in the nested subsys object
-			if subsystemNQN != "" && subsystemID > 0 {
-				// Extract the dataset ID from the device path
-				// Device path could be "zvol/tank/csi/volume-name" or "/dev/zvol/tank/csi/volume-name"
-				// Dataset ID should be "tank/csi/volume-name"
-				datasetID := strings.TrimPrefix(device, "/dev/zvol/")
-				datasetID = strings.TrimPrefix(datasetID, "zvol/")
-				klog.Infof("lookupNVMeOFVolume: Found NVMe-oF volume %s with dataset %s, NQN %s", volumeID, datasetID, subsystemNQN)
-				return &VolumeMetadata{
-					Name:              volumeID,
-					Protocol:          ProtocolNVMeOF,
-					DatasetID:         datasetID,
-					DatasetName:       datasetID,
-					NVMeOFNQN:         subsystemNQN,
-					NVMeOFSubsystemID: subsystemID,
-					NVMeOFNamespaceID: ns.ID,
-				}, nil
-			}
-			klog.Warningf("lookupNVMeOFVolume: Found matching namespace but subsystem info is incomplete for volume %s (subsystemID: %d, subsystemNQN: %s)", volumeID, subsystemID, subsystemNQN)
-		}
-	}
-
-	klog.Warningf("lookupNVMeOFVolume: No NVMe-oF namespace found for volume %s after checking %d namespaces", volumeID, len(namespaces))
-	return nil, ErrVolumeNotFound
-}
-
 // ControllerExpandVolume expands a volume.
 func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	klog.V(4).Infof("ControllerExpandVolume called with request: %+v", req)
@@ -1251,58 +1327,29 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	klog.Infof("ControllerExpandVolume: Expanding volume %s to %d bytes", volumeID, requiredBytes)
 
-	// Try property-based lookup first (preferred method - uses ZFS properties as source of truth)
+	// Look up volume using ZFS properties as source of truth
 	volumeMeta, err := s.lookupVolumeByCSIName(ctx, "", volumeID)
 	if err != nil {
-		klog.Warningf("ControllerExpandVolume: Property-based lookup failed for volume %s: %v, falling back to share/namespace search", volumeID, err)
-	} else if volumeMeta != nil {
-		klog.V(4).Infof("ControllerExpandVolume: Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
-		switch volumeMeta.Protocol {
-		case ProtocolNFS:
-			klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
-			return s.expandNFSVolume(ctx, volumeMeta, requiredBytes)
-		case ProtocolNVMeOF:
-			klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
-			return s.expandNVMeOFVolume(ctx, volumeMeta, requiredBytes)
-		default:
-			klog.Warningf("ControllerExpandVolume: Unknown protocol %s for volume %s, falling back to share/namespace search", volumeMeta.Protocol, volumeID)
-		}
+		klog.Errorf("ControllerExpandVolume: Property-based lookup failed for volume %s: %v", volumeID, err)
+		return nil, status.Errorf(codes.Internal, "Failed to lookup volume: %v", err)
 	}
 
-	// Fallback: search through NFS shares and NVMe namespaces
-	// This handles volumes created before property-based tracking was implemented
-	klog.V(4).Infof("ControllerExpandVolume: Property lookup did not find volume %s, searching shares/namespaces", volumeID)
-
-	// Try to find the volume in NFS shares
-	klog.V(4).Infof("ControllerExpandVolume: Looking up volume %s in NFS shares", volumeID)
-	nfsMeta, err := s.lookupNFSVolume(ctx, volumeID)
-	if err != nil && !errors.Is(err, ErrVolumeNotFound) {
-		// Real error (not just "not found") - return it
-		klog.Errorf("ControllerExpandVolume: Error looking up NFS volume %s: %v", volumeID, err)
-		return nil, status.Errorf(codes.Internal, "Failed to lookup volume %s: %v", volumeID, err)
+	if volumeMeta == nil {
+		klog.Errorf("ControllerExpandVolume: Volume %s not found", volumeID)
+		return nil, status.Errorf(codes.NotFound, "Volume %s not found for expansion", volumeID)
 	}
 
-	if nfsMeta != nil {
-		klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes (found via share search)", volumeID, nfsMeta.DatasetName, requiredBytes)
-		return s.expandNFSVolume(ctx, nfsMeta, requiredBytes)
+	klog.V(4).Infof("ControllerExpandVolume: Found volume %s via property lookup: dataset=%s, protocol=%s", volumeID, volumeMeta.DatasetID, volumeMeta.Protocol)
+	switch volumeMeta.Protocol {
+	case ProtocolNFS:
+		klog.Infof("Expanding NFS volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+		return s.expandNFSVolume(ctx, volumeMeta, requiredBytes)
+	case ProtocolNVMeOF:
+		klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+		return s.expandNVMeOFVolume(ctx, volumeMeta, requiredBytes)
+	default:
+		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
-
-	// Try to find the volume in NVMe-oF namespaces
-	klog.V(4).Infof("ControllerExpandVolume: Looking up volume %s in NVMe-oF namespaces", volumeID)
-	nvmeofMeta, err := s.lookupNVMeOFVolume(ctx, volumeID)
-	if err != nil && !errors.Is(err, ErrVolumeNotFound) {
-		// Real error (not just "not found") - return it
-		klog.Errorf("ControllerExpandVolume: Error looking up NVMe-oF volume %s: %v", volumeID, err)
-		return nil, status.Errorf(codes.Internal, "Failed to lookup volume %s: %v", volumeID, err)
-	}
-
-	if nvmeofMeta != nil {
-		klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes (found via namespace search)", volumeID, nvmeofMeta.DatasetName, requiredBytes)
-		return s.expandNVMeOFVolume(ctx, nvmeofMeta, requiredBytes)
-	}
-
-	klog.Errorf("ControllerExpandVolume: Volume %s not found in NFS shares or NVMe-oF namespaces", volumeID)
-	return nil, status.Errorf(codes.NotFound, "Volume %s not found for expansion", volumeID)
 }
 
 // ControllerGetVolume returns volume information including health status.
@@ -1319,21 +1366,26 @@ func (s *ControllerService) ControllerGetVolume(ctx context.Context, req *csi.Co
 	volumeID := req.GetVolumeId()
 	klog.V(4).Infof("Getting volume info for: %s", volumeID)
 
-	// Try to find the volume as NFS first
-	nfsMeta, nfsErr := s.lookupNFSVolume(ctx, volumeID)
-	if nfsMeta != nil {
-		return s.getNFSVolumeInfo(ctx, nfsMeta)
+	// Look up volume using ZFS properties as source of truth
+	volumeMeta, err := s.lookupVolumeByCSIName(ctx, "", volumeID)
+	if err != nil {
+		klog.Errorf("ControllerGetVolume: Property-based lookup failed for volume %s: %v", volumeID, err)
+		return nil, status.Errorf(codes.Internal, "Failed to lookup volume: %v", err)
 	}
 
-	// Try to find the volume as NVMe-oF
-	nvmeofMeta, nvmeofErr := s.lookupNVMeOFVolume(ctx, volumeID)
-	if nvmeofMeta != nil {
-		return s.getNVMeOFVolumeInfo(ctx, nvmeofMeta)
+	if volumeMeta == nil {
+		klog.V(4).Infof("Volume %s not found", volumeID)
+		return nil, status.Errorf(codes.NotFound, "Volume %s not found", volumeID)
 	}
 
-	// Volume not found in either protocol
-	klog.V(4).Infof("Volume %s not found (NFS error: %v, NVMe-oF error: %v)", volumeID, nfsErr, nvmeofErr)
-	return nil, status.Errorf(codes.NotFound, "Volume %s not found", volumeID)
+	switch volumeMeta.Protocol {
+	case ProtocolNFS:
+		return s.getNFSVolumeInfo(ctx, volumeMeta)
+	case ProtocolNVMeOF:
+		return s.getNVMeOFVolumeInfo(ctx, volumeMeta)
+	default:
+		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
+	}
 }
 
 // getNFSVolumeInfo retrieves volume information and health status for an NFS volume.

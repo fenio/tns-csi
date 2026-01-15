@@ -2,8 +2,6 @@ package driver
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -16,32 +14,34 @@ import (
 
 // MockAPIClientForSnapshots is a mock implementation of APIClient for snapshot tests.
 type MockAPIClientForSnapshots struct {
-	CreateSnapshotFunc           func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
-	DeleteSnapshotFunc           func(ctx context.Context, snapshotID string) error
-	QuerySnapshotsFunc           func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
-	CloneSnapshotFunc            func(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
-	PromoteDatasetFunc           func(ctx context.Context, datasetID string) error
-	CreateDatasetFunc            func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
-	DeleteDatasetFunc            func(ctx context.Context, datasetID string) error
-	GetDatasetFunc               func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error)
-	UpdateDatasetFunc            func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
-	CreateNFSShareFunc           func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
-	DeleteNFSShareFunc           func(ctx context.Context, shareID int) error
-	QueryNFSShareFunc            func(ctx context.Context, path string) ([]tnsapi.NFSShare, error)
-	CreateZvolFunc               func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
-	CreateNVMeOFSubsystemFunc    func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
-	DeleteNVMeOFSubsystemFunc    func(ctx context.Context, subsystemID int) error
-	QueryNVMeOFSubsystemFunc     func(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error)
-	ListAllNVMeOFSubsystemsFunc  func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error)
-	CreateNVMeOFNamespaceFunc    func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
-	DeleteNVMeOFNamespaceFunc    func(ctx context.Context, namespaceID int) error
-	QueryNVMeOFPortsFunc         func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
-	AddSubsystemToPortFunc       func(ctx context.Context, subsystemID, portID int) error
-	NVMeOFSubsystemByNQNFunc     func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
-	QueryAllDatasetsFunc         func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
-	QueryAllNFSSharesFunc        func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
-	QueryAllNVMeOFNamespacesFunc func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
-	QueryPoolFunc                func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
+	CreateSnapshotFunc             func(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error)
+	DeleteSnapshotFunc             func(ctx context.Context, snapshotID string) error
+	QuerySnapshotsFunc             func(ctx context.Context, filters []interface{}) ([]tnsapi.Snapshot, error)
+	CloneSnapshotFunc              func(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error)
+	PromoteDatasetFunc             func(ctx context.Context, datasetID string) error
+	CreateDatasetFunc              func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error)
+	DeleteDatasetFunc              func(ctx context.Context, datasetID string) error
+	GetDatasetFunc                 func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error)
+	UpdateDatasetFunc              func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
+	CreateNFSShareFunc             func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
+	DeleteNFSShareFunc             func(ctx context.Context, shareID int) error
+	QueryNFSShareFunc              func(ctx context.Context, path string) ([]tnsapi.NFSShare, error)
+	CreateZvolFunc                 func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
+	CreateNVMeOFSubsystemFunc      func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
+	DeleteNVMeOFSubsystemFunc      func(ctx context.Context, subsystemID int) error
+	QueryNVMeOFSubsystemFunc       func(ctx context.Context, nqn string) ([]tnsapi.NVMeOFSubsystem, error)
+	ListAllNVMeOFSubsystemsFunc    func(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error)
+	CreateNVMeOFNamespaceFunc      func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error)
+	DeleteNVMeOFNamespaceFunc      func(ctx context.Context, namespaceID int) error
+	QueryNVMeOFPortsFunc           func(ctx context.Context) ([]tnsapi.NVMeOFPort, error)
+	AddSubsystemToPortFunc         func(ctx context.Context, subsystemID, portID int) error
+	NVMeOFSubsystemByNQNFunc       func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error)
+	QueryAllDatasetsFunc           func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
+	QueryAllNFSSharesFunc          func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
+	QueryAllNVMeOFNamespacesFunc   func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
+	QueryPoolFunc                  func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
+	FindDatasetByCSIVolumeNameFunc func(ctx context.Context, poolDatasetPrefix, volumeName string) (*tnsapi.DatasetWithProperties, error)
+	FindDatasetsByPropertyFunc     func(ctx context.Context, poolDatasetPrefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -293,7 +293,10 @@ func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Con
 }
 
 func (m *MockAPIClientForSnapshots) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {
-	// Mock implementation - return empty slice
+	if m.FindDatasetsByPropertyFunc != nil {
+		return m.FindDatasetsByPropertyFunc(ctx, prefix, propertyName, propertyValue)
+	}
+	// Default: return empty slice (no matches)
 	return nil, nil
 }
 
@@ -303,7 +306,10 @@ func (m *MockAPIClientForSnapshots) FindManagedDatasets(ctx context.Context, pre
 }
 
 func (m *MockAPIClientForSnapshots) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*tnsapi.DatasetWithProperties, error) {
-	// Mock implementation - return nil (not found)
+	if m.FindDatasetByCSIVolumeNameFunc != nil {
+		return m.FindDatasetByCSIVolumeNameFunc(ctx, prefix, csiVolumeName)
+	}
+	// Default: return nil (not found)
 	return nil, nil //nolint:nilnil // Mock returns "not found"
 }
 
@@ -411,44 +417,6 @@ func TestEncodeDecodeSnapshotID(t *testing.T) {
 				t.Errorf("CreatedAt = %v, want 0 (CreatedAt is excluded from snapshot ID encoding)", decoded.CreatedAt)
 			}
 		})
-	}
-}
-
-// TestLegacySnapshotIDDecoding tests backward compatibility with legacy base64 encoded snapshot IDs.
-func TestLegacySnapshotIDDecoding(t *testing.T) {
-	// Create a legacy format snapshot ID (base64 encoded JSON)
-	legacyMeta := SnapshotMetadata{
-		SnapshotName: "tank/test-volume@snap1",
-		SourceVolume: "test-volume-id",
-		DatasetName:  "tank/test-volume",
-		Protocol:     "nfs",
-	}
-
-	// Manually encode using legacy format
-	data, err := json.Marshal(legacyMeta)
-	if err != nil {
-		t.Fatalf("Failed to marshal legacy metadata: %v", err)
-	}
-	legacyID := base64.RawURLEncoding.EncodeToString(data)
-
-	// Decode using current decoder (should work with backward compatibility)
-	decoded, err := decodeSnapshotID(legacyID)
-	if err != nil {
-		t.Fatalf("Failed to decode legacy snapshot ID: %v", err)
-	}
-
-	// Legacy format preserves all fields
-	if decoded.SnapshotName != legacyMeta.SnapshotName {
-		t.Errorf("SnapshotName = %v, want %v", decoded.SnapshotName, legacyMeta.SnapshotName)
-	}
-	if decoded.SourceVolume != legacyMeta.SourceVolume {
-		t.Errorf("SourceVolume = %v, want %v", decoded.SourceVolume, legacyMeta.SourceVolume)
-	}
-	if decoded.DatasetName != legacyMeta.DatasetName {
-		t.Errorf("DatasetName = %v, want %v", decoded.DatasetName, legacyMeta.DatasetName)
-	}
-	if decoded.Protocol != legacyMeta.Protocol {
-		t.Errorf("Protocol = %v, want %v", decoded.Protocol, legacyMeta.Protocol)
 	}
 }
 

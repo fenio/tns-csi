@@ -415,7 +415,8 @@ spec:
 - **Status**: ✅ Flexible configuration
 - **Support**: Multiple storage classes per driver installation
 - **Parameters**:
-  - Common: `protocol`, `pool`, `server`, `deleteStrategy`
+  - Common: `protocol`, `pool`, `server`, `deleteStrategy`, `parentDataset`
+  - Adoption: `markAdoptable`, `adoptExisting` (see "Volume Adoption" section)
   - NFS-specific: `path`
   - NVMe-oF specific: `subsystemNQN`, `fsType`, `transport`, `port`
   - ZFS properties: See "Configurable ZFS Properties" section below
@@ -491,6 +492,197 @@ parameters:
   zfs.volblocksize: "16K"
 allowVolumeExpansion: true
 reclaimPolicy: Delete
+```
+
+### Volume Metadata (Schema v1)
+- **Status**: ✅ Implemented
+- **Description**: All volumes are tagged with ZFS user properties for reliable identification and cross-cluster adoption
+- **Schema Version**: `1` (versioned for future migrations)
+
+The driver stores metadata as ZFS user properties on each volume's dataset/ZVOL. This enables:
+- Reliable volume identification without searching by name/path
+- Cross-cluster volume adoption
+- Ownership verification before deletion
+- Easy debugging via `zfs get all <dataset>`
+
+#### Core Properties (All Volumes)
+
+| Property | Description | Example |
+|----------|-------------|---------|
+| `tns-csi:schema_version` | Schema version for migrations | `"1"` |
+| `tns-csi:managed_by` | Ownership marker | `"tns-csi"` |
+| `tns-csi:csi_volume_name` | CSI volume identifier | `"pvc-abc123"` |
+| `tns-csi:protocol` | Storage protocol | `"nfs"` or `"nvmeof"` |
+| `tns-csi:capacity_bytes` | Volume size in bytes | `"10737418240"` |
+| `tns-csi:created_at` | Creation timestamp (RFC3339) | `"2024-01-15T10:30:00Z"` |
+| `tns-csi:delete_strategy` | Retain/delete policy | `"delete"` or `"retain"` |
+
+#### Adoption Properties (For Cross-Cluster Adoption)
+
+| Property | Description | Example |
+|----------|-------------|---------|
+| `tns-csi:pvc_name` | Original PVC name | `"my-data"` |
+| `tns-csi:pvc_namespace` | Original namespace | `"default"` |
+| `tns-csi:storage_class` | Original StorageClass | `"truenas-nfs"` |
+
+#### Protocol-Specific Properties
+
+**NFS Volumes:**
+| Property | Description | Mutable? |
+|----------|-------------|----------|
+| `tns-csi:nfs_share_path` | NFS export path (stable) | No |
+| `tns-csi:nfs_share_id` | TrueNAS share ID | Yes (on re-share) |
+
+**NVMe-oF Volumes:**
+| Property | Description | Mutable? |
+|----------|-------------|----------|
+| `tns-csi:nvmeof_nqn` | Subsystem NQN (stable) | No |
+| `tns-csi:nvmeof_subsystem_id` | TrueNAS subsystem ID | Yes |
+| `tns-csi:nvmeof_namespace_id` | TrueNAS namespace ID | Yes |
+
+**Viewing Volume Properties:**
+```bash
+# On TrueNAS, view all properties for a volume
+zfs get all tank/csi/pvc-12345678 | grep tns-csi
+```
+
+### Volume Adoption (Cross-Cluster)
+- **Status**: ✅ Fully Implemented
+- **Description**: Import existing tns-csi managed volumes into a new Kubernetes cluster
+- **Use Cases**:
+  - GitOps recovery - recreate cluster from same Git repo, volumes are automatically adopted
+  - Disaster recovery - restore volumes to a new cluster
+  - Cluster migration - move workloads between clusters
+  - Upgrade recovery - re-import retained volumes after breaking upgrades
+
+#### Automatic Adoption (GitOps)
+
+**New in v0.7.0**: Volumes can be automatically adopted when a PVC with the same name is created.
+
+**StorageClass Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `markAdoptable` | `bool` | `false` | Mark new volumes as adoptable (`tns-csi:adoptable=true`) |
+| `adoptExisting` | `bool` | `false` | Automatically adopt any managed volume with matching name |
+
+**Adoption Behavior Matrix:**
+
+| Volume has `adoptable=true` | StorageClass `adoptExisting` | Result |
+|:---------------------------:|:---------------------------:|--------|
+| Yes | No | Volume is adopted |
+| No | Yes | Volume is adopted |
+| Yes | Yes | Volume is adopted |
+| No | No | Volume is NOT adopted (new volume created) |
+
+**Example StorageClass for GitOps:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-gitops
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  parentDataset: csi
+  server: truenas.local
+  markAdoptable: "true"    # New volumes can be adopted by future clusters
+  adoptExisting: "true"    # Adopt existing volumes with matching names
+reclaimPolicy: Retain      # Keep volumes on PVC deletion
+allowVolumeExpansion: true
+```
+
+**Adoption Process:**
+1. When `CreateVolume` is called, the driver searches for an existing volume by CSI name
+2. If found, it checks adoption eligibility (adoptable property or adoptExisting parameter)
+3. If eligible, it re-creates any missing TrueNAS resources (NFS share or NVMe-oF subsystem/namespace)
+4. Volume capacity is expanded if requested size is larger than existing size
+5. Volume is returned as if newly created, but data is preserved
+
+**Capacity Handling:**
+- If requested capacity > existing capacity: volume is expanded
+- If requested capacity ≤ existing capacity: existing capacity is used
+
+#### Adoption Requirements
+
+A volume is adoptable if it has:
+1. `tns-csi:managed_by` = `"tns-csi"` (ownership marker)
+2. Valid `tns-csi:schema_version` (currently `"1"`)
+3. `tns-csi:protocol` set to `"nfs"` or `"nvmeof"`
+4. Protocol-specific stable identifier:
+   - NFS: `tns-csi:nfs_share_path`
+   - NVMe-oF: `tns-csi:nvmeof_nqn`
+
+#### Manual Adoption Workflow
+
+**Note:** Dataset paths in examples use `{pool}/{parentDataset}/{volume}` format (e.g., `tank/csi/my-volume`).
+Your actual paths depend on StorageClass configuration:
+- `pool` parameter sets the ZFS pool (e.g., `tank`)
+- `parentDataset` parameter sets an optional parent dataset (e.g., `csi`)
+- If `parentDataset` is not set, volumes are created directly under the pool
+
+1. **Identify adoptable volumes** on TrueNAS:
+   ```bash
+   # List all tns-csi managed datasets (adjust path to match your pool/parentDataset)
+   zfs list -o name,tns-csi:managed_by,tns-csi:csi_volume_name,tns-csi:protocol -r tank
+   ```
+
+2. **Extract volume information**:
+   ```bash
+   # Get all properties for a specific volume
+   zfs get all tank/my-volume | grep tns-csi
+   ```
+
+3. **Re-create NFS share or NVMe-oF namespace** if missing (TrueNAS UI or API)
+
+4. **Create static PV** in Kubernetes referencing the existing volume:
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: adopted-volume
+   spec:
+     capacity:
+       storage: 10Gi  # Match tns-csi:capacity_bytes
+     accessModes:
+       - ReadWriteMany
+     persistentVolumeReclaimPolicy: Retain
+     storageClassName: truenas-nfs
+     csi:
+       driver: tns.csi.io
+       volumeHandle: my-volume  # Must match tns-csi:csi_volume_name
+       volumeAttributes:
+         protocol: nfs
+         server: truenas.local
+         share: /mnt/tank/my-volume  # Must match tns-csi:nfs_share_path
+   ```
+
+5. **Create PVC** bound to the static PV:
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: adopted-pvc
+   spec:
+     accessModes:
+       - ReadWriteMany
+     resources:
+       requests:
+         storage: 10Gi
+     storageClassName: truenas-nfs
+     volumeName: adopted-volume  # Bind to static PV
+   ```
+
+#### Future: Automated Adoption CLI
+
+A future release may include CLI tooling for automated adoption:
+```bash
+# Discover orphaned volumes (planned)
+kubectl tns-csi list-orphaned
+
+# Adopt a specific volume (planned)
+kubectl tns-csi adopt <dataset-path> --namespace <ns> --pvc-name <name>
 ```
 
 ### Volume Name Templating

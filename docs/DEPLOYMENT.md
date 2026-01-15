@@ -565,6 +565,113 @@ kubectl delete -f deploy/rbac.yaml
 kubectl delete -f deploy/secret.yaml
 ```
 
+## Upgrading
+
+### Standard Upgrade (Minor Versions)
+
+For minor version upgrades within the same schema version:
+
+```bash
+# Helm upgrade
+helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version <NEW_VERSION> \
+  --namespace kube-system \
+  --reuse-values
+```
+
+### Breaking Change Upgrade (v0.6.x → v0.7.0+)
+
+**⚠️ IMPORTANT:** Version 0.7.0 introduces Schema v1 which is a breaking change.
+
+Volumes created with earlier versions will **not be recognized** by the new driver because:
+- The metadata schema has changed
+- Legacy snapshot ID formats are no longer supported
+- Volume lookup fallbacks have been removed
+
+#### Option 1: Fresh Start (Recommended for Dev/Test)
+
+1. Delete all PVCs using the driver:
+   ```bash
+   kubectl delete pvc -l app.kubernetes.io/provisioner=tns.csi.io --all-namespaces
+   ```
+
+2. Upgrade the driver:
+   ```bash
+   helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+     --version 0.7.0 \
+     --namespace kube-system \
+     --reuse-values
+   ```
+
+3. Re-create your PVCs (data will be new)
+
+#### Option 2: Retain Data with Adoption Workflow
+
+1. **Before upgrading**, update StorageClasses to retain volumes:
+   ```yaml
+   parameters:
+     deleteStrategy: "retain"
+   ```
+
+2. Delete PVCs (underlying data is retained on TrueNAS):
+   ```bash
+   kubectl delete pvc my-important-data
+   ```
+
+3. Upgrade the driver to v0.7.0+
+
+4. **Verify volumes have metadata** on TrueNAS:
+   ```bash
+   # SSH to TrueNAS and check properties
+   # Path format: {pool}/{parentDataset}/{volume} or {pool}/{volume}
+   # Example with parentDataset=csi:
+   zfs get all tank/csi/my-volume | grep tns-csi
+   # Example without parentDataset:
+   zfs get all tank/my-volume | grep tns-csi
+   ```
+
+5. **If metadata exists**, follow the [Volume Adoption workflow](FEATURES.md#volume-adoption-cross-cluster) to re-import volumes
+
+6. **If metadata is missing**, you'll need to manually set properties:
+   ```bash
+   # On TrueNAS (example for NFS volume at tank/my-volume)
+   zfs set tns-csi:managed_by=tns-csi tank/my-volume
+   zfs set tns-csi:schema_version=1 tank/my-volume
+   zfs set tns-csi:csi_volume_name=my-volume tank/my-volume
+   zfs set tns-csi:protocol=nfs tank/my-volume
+   zfs set tns-csi:nfs_share_path=/mnt/tank/my-volume tank/my-volume
+   # ... set other properties as needed
+   ```
+
+#### Verifying Upgrade Success
+
+After upgrading, verify the new driver is working:
+
+```bash
+# Check driver version
+kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
+
+# Test creating a new volume
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: upgrade-test
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: truenas-nfs
+EOF
+
+# Verify volume was created with new schema
+kubectl get pvc upgrade-test
+# On TrueNAS (path depends on your pool/parentDataset settings):
+# zfs get tns-csi:schema_version tank/upgrade-test
+```
+
 ## Production Considerations
 
 1. **High Availability**: Increase controller replicas for HA

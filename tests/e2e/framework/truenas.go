@@ -19,6 +19,9 @@ var ErrMissingIDField = errors.New("resource has no ID field")
 // ErrInvalidIDType is returned when a TrueNAS resource ID cannot be converted to int.
 var ErrInvalidIDType = errors.New("cannot convert resource ID to int")
 
+// ErrDatasetNotFound is returned when a requested dataset doesn't exist.
+var ErrDatasetNotFound = errors.New("dataset not found")
+
 // TrueNASVerifier provides methods for verifying TrueNAS backend state.
 type TrueNASVerifier struct {
 	client *tnsapi.Client
@@ -302,4 +305,42 @@ func (v *TrueNASVerifier) DeleteNFSShare(ctx context.Context, path string) error
 		path,
 		"NFS share for path "+path,
 	)
+}
+
+// GetDatasetProperty retrieves a specific ZFS user property from a dataset.
+// Returns empty string if the property doesn't exist or is unset.
+func (v *TrueNASVerifier) GetDatasetProperty(ctx context.Context, datasetPath, propertyName string) (string, error) {
+	var datasets []map[string]any
+	filter := []any{[]any{"id", "=", datasetPath}}
+	// Request the specific user property in the extra fields
+	options := map[string]any{
+		"extra": map[string]any{
+			"properties": []string{propertyName},
+		},
+	}
+	if err := v.client.Call(ctx, "pool.dataset.query", []any{filter, options}, &datasets); err != nil {
+		return "", fmt.Errorf("failed to query dataset: %w", err)
+	}
+	if len(datasets) == 0 {
+		return "", fmt.Errorf("%s: %w", datasetPath, ErrDatasetNotFound)
+	}
+
+	// User properties are returned in the dataset response
+	// Look for the property in the dataset
+	dataset := datasets[0]
+	if props, ok := dataset[propertyName]; ok {
+		// Properties may be returned as objects with "value" field or as direct strings
+		if propMap, isMap := props.(map[string]any); isMap {
+			if val, hasValue := propMap["value"]; hasValue {
+				if strVal, isStr := val.(string); isStr {
+					return strVal, nil
+				}
+			}
+		}
+		if strVal, isStr := props.(string); isStr {
+			return strVal, nil
+		}
+	}
+
+	return "", nil // Property not set
 }

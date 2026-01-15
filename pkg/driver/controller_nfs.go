@@ -29,8 +29,14 @@ type nfsVolumeParams struct {
 	datasetName       string
 	// deleteStrategy controls what happens on volume deletion: "delete" (default) or "retain"
 	deleteStrategy string
+	// markAdoptable marks volumes as adoptable for cross-cluster adoption (StorageClass parameter)
+	markAdoptable bool
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsDatasetProperties
+	// Adoption metadata from CSI parameters
+	pvcName      string
+	pvcNamespace string
+	storageClass string
 }
 
 // zfsDatasetProperties holds ZFS properties for dataset creation.
@@ -131,8 +137,8 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	// Server parameter - optional for testing with default value
 	server := params["server"]
 	if server == "" {
-		server = "truenas.local" // Default for testing
-		klog.V(4).Info("No server parameter provided, using default: truenas.local")
+		server = defaultServerAddress // Default for testing
+		klog.V(4).Infof("No server parameter provided, using default: %s", defaultServerAddress)
 	}
 
 	parentDataset := params["parentDataset"]
@@ -161,6 +167,14 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
 
+	// Parse markAdoptable from StorageClass parameters (default: false)
+	markAdoptable := params["markAdoptable"] == "true"
+
+	// Extract adoption metadata from CSI parameters
+	pvcName := params["csi.storage.k8s.io/pvc/name"]
+	pvcNamespace := params["csi.storage.k8s.io/pvc/namespace"]
+	storageClass := params["csi.storage.k8s.io/sc/name"]
+
 	return &nfsVolumeParams{
 		pool:              pool,
 		server:            server,
@@ -169,7 +183,11 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		volumeName:        volumeName,
 		datasetName:       datasetName,
 		deleteStrategy:    deleteStrategy,
+		markAdoptable:     markAdoptable,
 		zfsProps:          zfsProps,
+		pvcName:           pvcName,
+		pvcNamespace:      pvcNamespace,
+		storageClass:      storageClass,
 	}, nil
 }
 
@@ -328,9 +346,20 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 
 	klog.V(4).Infof("Created NFS share with ID: %d for path: %s", nfsShare.ID, nfsShare.Path)
 
-	// Store ZFS user properties for CSI metadata tracking
-	// This enables safe deletion (verify ownership before delete) and debugging
-	props := tnsapi.NFSVolumeProperties(params.volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339), params.deleteStrategy)
+	// Store ZFS user properties for CSI metadata tracking (Schema v1)
+	// This enables safe deletion (verify ownership before delete), debugging, and cross-cluster adoption
+	props := tnsapi.NFSVolumePropertiesV1(tnsapi.NFSVolumeParams{
+		VolumeID:       params.volumeName,
+		CapacityBytes:  params.requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: params.deleteStrategy,
+		ShareID:        nfsShare.ID,
+		SharePath:      nfsShare.Path,
+		PVCName:        params.pvcName,
+		PVCNamespace:   params.pvcNamespace,
+		StorageClass:   params.storageClass,
+		Adoptable:      params.markAdoptable,
+	})
 	klog.Infof("DEBUG: Storing ZFS properties on dataset %s: deleteStrategy=%q, all props=%v", dataset.ID, params.deleteStrategy, props)
 	if err := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); err != nil {
 		// Log warning but don't fail - properties are not critical for basic operation
@@ -560,15 +589,25 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
 	}
 
-	// Get deleteStrategy from StorageClass parameters (default: "delete")
+	// Get deleteStrategy and adoption metadata from StorageClass parameters
 	params := req.GetParameters()
 	deleteStrategy := params["deleteStrategy"]
 	if deleteStrategy == "" {
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
 
-	// Store ZFS user properties for CSI metadata tracking (including clone source info)
-	props := tnsapi.NFSVolumeProperties(volumeName, nfsShare.ID, time.Now().UTC().Format(time.RFC3339), deleteStrategy)
+	// Store ZFS user properties for CSI metadata tracking (Schema v1, including clone source info)
+	props := tnsapi.NFSVolumePropertiesV1(tnsapi.NFSVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		ShareID:        nfsShare.ID,
+		SharePath:      nfsShare.Path,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+	})
 	// Add clone-specific properties
 	cloneProps := tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID)
 	for k, v := range cloneProps {
@@ -617,6 +656,112 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 					},
 				},
 			},
+		},
+	}, nil
+}
+
+// adoptNFSVolume adopts an orphaned NFS volume by re-creating its NFS share.
+// This is called when a volume is found by CSI name but needs to be adopted into a new cluster.
+func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.DatasetWithProperties, params map[string]string) (*csi.CreateVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "adopt")
+	volumeName := req.GetName()
+	klog.Infof("Adopting NFS volume: %s (dataset=%s)", volumeName, dataset.ID)
+
+	// Get server parameter
+	server := params["server"]
+	if server == "" {
+		server = defaultServerAddress
+	}
+
+	// Get requested capacity (use existing if not expanded)
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	// Check if dataset has a mountpoint
+	if dataset.Mountpoint == "" {
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Dataset %s has no mountpoint", dataset.ID)
+	}
+
+	// Check if an NFS share already exists for this mountpoint
+	existingShares, err := s.apiClient.QueryNFSShare(ctx, dataset.Mountpoint)
+	if err != nil {
+		klog.Warningf("Failed to query NFS shares for %s: %v", dataset.Mountpoint, err)
+	}
+
+	var nfsShare *tnsapi.NFSShare
+	if len(existingShares) > 0 {
+		// NFS share already exists - use it
+		nfsShare = &existingShares[0]
+		klog.Infof("Found existing NFS share for adopted volume: ID=%d, path=%s", nfsShare.ID, nfsShare.Path)
+	} else {
+		// Create new NFS share
+		klog.Infof("Creating NFS share for adopted volume: %s", dataset.Mountpoint)
+		comment := fmt.Sprintf("CSI Volume: %s | Capacity: %d", volumeName, requestedCapacity)
+		newShare, createErr := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
+			Path:         dataset.Mountpoint,
+			Comment:      comment,
+			MaprootUser:  "root",
+			MaprootGroup: "wheel",
+			Enabled:      true,
+		})
+		if createErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create NFS share for adopted volume: %v", createErr)
+		}
+		nfsShare = newShare
+		klog.Infof("Created NFS share for adopted volume: ID=%d, path=%s", nfsShare.ID, nfsShare.Path)
+	}
+
+	// Update ZFS properties with new share ID
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+	markAdoptable := params["markAdoptable"] == "true"
+
+	props := tnsapi.NFSVolumePropertiesV1(tnsapi.NFSVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		ShareID:        nfsShare.ID,
+		SharePath:      nfsShare.Path,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+		Adoptable:      markAdoptable,
+	})
+	if propErr := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); propErr != nil {
+		klog.Warningf("Failed to update ZFS properties on adopted volume %s: %v", dataset.ID, propErr)
+	}
+
+	// Build response
+	meta := VolumeMetadata{
+		Name:        volumeName,
+		Protocol:    ProtocolNFS,
+		DatasetID:   dataset.ID,
+		DatasetName: dataset.Name,
+		Server:      server,
+		NFSShareID:  nfsShare.ID,
+	}
+
+	volumeContext := buildVolumeContext(meta)
+	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
+
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolNFS, requestedCapacity)
+
+	klog.Infof("Successfully adopted NFS volume: %s (shareID=%d)", volumeName, nfsShare.ID)
+	timer.ObserveSuccess()
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeName,
+			CapacityBytes: requestedCapacity,
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }

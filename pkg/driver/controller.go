@@ -206,8 +206,6 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 // Note: This only finds detached snapshots (stored as datasets). Regular ZFS snapshots
 // store properties differently and should be queried via QuerySnapshots.
 // Returns nil, nil if snapshot not found; returns error only on API failures.
-//
-//nolint:unused // Will be used in future ListSnapshots implementation for detached snapshots
 func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDatasetPrefix, snapshotName string) (*SnapshotMetadata, error) {
 	klog.V(4).Infof("Looking up snapshot by CSI name: %s (prefix: %s)", snapshotName, poolDatasetPrefix)
 

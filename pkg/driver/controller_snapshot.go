@@ -730,7 +730,30 @@ func (s *ControllerService) deleteRegularSnapshot(ctx context.Context, timer *me
 // Detached snapshots are stored as full dataset copies, so we delete the dataset instead of a ZFS snapshot.
 func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *metrics.OperationTimer, snapshotMeta *SnapshotMetadata) (*csi.DeleteSnapshotResponse, error) {
 	// For detached snapshots, DatasetName contains the full dataset path
-	datasetPath := snapshotMeta.DatasetName // TODO: This is empty according to decodeCompactSnapshotID and breaks functionality
+	// For compact format, DatasetName is empty - use property-based lookup to find it
+	datasetPath := snapshotMeta.DatasetName
+
+	if datasetPath == "" {
+		// Compact format doesn't include DatasetName - use property-based lookup
+		klog.V(4).Infof("DatasetName empty for detached snapshot %s, using property-based lookup", snapshotMeta.SnapshotName)
+
+		// Search across all pools for the detached snapshot dataset by its snapshot ID property
+		resolvedMeta, err := s.lookupSnapshotByCSIName(ctx, "", snapshotMeta.SnapshotName)
+		if err != nil {
+			klog.Warningf("Failed to lookup detached snapshot %s via properties: %v", snapshotMeta.SnapshotName, err)
+			// Continue anyway - we'll try to delete by constructed path below
+		} else if resolvedMeta != nil {
+			datasetPath = resolvedMeta.DatasetName
+			klog.V(4).Infof("Resolved detached snapshot %s to dataset: %s", snapshotMeta.SnapshotName, datasetPath)
+		}
+	}
+
+	// If we still don't have a dataset path, the snapshot likely doesn't exist
+	if datasetPath == "" {
+		klog.Infof("Could not resolve dataset path for detached snapshot %s, assuming already deleted", snapshotMeta.SnapshotName)
+		timer.ObserveSuccess()
+		return &csi.DeleteSnapshotResponse{}, nil
+	}
 
 	klog.Infof("Deleting detached snapshot dataset: %s (snapshot: %s)", datasetPath, snapshotMeta.SnapshotName)
 
@@ -847,7 +870,12 @@ func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListS
 		}, nil
 	}
 
-	// Resolve the full ZFS snapshot name if we only have the short name
+	// Handle detached snapshots differently - they are datasets, not ZFS snapshots
+	if snapshotMeta.Detached {
+		return s.listDetachedSnapshotByID(ctx, req, snapshotMeta)
+	}
+
+	// Regular snapshot: resolve the full ZFS snapshot name if we only have the short name
 	zfsSnapshotName, err := s.resolveZFSSnapshotName(ctx, snapshotMeta)
 	if err != nil {
 		// Snapshot not found
@@ -885,6 +913,45 @@ func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListS
 			SnapshotId:     req.GetSnapshotId(), // Return the same ID we were queried with
 			SourceVolumeId: snapshotMeta.SourceVolume,
 			CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
+			ReadyToUse:     true,
+		},
+	}
+
+	return &csi.ListSnapshotsResponse{
+		Entries: []*csi.ListSnapshotsResponse_Entry{entry},
+	}, nil
+}
+
+// listDetachedSnapshotByID handles listing a specific detached snapshot by ID.
+// Detached snapshots are stored as datasets, so we use property-based lookup.
+func (s *ControllerService) listDetachedSnapshotByID(ctx context.Context, req *csi.ListSnapshotsRequest, snapshotMeta *SnapshotMetadata) (*csi.ListSnapshotsResponse, error) {
+	klog.V(4).Infof("ListSnapshots: looking up detached snapshot %s via properties", snapshotMeta.SnapshotName)
+
+	// Use property-based lookup to find the detached snapshot dataset
+	resolvedMeta, err := s.lookupSnapshotByCSIName(ctx, "", snapshotMeta.SnapshotName)
+	if err != nil {
+		klog.Warningf("Failed to lookup detached snapshot %s: %v", snapshotMeta.SnapshotName, err)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	if resolvedMeta == nil {
+		// Snapshot not found
+		klog.V(4).Infof("Detached snapshot %s not found - returning empty list", snapshotMeta.SnapshotName)
+		return &csi.ListSnapshotsResponse{
+			Entries: []*csi.ListSnapshotsResponse_Entry{},
+		}, nil
+	}
+
+	klog.V(4).Infof("Found detached snapshot %s at dataset %s", snapshotMeta.SnapshotName, resolvedMeta.DatasetName)
+
+	// Snapshot exists - return it
+	entry := &csi.ListSnapshotsResponse_Entry{
+		Snapshot: &csi.Snapshot{
+			SnapshotId:     req.GetSnapshotId(), // Return the same ID we were queried with
+			SourceVolumeId: resolvedMeta.SourceVolume,
+			CreationTime:   timestamppb.New(time.Now()), // We don't store creation time in properties
 			ReadyToUse:     true,
 		},
 	}

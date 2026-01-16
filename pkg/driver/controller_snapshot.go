@@ -1605,22 +1605,36 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 
 	// For NVMe-oF, try to find subsystemNQN from the source volume
 	if subsystemNQN == "" && snapshotMeta.Protocol == ProtocolNVMeOF {
-		// Try to find the NVMe-oF namespace for the source volume
-		namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-		if nsErr != nil {
-			klog.Warningf("Failed to query NVMe-oF namespaces to find subsystemNQN: %v", nsErr)
-		} else {
-			for _, ns := range namespaces {
-				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
-					// Found the namespace - the subsystem NQN is directly in the nested subsys object
-					subsystemNQN = ns.GetSubsystemNQN()
-					if subsystemNQN != "" {
-						klog.V(4).Infof("Found subsystemNQN %s directly from source volume namespace", subsystemNQN)
+		// First try property-based lookup on the source volume - most reliable method
+		// Uses empty prefix to search globally across all pools
+		volumeMeta, lookupErr := s.lookupVolumeByCSIName(ctx, "", sourceVolumeID)
+		if lookupErr != nil {
+			klog.Warningf("Property-based lookup failed for source volume %s: %v, trying namespace search", sourceVolumeID, lookupErr)
+		} else if volumeMeta != nil && volumeMeta.NVMeOFNQN != "" {
+			subsystemNQN = volumeMeta.NVMeOFNQN
+			klog.V(4).Infof("Found subsystemNQN %s from source volume ZFS properties", subsystemNQN)
+		}
+
+		// Fallback: Try to find the NVMe-oF namespace for the source volume by device path
+		if subsystemNQN == "" {
+			klog.V(4).Infof("NQN not found in volume properties, trying namespace device path search for %s", sourceVolumeID)
+			namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+			if nsErr != nil {
+				klog.Warningf("Failed to query NVMe-oF namespaces to find subsystemNQN: %v", nsErr)
+			} else {
+				for _, ns := range namespaces {
+					if strings.Contains(ns.GetDevice(), sourceVolumeID) {
+						// Found the namespace - the subsystem NQN is directly in the nested subsys object
+						subsystemNQN = ns.GetSubsystemNQN()
+						if subsystemNQN != "" {
+							klog.V(4).Infof("Found subsystemNQN %s from source volume namespace device path", subsystemNQN)
+						}
+						break
 					}
-					break
 				}
 			}
 		}
+
 		if subsystemNQN == "" {
 			// subsystemNQN is required for NVMe-oF
 			klog.Errorf("subsystemNQN not found for NVMe-oF source volume %s, cleaning up", sourceVolumeID)

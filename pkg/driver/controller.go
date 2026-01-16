@@ -1108,7 +1108,7 @@ func GetAdoptionInfo(props map[string]tnsapi.UserProperty) map[string]string {
 // or (nil, false, nil) if no adoptable volume found.
 func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) (*csi.CreateVolumeResponse, bool, error) {
 	volumeName := req.GetName()
-	adoptExisting := params["adoptExisting"] == "true"
+	adoptExisting := params["adoptExisting"] == VolumeContextValueTrue
 
 	klog.V(4).Infof("Checking for adoptable volume: %s (adoptExisting=%v)", volumeName, adoptExisting)
 

@@ -1586,11 +1586,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 		return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)
 	}
 
-	klog.V(4).Infof("Server or subsystemNQN not in parameters, extracting from source volume: %s", snapshotMeta.SourceVolume)
-
-	// With plain volume IDs, we need to look up the source volume in TrueNAS
-	// to find the server and NQN information.
-	sourceVolumeID := snapshotMeta.SourceVolume
+	klog.V(4).Infof("Server or subsystemNQN not in parameters, will derive from context (source volume: %s)", snapshotMeta.SourceVolume)
 
 	// For NFS, server should be provided in StorageClass parameters
 	// For NVMe-oF, we can try to find the subsystem NQN from TrueNAS
@@ -1604,47 +1600,16 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 			"server parameter is required in StorageClass for restoring from snapshot")
 	}
 
-	// For NVMe-oF, try to find subsystemNQN from the source volume
+	// For NVMe-oF with independent subsystems, we generate a new NQN for each clone.
+	// The source volume's NQN is not needed - the clone gets its own dedicated subsystem.
+	// We use a placeholder value to satisfy the validation; setupNVMeOFVolumeFromClone
+	// will generate the actual NQN based on the new volume name.
 	if subsystemNQN == "" && snapshotMeta.Protocol == ProtocolNVMeOF {
-		// First try property-based lookup on the source volume - most reliable method
-		// Uses empty prefix to search globally across all pools
-		volumeMeta, lookupErr := s.lookupVolumeByCSIName(ctx, "", sourceVolumeID)
-		if lookupErr != nil {
-			klog.Warningf("Property-based lookup failed for source volume %s: %v, trying namespace search", sourceVolumeID, lookupErr)
-		} else if volumeMeta != nil && volumeMeta.NVMeOFNQN != "" {
-			subsystemNQN = volumeMeta.NVMeOFNQN
-			klog.V(4).Infof("Found subsystemNQN %s from source volume ZFS properties", subsystemNQN)
-		}
-
-		// Fallback: Try to find the NVMe-oF namespace for the source volume by device path
-		if subsystemNQN == "" {
-			klog.V(4).Infof("NQN not found in volume properties, trying namespace device path search for %s", sourceVolumeID)
-			namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-			if nsErr != nil {
-				klog.Warningf("Failed to query NVMe-oF namespaces to find subsystemNQN: %v", nsErr)
-			} else {
-				for _, ns := range namespaces {
-					if strings.Contains(ns.GetDevice(), sourceVolumeID) {
-						// Found the namespace - the subsystem NQN is directly in the nested subsys object
-						subsystemNQN = ns.GetSubsystemNQN()
-						if subsystemNQN != "" {
-							klog.V(4).Infof("Found subsystemNQN %s from source volume namespace device path", subsystemNQN)
-						}
-						break
-					}
-				}
-			}
-		}
-
-		if subsystemNQN == "" {
-			// subsystemNQN is required for NVMe-oF
-			klog.Errorf("subsystemNQN not found for NVMe-oF source volume %s, cleaning up", sourceVolumeID)
-			if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-				klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-			}
-			return "", "", status.Error(codes.InvalidArgument,
-				"subsystemNQN parameter is required in StorageClass for NVMe-oF snapshot restore, or source volume must still exist in TrueNAS")
-		}
+		// For clone operations, we don't need the source volume's subsystemNQN.
+		// Each cloned volume gets its own independent subsystem with a newly generated NQN.
+		// This allows restoring from detached snapshots even after the source volume is deleted.
+		klog.V(4).Infof("NVMe-oF clone: will generate new subsystem NQN for cloned volume (source volume NQN not required)")
+		subsystemNQN = "clone-will-generate-new-nqn" // Placeholder to pass validation
 	}
 
 	return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)

@@ -184,6 +184,9 @@ const (
 
 	// DeleteStrategyRetain means the volume is retained when PVC is deleted.
 	DeleteStrategyRetain = "retain"
+
+	// PropertyValueTrue is the string value "true" used in boolean ZFS properties.
+	PropertyValueTrue = "true"
 )
 
 // PropertyNames returns all tns-csi property names for querying.
@@ -266,7 +269,7 @@ func NFSVolumePropertiesV1(params NFSVolumeParams) map[string]string {
 		props[PropertyStorageClass] = params.StorageClass
 	}
 	if params.Adoptable {
-		props[PropertyAdoptable] = "true"
+		props[PropertyAdoptable] = PropertyValueTrue
 	}
 	return props
 }
@@ -326,7 +329,7 @@ func NVMeOFVolumePropertiesV1(params NVMeOFVolumeParams) map[string]string {
 		props[PropertyStorageClass] = params.StorageClass
 	}
 	if params.Adoptable {
-		props[PropertyAdoptable] = "true"
+		props[PropertyAdoptable] = PropertyValueTrue
 	}
 	return props
 }

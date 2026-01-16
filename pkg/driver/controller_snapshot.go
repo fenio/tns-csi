@@ -1282,15 +1282,18 @@ func (s *ControllerService) resolveSnapshotMetadata(ctx context.Context, meta *S
 // resolveDetachedSnapshotMetadata resolves metadata for detached snapshots using property-based lookup.
 // Detached snapshots are stored as datasets with tns-csi:detached_snapshot=true property.
 func (s *ControllerService) resolveDetachedSnapshotMetadata(ctx context.Context, meta *SnapshotMetadata) error {
-	klog.V(4).Infof("Resolving detached snapshot metadata for: %s", meta.SnapshotName)
+	klog.Infof("Resolving detached snapshot metadata for snapshot_id: %q (from decoded ID)", meta.SnapshotName)
 
 	// Use property-based lookup to find the detached snapshot dataset
+	// Search globally (empty prefix) to find detached snapshots across all pools
 	resolvedMeta, err := s.lookupSnapshotByCSIName(ctx, "", meta.SnapshotName)
 	if err != nil {
+		klog.Errorf("Property-based lookup failed for detached snapshot %s: %v", meta.SnapshotName, err)
 		return fmt.Errorf("failed to lookup detached snapshot %s: %w", meta.SnapshotName, err)
 	}
 
 	if resolvedMeta == nil {
+		klog.Errorf("Detached snapshot dataset not found for snapshot_id: %s (property tns-csi:snapshot_id not found on any dataset)", meta.SnapshotName)
 		return fmt.Errorf("%w: %s", ErrDetachedSnapshotNotFound, meta.SnapshotName)
 	}
 

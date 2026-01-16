@@ -2206,9 +2206,10 @@ func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params Replic
 // - Orphan detection and volume recovery
 //
 // The search is performed under the specified prefix (e.g., "tank/k8s").
+// If prefix is empty, searches all datasets across all pools.
 // Returns a list of DatasetWithProperties that match the property filter.
 func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error) {
-	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %s", propertyName, propertyValue, prefix)
+	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %q", propertyName, propertyValue, prefix)
 
 	// Query all datasets under the prefix with user properties included
 	var result []DatasetWithProperties
@@ -2218,16 +2219,27 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 		},
 	}
 
-	// Use "id" with "^" (starts with) filter to get all datasets under the prefix
-	err := c.Call(ctx, "pool.dataset.query", []interface{}{
-		[]interface{}{
+	// Build the query - if prefix is empty, query all datasets without filter
+	// The TrueNAS API may not handle ["id", "^", ""] correctly, so we omit the filter entirely
+	var queryFilters []interface{}
+	if prefix != "" {
+		// Use "id" with "^" (starts with) filter to get all datasets under the prefix
+		queryFilters = []interface{}{
 			[]interface{}{"id", "^", prefix},
-		},
+		}
+	} else {
+		// Empty filter array to get all datasets
+		queryFilters = []interface{}{}
+	}
+
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		queryFilters,
 		queryOpts,
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query datasets with properties: %w", err)
 	}
+	klog.V(4).Infof("Query returned %d datasets (prefix: %q)", len(result), prefix)
 
 	// Filter datasets that have the matching property value
 	var matched []DatasetWithProperties

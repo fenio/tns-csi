@@ -208,16 +208,19 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 // store properties differently and should be queried via QuerySnapshots.
 // Returns nil, nil if snapshot not found; returns error only on API failures.
 func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDatasetPrefix, snapshotName string) (*SnapshotMetadata, error) {
-	klog.V(4).Infof("Looking up snapshot by CSI name: %s (prefix: %s)", snapshotName, poolDatasetPrefix)
+	klog.Infof("Looking up detached snapshot by property %s=%s (prefix: %q)", tnsapi.PropertySnapshotID, snapshotName, poolDatasetPrefix)
 
 	// Search for datasets with matching snapshot ID property
 	datasets, err := s.apiClient.FindDatasetsByProperty(ctx, poolDatasetPrefix, tnsapi.PropertySnapshotID, snapshotName)
 	if err != nil {
+		klog.Errorf("FindDatasetsByProperty failed for snapshot lookup: %v", err)
 		return nil, fmt.Errorf("failed to find snapshot by CSI name: %w", err)
 	}
 
+	klog.V(4).Infof("FindDatasetsByProperty returned %d datasets for snapshot_id=%s", len(datasets), snapshotName)
+
 	if len(datasets) == 0 {
-		klog.V(4).Infof("Snapshot not found by CSI name: %s", snapshotName)
+		klog.Warningf("Detached snapshot not found by property: %s=%s (no datasets matched)", tnsapi.PropertySnapshotID, snapshotName)
 		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
 	}
 

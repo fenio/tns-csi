@@ -41,6 +41,12 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(docker)"
+    ignore:
+      - dependency-name: "*"
+        versions:
+          - "*-alpha*"
+          - "*-beta*"
+          - "*-rc*"
 
   # npm (for dashboard)
   - package-ecosystem: "npm"

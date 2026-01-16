@@ -1361,16 +1361,25 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 
 	// If parentDataset is not provided, infer from snapshot's dataset path or use pool
 	if parentDataset == "" {
-		parts := strings.Split(snapshotMeta.DatasetName, "/")
-		if len(parts) > 1 {
-			// Use the same parent dataset structure as the source volume
-			// For dataset "pool/parent/volume", use "pool/parent"
-			parentDataset = strings.Join(parts[:len(parts)-1], "/")
-			klog.V(4).Infof("Inferred parentDataset %q from snapshot dataset %q", parentDataset, snapshotMeta.DatasetName)
-		} else {
-			// Just use the pool as parent
+		// For detached snapshots, use pool directly since the snapshot is stored in a
+		// separate location (pool/csi-detached-snapshots/). We don't want to create
+		// restored volumes in the detached snapshots folder.
+		if snapshotMeta.Detached {
 			parentDataset = pool
-			klog.V(4).Infof("Using pool %q as parentDataset", pool)
+			klog.V(4).Infof("Using pool %q as parentDataset for detached snapshot restore", pool)
+		} else {
+			// For regular snapshots, infer from snapshot's dataset path
+			parts := strings.Split(snapshotMeta.DatasetName, "/")
+			if len(parts) > 1 {
+				// Use the same parent dataset structure as the source volume
+				// For dataset "pool/parent/volume", use "pool/parent"
+				parentDataset = strings.Join(parts[:len(parts)-1], "/")
+				klog.V(4).Infof("Inferred parentDataset %q from snapshot dataset %q", parentDataset, snapshotMeta.DatasetName)
+			} else {
+				// Just use the pool as parent
+				parentDataset = pool
+				klog.V(4).Infof("Using pool %q as parentDataset", pool)
+			}
 		}
 	}
 

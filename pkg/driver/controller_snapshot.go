@@ -1184,12 +1184,16 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		klog.Warningf("Failed to decode snapshot ID %s: %v. Treating as not found.", snapshotID, decodeErr)
 		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
 	}
+	klog.Infof("Decoded snapshot ID: SnapshotName=%s, SourceVolume=%s, Protocol=%s, Detached=%v",
+		snapshotMeta.SnapshotName, snapshotMeta.SourceVolume, snapshotMeta.Protocol, snapshotMeta.Detached)
 
 	// Resolve the full ZFS snapshot name and dataset info if using compact format
 	if resolveErr := s.resolveSnapshotMetadata(ctx, snapshotMeta); resolveErr != nil {
 		klog.Warningf("Failed to resolve snapshot metadata: %v. Treating as not found.", resolveErr)
 		return nil, status.Errorf(codes.NotFound, "Snapshot not found: %s", snapshotID)
 	}
+	klog.Infof("Resolved snapshot metadata: DatasetName=%s, Protocol=%s, Detached=%v",
+		snapshotMeta.DatasetName, snapshotMeta.Protocol, snapshotMeta.Detached)
 
 	// Validate and extract clone parameters
 	cloneParams, validateErr := s.validateCloneParameters(req, snapshotMeta)
@@ -1228,6 +1232,8 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	if cloneErr != nil {
 		return nil, cloneErr
 	}
+	klog.Infof("Clone operation succeeded: dataset=%s, type=%s, mountpoint=%s",
+		clonedDataset.Name, clonedDataset.Type, clonedDataset.Mountpoint)
 
 	// Wait for ZFS metadata sync for NVMe-oF volumes
 	s.waitForZFSSyncIfNVMeOF(snapshotMeta.Protocol)
@@ -1235,10 +1241,13 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	// Get server and subsystemNQN parameters
 	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset)
 	if err != nil {
+		klog.Errorf("Failed to get volume parameters for snapshot: %v", err)
 		return nil, err
 	}
+	klog.Infof("Got volume parameters: server=%s, subsystemNQN=%s, protocol=%s", server, subsystemNQN, snapshotMeta.Protocol)
 
 	// Route to protocol-specific volume setup
+	klog.Infof("Routing to protocol-specific setup: protocol=%s", snapshotMeta.Protocol)
 	return s.setupVolumeFromClone(ctx, req, clonedDataset, snapshotMeta.Protocol, server, subsystemNQN, snapshotID)
 }
 

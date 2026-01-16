@@ -127,14 +127,14 @@ The Helm chart resolves the image tag in this order:
 ```bash
 # Install specific chart version (uses matching image tag automatically)
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.5.0 \
+  --version 0.7.0 \
   ...
 ```
 
 Or explicitly set the image tag:
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
-  --set image.tag=v0.5.0 \
+  --set image.tag=v0.7.0 \
   ...
 ```
 
@@ -160,7 +160,7 @@ kubectl logs -n kube-system deployment/tns-csi-controller | head -1
 Upgrade to a new version:
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.6.0 \
+  --version 0.7.0 \
   --reuse-values
 ```
 

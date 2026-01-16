@@ -167,7 +167,7 @@ The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub
 **For NFS:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.7.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -180,7 +180,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **For NVMe-oF:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.7.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \

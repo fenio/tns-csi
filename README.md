@@ -59,6 +59,7 @@ The driver intentionally focuses on these two production-ready protocols rather 
 - **Volume cloning** - Create new volumes from existing snapshots
 - **Volume expansion** - Resize volumes dynamically (supported for both NFS and NVMe-oF)
 - **Volume retention** - Optional `deleteStrategy: retain` to keep volumes on PVC deletion
+- **Volume adoption** - Automatically adopt orphaned volumes for GitOps and disaster recovery workflows
 - **Configurable mount options** - Customize NFS/NVMe-oF mount options via StorageClass
 - **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
@@ -106,7 +107,7 @@ The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry
 #### Docker Hub (recommended)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.5.0 \
+  --version 0.7.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -119,7 +120,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **NVMe-oF Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.5.0 \
+  --version 0.7.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -190,6 +191,7 @@ Every commit triggers comprehensive integration tests:
 - Volume expansion (dynamic resizing)
 - Snapshot creation and restoration
 - Volume cloning from snapshots
+- Volume adoption (GitOps workflows)
 - StatefulSet volume management
 - Data persistence across pod restarts
 

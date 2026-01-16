@@ -66,6 +66,7 @@ Every push to main triggers comprehensive integration tests organized into three
 |-----------|-------------|
 | `basic_test.go` | Volume provisioning, mounting, I/O operations, deletion |
 | `access_modes_test.go` | RWO/RWX access mode validation |
+| `adoption_test.go` | Volume adoption for GitOps workflows |
 | `clone_test.go` | Volume cloning from snapshots |
 | `concurrent_test.go` | 5 simultaneous volume creations |
 | `delete_strategy_retain_test.go` | Volume retention on PVC deletion |

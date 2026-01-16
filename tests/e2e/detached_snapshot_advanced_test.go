@@ -243,6 +243,17 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 			Expect(snapshotInfo.ReadyToUse).NotTo(BeNil(), "Snapshot should have ReadyToUse status")
 			Expect(*snapshotInfo.ReadyToUse).To(BeTrue(), "Snapshot should still be ready")
 
+			By("Checking VolumeSnapshotContent state after source deletion")
+			contentInfo, contentErr := f.K8s.GetVolumeSnapshotContent(ctx, snapshotName)
+			if contentErr != nil {
+				GinkgoWriter.Printf("[%s] WARNING: Failed to get VolumeSnapshotContent: %v\n", proto.name, contentErr)
+			} else if contentInfo != nil {
+				GinkgoWriter.Printf("[%s] VolumeSnapshotContent: name=%s, snapshotHandle=%s, readyToUse=%v, deletionPolicy=%s\n",
+					proto.name, contentInfo.Name, contentInfo.SnapshotHandle, contentInfo.ReadyToUse, contentInfo.DeletionPolicy)
+			} else {
+				GinkgoWriter.Printf("[%s] WARNING: VolumeSnapshotContent is nil\n", proto.name)
+			}
+
 			By("Restoring PVC from detached snapshot (after source was deleted)")
 			restoredPVCName := "detached-dr-restored-" + proto.id
 			err = f.K8s.CreatePVCFromSnapshot(ctx, restoredPVCName, snapshotName, proto.storageClass, "1Gi",

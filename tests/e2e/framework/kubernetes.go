@@ -22,9 +22,10 @@ import (
 
 // Kubernetes client errors.
 var (
-	ErrPVCNoCapacity = errors.New("PVC has no capacity set")
-	ErrPVCNotBound   = errors.New("PVC is not bound to a PV")
-	ErrNotCSIVolume  = errors.New("PV is not a CSI volume")
+	ErrPVCNoCapacity          = errors.New("PVC has no capacity set")
+	ErrPVCNotBound            = errors.New("PVC is not bound to a PV")
+	ErrNotCSIVolume           = errors.New("PV is not a CSI volume")
+	ErrSnapshotNoBoundContent = errors.New("volumesnapshot has no bound content")
 )
 
 // Default access mode for PVCs.
@@ -556,6 +557,82 @@ func (k *KubernetesClient) GetVolumeSnapshot(ctx context.Context, name string) (
 	}
 	if snapshot.Status.Error != nil {
 		info.Error = snapshot.Status.Error.Message
+	}
+	return info, nil
+}
+
+// VolumeSnapshotContentInfo contains the relevant information from a VolumeSnapshotContent.
+type VolumeSnapshotContentInfo struct {
+	Name           string
+	SnapshotHandle string
+	DeletionPolicy string
+	ReadyToUse     bool
+}
+
+// GetVolumeSnapshotContent gets the VolumeSnapshotContent for a VolumeSnapshot.
+// It first gets the snapshot to find the content name, then fetches the content.
+func (k *KubernetesClient) GetVolumeSnapshotContent(ctx context.Context, snapshotName string) (*VolumeSnapshotContentInfo, error) {
+	// First get the VolumeSnapshot to find the boundVolumeSnapshotContentName
+	args := []string{
+		"get", "volumesnapshot", snapshotName,
+		"-n", k.namespace,
+		"-o", "jsonpath={.status.boundVolumeSnapshotContentName}",
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to get volumesnapshot content name: %w\nstderr: %s", err, stderr.String())
+	}
+
+	contentName := strings.TrimSpace(stdout.String())
+	if contentName == "" {
+		return nil, fmt.Errorf("%w: %s", ErrSnapshotNoBoundContent, snapshotName)
+	}
+
+	// Now get the VolumeSnapshotContent (cluster-scoped, no namespace)
+	args = []string{
+		"get", "volumesnapshotcontent", contentName,
+		"-o", "json",
+	}
+	cmd = exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	stdout.Reset()
+	stderr.Reset()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to get volumesnapshotcontent: %w\nstderr: %s", err, stderr.String())
+	}
+
+	// Parse the content
+	var content struct { //nolint:govet
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Spec struct {
+			DeletionPolicy string `json:"deletionPolicy"`
+		} `json:"spec"`
+		Status struct {
+			SnapshotHandle *string `json:"snapshotHandle"`
+			ReadyToUse     *bool   `json:"readyToUse"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &content); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal volumesnapshotcontent: %w", err)
+	}
+
+	info := &VolumeSnapshotContentInfo{
+		Name:           content.Metadata.Name,
+		DeletionPolicy: content.Spec.DeletionPolicy,
+	}
+	if content.Status.SnapshotHandle != nil {
+		info.SnapshotHandle = *content.Status.SnapshotHandle
+	}
+	if content.Status.ReadyToUse != nil {
+		info.ReadyToUse = *content.Status.ReadyToUse
 	}
 	return info, nil
 }

@@ -47,6 +47,7 @@ var (
 	ErrSnapshotNotFoundTrueNAS      = errors.New("snapshot not found in TrueNAS")
 	ErrDetachedSnapshotFailed       = errors.New("detached snapshot creation failed")
 	ErrDetachedParentDatasetMissing = errors.New("detached snapshots parent dataset is required")
+	ErrDetachedSnapshotNotFound     = errors.New("detached snapshot not found")
 )
 
 // SnapshotMetadata contains information needed to manage a snapshot.
@@ -1196,21 +1197,32 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		return nil, validateErr
 	}
 
-	// Check if detached clone is requested
+	// Check if detached clone is requested (StorageClass parameter)
 	// A detached clone is independent from the source snapshot (promoted)
 	params := req.GetParameters()
 	if params == nil {
 		params = make(map[string]string)
 	}
-	detached := params["detached"] == VolumeContextValueTrue
+	detachedClone := params["detached"] == VolumeContextValueTrue
 
-	// Clone the snapshot (detached or regular)
+	// Clone/restore the snapshot based on source type and clone mode:
+	// 1. Detached snapshot (dataset) -> executeDetachedSnapshotRestore (always promoted)
+	// 2. Regular snapshot + detached=true -> executeDetachedSnapshotClone (promoted clone)
+	// 3. Regular snapshot + detached=false -> executeSnapshotClone (COW clone)
 	var clonedDataset *tnsapi.Dataset
 	var cloneErr error
-	if detached {
-		klog.Infof("Creating detached (promoted) clone for volume %s", req.GetName())
+	switch {
+	case snapshotMeta.Detached:
+		// Source is a detached snapshot (stored as a dataset, not a ZFS snapshot)
+		// We need to create a temp snapshot of the dataset, clone it, and promote
+		klog.Infof("Restoring volume %s from detached snapshot dataset %s", req.GetName(), snapshotMeta.DatasetName)
+		clonedDataset, cloneErr = s.executeDetachedSnapshotRestore(ctx, snapshotMeta, cloneParams)
+	case detachedClone:
+		// Source is a regular ZFS snapshot, but user wants a promoted (independent) clone
+		klog.Infof("Creating detached (promoted) clone for volume %s from snapshot", req.GetName())
 		clonedDataset, cloneErr = s.executeDetachedSnapshotClone(ctx, snapshotMeta, cloneParams)
-	} else {
+	default:
+		// Source is a regular ZFS snapshot, create a standard COW clone
 		clonedDataset, cloneErr = s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
 	}
 	if cloneErr != nil {
@@ -1233,6 +1245,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 // resolveSnapshotMetadata resolves missing metadata fields for compact format snapshots.
 // For legacy format, the metadata is already complete.
 // For compact format, we need to look up the full ZFS snapshot name and dataset info.
+// For detached snapshots (stored as datasets), we use property-based lookup.
 func (s *ControllerService) resolveSnapshotMetadata(ctx context.Context, meta *SnapshotMetadata) error {
 	// If SnapshotName already contains "@", it's the full ZFS path (legacy format)
 	// and DatasetName should also be populated
@@ -1240,7 +1253,13 @@ func (s *ControllerService) resolveSnapshotMetadata(ctx context.Context, meta *S
 		return nil
 	}
 
-	// Compact format: need to resolve full paths
+	// Detached snapshots are stored as datasets, not ZFS snapshots
+	// Use property-based lookup to find the dataset
+	if meta.Detached {
+		return s.resolveDetachedSnapshotMetadata(ctx, meta)
+	}
+
+	// Regular snapshot: Compact format: need to resolve full paths
 	zfsSnapshotName, err := s.resolveZFSSnapshotName(ctx, meta)
 	if err != nil {
 		return err
@@ -1256,6 +1275,36 @@ func (s *ControllerService) resolveSnapshotMetadata(ctx context.Context, meta *S
 
 	klog.V(4).Infof("Resolved snapshot metadata: SnapshotName=%s, DatasetName=%s",
 		meta.SnapshotName, meta.DatasetName)
+
+	return nil
+}
+
+// resolveDetachedSnapshotMetadata resolves metadata for detached snapshots using property-based lookup.
+// Detached snapshots are stored as datasets with tns-csi:detached_snapshot=true property.
+func (s *ControllerService) resolveDetachedSnapshotMetadata(ctx context.Context, meta *SnapshotMetadata) error {
+	klog.V(4).Infof("Resolving detached snapshot metadata for: %s", meta.SnapshotName)
+
+	// Use property-based lookup to find the detached snapshot dataset
+	resolvedMeta, err := s.lookupSnapshotByCSIName(ctx, "", meta.SnapshotName)
+	if err != nil {
+		return fmt.Errorf("failed to lookup detached snapshot %s: %w", meta.SnapshotName, err)
+	}
+
+	if resolvedMeta == nil {
+		return fmt.Errorf("%w: %s", ErrDetachedSnapshotNotFound, meta.SnapshotName)
+	}
+
+	// Update metadata with resolved values
+	meta.DatasetName = resolvedMeta.DatasetName
+	if resolvedMeta.Protocol != "" {
+		meta.Protocol = resolvedMeta.Protocol
+	}
+	if resolvedMeta.SourceVolume != "" {
+		meta.SourceVolume = resolvedMeta.SourceVolume
+	}
+
+	klog.V(4).Infof("Resolved detached snapshot metadata: SnapshotName=%s, DatasetName=%s, Protocol=%s",
+		meta.SnapshotName, meta.DatasetName, meta.Protocol)
 
 	return nil
 }
@@ -1387,6 +1436,72 @@ func (s *ControllerService) executeDetachedSnapshotClone(ctx context.Context, sn
 	}
 
 	klog.Infof("Successfully created detached clone: %s (independent from source snapshot)", clonedDataset.Name)
+	return clonedDataset, nil
+}
+
+// executeDetachedSnapshotRestore restores a volume from a detached snapshot.
+// Detached snapshots are stored as datasets (not ZFS snapshots), so we need to:
+// 1. Create a temporary ZFS snapshot of the detached snapshot dataset
+// 2. Clone that temporary snapshot to create the new volume
+// 3. Promote the clone to make it independent (always, since temp snapshot will be deleted)
+// 4. Delete the temporary snapshot
+//
+// This is different from executeDetachedSnapshotClone which creates a promoted clone
+// from a regular ZFS snapshot. Here, the source is already a dataset (detached snapshot).
+func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
+	klog.Infof("Restoring volume from detached snapshot dataset %s to %s", snapshotMeta.DatasetName, params.newDatasetName)
+
+	// Step 1: Create a temporary ZFS snapshot of the detached snapshot dataset
+	tempSnapshotName := fmt.Sprintf("csi-restore-temp-%d", time.Now().UnixNano())
+	tempSnapshotFullName := fmt.Sprintf("%s@%s", snapshotMeta.DatasetName, tempSnapshotName)
+
+	klog.V(4).Infof("Creating temporary snapshot %s for restore operation", tempSnapshotFullName)
+
+	_, err := s.apiClient.CreateSnapshot(ctx, tnsapi.SnapshotCreateParams{
+		Dataset:   snapshotMeta.DatasetName,
+		Name:      tempSnapshotName,
+		Recursive: false,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot of detached snapshot dataset: %v", err)
+	}
+
+	// Ensure we clean up the temporary snapshot regardless of outcome
+	defer func() {
+		klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshotFullName)
+		if delErr := s.apiClient.DeleteSnapshot(ctx, tempSnapshotFullName); delErr != nil {
+			klog.Warningf("Failed to delete temporary snapshot %s: %v", tempSnapshotFullName, delErr)
+		}
+	}()
+
+	// Step 2: Clone the temporary snapshot to the new dataset
+	klog.V(4).Infof("Cloning temporary snapshot %s to %s", tempSnapshotFullName, params.newDatasetName)
+
+	cloneParams := tnsapi.CloneSnapshotParams{
+		Snapshot: tempSnapshotFullName,
+		Dataset:  params.newDatasetName,
+	}
+
+	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
+	if err != nil {
+		klog.Errorf("Failed to clone temporary snapshot: %v", err)
+		s.cleanupPartialClone(ctx, params.newDatasetName)
+		return nil, status.Errorf(codes.Internal, "Failed to clone detached snapshot: %v", err)
+	}
+
+	klog.Infof("Clone created from detached snapshot, now promoting to make it independent: %s", clonedDataset.Name)
+
+	// Step 3: Promote the clone to break the parent-child relationship
+	// This is required because the temp snapshot will be deleted, so the clone must be independent
+	if err := s.apiClient.PromoteDataset(ctx, clonedDataset.Name); err != nil {
+		klog.Errorf("Failed to promote cloned dataset %s: %v. Cleaning up...", clonedDataset.Name, err)
+		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.Name); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned dataset after promotion failure: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to promote restored volume: %v", err)
+	}
+
+	klog.Infof("Successfully restored volume from detached snapshot: %s -> %s", snapshotMeta.DatasetName, clonedDataset.Name)
 	return clonedDataset, nil
 }
 

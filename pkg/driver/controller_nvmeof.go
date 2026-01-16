@@ -914,10 +914,26 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 // setupNVMeOFVolumeFromClone sets up NVMe-oF infrastructure for a cloned ZVOL.
 // With independent subsystem architecture, creates a new subsystem for the clone.
 func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, _, snapshotID string) (*csi.CreateVolumeResponse, error) {
-	klog.Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s (from snapshot)", zvol.Name)
+	klog.Infof("Setting up NVMe-oF namespace for cloned ZVOL: %s (from snapshot, type: %s)", zvol.Name, zvol.Type)
 
 	volumeName := req.GetName()
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "clone")
+
+	// Validate that the dataset is a ZVOL (type=VOLUME), not a filesystem
+	// This can happen if detached snapshot was created incorrectly
+	if zvol.Type != "VOLUME" {
+		klog.Errorf("Expected ZVOL (type=VOLUME) but got type=%q for dataset %s. "+
+			"This can happen if the source detached snapshot was not a ZVOL.", zvol.Type, zvol.Name)
+		// Cleanup the non-ZVOL dataset
+		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup non-ZVOL dataset: %v", delErr)
+		}
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal,
+			"Cannot create NVMe-oF volume from snapshot: cloned dataset %s has type %q, expected VOLUME (ZVOL). "+
+				"The source detached snapshot may not have been created correctly from an NVMe-oF volume.",
+			zvol.Name, zvol.Type)
+	}
 
 	// Generate NQN for the cloned volume's dedicated subsystem
 	subsystemNQN := generateNQN(volumeName)

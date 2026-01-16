@@ -254,7 +254,7 @@ func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDat
 		meta.Detached = detached.Value == VolumeContextValueTrue
 	}
 
-	klog.V(4).Infof("Found snapshot: %s (dataset=%s, protocol=%s, detached=%v)", snapshotName, dataset.ID, meta.Protocol, meta.Detached)
+	klog.V(4).Infof("Found snapshot: %s (dataset=%s, type=%s, protocol=%s, detached=%v)", snapshotName, dataset.ID, dataset.Type, meta.Protocol, meta.Detached)
 	return meta, nil
 }
 

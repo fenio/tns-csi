@@ -1492,7 +1492,8 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 		return nil, status.Errorf(codes.Internal, "Failed to clone detached snapshot: %v", err)
 	}
 
-	klog.Infof("Clone created from detached snapshot, now promoting to make it independent: %s", clonedDataset.Name)
+	klog.Infof("Clone created from detached snapshot (name: %s, type: %s), now promoting to make it independent",
+		clonedDataset.Name, clonedDataset.Type)
 
 	// Step 3: Promote the clone to break the parent-child relationship
 	// This is required because the temp snapshot will be deleted, so the clone must be independent

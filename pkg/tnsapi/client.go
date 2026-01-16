@@ -2214,7 +2214,7 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
 		"extra": map[string]interface{}{
-			"properties": true,
+			"user_properties": true,
 		},
 	}
 

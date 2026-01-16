@@ -103,13 +103,13 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, snapshotTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Creating detached StorageClass")
+		By("Creating detached StorageClass (detached=true promotes clones to be independent)")
 		detachedStorageClass := "tns-csi-nfs-detached"
 		err = f.K8s.CreateStorageClassWithParams(ctx, detachedStorageClass, "tns.csi.io", map[string]string{
-			"protocol":          "nfs",
-			"server":            f.Config.TrueNASHost,
-			"pool":              f.Config.TrueNASPool,
-			"detachedSnapshots": "true",
+			"protocol": "nfs",
+			"server":   f.Config.TrueNASHost,
+			"pool":     f.Config.TrueNASPool,
+			"detached": "true", // Promotes clones to be independent from source snapshot
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {

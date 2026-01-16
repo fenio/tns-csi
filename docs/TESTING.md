@@ -95,6 +95,7 @@ Every push to main triggers comprehensive integration tests organized into three
 | Test File | Description |
 |-----------|-------------|
 | `snapshot_restore_test.go` | Snapshot creation and restoration (both protocols) |
+| `detached_snapshot_advanced_test.go` | Detached snapshots via zfs send/receive, DR scenario testing |
 | `stress_test.go` | Volume stress testing |
 | `name_templating_test.go` | Custom volume naming templates |
 | `error_handling_test.go` | Error condition handling |

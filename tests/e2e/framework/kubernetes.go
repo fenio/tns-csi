@@ -4,6 +4,7 @@ package framework
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -486,6 +487,77 @@ deletionPolicy: %s
 `, name, driver, deletionPolicy)
 
 	return k.applyYAML(ctx, yaml)
+}
+
+// CreateVolumeSnapshotClassWithParams creates a VolumeSnapshotClass with parameters using kubectl.
+func (k *KubernetesClient) CreateVolumeSnapshotClassWithParams(ctx context.Context, name, driver, deletionPolicy string, params map[string]string) error {
+	var paramsYAML string
+	if len(params) > 0 {
+		paramLines := make([]string, 0, len(params))
+		for key, value := range params {
+			paramLines = append(paramLines, fmt.Sprintf("  %s: %q", key, value))
+		}
+		paramsYAML = "parameters:\n" + strings.Join(paramLines, "\n") + "\n"
+	}
+
+	yaml := fmt.Sprintf(`apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: %s
+driver: %s
+deletionPolicy: %s
+%s`, name, driver, deletionPolicy, paramsYAML)
+
+	return k.applyYAML(ctx, yaml)
+}
+
+// VolumeSnapshotInfo contains information about a VolumeSnapshot.
+type VolumeSnapshotInfo struct {
+	Name       string
+	ReadyToUse *bool
+	Error      string
+}
+
+// GetVolumeSnapshot gets a VolumeSnapshot by name.
+func (k *KubernetesClient) GetVolumeSnapshot(ctx context.Context, name string) (*VolumeSnapshotInfo, error) {
+	args := []string{
+		"get", "volumesnapshot", name,
+		"-n", k.namespace,
+		"-o", "json",
+	}
+	cmd := exec.CommandContext(ctx, "kubectl", args...) //nolint:gosec // args are controlled by the framework
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("kubectl get volumesnapshot failed: %w\nstderr: %s", err, stderr.String())
+	}
+
+	// Parse just the fields we need (nolint:govet - anonymous struct used for JSON parsing)
+	var snapshot struct { //nolint:govet
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Status struct {
+			ReadyToUse *bool `json:"readyToUse"`
+			Error      *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal volumesnapshot: %w", err)
+	}
+
+	info := &VolumeSnapshotInfo{
+		Name:       snapshot.Metadata.Name,
+		ReadyToUse: snapshot.Status.ReadyToUse,
+	}
+	if snapshot.Status.Error != nil {
+		info.Error = snapshot.Status.Error.Message
+	}
+	return info, nil
 }
 
 // DeleteVolumeSnapshotClass deletes a VolumeSnapshotClass using kubectl.

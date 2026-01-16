@@ -107,16 +107,16 @@ var _ = Describe("NVMe-oF Detached Snapshot", func() {
 		err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, snapshotTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Creating detached StorageClass")
+		By("Creating detached StorageClass (detached=true promotes clones to be independent)")
 		detachedStorageClass := "tns-csi-nvmeof-detached"
 		err = f.K8s.CreateStorageClassWithParamsAndBindingMode(ctx, detachedStorageClass, "tns.csi.io", map[string]string{
-			"protocol":          "nvmeof",
-			"server":            f.Config.TrueNASHost,
-			"pool":              f.Config.TrueNASPool,
-			"transport":         "tcp",
-			"port":              "4420",
-			"fsType":            "ext4",
-			"detachedSnapshots": "true",
+			"protocol":  "nvmeof",
+			"server":    f.Config.TrueNASHost,
+			"pool":      f.Config.TrueNASPool,
+			"transport": "tcp",
+			"port":      "4420",
+			"fsType":    "ext4",
+			"detached":  "true", // Promotes clones to be independent from source snapshot
 		}, "WaitForFirstConsumer")
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {

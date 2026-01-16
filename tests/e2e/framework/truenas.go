@@ -312,10 +312,10 @@ func (v *TrueNASVerifier) DeleteNFSShare(ctx context.Context, path string) error
 func (v *TrueNASVerifier) GetDatasetProperty(ctx context.Context, datasetPath, propertyName string) (string, error) {
 	var datasets []map[string]any
 	filter := []any{[]any{"id", "=", datasetPath}}
-	// Request the specific user property in the extra fields
+	// Request user properties to be included in the response
 	options := map[string]any{
 		"extra": map[string]any{
-			"properties": []string{propertyName},
+			"user_properties": true,
 		},
 	}
 	if err := v.client.Call(ctx, "pool.dataset.query", []any{filter, options}, &datasets); err != nil {
@@ -325,22 +325,32 @@ func (v *TrueNASVerifier) GetDatasetProperty(ctx context.Context, datasetPath, p
 		return "", fmt.Errorf("%s: %w", datasetPath, ErrDatasetNotFound)
 	}
 
-	// User properties are returned in the dataset response
-	// Look for the property in the dataset
+	// User properties are returned under the "user_properties" key
 	dataset := datasets[0]
-	if props, ok := dataset[propertyName]; ok {
-		// Properties may be returned as objects with "value" field or as direct strings
-		if propMap, isMap := props.(map[string]any); isMap {
-			if val, hasValue := propMap["value"]; hasValue {
-				if strVal, isStr := val.(string); isStr {
-					return strVal, nil
-				}
+	userProps, ok := dataset["user_properties"]
+	if !ok {
+		return "", nil // No user properties
+	}
+
+	// user_properties is a map of property name -> {value, source, ...}
+	propsMap, ok := userProps.(map[string]any)
+	if !ok {
+		return "", nil // Unexpected format
+	}
+
+	propData, ok := propsMap[propertyName]
+	if !ok {
+		return "", nil // Property not set
+	}
+
+	// Property value is in the "value" field
+	if propMap, isMap := propData.(map[string]any); isMap {
+		if val, hasValue := propMap["value"]; hasValue {
+			if strVal, isStr := val.(string); isStr {
+				return strVal, nil
 			}
-		}
-		if strVal, isStr := props.(string); isStr {
-			return strVal, nil
 		}
 	}
 
-	return "", nil // Property not set
+	return "", nil // Property not set or unexpected format
 }

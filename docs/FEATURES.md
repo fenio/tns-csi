@@ -780,6 +780,7 @@ reclaimPolicy: Delete
   - Concurrent volume operations
   - StatefulSet workloads
   - Snapshot creation and restoration (NFS, NVMe-oF)
+  - Volume adoption (GitOps workflows)
   - Connection resilience
   - Orphaned resource cleanup
   - Persistence testing
@@ -987,6 +988,7 @@ All features are tested on **real infrastructure** - not mocks or simulators:
 - ✅ Basic volume operations (NFS & NVMe-oF)
 - ✅ Volume expansion testing
 - ✅ Snapshot creation and restoration
+- ✅ Volume adoption (GitOps workflows)
 - ✅ StatefulSet volume management (3 replica testing)
 - ✅ Data persistence across pod restarts
 - ✅ Concurrent volume creation (5 simultaneous volumes)
@@ -1051,7 +1053,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ---
 
-**Last Updated**: 2025-12-17  
-**Driver Version**: v0.0.x (early development)  
-**Kubernetes Version Tested**: 1.27+  
+**Last Updated**: 2026-01-16
+**Driver Version**: v0.7.0
+**Kubernetes Version Tested**: 1.27+
 **Go Version**: 1.25.5+

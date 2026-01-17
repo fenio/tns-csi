@@ -98,11 +98,13 @@ jobs:
     # - triggered by workflow_run and the workflow failed
     # - triggered by CI workflow but not on main branch (only run integration tests for main)
     # - no driver files changed (plugin-only changes)
+    # Note: always() allows this job to run even when check-driver-changes is skipped (manual dispatch)
     if: |
+      always() &&
       (github.event_name != 'workflow_run' ||
        (github.event.workflow_run.conclusion == 'success' &&
         (github.event.workflow_run.name == 'Release' || github.event.workflow_run.head_branch == 'main'))) &&
-      (needs.check-driver-changes.outputs.should_run == 'true' || github.event_name != 'workflow_run')
+      (needs.check-driver-changes.outputs.should_run != 'false')
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:

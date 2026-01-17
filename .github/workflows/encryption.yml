@@ -18,6 +18,7 @@ on:
           - all
           - nfs
           - nvmeof
+          - shared
 
 # Restrict permissions to minimum required
 permissions:
@@ -158,6 +159,44 @@ jobs:
           path: /tmp/test-logs/
           retention-days: 7
 
+  encryption-shared:
+    name: "Encryption: Shared"
+    runs-on: new
+    timeout-minutes: 45
+    needs: compute-tag
+    if: |
+      !cancelled() && needs.compute-tag.result == 'success' &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'shared' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run Shared Encryption Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running Shared Encryption E2E Tests ==="
+          # Run shared encryption tests (both protocols)
+          ginkgo -v --timeout=40m --focus="Shared Encryption" ./tests/e2e/encryption/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: encryption-shared-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   # ==========================================
   # Summary
   # ==========================================
@@ -166,7 +205,7 @@ jobs:
     name: "Encryption Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [encryption-nfs, encryption-nvmeof]
+    needs: [encryption-nfs, encryption-nvmeof, encryption-shared]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -176,6 +215,7 @@ jobs:
             const results = {
               'NFS Encryption': '${{ needs.encryption-nfs.result }}',
               'NVMe-oF Encryption': '${{ needs.encryption-nvmeof.result }}',
+              'Shared Encryption': '${{ needs.encryption-shared.result }}',
             };
 
             const getIcon = (result) => {
@@ -221,12 +261,17 @@ jobs:
             }
 
             summary += `\n## What Was Tested\n\n`;
+            summary += `### Protocol-Specific Tests (NFS & NVMe-oF)\n`;
             summary += `- **Basic Operations**: Provisioning with auto-generated keys, custom algorithms (AES-128-CCM)\n`;
             summary += `- **Volume Expansion**: Expanding encrypted volumes while preserving data\n`;
             summary += `- **Snapshots**: Creating and restoring snapshots from encrypted volumes\n`;
             summary += `- **Volume Cloning**: Cloning encrypted volumes to new PVCs\n`;
             summary += `- **Persistence**: Data persistence across pod restarts\n`;
-            summary += `- **Block Mode**: NVMe-oF encrypted raw block devices\n`;
+            summary += `- **Block Mode**: NVMe-oF encrypted raw block devices\n\n`;
+            summary += `### Shared Tests (Both Protocols)\n`;
+            summary += `- **Cross-Protocol Verification**: Encrypted volumes on both NFS and NVMe-oF\n`;
+            summary += `- **Snapshot Restore**: Point-in-time restore on encrypted volumes\n`;
+            summary += `- **Data Integrity**: Large file checksum verification\n`;
 
             // Write to job summary
             await core.summary.addRaw(summary).write();

@@ -1152,7 +1152,7 @@ func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.Cr
 
 	// Check if adoption is allowed: either volume has adoptable=true OR StorageClass has adoptExisting=true
 	volumeAdoptable := false
-	if adoptableProp, ok := props[tnsapi.PropertyAdoptable]; ok && adoptableProp.Value == "true" {
+	if adoptableProp, ok := props[tnsapi.PropertyAdoptable]; ok && adoptableProp.Value == VolumeContextValueTrue {
 		volumeAdoptable = true
 	}
 

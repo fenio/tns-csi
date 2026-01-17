@@ -50,6 +50,8 @@ type nvmeofVolumeParams struct {
 	markAdoptable bool
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsZvolProperties
+	// Encryption settings parsed from StorageClass and secrets
+	encryption *encryptionConfig
 	// Adoption metadata from CSI parameters
 	pvcName      string
 	pvcNamespace string
@@ -175,6 +177,9 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 	// Parse ZFS properties from StorageClass parameters
 	zfsProps := parseZFSZvolProperties(params)
 
+	// Parse encryption config from StorageClass parameters and secrets
+	encryption := parseEncryptionConfig(params, req.GetSecrets())
+
 	// Parse deleteStrategy from StorageClass parameters (default: "delete")
 	deleteStrategy := params["deleteStrategy"]
 	if deleteStrategy == "" {
@@ -201,6 +206,7 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		deleteStrategy:    deleteStrategy,
 		markAdoptable:     markAdoptable,
 		zfsProps:          zfsProps,
+		encryption:        encryption,
 		pvcName:           pvcName,
 		pvcNamespace:      pvcNamespace,
 		storageClass:      storageClass,
@@ -543,6 +549,32 @@ func (s *ControllerService) getOrCreateZVOL(ctx context.Context, params *nvmeofV
 
 		klog.V(4).Infof("Creating ZVOL with ZFS properties: compression=%s, dedup=%s, sync=%s, sparse=%v, volblocksize=%s",
 			createParams.Compression, createParams.Dedup, createParams.Sync, createParams.Sparse, createParams.Volblocksize)
+	}
+
+	// Apply encryption settings if specified in StorageClass
+	if params.encryption != nil && params.encryption.Enabled { //nolint:dupl // Intentionally duplicated in NFS
+		createParams.Encryption = true
+
+		// Build encryption options
+		encOpts := &tnsapi.EncryptionOptions{
+			Algorithm: params.encryption.Algorithm,
+		}
+
+		// Determine key source (priority: passphrase > key > generateKey)
+		switch {
+		case params.encryption.Passphrase != "":
+			encOpts.Passphrase = params.encryption.Passphrase
+		case params.encryption.Key != "":
+			encOpts.Key = params.encryption.Key
+		case params.encryption.GenerateKey:
+			encOpts.GenerateKey = true
+		}
+
+		createParams.EncryptionOptions = encOpts
+
+		klog.V(4).Infof("Creating encrypted ZVOL with algorithm=%s, generateKey=%v, hasPassphrase=%v, hasKey=%v",
+			params.encryption.Algorithm, params.encryption.GenerateKey,
+			params.encryption.Passphrase != "", params.encryption.Key != "")
 	}
 
 	// Create new ZVOL

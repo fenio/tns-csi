@@ -1,0 +1,236 @@
+name: Encryption Tests
+
+on:
+  # Run after Integration Tests workflow completes successfully
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types:
+      - completed
+  # Manual trigger for testing encryption specifically
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Protocol to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - nfs
+          - nvmeof
+
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
+# Ensure only one encryption test runs at a time
+concurrency:
+  group: encryption-tests
+  cancel-in-progress: false
+
+jobs:
+  # ==========================================
+  # Setup Phase
+  # ==========================================
+
+  compute-tag:
+    name: Compute Image Tag
+    runs-on: new
+    # Only run if triggered manually OR if Integration Tests passed
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Compute image tag from ref
+        id: tag
+        env:
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          # For workflow_run events, get ref from the triggering workflow
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            REF_NAME="$WORKFLOW_HEAD_BRANCH"
+            # Check if it was triggered by a tag (Release workflow)
+            if [ "$WORKFLOW_EVENT" = "push" ] && [[ "$WORKFLOW_HEAD_BRANCH" == v* ]]; then
+              REF_TYPE="tag"
+            else
+              REF_TYPE="branch"
+            fi
+          else
+            # For manual dispatch
+            REF_NAME="${{ github.ref_name }}"
+            REF_TYPE="${{ github.ref_type }}"
+          fi
+
+          echo "REF_NAME: $REF_NAME, REF_TYPE: $REF_TYPE"
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            TAG="${REF_NAME#v}"
+            echo "Using image tag: $TAG (from tag: $REF_NAME)"
+          elif [ "$REF_NAME" = "main" ]; then
+            TAG="latest"
+            echo "Using image tag: $TAG (from branch: $REF_NAME)"
+          else
+            TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
+            echo "Using image tag: $TAG (from branch: $REF_NAME)"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+  # ==========================================
+  # Encryption E2E Tests
+  # ==========================================
+
+  encryption-nfs:
+    name: "Encryption: NFS"
+    runs-on: new
+    timeout-minutes: 25
+    needs: compute-tag
+    if: |
+      !cancelled() && needs.compute-tag.result == 'success' &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run NFS Encryption Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running NFS Encryption E2E Tests ==="
+          # Run only encryption tests from the nfs/ directory
+          ginkgo -v --timeout=20m --focus="Encryption" ./tests/e2e/nfs/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: encryption-nfs-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  encryption-nvmeof:
+    name: "Encryption: NVMe-oF"
+    runs-on: new
+    timeout-minutes: 35
+    needs: compute-tag
+    if: |
+      !cancelled() && needs.compute-tag.result == 'success' &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run NVMe-oF Encryption Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running NVMe-oF Encryption E2E Tests ==="
+          # Run only encryption tests from the nvmeof/ directory
+          ginkgo -v --timeout=30m --focus="Encryption" ./tests/e2e/nvmeof/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: encryption-nvmeof-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
+  # ==========================================
+  # Summary
+  # ==========================================
+
+  encryption-summary:
+    name: "Encryption Test Summary"
+    runs-on: new
+    timeout-minutes: 5
+    needs: [encryption-nfs, encryption-nvmeof]
+    if: always()
+    steps:
+      - name: Generate Test Summary
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const results = {
+              'NFS Encryption': '${{ needs.encryption-nfs.result }}',
+              'NVMe-oF Encryption': '${{ needs.encryption-nvmeof.result }}',
+            };
+
+            const getIcon = (result) => {
+              switch(result) {
+                case 'success': return '✅';
+                case 'failure': return '❌';
+                case 'skipped': return '⏭️';
+                case 'cancelled': return '🚫';
+                default: return '⚪';
+              }
+            };
+
+            let passed = 0, failed = 0, skipped = 0;
+            for (const result of Object.values(results)) {
+              if (result === 'success') passed++;
+              else if (result === 'failure') failed++;
+              else if (result === 'skipped') skipped++;
+            }
+            const total = Object.keys(results).length;
+
+            let summary = `# Encryption Test Results\n\n`;
+
+            // Overall status banner
+            if (failed > 0) {
+              summary += `> ### ❌ ${failed} test(s) failed\n\n`;
+            } else if (passed === total) {
+              summary += `> ### ✅ All ${total} encryption tests passed!\n\n`;
+            } else {
+              summary += `> ### ${passed}/${passed + failed} tests passed (${skipped} skipped)\n\n`;
+            }
+
+            // Quick stats
+            summary += `| Passed | Failed | Skipped | Total |\n`;
+            summary += `|:------:|:------:|:-------:|:-----:|\n`;
+            summary += `| ${passed} | ${failed} | ${skipped} | ${total} |\n\n`;
+
+            // Test details
+            summary += `## Test Details\n\n`;
+            summary += `| Test Suite | Status |\n`;
+            summary += `|------------|:------:|\n`;
+            for (const [test, result] of Object.entries(results)) {
+              summary += `| ${test} | ${getIcon(result)} |\n`;
+            }
+
+            summary += `\n## What Was Tested\n\n`;
+            summary += `- **Encrypted volume provisioning** with auto-generated keys\n`;
+            summary += `- **Data integrity** on encrypted volumes (read/write verification)\n`;
+            summary += `- **Volume expansion** on encrypted volumes\n`;
+            summary += `- **Custom encryption algorithms** (AES-128-CCM, AES-256-GCM)\n`;
+            summary += `- **Encryption with compression** (NVMe-oF)\n`;
+
+            // Write to job summary
+            await core.summary.addRaw(summary).write();
+
+            // Fail if any test failed
+            if (failed > 0) {
+              core.setFailed(`${failed} encryption test(s) failed`);
+            }

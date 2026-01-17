@@ -77,6 +77,7 @@
 | Prometheus metrics | Yes | No (basic) |
 | kubectl plugin | Yes | No |
 | Volume adoption | Yes | No |
+| Dataset encryption | Yes | No |
 
 ## Configuration Complexity
 

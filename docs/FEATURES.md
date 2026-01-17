@@ -494,6 +494,130 @@ allowVolumeExpansion: true
 reclaimPolicy: Delete
 ```
 
+### ZFS Native Encryption
+- **Status**: ✅ Implemented
+- **Description**: Enable ZFS native encryption for datasets and ZVOLs at creation time
+- **Protocols**: NFS, NVMe-oF
+
+ZFS native encryption provides transparent, at-rest encryption for your volumes. Once enabled, all data written to the volume is automatically encrypted using AES-256-GCM (default) or other supported algorithms.
+
+#### StorageClass Parameters
+
+| Parameter | Description | Default | Required |
+|-----------|-------------|---------|----------|
+| `encryption` | Enable encryption | `"false"` | Yes (to enable) |
+| `encryptionAlgorithm` | Encryption algorithm | `"AES-256-GCM"` | No |
+| `encryptionGenerateKey` | Auto-generate encryption key | `"false"` | One of key source options |
+
+**Supported Algorithms:**
+- `AES-256-GCM` (recommended, default)
+- `AES-128-CCM`
+- `AES-192-CCM`
+- `AES-256-CCM`
+- `AES-128-GCM`
+- `AES-192-GCM`
+
+#### Key Management Options
+
+1. **Auto-generate Key** (simplest): TrueNAS generates and manages the encryption key
+   ```yaml
+   encryption: "true"
+   encryptionGenerateKey: "true"
+   ```
+
+2. **Passphrase**: Provide a passphrase via Kubernetes Secret (min 8 characters)
+   ```yaml
+   encryption: "true"
+   csi.storage.k8s.io/provisioner-secret-name: encryption-secret
+   csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+   ```
+
+   Secret contents:
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: encryption-secret
+     namespace: kube-system
+   type: Opaque
+   stringData:
+     encryptionPassphrase: "my-secret-passphrase"
+   ```
+
+3. **Hex Key**: Provide a 256-bit hex-encoded key via Kubernetes Secret (64 hex chars)
+   ```yaml
+   encryption: "true"
+   csi.storage.k8s.io/provisioner-secret-name: encryption-secret
+   csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+   ```
+
+   Secret contents:
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: encryption-secret
+     namespace: kube-system
+   type: Opaque
+   stringData:
+     encryptionKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+   ```
+
+**Example: Encrypted NFS StorageClass (Auto-Generated Key):**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-encrypted
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  encryption: "true"
+  encryptionGenerateKey: "true"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
+**Example: Encrypted NVMe-oF StorageClass (Passphrase from Secret):**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nvmeof-encrypted
+provisioner: tns.csi.io
+parameters:
+  protocol: nvmeof
+  pool: tank
+  server: truenas.local
+  transport: tcp
+  port: "4420"
+  encryption: "true"
+  encryptionAlgorithm: "AES-256-GCM"
+  csi.storage.k8s.io/provisioner-secret-name: encryption-secret
+  csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption-secret
+  namespace: kube-system
+type: Opaque
+stringData:
+  encryptionPassphrase: "my-secret-passphrase-at-least-8-chars"
+```
+
+#### Important Notes
+
+- **Key Recovery**: If using passphrase or hex key, you are responsible for key backup. Losing the key means losing access to encrypted data.
+- **Auto-Generated Keys**: When using `encryptionGenerateKey: "true"`, TrueNAS manages the key. The key is stored on TrueNAS and is accessible to TrueNAS administrators.
+- **Existing Volumes**: Encryption can only be set at volume creation time. Existing unencrypted volumes cannot be encrypted.
+- **Snapshots**: Snapshots of encrypted volumes inherit the encryption settings.
+- **Performance**: Encryption has minimal performance impact with modern CPUs (AES-NI acceleration).
+
 ### Volume Metadata (Schema v1)
 - **Status**: ✅ Implemented
 - **Description**: All volumes are tagged with ZFS user properties for reliable identification and cross-cluster adoption

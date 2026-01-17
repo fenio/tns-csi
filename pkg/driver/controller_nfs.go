@@ -17,6 +17,22 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// encryptionConfig holds encryption settings parsed from StorageClass and secrets.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
+type encryptionConfig struct {
+	// Enabled indicates whether encryption should be enabled for the volume.
+	Enabled bool
+	// Algorithm specifies the encryption algorithm (e.g., AES-256-GCM).
+	Algorithm string
+	// GenerateKey indicates whether to auto-generate an encryption key.
+	GenerateKey bool
+	// Passphrase for encryption (from secret).
+	Passphrase string
+	// Key is a hex-encoded encryption key (from secret).
+	Key string
+}
+
 // nfsVolumeParams holds validated parameters for NFS volume creation.
 //
 //nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
@@ -33,6 +49,8 @@ type nfsVolumeParams struct {
 	markAdoptable bool
 	// ZFS properties parsed from StorageClass parameters
 	zfsProps *zfsDatasetProperties
+	// Encryption settings parsed from StorageClass and secrets
+	encryption *encryptionConfig
 	// Adoption metadata from CSI parameters
 	pvcName      string
 	pvcNamespace string
@@ -125,6 +143,49 @@ func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
 	return props
 }
 
+// parseEncryptionConfig extracts encryption settings from StorageClass parameters and secrets.
+// StorageClass parameters:
+//   - encryption: "true" or "false" (default: false)
+//   - encryptionAlgorithm: AES-256-GCM (default), AES-128-CCM, AES-192-CCM, AES-256-CCM, AES-128-GCM, AES-192-GCM
+//   - encryptionGenerateKey: "true" to auto-generate key (default: false)
+//
+// Secrets (from csi.storage.k8s.io/provisioner-secret-name):
+//   - encryptionPassphrase: passphrase for encryption (min 8 chars)
+//   - encryptionKey: hex-encoded 256-bit key (64 chars)
+func parseEncryptionConfig(params, secrets map[string]string) *encryptionConfig {
+	if !strings.EqualFold(params["encryption"], "true") {
+		return nil
+	}
+
+	config := &encryptionConfig{
+		Enabled:     true,
+		Algorithm:   params["encryptionAlgorithm"],
+		GenerateKey: strings.EqualFold(params["encryptionGenerateKey"], "true"),
+	}
+
+	// Default algorithm if not specified
+	if config.Algorithm == "" {
+		config.Algorithm = "AES-256-GCM"
+	}
+
+	// Get sensitive values from secrets
+	if secrets != nil {
+		config.Passphrase = secrets["encryptionPassphrase"]
+		config.Key = secrets["encryptionKey"]
+	}
+
+	// Validate: must have either generateKey, passphrase, or key
+	if !config.GenerateKey && config.Passphrase == "" && config.Key == "" {
+		klog.Warningf("Encryption enabled but no key source specified. Set encryptionGenerateKey=true, " +
+			"or provide encryptionPassphrase/encryptionKey in provisioner secret.")
+	}
+
+	klog.V(4).Infof("Parsed encryption config: enabled=%v, algorithm=%s, generateKey=%v, hasPassphrase=%v, hasKey=%v",
+		config.Enabled, config.Algorithm, config.GenerateKey, config.Passphrase != "", config.Key != "")
+
+	return config
+}
+
 // validateNFSParams validates and extracts NFS volume parameters from the request.
 func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	params := req.GetParameters()
@@ -161,6 +222,9 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	// Parse ZFS properties from StorageClass parameters
 	zfsProps := parseZFSDatasetProperties(params)
 
+	// Parse encryption config from StorageClass parameters and secrets
+	encryption := parseEncryptionConfig(params, req.GetSecrets())
+
 	// Parse deleteStrategy from StorageClass parameters (default: "delete")
 	deleteStrategy := params["deleteStrategy"]
 	if deleteStrategy == "" {
@@ -185,6 +249,7 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 		deleteStrategy:    deleteStrategy,
 		markAdoptable:     markAdoptable,
 		zfsProps:          zfsProps,
+		encryption:        encryption,
 		pvcName:           pvcName,
 		pvcNamespace:      pvcNamespace,
 		storageClass:      storageClass,
@@ -313,6 +378,32 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 
 		klog.V(4).Infof("Creating dataset with ZFS properties: compression=%s, dedup=%s, atime=%s",
 			createParams.Compression, createParams.Dedup, createParams.Atime)
+	}
+
+	// Apply encryption settings if specified in StorageClass
+	if params.encryption != nil && params.encryption.Enabled { //nolint:dupl // Intentionally duplicated in NVMe-oF
+		createParams.Encryption = true
+
+		// Build encryption options
+		encOpts := &tnsapi.EncryptionOptions{
+			Algorithm: params.encryption.Algorithm,
+		}
+
+		// Determine key source (priority: passphrase > key > generateKey)
+		switch {
+		case params.encryption.Passphrase != "":
+			encOpts.Passphrase = params.encryption.Passphrase
+		case params.encryption.Key != "":
+			encOpts.Key = params.encryption.Key
+		case params.encryption.GenerateKey:
+			encOpts.GenerateKey = true
+		}
+
+		createParams.EncryptionOptions = encOpts
+
+		klog.V(4).Infof("Creating encrypted dataset with algorithm=%s, generateKey=%v, hasPassphrase=%v, hasKey=%v",
+			params.encryption.Algorithm, params.encryption.GenerateKey,
+			params.encryption.Passphrase != "", params.encryption.Key != "")
 	}
 
 	// Create new dataset

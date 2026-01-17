@@ -268,6 +268,20 @@ storageClasses:
     #   adoptExisting: "true" or "false"
     #     - When "true", the driver will adopt existing volumes that match the PVC name
     #     - Useful for migrating volumes between clusters or recovering from cluster failures
+    #
+    # Encryption (ZFS native encryption):
+    #   encryption: "true" or "false"
+    #     - Enables ZFS native encryption for the dataset
+    #   encryptionAlgorithm: Algorithm to use (default: "AES-256-GCM")
+    #     - Options: AES-256-GCM, AES-128-CCM, AES-192-CCM, AES-256-CCM, AES-128-GCM, AES-192-GCM
+    #   encryptionGenerateKey: "true" to auto-generate encryption key
+    #     - If true, TrueNAS generates and manages the encryption key
+    #   To use passphrase or hex key, create a Secret and reference it with:
+    #     csi.storage.k8s.io/provisioner-secret-name: <secret-name>
+    #     csi.storage.k8s.io/provisioner-secret-namespace: <secret-namespace>
+    #   Secret keys:
+    #     - encryptionPassphrase: passphrase for encryption (min 8 chars)
+    #     - encryptionKey: hex-encoded encryption key (64 chars for 256-bit)
     parameters: {}
 
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
@@ -331,6 +345,20 @@ storageClasses:
     #   portID: TrueNAS NVMe-oF port ID to use
     #     - If not specified, the driver auto-detects the first available port
     #     - Useful when multiple NVMe-oF ports are configured on TrueNAS
+    #
+    # Encryption (ZFS native encryption):
+    #   encryption: "true" or "false"
+    #     - Enables ZFS native encryption for the ZVOL
+    #   encryptionAlgorithm: Algorithm to use (default: "AES-256-GCM")
+    #     - Options: AES-256-GCM, AES-128-CCM, AES-192-CCM, AES-256-CCM, AES-128-GCM, AES-192-GCM
+    #   encryptionGenerateKey: "true" to auto-generate encryption key
+    #     - If true, TrueNAS generates and manages the encryption key
+    #   To use passphrase or hex key, create a Secret and reference it with:
+    #     csi.storage.k8s.io/provisioner-secret-name: <secret-name>
+    #     csi.storage.k8s.io/provisioner-secret-namespace: <secret-namespace>
+    #   Secret keys:
+    #     - encryptionPassphrase: passphrase for encryption (min 8 chars)
+    #     - encryptionKey: hex-encoded encryption key (64 chars for 256-bit)
     parameters: {}
 
 # Snapshot support

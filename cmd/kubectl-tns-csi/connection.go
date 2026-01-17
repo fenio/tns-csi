@@ -20,6 +20,12 @@ var (
 	errInvalidSecretRef    = errors.New("invalid secret reference format, expected 'namespace/name'")
 )
 
+// Constants for auto-discovery.
+const (
+	defaultDriverNamespace = "kube-system"
+	driverLabelSelector    = "app.kubernetes.io/name=tns-csi-driver"
+)
+
 // connectionConfig holds TrueNAS connection parameters.
 type connectionConfig struct {
 	URL           string
@@ -28,7 +34,7 @@ type connectionConfig struct {
 }
 
 // getConnectionConfig resolves TrueNAS connection config from various sources.
-// Priority: flags > secret > environment.
+// Priority: flags > explicit secret > auto-discovered secret > environment.
 func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, skipTLSVerify *bool) (*connectionConfig, error) {
 	cfg := &connectionConfig{
 		SkipTLSVerify: true, // Default to skip for self-signed certs
@@ -51,7 +57,7 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 		return cfg, nil
 	}
 
-	// Try Kubernetes secret
+	// Try explicitly provided Kubernetes secret
 	if secretRef != nil && *secretRef != "" {
 		secretCfg, err := getConfigFromSecret(ctx, *secretRef)
 		if err != nil {
@@ -62,6 +68,18 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 		}
 		if cfg.APIKey == "" {
 			cfg.APIKey = secretCfg.APIKey
+		}
+	}
+
+	// If still missing config, try auto-discovery from installed driver
+	if cfg.URL == "" || cfg.APIKey == "" {
+		if discoveredCfg := autoDiscoverDriverSecret(ctx); discoveredCfg != nil {
+			if cfg.URL == "" {
+				cfg.URL = discoveredCfg.URL
+			}
+			if cfg.APIKey == "" {
+				cfg.APIKey = discoveredCfg.APIKey
+			}
 		}
 	}
 
@@ -150,4 +168,84 @@ func connectToTrueNAS(_ context.Context, cfg *connectionConfig) (*TrueNASClient,
 	}
 
 	return &TrueNASClient{Client: client}, nil
+}
+
+// autoDiscoverDriverSecret attempts to find the tns-csi driver secret automatically.
+// It searches in kube-system namespace for secrets with the driver labels.
+func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
+	// Build Kubernetes client
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	config, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return nil // Can't connect to cluster, skip auto-discovery
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil
+	}
+
+	// Search for secrets with tns-csi-driver labels
+	secrets, err := clientset.CoreV1().Secrets(defaultDriverNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: driverLabelSelector,
+	})
+	if err != nil || len(secrets.Items) == 0 {
+		// Try common secret name patterns as fallback
+		return tryCommonSecretNames(ctx, clientset)
+	}
+
+	// Use the first matching secret
+	secret := &secrets.Items[0]
+	return extractConfigFromSecretData(secret.Data)
+}
+
+// tryCommonSecretNames tries to find secrets with common naming patterns.
+func tryCommonSecretNames(ctx context.Context, clientset *kubernetes.Clientset) *connectionConfig {
+	commonNames := []string{
+		"tns-csi-driver-secret",
+		"tns-csi-secret",
+		"truenas-csi-secret",
+	}
+
+	for _, name := range commonNames {
+		secret, err := clientset.CoreV1().Secrets(defaultDriverNamespace).Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			cfg := extractConfigFromSecretData(secret.Data)
+			if cfg != nil && cfg.URL != "" && cfg.APIKey != "" {
+				return cfg
+			}
+		}
+	}
+
+	return nil
+}
+
+// extractConfigFromSecretData extracts connection config from secret data.
+func extractConfigFromSecretData(data map[string][]byte) *connectionConfig {
+	cfg := &connectionConfig{}
+
+	// Try common key names for URL
+	for _, key := range []string{"url", "truenas-url", "TRUENAS_URL"} {
+		if val, ok := data[key]; ok && len(val) > 0 {
+			cfg.URL = string(val)
+			break
+		}
+	}
+
+	// Try common key names for API key
+	for _, key := range []string{"api-key", "apiKey", "truenas-api-key", "TRUENAS_API_KEY"} {
+		if val, ok := data[key]; ok && len(val) > 0 {
+			cfg.APIKey = string(val)
+			break
+		}
+	}
+
+	if cfg.URL == "" && cfg.APIKey == "" {
+		return nil
+	}
+
+	return cfg
 }

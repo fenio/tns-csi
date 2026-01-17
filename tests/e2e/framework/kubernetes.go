@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/klog/v2"
 )
 
 // Kubernetes client errors.
@@ -305,11 +306,28 @@ func (k *KubernetesClient) DeletePod(ctx context.Context, name string) error {
 }
 
 // WaitForPodReady waits for a Pod to be Running and Ready.
+// On timeout, it logs diagnostic information about why the pod isn't ready.
 func (k *KubernetesClient) WaitForPodReady(ctx context.Context, name string, timeout time.Duration) error {
-	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+	var lastPod *corev1.Pod
+	var lastLogTime time.Time
+
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pod, err := k.GetPod(ctx, name)
 		if err != nil {
 			return false, nil //nolint:nilerr // Continue polling on transient errors
+		}
+		lastPod = pod
+
+		// Log status every 30 seconds while waiting
+		if time.Since(lastLogTime) > 30*time.Second {
+			klog.Infof("Pod %s status: Phase=%s", name, pod.Status.Phase)
+			for i := range pod.Status.ContainerStatuses {
+				cs := &pod.Status.ContainerStatuses[i]
+				if cs.State.Waiting != nil {
+					klog.Infof("  Container %s: Waiting - %s: %s", cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+				}
+			}
+			lastLogTime = time.Now()
 		}
 
 		if pod.Status.Phase != corev1.PodRunning {
@@ -323,6 +341,43 @@ func (k *KubernetesClient) WaitForPodReady(ctx context.Context, name string, tim
 		}
 		return false, nil
 	})
+
+	// On timeout, log detailed diagnostics
+	if err != nil && lastPod != nil {
+		klog.Errorf("Pod %s failed to become ready. Final status:", name)
+		klog.Errorf("  Phase: %s", lastPod.Status.Phase)
+		for _, cond := range lastPod.Status.Conditions {
+			klog.Errorf("  Condition %s: %s (Reason: %s, Message: %s)",
+				cond.Type, cond.Status, cond.Reason, cond.Message)
+		}
+		for i := range lastPod.Status.ContainerStatuses {
+			cs := &lastPod.Status.ContainerStatuses[i]
+			if cs.State.Waiting != nil {
+				klog.Errorf("  Container %s: Waiting - %s: %s", cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+			} else if cs.State.Terminated != nil {
+				klog.Errorf("  Container %s: Terminated - %s (exit code %d)", cs.Name, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode)
+			}
+		}
+		// Log pod events
+		k.logPodEvents(ctx, name)
+	}
+
+	return err
+}
+
+// logPodEvents logs events related to a pod for debugging.
+func (k *KubernetesClient) logPodEvents(ctx context.Context, podName string) {
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "events", //nolint:gosec // args are controlled by the framework
+		"-n", k.namespace,
+		"--field-selector", "involvedObject.name="+podName,
+		"--sort-by=.lastTimestamp",
+		"-o", "custom-columns=TIME:.lastTimestamp,TYPE:.type,REASON:.reason,MESSAGE:.message")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.Warningf("Failed to get pod events: %v", err)
+		return
+	}
+	klog.Errorf("Pod %s events:\n%s", podName, string(output))
 }
 
 // WaitForPodDeleted waits for a Pod to be fully deleted.

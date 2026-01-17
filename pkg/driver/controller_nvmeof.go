@@ -182,7 +182,7 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 	}
 
 	// Parse markAdoptable from StorageClass parameters (default: false)
-	markAdoptable := params["markAdoptable"] == "true"
+	markAdoptable := params["markAdoptable"] == VolumeContextValueTrue
 
 	// Extract adoption metadata from CSI parameters
 	pvcName := params["csi.storage.k8s.io/pvc/name"]
@@ -1192,7 +1192,7 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 	if deleteStrategy == "" {
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
-	markAdoptable := params["markAdoptable"] == "true"
+	markAdoptable := params["markAdoptable"] == VolumeContextValueTrue
 
 	props := tnsapi.NVMeOFVolumePropertiesV1(tnsapi.NVMeOFVolumeParams{
 		VolumeID:       volumeName,

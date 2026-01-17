@@ -1,6 +1,6 @@
 module github.com/fenio/tns-csi
 
-go 1.25.5
+go 1.25.6
 
 require (
 	github.com/container-storage-interface/spec v1.12.0

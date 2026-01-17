@@ -557,7 +557,7 @@ zfs get all tank/csi/pvc-12345678 | grep tns-csi
 
 #### Automatic Adoption (GitOps)
 
-**New in v0.7.0**: Volumes can be automatically adopted when a PVC with the same name is created.
+**New in v0.8.0**: Volumes can be automatically adopted when a PVC with the same name is created.
 
 **StorageClass Parameters:**
 
@@ -674,16 +674,22 @@ Your actual paths depend on StorageClass configuration:
      volumeName: adopted-volume  # Bind to static PV
    ```
 
-#### Future: Automated Adoption CLI
+#### Automated Adoption CLI
 
-A future release may include CLI tooling for automated adoption:
+The kubectl plugin provides CLI tooling for volume discovery and adoption:
 ```bash
-# Discover orphaned volumes (planned)
+# Discover orphaned volumes (volumes on TrueNAS without matching PVCs)
 kubectl tns-csi list-orphaned
 
-# Adopt a specific volume (planned)
-kubectl tns-csi adopt <dataset-path> --namespace <ns> --pvc-name <name>
+# Generate PV manifest to adopt a specific volume
+kubectl tns-csi adopt <dataset-path> -o yaml > pv.yaml
+kubectl apply -f pv.yaml
+
+# Mark volumes as adoptable for future cluster recreation
+kubectl tns-csi mark-adoptable --all
 ```
+
+See [kubectl Plugin Documentation](KUBECTL-PLUGIN.md) for full details on adoption workflows.
 
 ### Volume Name Templating
 - **Status**: ✅ Implemented
@@ -955,6 +961,7 @@ reclaimPolicy: Delete
 ### Available Documentation
 - ✅ README.md - Project overview and quick start
 - ✅ DEPLOYMENT.md - Detailed deployment guide
+- ✅ KUBECTL-PLUGIN.md - kubectl plugin for volume management
 - ✅ QUICKSTART.md - NFS quick start guide
 - ✅ QUICKSTART-NVMEOF.md - NVMe-oF setup guide
 - ✅ SNAPSHOTS.md - Snapshot and cloning guide
@@ -1053,7 +1060,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ---
 
-**Last Updated**: 2026-01-16
-**Driver Version**: v0.7.0
+**Last Updated**: 2026-01-17
+**Driver Version**: v0.8.0
 **Kubernetes Version Tested**: 1.27+
-**Go Version**: 1.25.5+
+**Go Version**: 1.25.6+

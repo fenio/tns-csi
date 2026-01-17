@@ -69,6 +69,7 @@ Connection to TrueNAS can be configured via:
 	rootCmd.AddCommand(newListOrphanedCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
 	rootCmd.AddCommand(newDescribeCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
 	rootCmd.AddCommand(newHealthCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
+	rootCmd.AddCommand(newTroubleshootCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
 	rootCmd.AddCommand(newAdoptCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
 	rootCmd.AddCommand(newStatusCmd(&truenasURL, &truenasAPIKey, &secretRef, &outputFormat, &skipTLSVerify))
 	rootCmd.AddCommand(newConnectivityCmd(&truenasURL, &truenasAPIKey, &secretRef, &skipTLSVerify))

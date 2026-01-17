@@ -565,8 +565,14 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		tnsapi.PropertyDeleteStrategy:   "delete",
 	}
 	if err := s.apiClient.SetDatasetProperties(ctx, targetDataset, props); err != nil {
-		klog.Warningf("Failed to set CSI properties on detached snapshot dataset: %v", err)
-		// Non-fatal - the snapshot is still usable
+		// Property setting is critical - without PropertySnapshotID, the snapshot can't be found
+		// during restore operations. We must clean up and fail.
+		klog.Errorf("Failed to set CSI properties on detached snapshot dataset %s: %v. Cleaning up.", targetDataset, err)
+		if delErr := s.apiClient.DeleteDataset(ctx, targetDataset); delErr != nil {
+			klog.Errorf("Failed to cleanup detached snapshot dataset after property setting failure: %v", delErr)
+		}
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to set CSI properties on detached snapshot: %v", err)
 	}
 
 	// Create snapshot metadata

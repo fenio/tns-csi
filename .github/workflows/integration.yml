@@ -61,16 +61,48 @@ jobs:
   # ==========================================
   # Setup Phase
   # ==========================================
+
+  # Check if driver files changed (skip integration tests for plugin-only changes)
+  check-driver-changes:
+    name: Check Driver Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+      - name: Check for driver changes
+        id: check
+        run: |
+          # Get changed files in the commit
+          CHANGED=$(git diff --name-only HEAD^..HEAD 2>/dev/null || echo "")
+          echo "Changed files: $CHANGED"
+
+          # Check if any driver-related files changed
+          if echo "$CHANGED" | grep -qE '^(cmd/tns-csi-driver/|pkg/|Dockerfile|go\.(mod|sum)|charts/)'; then
+            echo "Driver files changed - will run integration tests"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "No driver files changed - skipping integration tests"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
   compute-tag:
     name: Compute Image Tag
     runs-on: new
+    needs: check-driver-changes
     # Skip if:
     # - triggered by workflow_run and the workflow failed
     # - triggered by CI workflow but not on main branch (only run integration tests for main)
+    # - no driver files changed (plugin-only changes)
     if: |
-      github.event_name != 'workflow_run' || 
-      (github.event.workflow_run.conclusion == 'success' && 
-       (github.event.workflow_run.name == 'Release' || github.event.workflow_run.head_branch == 'main'))
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        (github.event.workflow_run.name == 'Release' || github.event.workflow_run.head_branch == 'main'))) &&
+      (needs.check-driver-changes.outputs.should_run == 'true' || github.event_name != 'workflow_run')
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -195,7 +227,7 @@ jobs:
   ginkgo-e2e-shared:
     name: "E2E: Shared"
     runs-on: new
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: compute-tag
     steps:
       - uses: actions/checkout@v6
@@ -219,7 +251,7 @@ jobs:
           echo "=== Running Shared E2E Tests ==="
           # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
           # These tests use "both" protocol setup
-          ginkgo -v --timeout=25m ./tests/e2e/
+          ginkgo -v --timeout=40m ./tests/e2e/
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6

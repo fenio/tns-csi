@@ -12,6 +12,29 @@ permissions:
   contents: read
 
 jobs:
+  # Detect which components changed
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      driver: ${{ steps.filter.outputs.driver }}
+      plugin: ${{ steps.filter.outputs.plugin }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            driver:
+              - 'cmd/tns-csi-driver/**'
+              - 'pkg/**'
+              - 'Dockerfile'
+              - 'go.mod'
+              - 'go.sum'
+              - 'charts/**'
+            plugin:
+              - 'cmd/kubectl-tns-csi/**'
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -52,9 +75,11 @@ jobs:
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest
-    needs: [lint, test]
-    # Push on any branch push or manual trigger (not PRs)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [changes, lint, test]
+    # Push on any branch push or manual trigger (not PRs), but only if driver changed
+    if: |
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (needs.changes.outputs.driver == 'true' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
       packages: write
@@ -138,9 +163,9 @@ jobs:
   build-image-pr:
     name: Build Docker Image (PR)
     runs-on: ubuntu-latest
-    needs: [lint, test]
-    # Only build (not push) on PRs
-    if: github.event_name == 'pull_request'
+    needs: [changes, lint, test]
+    # Only build (not push) on PRs, and only if driver changed
+    if: github.event_name == 'pull_request' && needs.changes.outputs.driver == 'true'
     permissions:
       contents: read
     steps:
@@ -151,3 +176,28 @@ jobs:
 
       - name: Build image
         run: make docker-build
+
+  build-plugin:
+    name: Build Plugin
+    runs-on: ubuntu-latest
+    needs: [changes, lint, test]
+    # Build plugin if plugin files changed
+    if: needs.changes.outputs.plugin == 'true'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
+
+      - name: Build plugin
+        run: make build-plugin
+
+      - name: Test plugin builds for multiple platforms
+        run: |
+          # Quick sanity check that cross-compilation works
+          GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/kubectl-tns-csi
+          GOOS=darwin GOARCH=amd64 go build -o /dev/null ./cmd/kubectl-tns-csi
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/kubectl-tns-csi
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/kubectl-tns-csi

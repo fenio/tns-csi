@@ -1,0 +1,221 @@
+name: Release Plugin
+
+on:
+  push:
+    tags:
+      - 'plugin-v*'  # Trigger on plugin version tags like plugin-v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.5'
+
+      - name: Get version from tag
+        id: version
+        run: |
+          # Extract version from tag (plugin-v1.0.0 -> 1.0.0)
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#plugin-v}
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
+
+      - name: Run tests
+        run: go test ./cmd/kubectl-tns-csi/... ./pkg/tnsapi/...
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --config .golangci.yml ./cmd/kubectl-tns-csi/...
+
+      - name: Build binaries for all platforms
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          COMMIT=${{ steps.version.outputs.commit }}
+          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}"
+
+          mkdir -p dist
+
+          # Build for each platform
+          platforms=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+          )
+
+          for platform in "${platforms[@]}"; do
+            GOOS=${platform%/*}
+            GOARCH=${platform#*/}
+            output="kubectl-tns_csi"
+            if [ "$GOOS" = "windows" ]; then
+              output="${output}.exe"
+            fi
+
+            echo "Building for ${GOOS}/${GOARCH}..."
+            GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "${LDFLAGS}" \
+              -o "dist/kubectl-tns_csi-${GOOS}-${GOARCH}/${output}" \
+              ./cmd/kubectl-tns-csi
+
+            # Create tarball (zip for windows)
+            cd dist
+            if [ "$GOOS" = "windows" ]; then
+              zip -r "kubectl-tns_csi-${GOOS}-${GOARCH}.zip" "kubectl-tns_csi-${GOOS}-${GOARCH}"
+            else
+              tar -czvf "kubectl-tns_csi-${GOOS}-${GOARCH}.tar.gz" "kubectl-tns_csi-${GOOS}-${GOARCH}"
+            fi
+            cd ..
+          done
+
+          # Generate checksums
+          cd dist
+          sha256sum *.tar.gz *.zip > checksums.txt
+          cd ..
+
+      - name: Generate krew manifest
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          TAG=${{ steps.version.outputs.tag }}
+
+          # Calculate checksums for krew manifest
+          LINUX_AMD64_SHA=$(sha256sum dist/kubectl-tns_csi-linux-amd64.tar.gz | cut -d' ' -f1)
+          LINUX_ARM64_SHA=$(sha256sum dist/kubectl-tns_csi-linux-arm64.tar.gz | cut -d' ' -f1)
+          DARWIN_AMD64_SHA=$(sha256sum dist/kubectl-tns_csi-darwin-amd64.tar.gz | cut -d' ' -f1)
+          DARWIN_ARM64_SHA=$(sha256sum dist/kubectl-tns_csi-darwin-arm64.tar.gz | cut -d' ' -f1)
+          WINDOWS_AMD64_SHA=$(sha256sum dist/kubectl-tns_csi-windows-amd64.zip | cut -d' ' -f1)
+
+          cat > dist/tns-csi.yaml << EOF
+          apiVersion: krew.googlecontainertools.github.com/v1alpha2
+          kind: Plugin
+          metadata:
+            name: tns-csi
+          spec:
+            version: v${VERSION}
+            homepage: https://github.com/${{ github.repository }}
+            shortDescription: Manage TrueNAS CSI volumes
+            description: |
+              kubectl plugin for managing TrueNAS CSI driver volumes.
+
+              Features:
+              - List all tns-csi managed volumes on TrueNAS
+              - Find orphaned volumes (exist on TrueNAS but no matching PVC)
+              - Adopt orphaned volumes into Kubernetes
+              - Check volume status and health
+              - Test TrueNAS connectivity
+            platforms:
+            - selector:
+                matchLabels:
+                  os: linux
+                  arch: amd64
+              uri: https://github.com/${{ github.repository }}/releases/download/${TAG}/kubectl-tns_csi-linux-amd64.tar.gz
+              sha256: ${LINUX_AMD64_SHA}
+              bin: kubectl-tns_csi
+            - selector:
+                matchLabels:
+                  os: linux
+                  arch: arm64
+              uri: https://github.com/${{ github.repository }}/releases/download/${TAG}/kubectl-tns_csi-linux-arm64.tar.gz
+              sha256: ${LINUX_ARM64_SHA}
+              bin: kubectl-tns_csi
+            - selector:
+                matchLabels:
+                  os: darwin
+                  arch: amd64
+              uri: https://github.com/${{ github.repository }}/releases/download/${TAG}/kubectl-tns_csi-darwin-amd64.tar.gz
+              sha256: ${DARWIN_AMD64_SHA}
+              bin: kubectl-tns_csi
+            - selector:
+                matchLabels:
+                  os: darwin
+                  arch: arm64
+              uri: https://github.com/${{ github.repository }}/releases/download/${TAG}/kubectl-tns_csi-darwin-arm64.tar.gz
+              sha256: ${DARWIN_ARM64_SHA}
+              bin: kubectl-tns_csi
+            - selector:
+                matchLabels:
+                  os: windows
+                  arch: amd64
+              uri: https://github.com/${{ github.repository }}/releases/download/${TAG}/kubectl-tns_csi-windows-amd64.zip
+              sha256: ${WINDOWS_AMD64_SHA}
+              bin: kubectl-tns_csi.exe
+          EOF
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Get previous plugin tag
+          PREV_TAG=$(git tag -l 'plugin-v*' | grep -v "^${TAG}$" | sort -V | tail -1 || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous plugin tag found, showing all plugin commits"
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -- cmd/kubectl-tns-csi/)
+          else
+            echo "Generating changelog from ${PREV_TAG} to ${TAG}"
+            CHANGELOG=$(git log ${PREV_TAG}..${TAG} --pretty=format:"- %s (%h)" --no-merges -- cmd/kubectl-tns-csi/)
+          fi
+
+          cat > CHANGELOG.md << EOF
+          ## kubectl-tns-csi v${VERSION}
+
+          ### What's Changed
+
+          ${CHANGELOG}
+
+          ### Installation
+
+          #### Using Krew (recommended)
+          \`\`\`bash
+          kubectl krew install tns-csi
+          \`\`\`
+
+          #### Manual Installation
+          Download the appropriate binary for your platform from the assets below and place it in your PATH.
+
+          \`\`\`bash
+          # Example for Linux amd64
+          tar -xzf kubectl-tns_csi-linux-amd64.tar.gz
+          mv kubectl-tns_csi-linux-amd64/kubectl-tns_csi /usr/local/bin/
+          \`\`\`
+
+          ### Usage
+          \`\`\`bash
+          kubectl tns-csi list                 # List all managed volumes
+          kubectl tns-csi list-orphaned        # Find orphaned volumes
+          kubectl tns-csi status <pvc-name>    # Show volume status
+          kubectl tns-csi connectivity         # Test TrueNAS connection
+          \`\`\`
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: kubectl-tns-csi ${{ steps.version.outputs.tag }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/tns-csi.yaml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

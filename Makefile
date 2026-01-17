@@ -1,6 +1,7 @@
-.PHONY: all build clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof
+.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof
 
 DRIVER_NAME=tns-csi-driver
+PLUGIN_NAME=kubectl-tns_csi
 IMAGE_NAME=bfenski/tns-csi
 REGISTRY?=docker.io
 
@@ -31,6 +32,14 @@ build:
 	@echo "Building $(DRIVER_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(DRIVER_NAME) ./cmd/tns-csi-driver
+
+build-plugin:
+	@echo "Building $(PLUGIN_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	$(GOBUILD) -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT)" \
+		-o $(BUILD_DIR)/$(PLUGIN_NAME) ./cmd/kubectl-tns-csi
+	@echo "Plugin built: $(BUILD_DIR)/$(PLUGIN_NAME)"
+	@echo "Install with: cp $(BUILD_DIR)/$(PLUGIN_NAME) /usr/local/bin/"
 
 clean:
 	@echo "Cleaning..."

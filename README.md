@@ -41,6 +41,20 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 - **NFS** - Network File System for file-based storage
 - **NVMe-oF** - NVMe over Fabrics for high-performance block storage
 
+## Comparison with Other Drivers
+
+| | TNS-CSI | truenas-csi (Official) | Democratic-CSI |
+|---|---------|------------------------|----------------|
+| **Best for** | Modern TrueNAS with NVMe-oF | iSCSI + encryption needs | Broad compatibility |
+| **Block protocol** | NVMe-oF | iSCSI | iSCSI (+ NVMe-oF for ZoL) |
+| **Unique strength** | kubectl plugin, metrics, adoption | Encryption, scheduled snapshots | Multi-backend, Windows |
+| **Trade-off** | No iSCSI, no encryption | No NVMe-oF, no plugin | SSH complexity |
+| **Maturity** | Early development | Very new (Dec 2025) | Mature, production-ready |
+
+See detailed comparisons:
+- [TNS-CSI vs truenas-csi (Official)](docs/COMPARISON-TRUENAS-CSI.md)
+- [TNS-CSI vs Democratic-CSI](docs/COMPARISON-DEMOCRATIC-CSI.md)
+
 ### Why NFS and NVMe-oF?
 
 This driver focuses on these two protocols for specific reasons:
@@ -286,7 +300,8 @@ kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind
 - [Security](docs/SECURITY-SANITIZATION.md) - Security considerations
-- [Comparison with Democratic-CSI](docs/COMPARISON.md) - Feature comparison with democratic-csi
+- [Comparison with truenas-csi](docs/COMPARISON-TRUENAS-CSI.md) - vs official TrueNAS CSI driver
+- [Comparison with Democratic-CSI](docs/COMPARISON-DEMOCRATIC-CSI.md) - vs democratic-csi
 
 ## Volume Adoption
 

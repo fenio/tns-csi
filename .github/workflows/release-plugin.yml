@@ -69,17 +69,19 @@ jobs:
             fi
 
             echo "Building for ${GOOS}/${GOARCH}..."
+            # Build binary directly to dist directory (not in subdirectory)
             GOOS=$GOOS GOARCH=$GOARCH go build -ldflags "${LDFLAGS}" \
-              -o "dist/kubectl-tns_csi-${GOOS}-${GOARCH}/${output}" \
+              -o "dist/${output}" \
               ./cmd/kubectl-tns-csi
 
-            # Create tarball (zip for windows)
+            # Create tarball with binary at root (krew expects this)
             cd dist
             if [ "$GOOS" = "windows" ]; then
-              zip -r "kubectl-tns_csi-${GOOS}-${GOARCH}.zip" "kubectl-tns_csi-${GOOS}-${GOARCH}"
+              zip "kubectl-tns_csi-${GOOS}-${GOARCH}.zip" "${output}"
             else
-              tar -czvf "kubectl-tns_csi-${GOOS}-${GOARCH}.tar.gz" "kubectl-tns_csi-${GOOS}-${GOARCH}"
+              tar -czvf "kubectl-tns_csi-${GOOS}-${GOARCH}.tar.gz" "${output}"
             fi
+            rm "${output}"
             cd ..
           done
 

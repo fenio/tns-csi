@@ -67,9 +67,9 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/tns-csi
             ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest
 
       - name: Build and push Docker image
@@ -98,8 +98,9 @@ jobs:
           # Update Chart.yaml with new versions
           sed -i "s/^version:.*/version: ${VERSION#v}/" charts/tns-csi-driver/Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${VERSION}\"/" charts/tns-csi-driver/Chart.yaml
-          # Update values.yaml with new image tag
-          sed -i "s/tag:.*/tag: ${VERSION}/" charts/tns-csi-driver/values.yaml
+          # Update values.yaml with new image tag (only the main image.tag, not sidecars)
+          # The main image.tag has empty value "", sidecars have specific versions
+          sed -i 's/^  tag: ""$/  tag: "'"${VERSION}"'"/' charts/tns-csi-driver/values.yaml
 
       - name: Package Helm chart
         run: |

@@ -849,8 +849,38 @@ func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) 
 
 // Dataset API methods
 
+// EncryptionOptions represents encryption configuration for dataset creation.
+// Used by both DatasetCreateParams and ZvolCreateParams.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
+type EncryptionOptions struct {
+	// GenerateKey automatically generates an encryption key for the dataset.
+	// If true, no passphrase or key needs to be provided.
+	GenerateKey bool `json:"generate_key,omitempty"`
+
+	// Algorithm specifies the encryption algorithm.
+	// Valid values: AES-128-CCM, AES-192-CCM, AES-256-CCM, AES-128-GCM, AES-192-GCM, AES-256-GCM
+	// Default: AES-256-GCM
+	Algorithm string `json:"algorithm,omitempty"`
+
+	// Passphrase for encryption (minimum 8 characters).
+	// Either passphrase or key must be specified (unless generate_key is true).
+	Passphrase string `json:"passphrase,omitempty"`
+
+	// Key is a hex-encoded 256-bit key (exactly 64 characters).
+	// Either passphrase or key must be specified (unless generate_key is true).
+	Key string `json:"key,omitempty"`
+
+	// Pbkdf2iters is the number of PBKDF2 iterations for passphrase key derivation.
+	// Higher values improve security but increase unlock time.
+	// Minimum: 100000, Default: 350000
+	Pbkdf2iters int `json:"pbkdf2iters,omitempty"`
+}
+
 // DatasetCreateParams represents parameters for dataset creation.
 // Supports configurable ZFS properties via StorageClass parameters.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
 type DatasetCreateParams struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // FILESYSTEM, VOLUME
@@ -858,6 +888,17 @@ type DatasetCreateParams struct {
 	// RefQuota limits the space this dataset can consume (in bytes).
 	// Note: TrueNAS enforces a minimum of 1 GiB for quota values.
 	RefQuota *int64 `json:"refquota,omitempty"`
+
+	// Encryption enables ZFS native encryption for the dataset.
+	Encryption bool `json:"encryption,omitempty"`
+
+	// InheritEncryption inherits encryption settings from parent dataset.
+	// Default: true (if parent is encrypted, child will inherit)
+	InheritEncryption *bool `json:"inherit_encryption,omitempty"`
+
+	// EncryptionOptions specifies encryption algorithm and key/passphrase.
+	// Only used when Encryption is true.
+	EncryptionOptions *EncryptionOptions `json:"encryption_options,omitempty"`
 
 	// ZFS Properties (optional - passed to TrueNAS pool.dataset.create API)
 	// These can be configured per-StorageClass with the "zfs." prefix
@@ -1054,6 +1095,17 @@ type ZvolCreateParams struct {
 	Type         string `json:"type"`
 	Volblocksize string `json:"volblocksize,omitempty"`
 	Volsize      int64  `json:"volsize"`
+
+	// Encryption enables ZFS native encryption for the ZVOL.
+	Encryption bool `json:"encryption,omitempty"`
+
+	// InheritEncryption inherits encryption settings from parent dataset.
+	// Default: true (if parent is encrypted, child will inherit)
+	InheritEncryption *bool `json:"inherit_encryption,omitempty"`
+
+	// EncryptionOptions specifies encryption algorithm and key/passphrase.
+	// Only used when Encryption is true.
+	EncryptionOptions *EncryptionOptions `json:"encryption_options,omitempty"`
 
 	// ZFS Properties (optional - passed to TrueNAS pool.dataset.create API)
 	// These can be configured per-StorageClass with the "zfs." prefix

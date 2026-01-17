@@ -47,6 +47,7 @@ on:
           - snapshot-restore
           - volume-stress
           - error-handling
+          - encryption
 
 # Restrict permissions to minimum required
 permissions:

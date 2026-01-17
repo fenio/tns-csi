@@ -35,7 +35,7 @@ The [official TrueNAS CSI driver](https://github.com/truenas/truenas-csi) was re
 | **ZFS Compression** | Yes | Yes |
 | **ZFS Sync Modes** | Yes | Yes |
 | **Detached Snapshots** | Yes | No |
-| **Dataset Encryption** | No | Yes |
+| **Dataset Encryption** | Yes | Yes |
 | **Automatic Snapshot Scheduling** | No | Yes |
 | **CHAP Authentication** | N/A (no iSCSI) | Yes |
 | **kubectl Plugin** | Yes | No |
@@ -89,21 +89,14 @@ Built-in observability:
 
 ## Unique to truenas-csi (Official)
 
-### 1. Dataset Encryption
-
-- AES-256-GCM and AES-128-CCM algorithms
-- Passphrase or hex key support
-- Automatic key generation capability
-- Encryption managed at ZFS dataset level
-
-### 2. Automatic Snapshot Scheduling
+### 1. Automatic Snapshot Scheduling
 
 - Cron-based scheduling directly in StorageClass
 - Configurable retention policies (hourly to yearly)
 - Custom naming schemas with timestamps
 - No external snapshot controller needed for scheduled snapshots
 
-### 3. iSCSI with CHAP
+### 2. iSCSI with CHAP
 
 - Mature, widely-compatible block storage protocol
 - CHAP authentication (including mutual)
@@ -111,7 +104,7 @@ Built-in observability:
 - Network CIDR restrictions
 - Broad client compatibility
 
-### 4. Official Support
+### 3. Official Support
 
 - Maintained by iXsystems (TrueNAS developers)
 - Likely to have better long-term support
@@ -128,11 +121,11 @@ Built-in observability:
 - You're migrating from **democratic-csi** and want similar workflows
 - You need **Prometheus metrics** for monitoring
 - You want **detached snapshots** for backup/DR
+- You need **dataset encryption** with flexible key management options
 
 ### Choose truenas-csi (Official) if:
 
 - You need **iSCSI** (established infrastructure, compatibility requirements)
-- You want **dataset encryption** at the ZFS level
 - You need **automatic snapshot scheduling** without external tools
 - You prefer **official vendor support**
 - You want the safety of an **iXsystems-maintained** project

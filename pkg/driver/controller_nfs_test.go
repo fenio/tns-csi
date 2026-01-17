@@ -614,3 +614,144 @@ func TestSetupNFSVolumeFromClone(t *testing.T) {
 		})
 	}
 }
+
+func TestParseEncryptionConfig(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct layout prioritizes readability
+	tests := []struct {
+		name     string
+		params   map[string]string
+		secrets  map[string]string
+		expected *encryptionConfig
+	}{
+		{
+			name: "encryption disabled (default)",
+			params: map[string]string{
+				"protocol": "nfs",
+				"pool":     "tank",
+			},
+			secrets:  nil,
+			expected: nil,
+		},
+		{
+			name: "encryption disabled explicitly",
+			params: map[string]string{
+				"encryption": "false",
+			},
+			secrets:  nil,
+			expected: nil,
+		},
+		{
+			name: "encryption enabled with auto-generate key",
+			params: map[string]string{
+				"encryption":            "true",
+				"encryptionGenerateKey": "true",
+			},
+			secrets: nil,
+			expected: &encryptionConfig{
+				Enabled:     true,
+				Algorithm:   "AES-256-GCM", // default
+				GenerateKey: true,
+			},
+		},
+		{
+			name: "encryption enabled with custom algorithm",
+			params: map[string]string{
+				"encryption":            "true",
+				"encryptionAlgorithm":   "AES-128-CCM",
+				"encryptionGenerateKey": "true",
+			},
+			secrets: nil,
+			expected: &encryptionConfig{
+				Enabled:     true,
+				Algorithm:   "AES-128-CCM",
+				GenerateKey: true,
+			},
+		},
+		{
+			name: "encryption with passphrase from secret",
+			params: map[string]string{
+				"encryption": "true",
+			},
+			secrets: map[string]string{
+				"encryptionPassphrase": "mysecretpassphrase",
+			},
+			expected: &encryptionConfig{
+				Enabled:    true,
+				Algorithm:  "AES-256-GCM",
+				Passphrase: "mysecretpassphrase",
+			},
+		},
+		{
+			name: "encryption with hex key from secret",
+			params: map[string]string{
+				"encryption": "true",
+			},
+			secrets: map[string]string{
+				"encryptionKey": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			},
+			expected: &encryptionConfig{
+				Enabled:   true,
+				Algorithm: "AES-256-GCM",
+				Key:       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			},
+		},
+		{
+			name: "encryption enabled but no key source (warning case)",
+			params: map[string]string{
+				"encryption": "true",
+			},
+			secrets: nil,
+			expected: &encryptionConfig{
+				Enabled:   true,
+				Algorithm: "AES-256-GCM",
+			},
+		},
+		{
+			name: "encryption with mixed case",
+			params: map[string]string{
+				"encryption":            "TRUE",
+				"encryptionGenerateKey": "True",
+			},
+			secrets: nil,
+			expected: &encryptionConfig{
+				Enabled:     true,
+				Algorithm:   "AES-256-GCM",
+				GenerateKey: true,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseEncryptionConfig(tt.params, tt.secrets)
+
+			if tt.expected == nil {
+				if result != nil {
+					t.Errorf("Expected nil, got %+v", result)
+				}
+				return
+			}
+
+			if result == nil {
+				t.Errorf("Expected %+v, got nil", tt.expected)
+				return
+			}
+
+			if result.Enabled != tt.expected.Enabled {
+				t.Errorf("Enabled: expected %v, got %v", tt.expected.Enabled, result.Enabled)
+			}
+			if result.Algorithm != tt.expected.Algorithm {
+				t.Errorf("Algorithm: expected %v, got %v", tt.expected.Algorithm, result.Algorithm)
+			}
+			if result.GenerateKey != tt.expected.GenerateKey {
+				t.Errorf("GenerateKey: expected %v, got %v", tt.expected.GenerateKey, result.GenerateKey)
+			}
+			if result.Passphrase != tt.expected.Passphrase {
+				t.Errorf("Passphrase: expected %v, got %v", tt.expected.Passphrase, result.Passphrase)
+			}
+			if result.Key != tt.expected.Key {
+				t.Errorf("Key: expected %v, got %v", tt.expected.Key, result.Key)
+			}
+		})
+	}
+}

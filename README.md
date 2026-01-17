@@ -47,8 +47,8 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 |---|---------|------------------------|----------------|
 | **Best for** | Modern TrueNAS with NVMe-oF | iSCSI + encryption needs | Broad compatibility |
 | **Block protocol** | NVMe-oF | iSCSI | iSCSI (+ NVMe-oF for ZoL) |
-| **Unique strength** | kubectl plugin, metrics, adoption | Encryption, scheduled snapshots | Multi-backend, Windows |
-| **Trade-off** | No iSCSI, no encryption | No NVMe-oF, no plugin | SSH complexity |
+| **Unique strength** | kubectl plugin, metrics, adoption, encryption | Scheduled snapshots | Multi-backend, Windows |
+| **Trade-off** | No iSCSI | No NVMe-oF, no plugin | SSH complexity |
 | **Maturity** | Early development | Very new (Dec 2025) | Mature, production-ready |
 
 See detailed comparisons:

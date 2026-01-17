@@ -1,7 +1,7 @@
 # TNS CSI Driver
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Go Version](https://img.shields.io/badge/Go-1.25.5-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.25.6-00ADD8?logo=go)](https://go.dev/)
 [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml)
 [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml)
 [![Distro Compatibility](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml)
@@ -19,9 +19,9 @@ A Kubernetes CSI (Container Storage Interface) driver for TrueNAS Scale 25.10+.
 
 ## Breaking Changes Notice
 
-**⚠️ Schema v1 Migration (v0.7.0+)**
+**⚠️ Schema v1 Migration (v0.8.0+)**
 
-Starting with v0.7.0, the driver uses Schema v1 for volume metadata, which is a **breaking change**:
+Starting with v0.8.0, the driver uses Schema v1 for volume metadata, which is a **breaking change**:
 
 - **Existing volumes** created with earlier versions will not be recognized by the new driver
 - **Legacy snapshot ID formats** (base64/JSON) are no longer supported
@@ -66,6 +66,31 @@ The driver intentionally focuses on these two production-ready protocols rather 
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
 
+## kubectl Plugin
+
+The project includes a kubectl plugin (`kubectl tns-csi`) for managing volumes directly from the command line:
+
+```bash
+# Install via krew (recommended)
+kubectl krew install tns-csi
+
+# Or download from GitHub releases
+```
+
+**Key Commands:**
+| Command | Description |
+|---------|-------------|
+| `kubectl tns-csi summary` | Dashboard overview of all resources |
+| `kubectl tns-csi list` | List all managed volumes |
+| `kubectl tns-csi list-snapshots` | List snapshots with source volumes |
+| `kubectl tns-csi health` | Check health of all volumes |
+| `kubectl tns-csi troubleshoot <pvc>` | Diagnose PVC issues |
+| `kubectl tns-csi cleanup` | Delete orphaned volumes |
+
+The plugin **auto-discovers credentials** from the installed driver, so it works out of the box on clusters with tns-csi installed.
+
+See [kubectl Plugin Documentation](docs/KUBECTL-PLUGIN.md) for full details.
+
 ## Kubernetes Distribution Compatibility
 
 This driver is tested and verified to work on **6 Kubernetes distributions** with both NFS and NVMe-oF protocols:
@@ -107,7 +132,7 @@ The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry
 #### Docker Hub (recommended)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.7.0 \
+  --version 0.8.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -120,7 +145,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **NVMe-oF Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.7.0 \
+  --version 0.8.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -252,6 +277,7 @@ kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
 
 - [Features Documentation](docs/FEATURES.md) - Comprehensive feature support reference
 - [Deployment Guide](docs/DEPLOYMENT.md) - Detailed installation and configuration
+- [kubectl Plugin](docs/KUBECTL-PLUGIN.md) - Command-line tool for volume management
 - [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
 - [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
 - [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning

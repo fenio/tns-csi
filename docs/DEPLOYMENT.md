@@ -167,7 +167,7 @@ The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub
 **For NFS:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.7.0 \
+  --version 0.8.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -180,7 +180,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **For NVMe-oF:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.7.0 \
+  --version 0.8.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -506,6 +506,49 @@ kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
    - Verify subsystem exists: `sudo nvme list-subsys`
    - Check /sys/class/nvme for device entries
 
+### kubectl Plugin for Troubleshooting
+
+The `kubectl tns-csi` plugin provides powerful troubleshooting capabilities:
+
+```bash
+# Install via krew (recommended)
+kubectl krew install tns-csi
+
+# Or download from GitHub releases
+```
+
+**Troubleshooting Commands:**
+```bash
+# Comprehensive PVC diagnostics
+kubectl tns-csi troubleshoot <pvc-name> -n <namespace> --logs
+
+# Check health of all volumes
+kubectl tns-csi health
+
+# Test TrueNAS connectivity
+kubectl tns-csi connectivity
+
+# Show detailed volume information
+kubectl tns-csi describe <volume-id>
+```
+
+**Management Commands:**
+```bash
+# Dashboard overview
+kubectl tns-csi summary
+
+# List all managed volumes
+kubectl tns-csi list
+
+# Find orphaned volumes (exist on TrueNAS but no PVC)
+kubectl tns-csi list-orphaned
+
+# Clean up orphaned volumes
+kubectl tns-csi cleanup --execute
+```
+
+See [kubectl Plugin Documentation](KUBECTL-PLUGIN.md) for full command reference.
+
 ### Enable Debug Logging
 
 Edit the deployment and increase verbosity:
@@ -579,9 +622,9 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --reuse-values
 ```
 
-### Breaking Change Upgrade (v0.6.x → v0.7.0+)
+### Breaking Change Upgrade (v0.6.x → v0.8.0+)
 
-**⚠️ IMPORTANT:** Version 0.7.0 introduces Schema v1 which is a breaking change.
+**⚠️ IMPORTANT:** Version 0.8.0 introduces Schema v1 which is a breaking change.
 
 Volumes created with earlier versions will **not be recognized** by the new driver because:
 - The metadata schema has changed
@@ -598,7 +641,7 @@ Volumes created with earlier versions will **not be recognized** by the new driv
 2. Upgrade the driver:
    ```bash
    helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-     --version 0.7.0 \
+     --version 0.8.0 \
      --namespace kube-system \
      --reuse-values
    ```
@@ -618,7 +661,7 @@ Volumes created with earlier versions will **not be recognized** by the new driv
    kubectl delete pvc my-important-data
    ```
 
-3. Upgrade the driver to v0.7.0+
+3. Upgrade the driver to v0.8.0+
 
 4. **Verify volumes have metadata** on TrueNAS:
    ```bash

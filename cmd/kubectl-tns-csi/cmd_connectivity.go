@@ -99,8 +99,8 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 		// Count by protocol
 		nfsCount := 0
 		nvmeCount := 0
-		for _, v := range volumes {
-			switch v.Protocol {
+		for i := range volumes {
+			switch volumes[i].Protocol {
 			case "nfs":
 				nfsCount++
 			case "nvmeof":

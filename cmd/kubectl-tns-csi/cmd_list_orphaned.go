@@ -180,14 +180,15 @@ func getK8sVolumeInfo(ctx context.Context, client *kubernetes.Clientset, allName
 func findOrphanedVolumes(volumes []VolumeInfo, pvMap map[string]pvInfo, pvcMap map[string]pvcInfo) []OrphanedVolumeInfo {
 	var orphaned []OrphanedVolumeInfo
 
-	for _, vol := range volumes {
+	for i := range volumes {
+		vol := &volumes[i]
 		// Check if there's a PV with this volume ID
 		pv, hasPV := pvMap[vol.VolumeID]
 
 		if !hasPV {
 			// No PV exists - definitely orphaned
 			orphaned = append(orphaned, OrphanedVolumeInfo{
-				VolumeInfo: vol,
+				VolumeInfo: *vol,
 				Reason:     "no PV in cluster",
 			})
 			continue
@@ -196,7 +197,7 @@ func findOrphanedVolumes(volumes []VolumeInfo, pvMap map[string]pvInfo, pvcMap m
 		// PV exists - check if it has a bound PVC
 		if pv.PVCName == "" {
 			orphaned = append(orphaned, OrphanedVolumeInfo{
-				VolumeInfo: vol,
+				VolumeInfo: *vol,
 				Reason:     "PV exists but not bound",
 			})
 			continue
@@ -206,7 +207,7 @@ func findOrphanedVolumes(volumes []VolumeInfo, pvMap map[string]pvInfo, pvcMap m
 		pvcKey := pv.PVCNs + "/" + pv.PVCName
 		if _, hasPVC := pvcMap[pvcKey]; !hasPVC {
 			orphaned = append(orphaned, OrphanedVolumeInfo{
-				VolumeInfo: vol,
+				VolumeInfo: *vol,
 				PVCName:    pv.PVCName,
 				Namespace:  pv.PVCNs,
 				Reason:     "PVC deleted but PV remains",

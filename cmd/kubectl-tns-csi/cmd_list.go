@@ -26,14 +26,16 @@ const (
 
 // VolumeInfo represents a tns-csi managed volume.
 type VolumeInfo struct {
-	Dataset        string `json:"dataset"        yaml:"dataset"`
-	VolumeID       string `json:"volumeId"       yaml:"volumeId"`
-	Protocol       string `json:"protocol"       yaml:"protocol"`
-	CapacityHuman  string `json:"capacityHuman"  yaml:"capacityHuman"`
-	DeleteStrategy string `json:"deleteStrategy" yaml:"deleteStrategy"`
-	Type           string `json:"type"           yaml:"type"`
-	CapacityBytes  int64  `json:"capacityBytes"  yaml:"capacityBytes"`
-	Adoptable      bool   `json:"adoptable"      yaml:"adoptable"`
+	Dataset           string `json:"dataset"           yaml:"dataset"`
+	VolumeID          string `json:"volumeId"          yaml:"volumeId"`
+	Protocol          string `json:"protocol"          yaml:"protocol"`
+	CapacityHuman     string `json:"capacityHuman"     yaml:"capacityHuman"`
+	DeleteStrategy    string `json:"deleteStrategy"    yaml:"deleteStrategy"`
+	Type              string `json:"type"              yaml:"type"`
+	ContentSourceType string `json:"contentSourceType" yaml:"contentSourceType"` // "snapshot", "volume", or ""
+	ContentSourceID   string `json:"contentSourceId"   yaml:"contentSourceId"`   // Source snapshot/volume ID
+	CapacityBytes     int64  `json:"capacityBytes"     yaml:"capacityBytes"`
+	Adoptable         bool   `json:"adoptable"         yaml:"adoptable"`
 }
 
 func newListCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
@@ -136,6 +138,14 @@ func findManagedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]V
 			vol.Adoptable = prop.Value == valueTrue
 		}
 
+		// Extract content source (for clones)
+		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceType]; ok {
+			vol.ContentSourceType = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceID]; ok {
+			vol.ContentSourceID = prop.Value
+		}
+
 		volumes = append(volumes, vol)
 	}
 
@@ -158,15 +168,21 @@ func outputVolumes(volumes []VolumeInfo, format string) error {
 	case outputFormatTable, "":
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tTYPE\tADOPTABLE")
-		for _, v := range volumes {
+		_, _ = fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tTYPE\tCLONE_SOURCE\tADOPTABLE")
+		for i := range volumes {
+			v := &volumes[i]
 			adoptable := ""
 			if v.Adoptable {
 				adoptable = valueTrue
 			}
+			// Format clone source as "type:id" if present
+			cloneSource := ""
+			if v.ContentSourceType != "" && v.ContentSourceID != "" {
+				cloneSource = fmt.Sprintf("%s:%s", v.ContentSourceType, v.ContentSourceID)
+			}
 			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				v.Dataset, v.VolumeID, v.Protocol, v.CapacityHuman, v.Type, adoptable)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				v.Dataset, v.VolumeID, v.Protocol, v.CapacityHuman, v.Type, cloneSource, adoptable)
 		}
 		return w.Flush()
 

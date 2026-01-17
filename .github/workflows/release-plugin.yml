@@ -21,7 +21,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.5'
+          go-version-file: go.mod
 
       - name: Get version from tag
         id: version
@@ -112,12 +112,19 @@ jobs:
             description: |
               kubectl plugin for managing TrueNAS CSI driver volumes.
 
-              Features:
-              - List all tns-csi managed volumes on TrueNAS
-              - Find orphaned volumes (exist on TrueNAS but no matching PVC)
-              - Adopt orphaned volumes into Kubernetes
-              - Check volume status and health
-              - Test TrueNAS connectivity
+              Commands:
+              - list: List all managed volumes with clone relationships
+              - list-snapshots: List snapshots with source volumes
+              - list-orphaned: Find volumes without matching PVCs
+              - describe: Show detailed volume information
+              - health: Check health of all volumes
+              - troubleshoot: Diagnose PVC issues
+              - summary: Dashboard overview of all resources
+              - cleanup: Delete orphaned volumes safely
+              - mark-adoptable: Mark volumes for DR/adoption
+              - adopt: Generate PV manifest for adoption
+              - status: Show volume status from TrueNAS
+              - connectivity: Test TrueNAS connection
             platforms:
             - selector:
                 matchLabels:
@@ -198,9 +205,14 @@ jobs:
 
           ### Usage
           \`\`\`bash
+          kubectl tns-csi summary              # Dashboard overview
           kubectl tns-csi list                 # List all managed volumes
+          kubectl tns-csi list-snapshots       # List snapshots
           kubectl tns-csi list-orphaned        # Find orphaned volumes
-          kubectl tns-csi status <pvc-name>    # Show volume status
+          kubectl tns-csi describe <volume>    # Detailed volume info
+          kubectl tns-csi health               # Check all volumes health
+          kubectl tns-csi troubleshoot <pvc>   # Diagnose PVC issues
+          kubectl tns-csi cleanup --execute    # Delete orphaned volumes
           kubectl tns-csi connectivity         # Test TrueNAS connection
           \`\`\`
           EOF

@@ -60,6 +60,9 @@ jobs:
             "windows/amd64"
           )
 
+          # Copy LICENSE to dist for inclusion in archives
+          cp LICENSE dist/
+
           for platform in "${platforms[@]}"; do
             GOOS=${platform%/*}
             GOARCH=${platform#*/}
@@ -74,12 +77,12 @@ jobs:
               -o "dist/${output}" \
               ./cmd/kubectl-tns-csi
 
-            # Create tarball with binary at root (krew expects this)
+            # Create tarball with binary and LICENSE at root (krew expects this)
             cd dist
             if [ "$GOOS" = "windows" ]; then
-              zip "kubectl-tns_csi-${GOOS}-${GOARCH}.zip" "${output}"
+              zip "kubectl-tns_csi-${GOOS}-${GOARCH}.zip" "${output}" LICENSE
             else
-              tar -czvf "kubectl-tns_csi-${GOOS}-${GOARCH}.tar.gz" "${output}"
+              tar -czvf "kubectl-tns_csi-${GOOS}-${GOARCH}.tar.gz" "${output}" LICENSE
             fi
             rm "${output}"
             cd ..

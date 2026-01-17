@@ -10,7 +10,7 @@
 |--------|---------|----------------|
 | **Maturity** | Early development | Mature, established |
 | **Language** | Go | JavaScript (Node.js) |
-| **License** | Apache 2.0 | MIT |
+| **License** | GPL-3.0 | MIT |
 | **TrueNAS Version** | Scale 25.10+ only | FreeNAS/TrueNAS (multiple versions) |
 | **API Connection** | WebSocket API only (no SSH) | SSH-based or HTTP API (experimental) |
 

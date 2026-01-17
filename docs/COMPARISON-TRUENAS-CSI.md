@@ -9,7 +9,7 @@ The [official TrueNAS CSI driver](https://github.com/truenas/truenas-csi) was re
 | Aspect | TNS-CSI | truenas-csi (Official) |
 |--------|---------|------------------------|
 | **Maintainer** | Community (fenio) | iXsystems |
-| **License** | Apache 2.0 | GPL-3.0 |
+| **License** | GPL-3.0 | GPL-3.0 |
 | **TrueNAS Version** | Scale 25.10+ | Scale 25.10+ |
 | **API Communication** | WebSocket API | WebSocket API |
 | **Language** | Go | Go |

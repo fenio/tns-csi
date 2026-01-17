@@ -16,16 +16,24 @@ import (
 // Static errors for list command.
 var errUnknownOutputFormat = errors.New("unknown output format")
 
+// Output format constants.
+const (
+	outputFormatJSON  = "json"
+	outputFormatYAML  = "yaml"
+	outputFormatTable = "table"
+	valueTrue         = "true"
+)
+
 // VolumeInfo represents a tns-csi managed volume.
 type VolumeInfo struct {
-	Dataset        string `json:"dataset" yaml:"dataset"`
-	VolumeID       string `json:"volumeId" yaml:"volumeId"`
-	Protocol       string `json:"protocol" yaml:"protocol"`
-	CapacityBytes  int64  `json:"capacityBytes" yaml:"capacityBytes"`
-	CapacityHuman  string `json:"capacityHuman" yaml:"capacityHuman"`
+	Dataset        string `json:"dataset"        yaml:"dataset"`
+	VolumeID       string `json:"volumeId"       yaml:"volumeId"`
+	Protocol       string `json:"protocol"       yaml:"protocol"`
+	CapacityHuman  string `json:"capacityHuman"  yaml:"capacityHuman"`
 	DeleteStrategy string `json:"deleteStrategy" yaml:"deleteStrategy"`
-	Adoptable      bool   `json:"adoptable" yaml:"adoptable"`
-	Type           string `json:"type" yaml:"type"` // FILESYSTEM or VOLUME (zvol)
+	Type           string `json:"type"           yaml:"type"`
+	CapacityBytes  int64  `json:"capacityBytes"  yaml:"capacityBytes"`
+	Adoptable      bool   `json:"adoptable"      yaml:"adoptable"`
 }
 
 func newListCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
@@ -88,7 +96,7 @@ func findManagedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]V
 	var volumes []VolumeInfo
 	for _, ds := range datasets {
 		// Skip detached snapshots (they're datasets but not volumes)
-		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == "true" {
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
 			continue
 		}
 
@@ -125,7 +133,7 @@ func findManagedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]V
 
 		// Extract adoptable flag
 		if prop, ok := ds.UserProperties[tnsapi.PropertyAdoptable]; ok {
-			vol.Adoptable = prop.Value == "true"
+			vol.Adoptable = prop.Value == valueTrue
 		}
 
 		volumes = append(volumes, vol)
@@ -137,25 +145,27 @@ func findManagedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]V
 // outputVolumes outputs volumes in the specified format.
 func outputVolumes(volumes []VolumeInfo, format string) error {
 	switch format {
-	case "json":
+	case outputFormatJSON:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(volumes)
 
-	case "yaml":
+	case outputFormatYAML:
 		enc := yaml.NewEncoder(os.Stdout)
 		enc.SetIndent(2)
 		return enc.Encode(volumes)
 
-	case "table", "":
+	case outputFormatTable, "":
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tTYPE\tADOPTABLE")
+		//nolint:errcheck // writing to tabwriter for stdout
+		_, _ = fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tTYPE\tADOPTABLE")
 		for _, v := range volumes {
 			adoptable := ""
 			if v.Adoptable {
-				adoptable = "true"
+				adoptable = valueTrue
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			//nolint:errcheck // writing to tabwriter for stdout
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				v.Dataset, v.VolumeID, v.Protocol, v.CapacityHuman, v.Type, adoptable)
 		}
 		return w.Flush()

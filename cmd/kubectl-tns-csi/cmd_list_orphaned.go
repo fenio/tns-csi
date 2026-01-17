@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -20,10 +21,10 @@ var errOrphanedUnknownOutputFormat = errors.New("unknown output format")
 
 // OrphanedVolumeInfo represents a volume that exists on TrueNAS but has no matching PVC.
 type OrphanedVolumeInfo struct {
-	VolumeInfo `json:",inline" yaml:",inline"`
-	PVCName    string `json:"pvcName,omitempty" yaml:"pvcName,omitempty"`
+	PVCName    string `json:"pvcName,omitempty"   yaml:"pvcName,omitempty"`
 	Namespace  string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	Reason     string `json:"reason" yaml:"reason"`
+	Reason     string `json:"reason"              yaml:"reason"`
+	VolumeInfo `json:",inline"             yaml:",inline"`
 }
 
 func newListOrphanedCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
@@ -123,15 +124,17 @@ type pvcInfo struct {
 	PVName    string
 }
 
-func getK8sVolumeInfo(ctx context.Context, client *kubernetes.Clientset, allNamespaces bool) (map[string]pvInfo, map[string]pvcInfo, error) {
+func getK8sVolumeInfo(ctx context.Context, client *kubernetes.Clientset, allNamespaces bool) (pvMap map[string]pvInfo, pvcMap map[string]pvcInfo, err error) {
 	// Get all PVs
-	pvs, err := client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
+	var pvs *corev1.PersistentVolumeList
+	pvs, err = client.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list PVs: %w", err)
 	}
 
-	pvMap := make(map[string]pvInfo)
-	for _, pv := range pvs.Items {
+	pvMap = make(map[string]pvInfo)
+	for i := range pvs.Items {
+		pv := &pvs.Items[i]
 		// Only consider CSI volumes from our driver
 		if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != "tns.csi.io" {
 			continue
@@ -151,15 +154,17 @@ func getK8sVolumeInfo(ctx context.Context, client *kubernetes.Clientset, allName
 	}
 
 	// Get all PVCs
-	pvcMap := make(map[string]pvcInfo)
+	pvcMap = make(map[string]pvcInfo)
 
 	if allNamespaces {
-		pvcs, err := client.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
+		var pvcs *corev1.PersistentVolumeClaimList
+		pvcs, err = client.CoreV1().PersistentVolumeClaims("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to list PVCs: %w", err)
 		}
 
-		for _, pvc := range pvcs.Items {
+		for i := range pvcs.Items {
+			pvc := &pvcs.Items[i]
 			key := pvc.Namespace + "/" + pvc.Name
 			pvcMap[key] = pvcInfo{
 				Name:      pvc.Name,
@@ -221,25 +226,28 @@ func outputOrphanedVolumes(volumes []OrphanedVolumeInfo, format string) error {
 	}
 
 	switch format {
-	case "json":
+	case outputFormatJSON:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(volumes)
 
-	case "yaml":
+	case outputFormatYAML:
 		enc := yaml.NewEncoder(os.Stdout)
 		enc.SetIndent(2)
 		return enc.Encode(volumes)
 
-	case "table", "":
+	case outputFormatTable, "":
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tADOPTABLE\tREASON")
-		for _, v := range volumes {
+		//nolint:errcheck // writing to tabwriter for stdout
+		_, _ = fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tADOPTABLE\tREASON")
+		for i := range volumes {
+			v := &volumes[i]
 			adoptable := ""
 			if v.Adoptable {
-				adoptable = "true"
+				adoptable = valueTrue
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			//nolint:errcheck // writing to tabwriter for stdout
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				v.Dataset, v.VolumeID, v.Protocol, v.CapacityHuman, adoptable, v.Reason)
 		}
 		return w.Flush()

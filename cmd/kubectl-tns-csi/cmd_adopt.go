@@ -61,7 +61,7 @@ Examples:
 	return cmd
 }
 
-func runAdopt(ctx context.Context, url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool,
+func runAdopt(ctx context.Context, url, apiKey, secretRef, _ *string, skipTLSVerify *bool,
 	datasetPath, pvcName, namespace, storageClass, accessMode string) error {
 
 	// Get connection config
@@ -123,16 +123,13 @@ type adoptionVolumeInfo struct {
 	volumeID      string
 	dataset       string
 	protocol      string
-	capacityBytes int64
 	pvcName       string
 	namespace     string
 	storageClass  string
 	accessMode    string
-	// NFS specific
-	nfsSharePath string
-	nfsServer    string
-	// NVMe-oF specific
-	nvmeNQN string
+	nfsSharePath  string // NFS specific
+	nvmeNQN       string // NVMe-oF specific
+	capacityBytes int64
 }
 
 func getDatasetWithProperties(ctx context.Context, client tnsapi.ClientInterface, datasetPath string) (*tnsapi.DatasetWithProperties, error) {
@@ -288,7 +285,28 @@ func generatePV(info *adoptionVolumeInfo, server string) map[string]interface{} 
 		volumeAttributes["server"] = server
 	}
 
-	pv := map[string]interface{}{
+	spec := map[string]interface{}{
+		"capacity": map[string]string{
+			"storage": formatBytesK8s(info.capacityBytes),
+		},
+		"accessModes":                   []string{info.accessMode},
+		"persistentVolumeReclaimPolicy": "Retain", // Safe default for adopted volumes
+		"csi": map[string]interface{}{
+			"driver":           "tns.csi.io",
+			"volumeHandle":     info.volumeID,
+			"volumeAttributes": volumeAttributes,
+		},
+		"claimRef": map[string]interface{}{
+			"name":      info.pvcName,
+			"namespace": info.namespace,
+		},
+	}
+
+	if info.storageClass != "" {
+		spec["storageClassName"] = info.storageClass
+	}
+
+	return map[string]interface{}{
 		"apiVersion": "v1",
 		"kind":       "PersistentVolume",
 		"metadata": map[string]interface{}{
@@ -301,35 +319,28 @@ func generatePV(info *adoptionVolumeInfo, server string) map[string]interface{} 
 				"tns-csi.io/dataset": info.dataset,
 			},
 		},
-		"spec": map[string]interface{}{
-			"capacity": map[string]string{
-				"storage": formatBytesK8s(info.capacityBytes),
-			},
-			"accessModes":                   []string{info.accessMode},
-			"persistentVolumeReclaimPolicy": "Retain", // Safe default for adopted volumes
-			"csi": map[string]interface{}{
-				"driver":           "tns.csi.io",
-				"volumeHandle":     info.volumeID,
-				"volumeAttributes": volumeAttributes,
-			},
-			"claimRef": map[string]interface{}{
-				"name":      info.pvcName,
-				"namespace": info.namespace,
-			},
-		},
+		"spec": spec,
 	}
-
-	if info.storageClass != "" {
-		pv["spec"].(map[string]interface{})["storageClassName"] = info.storageClass
-	}
-
-	return pv
 }
 
 func generatePVC(info *adoptionVolumeInfo) map[string]interface{} {
 	pvName := "pv-" + info.volumeID
 
-	pvc := map[string]interface{}{
+	spec := map[string]interface{}{
+		"accessModes": []string{info.accessMode},
+		"resources": map[string]interface{}{
+			"requests": map[string]string{
+				"storage": formatBytesK8s(info.capacityBytes),
+			},
+		},
+		"volumeName": pvName,
+	}
+
+	if info.storageClass != "" {
+		spec["storageClassName"] = info.storageClass
+	}
+
+	return map[string]interface{}{
 		"apiVersion": "v1",
 		"kind":       "PersistentVolumeClaim",
 		"metadata": map[string]interface{}{
@@ -343,22 +354,8 @@ func generatePVC(info *adoptionVolumeInfo) map[string]interface{} {
 				"tns-csi.io/dataset": info.dataset,
 			},
 		},
-		"spec": map[string]interface{}{
-			"accessModes": []string{info.accessMode},
-			"resources": map[string]interface{}{
-				"requests": map[string]string{
-					"storage": formatBytesK8s(info.capacityBytes),
-				},
-			},
-			"volumeName": pvName,
-		},
+		"spec": spec,
 	}
-
-	if info.storageClass != "" {
-		pvc["spec"].(map[string]interface{})["storageClassName"] = info.storageClass
-	}
-
-	return pvc
 }
 
 // formatBytesK8s formats bytes in Kubernetes resource format.

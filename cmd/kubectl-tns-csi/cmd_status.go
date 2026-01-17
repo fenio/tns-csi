@@ -25,33 +25,25 @@ var (
 
 // VolumeStatus represents detailed status of a volume.
 type VolumeStatus struct {
-	VolumeID string `json:"volumeId" yaml:"volumeId"`
-	Dataset  string `json:"dataset" yaml:"dataset"`
-	Protocol string `json:"protocol" yaml:"protocol"`
-	Type     string `json:"type" yaml:"type"`
-
-	// Capacity info
-	CapacityBytes  int64  `json:"capacityBytes" yaml:"capacityBytes"`
-	CapacityHuman  string `json:"capacityHuman" yaml:"capacityHuman"`
-	UsedBytes      int64  `json:"usedBytes,omitempty" yaml:"usedBytes,omitempty"`
-	UsedHuman      string `json:"usedHuman,omitempty" yaml:"usedHuman,omitempty"`
-	AvailableBytes int64  `json:"availableBytes,omitempty" yaml:"availableBytes,omitempty"`
-	AvailableHuman string `json:"availableHuman,omitempty" yaml:"availableHuman,omitempty"`
-	UsedPercent    string `json:"usedPercent,omitempty" yaml:"usedPercent,omitempty"`
-
-	// NFS-specific
-	NFSShareID   int    `json:"nfsShareId,omitempty" yaml:"nfsShareId,omitempty"`
-	NFSSharePath string `json:"nfsSharePath,omitempty" yaml:"nfsSharePath,omitempty"`
-	NFSEnabled   bool   `json:"nfsEnabled,omitempty" yaml:"nfsEnabled,omitempty"`
-
-	// NVMe-oF-specific
-	NVMeSubsystemID int    `json:"nvmeSubsystemId,omitempty" yaml:"nvmeSubsystemId,omitempty"`
-	NVMeNamespaceID int    `json:"nvmeNamespaceId,omitempty" yaml:"nvmeNamespaceId,omitempty"`
-	NVMeNQN         string `json:"nvmeNqn,omitempty" yaml:"nvmeNqn,omitempty"`
-
-	// Health
-	Healthy bool     `json:"healthy" yaml:"healthy"`
-	Issues  []string `json:"issues,omitempty" yaml:"issues,omitempty"`
+	UsedHuman       string   `json:"usedHuman,omitempty"       yaml:"usedHuman,omitempty"`
+	UsedPercent     string   `json:"usedPercent,omitempty"     yaml:"usedPercent,omitempty"`
+	NVMeNQN         string   `json:"nvmeNqn,omitempty"         yaml:"nvmeNqn,omitempty"`
+	AvailableHuman  string   `json:"availableHuman,omitempty"  yaml:"availableHuman,omitempty"`
+	Dataset         string   `json:"dataset"                   yaml:"dataset"`
+	Protocol        string   `json:"protocol"                  yaml:"protocol"`
+	Type            string   `json:"type"                      yaml:"type"`
+	CapacityHuman   string   `json:"capacityHuman"             yaml:"capacityHuman"`
+	NFSSharePath    string   `json:"nfsSharePath,omitempty"    yaml:"nfsSharePath,omitempty"`
+	VolumeID        string   `json:"volumeId"                  yaml:"volumeId"`
+	Issues          []string `json:"issues,omitempty"          yaml:"issues,omitempty"`
+	CapacityBytes   int64    `json:"capacityBytes"             yaml:"capacityBytes"`
+	UsedBytes       int64    `json:"usedBytes,omitempty"       yaml:"usedBytes,omitempty"`
+	NFSShareID      int      `json:"nfsShareId,omitempty"      yaml:"nfsShareId,omitempty"`
+	NVMeSubsystemID int      `json:"nvmeSubsystemId,omitempty" yaml:"nvmeSubsystemId,omitempty"`
+	NVMeNamespaceID int      `json:"nvmeNamespaceId,omitempty" yaml:"nvmeNamespaceId,omitempty"`
+	AvailableBytes  int64    `json:"availableBytes,omitempty"  yaml:"availableBytes,omitempty"`
+	Healthy         bool     `json:"healthy"                   yaml:"healthy"`
+	NFSEnabled      bool     `json:"nfsEnabled,omitempty"      yaml:"nfsEnabled,omitempty"`
 }
 
 func newStatusCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
@@ -112,6 +104,7 @@ func runStatus(ctx context.Context, url, apiKey, secretRef, outputFormat *string
 	return outputStatus(status, *outputFormat)
 }
 
+//nolint:unparam // error kept for API consistency
 func buildVolumeStatus(ctx context.Context, client tnsapi.ClientInterface, ds *tnsapi.DatasetWithProperties, volumeID string) (*VolumeStatus, error) {
 	props := ds.UserProperties
 
@@ -154,7 +147,7 @@ func buildVolumeStatus(ctx context.Context, client tnsapi.ClientInterface, ds *t
 	return status, nil
 }
 
-func checkNFSStatus(ctx context.Context, client tnsapi.ClientInterface, ds *tnsapi.DatasetWithProperties, props map[string]tnsapi.UserProperty, status *VolumeStatus) error {
+func checkNFSStatus(ctx context.Context, client tnsapi.ClientInterface, _ *tnsapi.DatasetWithProperties, props map[string]tnsapi.UserProperty, status *VolumeStatus) error {
 	// Get NFS share ID from properties
 	if prop, ok := props[tnsapi.PropertyNFSShareID]; ok {
 		status.NFSShareID = tnsapi.StringToInt(prop.Value)
@@ -189,7 +182,7 @@ func checkNFSStatus(ctx context.Context, client tnsapi.ClientInterface, ds *tnsa
 	return fmt.Errorf("%w: %d", errNFSShareNotFound, status.NFSShareID)
 }
 
-func checkNVMeOFStatus(ctx context.Context, client tnsapi.ClientInterface, ds *tnsapi.DatasetWithProperties, props map[string]tnsapi.UserProperty, status *VolumeStatus) error {
+func checkNVMeOFStatus(ctx context.Context, client tnsapi.ClientInterface, _ *tnsapi.DatasetWithProperties, props map[string]tnsapi.UserProperty, status *VolumeStatus) error {
 	// Get NVMe-oF IDs from properties
 	if prop, ok := props[tnsapi.PropertyNVMeSubsystemID]; ok {
 		status.NVMeSubsystemID = tnsapi.StringToInt(prop.Value)
@@ -247,17 +240,17 @@ func checkNVMeOFStatus(ctx context.Context, client tnsapi.ClientInterface, ds *t
 
 func outputStatus(status *VolumeStatus, format string) error {
 	switch format {
-	case "json":
+	case outputFormatJSON:
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(status)
 
-	case "yaml":
+	case outputFormatYAML:
 		enc := yaml.NewEncoder(os.Stdout)
 		enc.SetIndent(2)
 		return enc.Encode(status)
 
-	case "table", "":
+	case outputFormatTable, "":
 		fmt.Printf("Volume:     %s\n", status.VolumeID)
 		fmt.Printf("Dataset:    %s\n", status.Dataset)
 		fmt.Printf("Protocol:   %s\n", status.Protocol)

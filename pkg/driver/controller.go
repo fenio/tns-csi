@@ -260,6 +260,16 @@ func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDat
 
 // CreateVolume creates a new volume.
 func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	// Log at Info level (not V(4)) so we can see when CreateVolume is called in CI
+	klog.Infof("=== CreateVolume CALLED === Name: %s", req.GetName())
+	if req.GetVolumeContentSource() != nil {
+		if snap := req.GetVolumeContentSource().GetSnapshot(); snap != nil {
+			klog.Infof("CreateVolume from Snapshot: SnapshotId=%s", snap.GetSnapshotId())
+		}
+		if vol := req.GetVolumeContentSource().GetVolume(); vol != nil {
+			klog.Infof("CreateVolume from Volume: VolumeId=%s", vol.GetVolumeId())
+		}
+	}
 	klog.V(4).Infof("CreateVolume called with request: %+v", req)
 
 	// Log detailed debug info for troubleshooting

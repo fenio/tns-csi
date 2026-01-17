@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"github.com/spf13/cobra"
@@ -352,57 +351,55 @@ func outputSummary(summary *Summary, format string) error {
 	}
 }
 
+// boxWidth is the inner width of the summary box (between the borders).
+const boxWidth = 62
+
+// printBoxLine prints a line with box borders and proper padding.
+func printBoxLine(content string) {
+	// Calculate padding needed
+	padding := boxWidth - len(content)
+	if padding < 0 {
+		padding = 0
+		content = content[:boxWidth]
+	}
+	fmt.Printf("║ %s%*s ║\n", content, padding, "")
+}
+
 // outputSummaryTable outputs the summary in a nice table format.
-//
-//nolint:errcheck // writing to tabwriter for stdout - errors not actionable
 func outputSummaryTable(summary *Summary) error {
 	fmt.Println("╔════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                    TNS-CSI Summary                             ║")
+	fmt.Println("║                        TNS-CSI Summary                         ║")
 	fmt.Println("╠════════════════════════════════════════════════════════════════╣")
 
 	// Volumes section
-	fmt.Println("║  VOLUMES                                                       ║")
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	_, _ = fmt.Fprintf(w, "║    Total:\t%d\t", summary.Volumes.Total)
-	_, _ = fmt.Fprintf(w, "NFS:\t%d\t", summary.Volumes.NFS)
-	_, _ = fmt.Fprintf(w, "NVMe-oF:\t%d\t", summary.Volumes.NVMeOF)
-	_, _ = fmt.Fprintf(w, "Clones:\t%d", summary.Volumes.Clones)
-	_, _ = fmt.Fprintln(w, "\t║")
-	_ = w.Flush()
+	printBoxLine("VOLUMES")
+	printBoxLine(fmt.Sprintf("  Total: %-6d NFS: %-6d NVMe-oF: %-6d Clones: %d",
+		summary.Volumes.Total, summary.Volumes.NFS, summary.Volumes.NVMeOF, summary.Volumes.Clones))
 
 	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
 
 	// Snapshots section
-	fmt.Println("║  SNAPSHOTS                                                     ║")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	_, _ = fmt.Fprintf(w, "║    Total:\t%d\t", summary.Snapshots.Total)
-	_, _ = fmt.Fprintf(w, "Attached:\t%d\t", summary.Snapshots.Attached)
-	_, _ = fmt.Fprintf(w, "Detached:\t%d", summary.Snapshots.Detached)
-	_, _ = fmt.Fprintln(w, "\t\t║")
-	_ = w.Flush()
+	printBoxLine("SNAPSHOTS")
+	printBoxLine(fmt.Sprintf("  Total: %-6d Attached: %-6d Detached: %d",
+		summary.Snapshots.Total, summary.Snapshots.Attached, summary.Snapshots.Detached))
 
 	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
 
 	// Capacity section
-	fmt.Println("║  CAPACITY                                                      ║")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	_, _ = fmt.Fprintf(w, "║    Provisioned:\t%s\t", summary.Capacity.ProvisionedHuman)
-	_, _ = fmt.Fprintf(w, "Used:\t%s", summary.Capacity.UsedHuman)
+	printBoxLine("CAPACITY")
 
 	// Calculate usage percentage
 	usagePercent := 0.0
 	if summary.Capacity.ProvisionedBytes > 0 {
 		usagePercent = float64(summary.Capacity.UsedBytes) / float64(summary.Capacity.ProvisionedBytes) * 100
 	}
-	_, _ = fmt.Fprintf(w, "\t(%.1f%%)", usagePercent)
-	_, _ = fmt.Fprintln(w, "\t\t║")
-	_ = w.Flush()
+	printBoxLine(fmt.Sprintf("  Provisioned: %-10s Used: %-10s (%.1f%%)",
+		summary.Capacity.ProvisionedHuman, summary.Capacity.UsedHuman, usagePercent))
 
 	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
 
 	// Health section
-	fmt.Println("║  HEALTH                                                        ║")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
+	printBoxLine("HEALTH")
 
 	// Build health status with icons
 	healthIcon := iconOK
@@ -412,15 +409,14 @@ func outputSummaryTable(summary *Summary) error {
 		healthIcon = iconWarning
 	}
 
-	_, _ = fmt.Fprintf(w, "║    %s Healthy:\t%d\t", healthIcon, summary.Health.HealthyVolumes)
+	healthLine := fmt.Sprintf("  %s Healthy: %d", healthIcon, summary.Health.HealthyVolumes)
 	if summary.Health.DegradedVolumes > 0 {
-		_, _ = fmt.Fprintf(w, "Degraded:\t%d\t", summary.Health.DegradedVolumes)
+		healthLine += fmt.Sprintf("  Degraded: %d", summary.Health.DegradedVolumes)
 	}
 	if summary.Health.UnhealthyVolumes > 0 {
-		_, _ = fmt.Fprintf(w, "Unhealthy:\t%d", summary.Health.UnhealthyVolumes)
+		healthLine += fmt.Sprintf("  Unhealthy: %d", summary.Health.UnhealthyVolumes)
 	}
-	_, _ = fmt.Fprintln(w, "\t\t\t║")
-	_ = w.Flush()
+	printBoxLine(healthLine)
 
 	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
 

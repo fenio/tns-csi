@@ -554,6 +554,9 @@ func (s *ControllerService) getOrCreateZVOL(ctx context.Context, params *nvmeofV
 	// Apply encryption settings if specified in StorageClass
 	if params.encryption != nil && params.encryption.Enabled { //nolint:dupl // Intentionally duplicated in NFS
 		createParams.Encryption = true
+		// Must disable inherit_encryption when enabling encryption
+		inheritEncryption := false
+		createParams.InheritEncryption = &inheritEncryption
 
 		// Build encryption options
 		encOpts := &tnsapi.EncryptionOptions{

@@ -49,6 +49,10 @@ _output/
 *.tar.gz
 .tmp/
 
+# Plugin binaries
+kubectl-tns-csi
+kubectl-tns_csi
+
 # Node.js
 node_modules/
 npm-debug.log*

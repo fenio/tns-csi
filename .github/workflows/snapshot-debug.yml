@@ -1,0 +1,125 @@
+name: Snapshot Debug
+
+on:
+  # Manual trigger only - for investigating snapshot issues
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'Protocol to test'
+        required: false
+        default: 'nfs'
+        type: choice
+        options:
+          - nfs
+          - nvmeof
+          - both
+      test_focus:
+        description: 'Ginkgo focus pattern'
+        required: false
+        default: 'detached snapshot after source'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snapshot-debug
+  cancel-in-progress: true
+
+jobs:
+  snapshot-debug:
+    name: "Snapshot Debug"
+    runs-on: new
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run Snapshot Debug Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: latest
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running Snapshot Debug Tests ==="
+          echo "Protocol: ${{ inputs.protocol }}"
+          echo "Focus: ${{ inputs.test_focus }}"
+
+          # Run focused test from shared e2e directory
+          ginkgo -v --timeout=15m \
+            --focus="${{ inputs.test_focus }}" \
+            ./tests/e2e/
+
+      - name: Collect controller logs
+        if: always()
+        run: |
+          mkdir -p /tmp/test-logs
+          echo "=== CSI Controller Logs ===" > /tmp/test-logs/controller.log
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller --tail=500 >> /tmp/test-logs/controller.log 2>&1 || true
+          echo ""
+          echo "=== Controller logs (last 100 lines) ==="
+          tail -100 /tmp/test-logs/controller.log
+
+      - name: Collect provisioner logs
+        if: always()
+        run: |
+          echo "=== CSI Provisioner Logs ===" > /tmp/test-logs/provisioner.log
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c csi-provisioner --tail=500 >> /tmp/test-logs/provisioner.log 2>&1 || true
+          echo ""
+          echo "=== Provisioner logs (last 100 lines) ==="
+          tail -100 /tmp/test-logs/provisioner.log
+
+      - name: Collect snapshotter logs
+        if: always()
+        run: |
+          echo "=== CSI Snapshotter Logs ===" > /tmp/test-logs/snapshotter.log
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c csi-snapshotter --tail=500 >> /tmp/test-logs/snapshotter.log 2>&1 || true
+          echo ""
+          echo "=== Snapshotter logs (last 100 lines) ==="
+          tail -100 /tmp/test-logs/snapshotter.log
+
+      - name: Show VolumeSnapshot resources
+        if: always()
+        run: |
+          echo "=== VolumeSnapshots ===" | tee /tmp/test-logs/snapshots.log
+          kubectl get volumesnapshots -A -o wide 2>&1 | tee -a /tmp/test-logs/snapshots.log
+          echo ""
+          echo "=== VolumeSnapshotContents ===" | tee -a /tmp/test-logs/snapshots.log
+          kubectl get volumesnapshotcontents -o wide 2>&1 | tee -a /tmp/test-logs/snapshots.log
+          echo ""
+          echo "=== VolumeSnapshotContents YAML ===" | tee -a /tmp/test-logs/snapshots.log
+          kubectl get volumesnapshotcontents -o yaml 2>&1 | tee -a /tmp/test-logs/snapshots.log
+
+      - name: Show PVC/PV status
+        if: always()
+        run: |
+          echo "=== PVCs ===" | tee /tmp/test-logs/pvcs.log
+          kubectl get pvc -A -o wide 2>&1 | tee -a /tmp/test-logs/pvcs.log
+          echo ""
+          echo "=== PVs ===" | tee -a /tmp/test-logs/pvcs.log
+          kubectl get pv -o wide 2>&1 | tee -a /tmp/test-logs/pvcs.log
+          echo ""
+          echo "=== PVC descriptions ===" | tee -a /tmp/test-logs/pvcs.log
+          for pvc in $(kubectl get pvc -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>/dev/null); do
+            ns=$(echo $pvc | cut -d/ -f1)
+            name=$(echo $pvc | cut -d/ -f2)
+            echo "--- PVC: $pvc ---" | tee -a /tmp/test-logs/pvcs.log
+            kubectl describe pvc -n $ns $name 2>&1 | tee -a /tmp/test-logs/pvcs.log
+          done
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: snapshot-debug-logs
+          path: /tmp/test-logs/
+          retention-days: 7

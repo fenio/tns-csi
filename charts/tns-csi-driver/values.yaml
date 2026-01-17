@@ -260,8 +260,16 @@ storageClasses:
     #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
     #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
     #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
+    #
+    # Volume Adoption (for cluster migration):
+    #   markAdoptable: "true" or "false"
+    #     - When "true", newly created volumes are marked as adoptable
+    #     - Adoptable volumes can be imported into a different cluster using 'kubectl tns-csi adopt'
+    #   adoptExisting: "true" or "false"
+    #     - When "true", the driver will adopt existing volumes that match the PVC name
+    #     - Useful for migrating volumes between clusters or recovering from cluster failures
     parameters: {}
-  
+
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)
   # IMPORTANT: Before enabling, ensure you have configured an NVMe-oF port
   # in TrueNAS (Shares > NVMe-oF Targets > Ports). The CSI driver automatically
@@ -310,6 +318,19 @@ storageClasses:
     #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
     #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
     #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
+    #
+    # Volume Adoption (for cluster migration):
+    #   markAdoptable: "true" or "false"
+    #     - When "true", newly created volumes are marked as adoptable
+    #     - Adoptable volumes can be imported into a different cluster using 'kubectl tns-csi adopt'
+    #   adoptExisting: "true" or "false"
+    #     - When "true", the driver will adopt existing volumes that match the PVC name
+    #     - Useful for migrating volumes between clusters or recovering from cluster failures
+    #
+    # NVMe-oF Specific:
+    #   portID: TrueNAS NVMe-oF port ID to use
+    #     - If not specified, the driver auto-detects the first available port
+    #     - Useful when multiple NVMe-oF ports are configured on TrueNAS
     parameters: {}
 
 # Snapshot support

@@ -383,6 +383,9 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 	// Apply encryption settings if specified in StorageClass
 	if params.encryption != nil && params.encryption.Enabled { //nolint:dupl // Intentionally duplicated in NVMe-oF
 		createParams.Encryption = true
+		// Must disable inherit_encryption when enabling encryption
+		inheritEncryption := false
+		createParams.InheritEncryption = &inheritEncryption
 
 		// Build encryption options
 		encOpts := &tnsapi.EncryptionOptions{

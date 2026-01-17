@@ -12,6 +12,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,10 +24,11 @@ import (
 
 // Kubernetes client errors.
 var (
-	ErrPVCNoCapacity          = errors.New("PVC has no capacity set")
-	ErrPVCNotBound            = errors.New("PVC is not bound to a PV")
-	ErrNotCSIVolume           = errors.New("PV is not a CSI volume")
-	ErrSnapshotNoBoundContent = errors.New("volumesnapshot has no bound content")
+	ErrPVCNoCapacity           = errors.New("PVC has no capacity set")
+	ErrPVCNotBound             = errors.New("PVC is not bound to a PV")
+	ErrNotCSIVolume            = errors.New("PV is not a CSI volume")
+	ErrSnapshotNoBoundContent  = errors.New("volumesnapshot has no bound content")
+	ErrStorageClassProvisioner = errors.New("storageclass has wrong provisioner")
 )
 
 // Default access mode for PVCs.
@@ -164,6 +166,8 @@ func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, tim
 		return pvc.Status.Phase == corev1.ClaimBound, nil
 	})
 	if err != nil {
+		// Dump diagnostic information on failure
+		k.dumpPVCDiagnostics(ctx, name)
 		return err
 	}
 
@@ -176,6 +180,69 @@ func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, tim
 	}
 
 	return nil
+}
+
+// dumpPVCDiagnostics dumps diagnostic information when PVC binding fails.
+func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName string) {
+	klog.Infof("=== PVC BINDING FAILURE DIAGNOSTICS ===")
+
+	// Get PVC details
+	pvc, err := k.GetPVC(ctx, pvcName)
+	if err != nil {
+		klog.Errorf("Failed to get PVC %s: %v", pvcName, err)
+	} else {
+		klog.Infof("PVC %s status: %s", pvcName, pvc.Status.Phase)
+		klog.Infof("PVC StorageClassName: %s", *pvc.Spec.StorageClassName)
+	}
+
+	// Get StorageClass details
+	if pvc != nil && pvc.Spec.StorageClassName != nil {
+		scName := *pvc.Spec.StorageClassName
+		sc, scErr := k.GetStorageClass(ctx, scName)
+		if scErr != nil {
+			klog.Errorf("Failed to get StorageClass %s: %v", scName, scErr)
+		} else {
+			klog.Infof("StorageClass %s provisioner: %s", scName, sc.Provisioner)
+			klog.Infof("StorageClass %s parameters: %v", scName, sc.Parameters)
+			klog.Infof("StorageClass %s volumeBindingMode: %v", scName, sc.VolumeBindingMode)
+		}
+	}
+
+	// Get PVC events using kubectl
+	eventsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	//nolint:gosec // args are controlled by the framework
+	cmd := exec.CommandContext(eventsCtx, "kubectl", "get", "events",
+		"-n", k.namespace,
+		"--field-selector", "involvedObject.name="+pvcName,
+		"-o", "wide")
+	output, cmdErr := cmd.CombinedOutput()
+	if cmdErr != nil {
+		klog.Errorf("Failed to get PVC events: %v", cmdErr)
+	} else {
+		klog.Infof("PVC Events:\n%s", string(output))
+	}
+
+	// Get controller pod logs
+	logsCtx, logsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer logsCancel()
+	logsCmd := exec.CommandContext(logsCtx, "kubectl", "logs",
+		"-n", "kube-system",
+		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		"--tail", "100")
+	logsOutput, logsErr := logsCmd.CombinedOutput()
+	if logsErr != nil {
+		klog.Errorf("Failed to get controller logs: %v", logsErr)
+	} else {
+		klog.Infof("Controller Logs (last 100 lines):\n%s", string(logsOutput))
+	}
+
+	klog.Infof("=== END DIAGNOSTICS ===")
+}
+
+// GetStorageClass retrieves a StorageClass by name.
+func (k *KubernetesClient) GetStorageClass(ctx context.Context, name string) (*storagev1.StorageClass, error) {
+	return k.clientset.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
 }
 
 // ExpandPVC updates a PVC to request more storage.
@@ -959,7 +1026,23 @@ allowVolumeExpansion: true
 volumeBindingMode: Immediate
 `, name, provisioner, paramsBuilder.String())
 
-	return k.applyYAML(ctx, yaml)
+	klog.Infof("Creating StorageClass %s with provisioner %s", name, provisioner)
+	klog.V(2).Infof("StorageClass YAML:\n%s", yaml)
+
+	if err := k.applyYAML(ctx, yaml); err != nil {
+		return err
+	}
+
+	// Verify the StorageClass was created correctly
+	sc, err := k.GetStorageClass(ctx, name)
+	if err != nil {
+		return fmt.Errorf("StorageClass %s was not created: %w", name, err)
+	}
+	if sc.Provisioner != provisioner {
+		return fmt.Errorf("%w: %s has %s, want %s", ErrStorageClassProvisioner, name, sc.Provisioner, provisioner)
+	}
+	klog.Infof("StorageClass %s created successfully with provisioner %s", name, sc.Provisioner)
+	return nil
 }
 
 // CreateStorageClassWithParamsAndBindingMode creates a StorageClass with custom parameters and binding mode.

@@ -309,6 +309,41 @@ func TestValidateCreateVolumeRequest(t *testing.T) {
 			wantErr:  true,
 			wantCode: codes.InvalidArgument,
 		},
+		{
+			name: "capacity below minimum (TrueNAS enforces 1 GiB minimum)",
+			req: &csi.CreateVolumeRequest{
+				Name: "test-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+					},
+				},
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 500 * 1024 * 1024, // 500 MiB - below 1 GiB minimum
+				},
+			},
+			wantErr:  true,
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "capacity at minimum (1 GiB)",
+			req: &csi.CreateVolumeRequest{
+				Name: "test-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{},
+						},
+					},
+				},
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 1 * 1024 * 1024 * 1024, // 1 GiB - exactly at minimum
+				},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -799,6 +834,16 @@ func TestControllerExpandVolume(t *testing.T) {
 			req: &csi.ControllerExpandVolumeRequest{
 				VolumeId:      nfsVolumeID,
 				CapacityRange: nil,
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {},
+			wantErr:   true,
+			wantCode:  codes.InvalidArgument,
+		},
+		{
+			name: "capacity below minimum (TrueNAS enforces 1 GiB minimum)",
+			req: &csi.ControllerExpandVolumeRequest{
+				VolumeId:      nfsVolumeID,
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 500 * 1024 * 1024}, // 500 MiB - below 1 GiB minimum
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {},
 			wantErr:   true,

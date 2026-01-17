@@ -291,8 +291,9 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 
 	// Build dataset creation parameters with ZFS properties
 	createParams := tnsapi.DatasetCreateParams{
-		Name: params.datasetName,
-		Type: "FILESYSTEM",
+		Name:     params.datasetName,
+		Type:     "FILESYSTEM",
+		RefQuota: &params.requestedCapacity, // Set quota at creation for consistency with expansion
 	}
 
 	// Apply ZFS properties if specified in StorageClass
@@ -778,23 +779,23 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 		return nil, status.Error(codes.InvalidArgument, "dataset ID not found in volume metadata")
 	}
 
-	// For NFS volumes, we update the quota on the dataset
-	// Note: ZFS datasets don't have a strict "size", but we can set a quota
-	// to limit the maximum space usage
-	klog.V(4).Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New Quota: %d bytes",
+	// For NFS volumes, we update the refquota on the dataset
+	// Note: ZFS datasets don't have a strict "size", but we can set a refquota
+	// to limit the maximum space usage (refquota excludes snapshots)
+	klog.V(4).Infof("Expanding NFS dataset - DatasetID: %s, DatasetName: %s, New RefQuota: %d bytes",
 		meta.DatasetID, meta.DatasetName, requiredBytes)
 
 	updateParams := tnsapi.DatasetUpdateParams{
-		Quota: &requiredBytes,
+		RefQuota: &requiredBytes,
 	}
 
 	_, err := s.apiClient.UpdateDataset(ctx, meta.DatasetID, updateParams)
 	if err != nil {
 		// Provide detailed error information to help diagnose dataset issues
-		klog.Errorf("Failed to update dataset quota for %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
+		klog.Errorf("Failed to update dataset refquota for %s (Name: %s): %v", meta.DatasetID, meta.DatasetName, err)
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal,
-			"Failed to update dataset quota for '%s' (Name: '%s'). "+
+			"Failed to update dataset refquota for '%s' (Name: '%s'). "+
 				"The dataset may not exist on TrueNAS - verify it exists at Storage > Pools. "+
 				"Error: %v", meta.DatasetID, meta.DatasetName, err)
 	}

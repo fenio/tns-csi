@@ -405,8 +405,8 @@ func TestExpandNFSVolume(t *testing.T) {
 					if datasetID != "tank/test-nfs-volume" {
 						t.Errorf("Expected dataset ID tank/test-nfs-volume, got %s", datasetID)
 					}
-					if params.Quota == nil || *params.Quota != 5*1024*1024*1024 {
-						t.Errorf("Expected quota 5GB, got %v", params.Quota)
+					if params.RefQuota == nil || *params.RefQuota != 5*1024*1024*1024 {
+						t.Errorf("Expected refquota 5GB, got %v", params.RefQuota)
 					}
 					return &tnsapi.Dataset{
 						ID:   datasetID,

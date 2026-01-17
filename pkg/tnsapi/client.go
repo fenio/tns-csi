@@ -855,6 +855,10 @@ type DatasetCreateParams struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // FILESYSTEM, VOLUME
 
+	// RefQuota limits the space this dataset can consume (in bytes).
+	// Note: TrueNAS enforces a minimum of 1 GiB for quota values.
+	RefQuota *int64 `json:"refquota,omitempty"`
+
 	// ZFS Properties (optional - passed to TrueNAS pool.dataset.create API)
 	// These can be configured per-StorageClass with the "zfs." prefix
 	// Example StorageClass parameter: zfs.compression: "lz4"

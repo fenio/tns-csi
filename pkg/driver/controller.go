@@ -18,13 +18,17 @@ import (
 
 // Error message constants.
 const (
-	errMsgVolumeIDRequired = "Volume ID is required"
-	msgVolumeIsHealthy     = "Volume is healthy"
+	errMsgVolumeIDRequired   = "Volume ID is required"
+	errMsgVolumeSizeTooSmall = "requested volume size %d bytes is below minimum %d bytes (1 GiB) enforced by TrueNAS"
+	msgVolumeIsHealthy       = "Volume is healthy"
 )
 
 // Default values.
 const (
 	defaultServerAddress = "defaultServerAddress"
+	// MinVolumeSize is the minimum volume size enforced by TrueNAS (1 GiB).
+	// TrueNAS API rejects quota/volsize values below this threshold.
+	MinVolumeSize = 1 << 30 // 1 GiB in bytes (1073741824)
 )
 
 // VolumeContext key constants - these are used consistently across the driver.
@@ -347,6 +351,14 @@ func validateCreateVolumeRequest(req *csi.CreateVolumeRequest) error {
 
 	if req.GetVolumeCapabilities() == nil || len(req.GetVolumeCapabilities()) == 0 {
 		return status.Error(codes.InvalidArgument, "Volume capabilities are required")
+	}
+
+	// Validate minimum volume size (TrueNAS enforces 1 GiB minimum for quota/volsize)
+	if capacityRange := req.GetCapacityRange(); capacityRange != nil {
+		requiredBytes := capacityRange.GetRequiredBytes()
+		if requiredBytes > 0 && requiredBytes < MinVolumeSize {
+			return status.Errorf(codes.InvalidArgument, errMsgVolumeSizeTooSmall, requiredBytes, MinVolumeSize)
+		}
 	}
 
 	return nil
@@ -1337,6 +1349,11 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 
 	volumeID := req.GetVolumeId()
 	requiredBytes := req.GetCapacityRange().GetRequiredBytes()
+
+	// Validate minimum volume size (TrueNAS enforces 1 GiB minimum for quota/volsize)
+	if requiredBytes > 0 && requiredBytes < MinVolumeSize {
+		return nil, status.Errorf(codes.InvalidArgument, errMsgVolumeSizeTooSmall, requiredBytes, MinVolumeSize)
+	}
 
 	klog.Infof("ControllerExpandVolume: Expanding volume %s to %d bytes", volumeID, requiredBytes)
 

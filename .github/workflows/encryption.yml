@@ -110,8 +110,8 @@ jobs:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           echo "=== Running NFS Encryption E2E Tests ==="
-          # Run only encryption tests from the nfs/ directory
-          ginkgo -v --timeout=20m --focus="Encryption" ./tests/e2e/nfs/...
+          # Run NFS encryption tests from the encryption/ directory
+          ginkgo -v --timeout=20m --focus="NFS Encryption" ./tests/e2e/encryption/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -148,8 +148,8 @@ jobs:
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |
           echo "=== Running NVMe-oF Encryption E2E Tests ==="
-          # Run only encryption tests from the nvmeof/ directory
-          ginkgo -v --timeout=30m --focus="Encryption" ./tests/e2e/nvmeof/...
+          # Run NVMe-oF encryption tests from the encryption/ directory
+          ginkgo -v --timeout=30m --focus="NVMe-oF Encryption" ./tests/e2e/encryption/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -221,11 +221,12 @@ jobs:
             }
 
             summary += `\n## What Was Tested\n\n`;
-            summary += `- **Encrypted volume provisioning** with auto-generated keys\n`;
-            summary += `- **Data integrity** on encrypted volumes (read/write verification)\n`;
-            summary += `- **Volume expansion** on encrypted volumes\n`;
-            summary += `- **Custom encryption algorithms** (AES-128-CCM, AES-256-GCM)\n`;
-            summary += `- **Encryption with compression** (NVMe-oF)\n`;
+            summary += `- **Basic Operations**: Provisioning with auto-generated keys, custom algorithms (AES-128-CCM)\n`;
+            summary += `- **Volume Expansion**: Expanding encrypted volumes while preserving data\n`;
+            summary += `- **Snapshots**: Creating and restoring snapshots from encrypted volumes\n`;
+            summary += `- **Volume Cloning**: Cloning encrypted volumes to new PVCs\n`;
+            summary += `- **Persistence**: Data persistence across pod restarts\n`;
+            summary += `- **Block Mode**: NVMe-oF encrypted raw block devices\n`;
 
             // Write to job summary
             await core.summary.addRaw(summary).write();

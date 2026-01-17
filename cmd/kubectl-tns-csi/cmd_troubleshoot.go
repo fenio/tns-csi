@@ -548,12 +548,12 @@ func outputTroubleshootResult(result *TroubleshootResult, format string) error {
 // outputTroubleshootResultTable outputs the troubleshoot result in table format.
 func outputTroubleshootResultTable(result *TroubleshootResult) error {
 	// Header
-	statusIcon := "✓"
+	statusIcon := iconOK
 	switch result.Status {
 	case statusError:
-		statusIcon = "✗"
+		statusIcon = iconError
 	case statusWarning:
-		statusIcon = "!"
+		statusIcon = iconWarning
 	}
 
 	fmt.Printf("=== Troubleshoot: %s/%s ===\n", result.Namespace, result.PVCName)
@@ -565,12 +565,12 @@ func outputTroubleshootResultTable(result *TroubleshootResult) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	for i := range result.Checks {
 		check := &result.Checks[i]
-		icon := "✓"
+		icon := iconOK
 		switch check.Status {
 		case statusError:
-			icon = "✗"
+			icon = iconError
 		case statusWarning:
-			icon = "!"
+			icon = iconWarning
 		case statusSkipped:
 			icon = "-"
 		}

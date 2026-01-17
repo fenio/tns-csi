@@ -522,7 +522,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		TargetDataset:           targetDataset,
 		Recursive:               false,
 		Properties:              true,
-		PropertiesExclude:       []string{"mountpoint", "sharenfs", "sharesmb"},
+		PropertiesExclude:       []string{"mountpoint", "sharenfs", "sharesmb", tnsapi.PropertyCSIVolumeName},
 		Replicate:               false,
 		Encryption:              false,
 		NameRegex:               &tempSnapshotName,

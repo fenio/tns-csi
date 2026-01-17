@@ -14,9 +14,9 @@ on:
           - nvmeof
           - both
       test_focus:
-        description: 'Ginkgo focus pattern'
+        description: 'Ginkgo focus pattern (regex) - use "NFS" or "NVMe-oF" to filter protocol'
         required: false
-        default: 'detached snapshot after source'
+        default: 'preserve detached snapshot after source volume deletion.*NFS'
         type: string
 
 permissions:
@@ -54,7 +54,8 @@ jobs:
           echo "Protocol: ${{ inputs.protocol }}"
           echo "Focus: ${{ inputs.test_focus }}"
 
-          # Run focused test from shared e2e directory
+          # Run only the specific test with focus pattern
+          # Using --focus to match test description
           ginkgo -v --timeout=15m \
             --focus="${{ inputs.test_focus }}" \
             ./tests/e2e/

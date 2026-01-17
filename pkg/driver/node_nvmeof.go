@@ -191,10 +191,11 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 	connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer connectCancel()
 
-	// NVMe-oF connection with resilience options:
+	// NVMe-oF connection with resilience and performance options:
 	// --reconnect-delay=2: Wait 2 seconds before reconnecting after connection loss
 	// --ctrl-loss-tmo=60: Keep retrying for 60 seconds before giving up
 	// --keep-alive-tmo=5: Send keepalive every 5 seconds to detect dead connections
+	// --nr-io-queues=4: Use 4 I/O queues for better concurrency under load
 	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
 	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect",
 		"-t", params.transport,
@@ -204,6 +205,7 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 		"--reconnect-delay=2",
 		"--ctrl-loss-tmo=60",
 		"--keep-alive-tmo=5",
+		"--nr-io-queues=4",
 	)
 	output, err := connectCmd.CombinedOutput()
 	if err != nil {

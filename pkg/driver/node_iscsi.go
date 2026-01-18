@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,7 +152,8 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 			klog.V(4).Infof("iSCSI target already logged in: %s", params.iqn)
 			return nil
 		}
-		return ErrISCSILoginFailed
+		klog.Errorf("iSCSI login failed for target %s at %s: %v, output: %s", params.iqn, portal, err, string(output))
+		return fmt.Errorf("%w: %s", ErrISCSILoginFailed, string(output))
 	}
 
 	klog.V(4).Infof("Successfully logged into iSCSI target: %s", params.iqn)

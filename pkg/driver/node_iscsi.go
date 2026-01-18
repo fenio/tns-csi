@@ -118,6 +118,11 @@ func (s *NodeService) validateISCSIParams(volumeContext map[string]string) (*isc
 		lun:    0, // Always LUN 0 with dedicated targets
 	}
 
+	// Log all volume context keys for debugging
+	klog.Infof("iSCSI validateISCSIParams - volume context keys: %v", volumeContext)
+	klog.Infof("iSCSI validateISCSIParams - extracted IQN: '%s', server: '%s', port: '%s'",
+		params.iqn, params.server, params.port)
+
 	if params.iqn == "" || params.server == "" {
 		return nil, status.Error(codes.InvalidArgument, "iSCSI IQN and server must be provided in volume context")
 	}
@@ -146,7 +151,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	portal := params.server + ":" + params.port
 
 	// Step 1: Discovery
-	klog.V(4).Infof("Discovering iSCSI targets at %s", portal)
+	klog.Infof("iSCSI: Discovering targets at portal %s for IQN %s", portal, params.iqn)
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer discoverCancel()
 
@@ -162,20 +167,22 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 		// Continue anyway - target might already be known from previous discovery
 		klog.Warningf("Continuing despite discovery failure - target may already be known")
 	} else {
-		klog.Infof("iSCSI discovery successful at %s: %s", portal, string(output))
+		klog.Infof("iSCSI discovery successful at %s, discovered targets:\n%s", portal, string(output))
 	}
 
 	// Step 2: Check if target is in node database
-	klog.V(4).Infof("Checking if iSCSI target %s is in node database", params.iqn)
+	klog.Infof("iSCSI: Checking if target '%s' is in node database at portal '%s'", params.iqn, portal)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer checkCancel()
 	checkCmd := iscsiadmCmd(checkCtx, "-m", "node", "-T", params.iqn, "-p", portal)
+	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -T %s -p %s", params.iqn, portal)
 	checkOutput, checkErr := checkCmd.CombinedOutput()
 	if checkErr != nil {
-		klog.Errorf("iSCSI target %s not found in node database: %v, output: %s", params.iqn, checkErr, string(checkOutput))
+		klog.Errorf("iSCSI target '%s' not found in node database at portal '%s': %v, output: %s",
+			params.iqn, portal, checkErr, string(checkOutput))
 		return fmt.Errorf("%w - check that TrueNAS iSCSI service is running and target is properly configured: %s", ErrISCSITargetNotInDB, string(checkOutput))
 	}
-	klog.V(4).Infof("iSCSI target %s found in node database", params.iqn)
+	klog.Infof("iSCSI target '%s' found in node database", params.iqn)
 
 	// Step 3: Login
 	klog.Infof("Logging into iSCSI target: %s at %s", params.iqn, portal)

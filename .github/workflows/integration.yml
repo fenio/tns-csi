@@ -277,7 +277,7 @@ jobs:
   ginkgo-e2e-shared:
     name: "E2E: Shared"
     runs-on: new
-    timeout-minutes: 45
+    timeout-minutes: 60
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success'
@@ -308,8 +308,8 @@ jobs:
         run: |
           echo "=== Running Shared E2E Tests ==="
           # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
-          # These tests use "both" protocol setup
-          ginkgo -v --timeout=40m ./tests/e2e/
+          # These tests use "both" protocol setup (NFS, NVMe-oF, and iSCSI)
+          ginkgo -v --timeout=55m ./tests/e2e/
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6

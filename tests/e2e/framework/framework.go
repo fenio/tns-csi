@@ -244,14 +244,14 @@ func (f *Framework) CreatePVC(ctx context.Context, opts PVCOptions) (*corev1.Per
 		}
 
 		// Wait for PVC to be fully deleted
-		if waitErr := f.K8s.WaitForPVCDeleted(cleanupCtx, opts.Name, 2*time.Minute); waitErr != nil {
+		if waitErr := f.K8s.WaitForPVCDeleted(cleanupCtx, opts.Name, 4*time.Minute); waitErr != nil {
 			klog.Warningf("Timeout waiting for PVC %s deletion: %v", opts.Name, waitErr)
 		}
 
 		// If we had a PV, wait for it to be deleted too (ensures CSI DeleteVolume completed)
 		if pvName != "" {
 			klog.Infof("Waiting for PV %s to be deleted (CSI DeleteVolume)", pvName)
-			if waitErr := f.K8s.WaitForPVDeleted(cleanupCtx, pvName, 2*time.Minute); waitErr != nil {
+			if waitErr := f.K8s.WaitForPVDeleted(cleanupCtx, pvName, 4*time.Minute); waitErr != nil {
 				klog.Warningf("Timeout waiting for PV %s deletion: %v", pvName, waitErr)
 			} else {
 				klog.Infof("PV %s deleted successfully", pvName)
@@ -284,7 +284,7 @@ func (f *Framework) CreatePod(ctx context.Context, opts PodOptions) (*corev1.Pod
 		}
 
 		// Wait for pod to be fully deleted to ensure volumes are unmounted
-		if waitErr := f.K8s.WaitForPodDeleted(cleanupCtx, opts.Name, 2*time.Minute); waitErr != nil {
+		if waitErr := f.K8s.WaitForPodDeleted(cleanupCtx, opts.Name, 4*time.Minute); waitErr != nil {
 			klog.Warningf("Timeout waiting for Pod %s deletion: %v", opts.Name, waitErr)
 			// Don't return error - we still want to continue with PVC cleanup
 		} else {
@@ -322,14 +322,14 @@ func (f *Framework) RegisterPVCCleanup(pvcName string) {
 		}
 
 		// Wait for PVC to be fully deleted
-		if waitErr := f.K8s.WaitForPVCDeleted(cleanupCtx, pvcName, 2*time.Minute); waitErr != nil {
+		if waitErr := f.K8s.WaitForPVCDeleted(cleanupCtx, pvcName, 4*time.Minute); waitErr != nil {
 			klog.Warningf("Timeout waiting for PVC %s deletion: %v", pvcName, waitErr)
 		}
 
 		// If we had a PV, wait for it to be deleted too (ensures CSI DeleteVolume completed)
 		if pvName != "" {
 			klog.Infof("Waiting for PV %s to be deleted (CSI DeleteVolume)", pvName)
-			if waitErr := f.K8s.WaitForPVDeleted(cleanupCtx, pvName, 2*time.Minute); waitErr != nil {
+			if waitErr := f.K8s.WaitForPVDeleted(cleanupCtx, pvName, 4*time.Minute); waitErr != nil {
 				klog.Warningf("Timeout waiting for PV %s deletion: %v", pvName, waitErr)
 			} else {
 				klog.Infof("PV %s deleted successfully", pvName)

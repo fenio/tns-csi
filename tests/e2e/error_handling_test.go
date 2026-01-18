@@ -152,9 +152,9 @@ var _ = Describe("Error Handling", func() {
 		ctx := context.Background()
 		scName := "tns-csi-invalid-protocol"
 
-		By("Creating StorageClass with invalid protocol (iscsi)")
+		By("Creating StorageClass with invalid protocol (smb)")
 		params := map[string]string{
-			"protocol": "iscsi", // Invalid - only nfs and nvmeof are supported
+			"protocol": "smb", // Invalid - only nfs, nvmeof, and iscsi are supported
 			"server":   f.Config.TrueNASHost,
 			"pool":     f.Config.TrueNASPool,
 		}

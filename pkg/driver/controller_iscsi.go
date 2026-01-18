@@ -90,7 +90,11 @@ func validateISCSIParams(req *csi.CreateVolumeRequest) (*iscsiVolumeParams, erro
 		}
 	}
 
-	volumeName := req.GetName()
+	// Resolve volume name using templating (if configured in StorageClass)
+	volumeName, err := ResolveVolumeName(params, req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "failed to resolve volume name: %v", err)
+	}
 	zvolName := parentDataset + "/" + volumeName
 
 	// Get delete strategy (default: delete)

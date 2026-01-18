@@ -492,12 +492,12 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 	var cmd *exec.Cmd
 
 	switch fsType {
-	case "ext4":
+	case fsTypeExt4:
 		// -F force, don't ask for confirmation
 		cmd = exec.CommandContext(formatCtx, "mkfs.ext4", "-F", devicePath)
-	case "ext3":
+	case fsTypeExt3:
 		cmd = exec.CommandContext(formatCtx, "mkfs.ext3", "-F", devicePath)
-	case "xfs":
+	case fsTypeXFS:
 		// -f force overwrite
 		cmd = exec.CommandContext(formatCtx, "mkfs.xfs", "-f", devicePath)
 	default:

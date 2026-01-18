@@ -305,6 +305,8 @@ type NVMeOFVolumeParams struct {
 }
 
 // NVMeOFVolumePropertiesV1 returns Schema v1 properties for an NVMe-oF volume.
+//
+//nolint:dupl // Intentionally similar structure to iSCSI volume properties
 func NVMeOFVolumePropertiesV1(params NVMeOFVolumeParams) map[string]string {
 	props := map[string]string{
 		PropertySchemaVersion:    SchemaVersionV1,
@@ -349,6 +351,53 @@ func NVMeOFVolumeProperties(volumeName string, subsystemID, namespaceID int, sub
 		PropertyCreatedAt:        provisionedAt,
 		PropertyDeleteStrategy:   deleteStrategy,
 	}
+}
+
+// ISCSIVolumeParams contains parameters for creating iSCSI volume properties.
+type ISCSIVolumeParams struct {
+	VolumeID       string
+	CreatedAt      string
+	DeleteStrategy string
+	TargetIQN      string
+	PVCName        string
+	PVCNamespace   string
+	StorageClass   string
+	CapacityBytes  int64
+	TargetID       int
+	ExtentID       int
+	Adoptable      bool // Mark volume as adoptable for cross-cluster adoption
+}
+
+// ISCSIVolumePropertiesV1 returns Schema v1 properties for an iSCSI volume.
+//
+//nolint:dupl // Intentionally similar structure to NVMe-oF volume properties
+func ISCSIVolumePropertiesV1(params ISCSIVolumeParams) map[string]string {
+	props := map[string]string{
+		PropertySchemaVersion:  SchemaVersionV1,
+		PropertyManagedBy:      ManagedByValue,
+		PropertyCSIVolumeName:  params.VolumeID,
+		PropertyCapacityBytes:  int64ToString(params.CapacityBytes),
+		PropertyProtocol:       ProtocolISCSI,
+		PropertyCreatedAt:      params.CreatedAt,
+		PropertyDeleteStrategy: params.DeleteStrategy,
+		PropertyISCSITargetID:  intToString(params.TargetID),
+		PropertyISCSIExtentID:  intToString(params.ExtentID),
+		PropertyISCSIIQN:       params.TargetIQN,
+	}
+	// Add adoption properties if provided
+	if params.PVCName != "" {
+		props[PropertyPVCName] = params.PVCName
+	}
+	if params.PVCNamespace != "" {
+		props[PropertyPVCNamespace] = params.PVCNamespace
+	}
+	if params.StorageClass != "" {
+		props[PropertyStorageClass] = params.StorageClass
+	}
+	if params.Adoptable {
+		props[PropertyAdoptable] = PropertyValueTrue
+	}
+	return props
 }
 
 // SnapshotParams contains parameters for creating snapshot properties.

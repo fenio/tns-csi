@@ -435,42 +435,44 @@ func (s *ControllerService) createISCSIExtent(ctx context.Context, params *iscsi
 	return extent, nil
 }
 
-// createISCSITarget creates an iSCSI target for the volume.
-func (s *ControllerService) createISCSITarget(ctx context.Context, params *iscsiVolumeParams, timer *metrics.OperationTimer) (*tnsapi.ISCSITarget, error) {
-	klog.V(4).Infof("Creating iSCSI target for volume: %s", params.volumeName)
-
-	// Get portal and initiator IDs if not specified
-	portalID := params.portalID
-	initiatorID := params.initiatorID
-
+// resolveISCSIPortalAndInitiator resolves portal and initiator IDs, querying TrueNAS if needed.
+// Returns the resolved IDs or an error if no portals/initiators are configured.
+func (s *ControllerService) resolveISCSIPortalAndInitiator(ctx context.Context, portalID, initiatorID int) (resolvedPortalID, resolvedInitiatorID int, err error) {
 	if portalID == 0 {
-		// Query available portals and use the first one
 		portals, err := s.apiClient.QueryISCSIPortals(ctx)
 		if err != nil {
-			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Failed to query iSCSI portals: %v", err)
+			return 0, 0, status.Errorf(codes.Internal, "Failed to query iSCSI portals: %v", err)
 		}
 		if len(portals) == 0 {
-			timer.ObserveError()
-			return nil, status.Error(codes.FailedPrecondition, "No iSCSI portals configured on TrueNAS")
+			return 0, 0, status.Error(codes.FailedPrecondition, "No iSCSI portals configured on TrueNAS")
 		}
 		portalID = portals[0].ID
 		klog.V(4).Infof("Using first available portal: %d", portalID)
 	}
 
 	if initiatorID == 0 {
-		// Query available initiators and use the first one
 		initiators, err := s.apiClient.QueryISCSIInitiators(ctx)
 		if err != nil {
-			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Failed to query iSCSI initiators: %v", err)
+			return 0, 0, status.Errorf(codes.Internal, "Failed to query iSCSI initiators: %v", err)
 		}
 		if len(initiators) == 0 {
-			timer.ObserveError()
-			return nil, status.Error(codes.FailedPrecondition, "No iSCSI initiator groups configured on TrueNAS")
+			return 0, 0, status.Error(codes.FailedPrecondition, "No iSCSI initiator groups configured on TrueNAS")
 		}
 		initiatorID = initiators[0].ID
 		klog.V(4).Infof("Using first available initiator: %d", initiatorID)
+	}
+
+	return portalID, initiatorID, nil
+}
+
+// createISCSITarget creates an iSCSI target for the volume.
+func (s *ControllerService) createISCSITarget(ctx context.Context, params *iscsiVolumeParams, timer *metrics.OperationTimer) (*tnsapi.ISCSITarget, error) {
+	klog.V(4).Infof("Creating iSCSI target for volume: %s", params.volumeName)
+
+	portalID, initiatorID, err := s.resolveISCSIPortalAndInitiator(ctx, params.portalID, params.initiatorID)
+	if err != nil {
+		timer.ObserveError()
+		return nil, err
 	}
 
 	targetParams := tnsapi.ISCSITargetCreateParams{
@@ -703,6 +705,21 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 		deleteStrategy = tnsapi.DeleteStrategyDelete
 	}
 
+	// Extract portal/initiator IDs from params or use first available
+	var portalID, initiatorID int
+	if portalIDStr := params["portalId"]; portalIDStr != "" {
+		portalID, _ = strconv.Atoi(portalIDStr) //nolint:errcheck // Invalid values will use default (0)
+	}
+	if initiatorIDStr := params["initiatorId"]; initiatorIDStr != "" {
+		initiatorID, _ = strconv.Atoi(initiatorIDStr) //nolint:errcheck // Invalid values will use default (0)
+	}
+
+	// Resolve portal/initiator IDs (query TrueNAS if not specified)
+	portalID, initiatorID, err = s.resolveISCSIPortalAndInitiator(ctx, portalID, initiatorID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Step 1: Create iSCSI extent (points to the cloned ZVOL)
 	extent, err := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
 		Name:      volumeName,
@@ -721,10 +738,17 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 
 	klog.V(4).Infof("Created iSCSI extent with ID: %d for cloned ZVOL: %s", extent.ID, zvol.ID)
 
-	// Step 2: Create iSCSI target
+	// Step 2: Create iSCSI target WITH portal/initiator groups (critical for discoverability!)
+	// Without groups, the target won't be advertised on any portal and won't be discoverable.
 	target, err := s.apiClient.CreateISCSITarget(ctx, tnsapi.ISCSITargetCreateParams{
 		Name: volumeName,
 		Mode: "ISCSI",
+		Groups: []tnsapi.ISCSITargetGroup{
+			{
+				Portal:    portalID,
+				Initiator: initiatorID,
+			},
+		},
 	})
 	if err != nil {
 		// Cleanup: delete extent and ZVOL

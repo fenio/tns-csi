@@ -246,9 +246,11 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// No sessions might mean device isn't connected yet
-		klog.V(5).Infof("iscsiadm session query failed: %v", err)
+		klog.Infof("iscsiadm session query failed: %v, output: %s", err, string(output))
 		return "", ErrISCSIDeviceNotFound
 	}
+
+	klog.V(5).Infof("iscsiadm session -P 3 output:\n%s", string(output))
 
 	// Parse the output to find our IQN and its attached disk
 	// Format:
@@ -257,12 +259,12 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	//     Attached scsi disk sda    State: running
 	deviceName := parseISCSISessionDevice(string(output), params.iqn)
 	if deviceName == "" {
-		klog.V(5).Infof("No device found for IQN %s in session output", params.iqn)
+		klog.Infof("No device found for IQN %s in session output (length=%d)", params.iqn, len(output))
 		return "", ErrISCSIDeviceNotFound
 	}
 
 	devicePath := "/dev/" + deviceName
-	klog.V(4).Infof("Found iSCSI device for IQN %s: %s", params.iqn, devicePath)
+	klog.Infof("Found iSCSI device for IQN %s: %s", params.iqn, devicePath)
 	return devicePath, nil
 }
 
@@ -303,19 +305,26 @@ func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConne
 	deadline := time.Now().Add(timeout)
 	attempt := 0
 
+	klog.Infof("Waiting for iSCSI device for IQN %s (timeout: %v)", params.iqn, timeout)
+
 	for time.Now().Before(deadline) {
 		attempt++
 		devicePath, err := s.findISCSIDevice(ctx, params)
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, statErr := os.Stat(devicePath); statErr == nil {
-				klog.V(4).Infof("iSCSI device found at %s after %d attempts", devicePath, attempt)
+				klog.Infof("iSCSI device found at %s after %d attempts", devicePath, attempt)
 				return devicePath, nil
 			}
+			klog.V(5).Infof("Device %s exists but not accessible yet", devicePath)
+		}
+		if attempt <= 3 || attempt%10 == 0 {
+			klog.Infof("Waiting for iSCSI device, attempt %d...", attempt)
 		}
 		time.Sleep(1 * time.Second)
 	}
 
+	klog.Errorf("Timeout waiting for iSCSI device for IQN %s after %d attempts", params.iqn, attempt)
 	return "", ErrISCSIDeviceTimeout
 }
 

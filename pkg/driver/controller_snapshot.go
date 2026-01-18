@@ -55,7 +55,7 @@ type SnapshotMetadata struct {
 	SnapshotName string `json:"snapshotName"` // ZFS snapshot name (dataset@snapshot) or detached dataset name
 	SourceVolume string `json:"sourceVolume"` // Source volume ID
 	DatasetName  string `json:"datasetName"`  // Parent dataset name (source for regular, target for detached)
-	Protocol     string `json:"protocol"`     // Protocol (nfs, nvmeof)
+	Protocol     string `json:"protocol"`     // Protocol (nfs, nvmeof, iscsi)
 	CreatedAt    int64  `json:"-"`            // Creation timestamp (Unix epoch) - excluded from ID encoding
 	Detached     bool   `json:"-"`            // True if this is a detached snapshot (stored as dataset, not ZFS snapshot)
 }
@@ -1563,6 +1563,8 @@ func (s *ControllerService) setupVolumeFromClone(ctx context.Context, req *csi.C
 		return s.setupNFSVolumeFromClone(ctx, req, clonedDataset, server, snapshotID)
 	case ProtocolNVMeOF:
 		return s.setupNVMeOFVolumeFromCloneWithValidation(ctx, req, clonedDataset, server, subsystemNQN, snapshotID)
+	case ProtocolISCSI:
+		return s.setupISCSIVolumeFromClone(ctx, req, clonedDataset, server, snapshotID)
 	default:
 		return s.handleUnknownProtocol(ctx, clonedDataset, protocol)
 	}

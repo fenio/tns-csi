@@ -673,3 +673,157 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 		},
 	}, nil
 }
+
+// setupISCSIVolumeFromClone sets up iSCSI infrastructure (extent, target, target-extent) for a cloned ZVOL.
+// The ZVOL already exists from the clone operation - this function creates the iSCSI resources on top of it.
+func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, zvol *tnsapi.Dataset, server, snapshotID string) (*csi.CreateVolumeResponse, error) {
+	klog.V(4).Infof("Setting up iSCSI infrastructure for cloned ZVOL: %s", zvol.Name)
+
+	volumeName := req.GetName()
+
+	// Get iSCSI global config to construct full IQN
+	globalConfig, err := s.apiClient.GetISCSIGlobalConfig(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to get iSCSI global config: %v", err)
+	}
+
+	// Get requested capacity
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // Default 1GB
+	}
+
+	// Get parameters from request
+	params := req.GetParameters()
+	if params == nil {
+		params = make(map[string]string)
+	}
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+
+	// Step 1: Create iSCSI extent (points to the cloned ZVOL)
+	extent, err := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
+		Name:      volumeName,
+		Type:      "DISK",
+		Disk:      "zvol/" + zvol.ID,
+		Blocksize: 512,
+	})
+	if err != nil {
+		// Cleanup: delete the cloned ZVOL if extent creation fails
+		klog.Errorf("Failed to create iSCSI extent for cloned ZVOL, cleaning up: %v", err)
+		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to create iSCSI extent for cloned volume: %v", err)
+	}
+
+	klog.V(4).Infof("Created iSCSI extent with ID: %d for cloned ZVOL: %s", extent.ID, zvol.ID)
+
+	// Step 2: Create iSCSI target
+	target, err := s.apiClient.CreateISCSITarget(ctx, tnsapi.ISCSITargetCreateParams{
+		Name: volumeName,
+		Mode: "ISCSI",
+	})
+	if err != nil {
+		// Cleanup: delete extent and ZVOL
+		klog.Errorf("Failed to create iSCSI target, cleaning up: %v", err)
+		if delErr := s.apiClient.DeleteISCSIExtent(ctx, extent.ID, false, false); delErr != nil {
+			klog.Errorf("Failed to cleanup iSCSI extent: %v", delErr)
+		}
+		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to create iSCSI target for cloned volume: %v", err)
+	}
+
+	klog.V(4).Infof("Created iSCSI target with ID: %d, Name: %s", target.ID, target.Name)
+
+	// Step 3: Create target-extent association (LUN 0)
+	_, err = s.apiClient.CreateISCSITargetExtent(ctx, tnsapi.ISCSITargetExtentCreateParams{
+		Target: target.ID,
+		Extent: extent.ID,
+		LunID:  0,
+	})
+	if err != nil {
+		// Cleanup: delete target, extent, and ZVOL
+		klog.Errorf("Failed to create target-extent association, cleaning up: %v", err)
+		if delErr := s.apiClient.DeleteISCSITarget(ctx, target.ID, false); delErr != nil {
+			klog.Errorf("Failed to cleanup iSCSI target: %v", delErr)
+		}
+		if delErr := s.apiClient.DeleteISCSIExtent(ctx, extent.ID, false, false); delErr != nil {
+			klog.Errorf("Failed to cleanup iSCSI extent: %v", delErr)
+		}
+		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
+			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to create target-extent association for cloned volume: %v", err)
+	}
+
+	// Step 4: Reload iSCSI service to make the new target discoverable
+	if reloadErr := s.apiClient.ReloadISCSIService(ctx); reloadErr != nil {
+		klog.Warningf("Failed to reload iSCSI service (target may not be immediately discoverable): %v", reloadErr)
+	}
+
+	// Construct full IQN
+	fullIQN := globalConfig.Basename + ":" + target.Name
+	klog.V(4).Infof("Constructed full IQN: %s", fullIQN)
+
+	// Step 5: Store ZFS user properties for metadata tracking
+	props := tnsapi.ISCSIVolumePropertiesV1(tnsapi.ISCSIVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		TargetID:       target.ID,
+		ExtentID:       extent.ID,
+		TargetIQN:      fullIQN,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+	})
+	// Add clone-specific properties
+	cloneProps := tnsapi.ClonedVolumeProperties(tnsapi.ContentSourceSnapshot, snapshotID)
+	for k, v := range cloneProps {
+		props[k] = v
+	}
+	if err := s.apiClient.SetDatasetProperties(ctx, zvol.ID, props); err != nil {
+		klog.Warningf("Failed to set ZFS user properties on cloned ZVOL %s: %v (volume will still work)", zvol.ID, err)
+	} else {
+		klog.V(4).Infof("Stored ZFS user properties on cloned ZVOL %s", zvol.ID)
+	}
+
+	klog.Infof("Created iSCSI volume from clone: %s (ZVOL: %s, Target: %s, IQN: %s, Extent: %d)",
+		volumeName, zvol.ID, target.Name, fullIQN, extent.ID)
+
+	// Build volume metadata
+	meta := VolumeMetadata{
+		Name:          volumeName,
+		Protocol:      ProtocolISCSI,
+		DatasetID:     zvol.ID,
+		DatasetName:   zvol.Name,
+		Server:        server,
+		ISCSITargetID: target.ID,
+		ISCSIExtentID: extent.ID,
+		ISCSIIQN:      fullIQN,
+	}
+
+	// Update volume capacity metric
+	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolISCSI, requestedCapacity)
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeName,
+			CapacityBytes: requestedCapacity,
+			VolumeContext: buildVolumeContext(meta),
+			ContentSource: &csi.VolumeContentSource{
+				Type: &csi.VolumeContentSource_Snapshot{
+					Snapshot: &csi.VolumeContentSource_SnapshotSource{
+						SnapshotId: snapshotID,
+					},
+				},
+			},
+		},
+	}, nil
+}

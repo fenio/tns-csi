@@ -19,10 +19,10 @@ The [official TrueNAS CSI driver](https://github.com/truenas/truenas-csi) was re
 | Protocol | TNS-CSI | truenas-csi |
 |----------|---------|-------------|
 | **NFS** | Yes | Yes |
-| **iSCSI** | No (intentionally excluded) | Yes |
+| **iSCSI** | Yes | Yes |
 | **NVMe-oF (TCP)** | Yes | No |
 
-**Philosophy difference**: TNS-CSI deliberately excludes iSCSI in favor of NVMe-oF, which offers better performance on modern networks (10GbE+). The official driver takes the opposite approach - supporting the mature iSCSI protocol but not NVMe-oF.
+**Key difference**: TNS-CSI supports all three major storage protocols (NFS, iSCSI, and NVMe-oF), while the official driver supports NFS and iSCSI but not NVMe-oF. If you need NVMe-oF for high-performance block storage on modern networks (10GbE+), TNS-CSI is currently the only option.
 
 ## Feature Comparison
 
@@ -37,7 +37,7 @@ The [official TrueNAS CSI driver](https://github.com/truenas/truenas-csi) was re
 | **Detached Snapshots** | Yes | No |
 | **Dataset Encryption** | Yes | Yes |
 | **Automatic Snapshot Scheduling** | No | Yes |
-| **CHAP Authentication** | N/A (no iSCSI) | Yes |
+| **CHAP Authentication** | No | Yes |
 | **kubectl Plugin** | Yes | No |
 | **Volume Adoption/Migration** | Yes | No |
 | **Prometheus Metrics** | Yes | No |
@@ -96,13 +96,12 @@ Built-in observability:
 - Custom naming schemas with timestamps
 - No external snapshot controller needed for scheduled snapshots
 
-### 2. iSCSI with CHAP
+### 2. iSCSI CHAP Authentication
 
-- Mature, widely-compatible block storage protocol
-- CHAP authentication (including mutual)
+- CHAP authentication (including mutual CHAP)
 - Initiator IQN filtering
 - Network CIDR restrictions
-- Broad client compatibility
+- Note: TNS-CSI supports iSCSI but without CHAP authentication
 
 ### 3. Official Support
 
@@ -115,7 +114,8 @@ Built-in observability:
 
 ### Choose TNS-CSI if:
 
-- You want **NVMe-oF** for high-performance block storage
+- You want **NVMe-oF** for high-performance block storage (not available in official driver)
+- You want **all three protocols** (NFS, iSCSI, NVMe-oF) from a single driver
 - You need **volume adoption/migration** features
 - You want a **kubectl plugin** for volume management
 - You're migrating from **democratic-csi** and want similar workflows
@@ -125,8 +125,8 @@ Built-in observability:
 
 ### Choose truenas-csi (Official) if:
 
-- You need **iSCSI** (established infrastructure, compatibility requirements)
 - You need **automatic snapshot scheduling** without external tools
+- You need **CHAP authentication** for iSCSI
 - You prefer **official vendor support**
 - You want the safety of an **iXsystems-maintained** project
 

@@ -21,8 +21,8 @@ var _ = Describe("Shared Encryption", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with "both" to enable both NFS and NVMe-oF storage classes
-		err = f.Setup("both")
+		// Setup with "all" to enable NFS, NVMe-oF, and iSCSI storage classes
+		err = f.Setup("all")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 
@@ -70,6 +70,22 @@ var _ = Describe("Shared Encryption", func() {
 					"pool":                      f.Config.TrueNASPool,
 					"transport":                 "tcp",
 					"port":                      "4420",
+					"csi.storage.k8s.io/fstype": "ext4",
+					"encryption":                "true",
+					"encryptionGenerateKey":     "true",
+				},
+			},
+			{
+				name:       "iSCSI",
+				id:         "iscsi",
+				accessMode: corev1.ReadWriteOnce,
+				pvcTimeout: 3 * time.Minute,
+				podTimeout: 3 * time.Minute,
+				scParams: map[string]string{
+					"protocol":                  "iscsi",
+					"server":                    f.Config.TrueNASHost,
+					"pool":                      f.Config.TrueNASPool,
+					"port":                      "3260",
 					"csi.storage.k8s.io/fstype": "ext4",
 					"encryption":                "true",
 					"encryptionGenerateKey":     "true",
@@ -325,6 +341,114 @@ var _ = Describe("Shared Encryption", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Deleting source pod before restore (NVMe-oF ReadWriteOnce)")
+			err = f.K8s.DeletePod(ctx, pod.Name)
+			Expect(err).NotTo(HaveOccurred())
+			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, proto.podTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating restored PVC from snapshot")
+			restoredPVCName := "encrypted-restored-" + proto.id
+			err = f.K8s.CreatePVCFromSnapshot(ctx, restoredPVCName, snapshotName, scName, "1Gi",
+				[]corev1.PersistentVolumeAccessMode{proto.accessMode})
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeletePVC(ctx, restoredPVCName)
+			})
+
+			err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, proto.pvcTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating pod to verify restored data")
+			restoredPodName := "encrypted-restored-pod-" + proto.id
+			restoredPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
+				Name:      restoredPodName,
+				PVCName:   restoredPVCName,
+				MountPath: "/data",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeletePod(ctx, restoredPodName)
+			})
+
+			err = f.K8s.WaitForPodReady(ctx, restoredPod.Name, proto.podTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying restored data matches snapshot point-in-time")
+			output, err := f.K8s.ExecInPod(ctx, restoredPod.Name, []string{"cat", "/data/snapshot-data.txt"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal(initialData))
+		})
+
+		It("should create and restore snapshots on encrypted volumes [iSCSI]", func() {
+			ctx := context.Background()
+			protocols := getProtocols(f)
+			proto := protocols[2] // iSCSI
+
+			By("Creating encrypted StorageClass")
+			scName := fmt.Sprintf("tns-csi-%s-encrypted-snap-restore", proto.id)
+			err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", proto.scParams)
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeleteStorageClass(ctx, scName)
+			})
+
+			By("Creating VolumeSnapshotClass")
+			snapshotClass := fmt.Sprintf("tns-csi-%s-encrypted-snap-class", proto.id)
+			err = f.K8s.CreateVolumeSnapshotClass(ctx, snapshotClass, "tns.csi.io", "Delete")
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeleteVolumeSnapshotClass(context.Background(), snapshotClass)
+			})
+
+			By("Creating source PVC")
+			pvcName := "encrypted-snap-source-" + proto.id
+			pvc, err := f.K8s.CreatePVC(ctx, framework.PVCOptions{
+				Name:             pvcName,
+				StorageClassName: scName,
+				Size:             "1Gi",
+				AccessModes:      []corev1.PersistentVolumeAccessMode{proto.accessMode},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeletePVC(ctx, pvcName)
+			})
+
+			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, proto.pvcTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating pod and writing initial data")
+			podName := "encrypted-snap-pod-" + proto.id
+			pod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
+				Name:      podName,
+				PVCName:   pvc.Name,
+				MountPath: "/data",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeletePod(ctx, podName)
+			})
+
+			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			initialData := "Initial encrypted iSCSI data for snapshot"
+			_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{
+				"sh", "-c", fmt.Sprintf("echo '%s' > /data/snapshot-data.txt && sync", initialData),
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating snapshot")
+			snapshotName := "encrypted-snapshot-" + proto.id
+			err = f.K8s.CreateVolumeSnapshot(ctx, snapshotName, pvc.Name, snapshotClass)
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeleteVolumeSnapshot(context.Background(), snapshotName)
+			})
+
+			err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, 3*time.Minute)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Deleting source pod before restore (iSCSI ReadWriteOnce)")
 			err = f.K8s.DeletePod(ctx, pod.Name)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, proto.podTimeout)

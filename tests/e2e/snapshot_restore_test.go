@@ -20,8 +20,8 @@ var _ = Describe("Snapshot Restore", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with "both" to enable both NFS and NVMe-oF storage classes
-		err = f.Setup("both")
+		// Setup with "all" to enable NFS, NVMe-oF, and iSCSI storage classes
+		err = f.Setup("all")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 
@@ -57,6 +57,15 @@ var _ = Describe("Snapshot Restore", func() {
 			id:            "nvmeof",
 			storageClass:  "tns-csi-nvmeof",
 			snapshotClass: "tns-csi-nvmeof-snapshot",
+			accessMode:    corev1.ReadWriteOnce,
+			podTimeout:    6 * time.Minute,
+			needsPodFirst: true,
+		},
+		{
+			name:          "iSCSI",
+			id:            "iscsi",
+			storageClass:  "tns-csi-iscsi",
+			snapshotClass: "tns-csi-iscsi-snapshot",
 			accessMode:    corev1.ReadWriteOnce,
 			podTimeout:    6 * time.Minute,
 			needsPodFirst: true,

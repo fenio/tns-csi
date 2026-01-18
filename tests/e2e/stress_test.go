@@ -22,8 +22,8 @@ var _ = Describe("Snapshot Stress", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with "both" to enable both NFS and NVMe-oF storage classes
-		err = f.Setup("both")
+		// Setup with "all" to enable NFS, NVMe-oF, and iSCSI storage classes
+		err = f.Setup("all")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 
@@ -57,6 +57,14 @@ var _ = Describe("Snapshot Stress", func() {
 			id:            "nvmeof",
 			storageClass:  "tns-csi-nvmeof",
 			snapshotClass: "tns-csi-nvmeof-snapshot-stress",
+			accessMode:    corev1.ReadWriteOnce,
+			podTimeout:    6 * time.Minute,
+		},
+		{
+			name:          "iSCSI",
+			id:            "iscsi",
+			storageClass:  "tns-csi-iscsi",
+			snapshotClass: "tns-csi-iscsi-snapshot-stress",
 			accessMode:    corev1.ReadWriteOnce,
 			podTimeout:    6 * time.Minute,
 		},
@@ -210,8 +218,8 @@ var _ = Describe("Volume Stress", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with "both" to enable both NFS and NVMe-oF storage classes
-		err = f.Setup("both")
+		// Setup with "all" to enable NFS, NVMe-oF, and iSCSI storage classes
+		err = f.Setup("all")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 
@@ -242,6 +250,13 @@ var _ = Describe("Volume Stress", func() {
 			name:         "NVMe-oF",
 			id:           "nvmeof",
 			storageClass: "tns-csi-nvmeof",
+			accessMode:   corev1.ReadWriteOnce,
+			podTimeout:   6 * time.Minute,
+		},
+		{
+			name:         "iSCSI",
+			id:           "iscsi",
+			storageClass: "tns-csi-iscsi",
 			accessMode:   corev1.ReadWriteOnce,
 			podTimeout:   6 * time.Minute,
 		},

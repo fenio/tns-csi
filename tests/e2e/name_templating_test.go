@@ -21,8 +21,8 @@ var _ = Describe("Name Templating", func() {
 		f, err = framework.NewFramework()
 		Expect(err).NotTo(HaveOccurred(), "Failed to create framework")
 
-		// Setup with "nfs" - NVMe-oF name templating tests skipped due to port binding issues
-		err = f.Setup("nfs")
+		// Setup with "all" to enable NFS, NVMe-oF, and iSCSI storage classes
+		err = f.Setup("all")
 		Expect(err).NotTo(HaveOccurred(), "Failed to setup framework")
 	})
 
@@ -53,6 +53,14 @@ var _ = Describe("Name Templating", func() {
 		},
 		// NVMe-oF skipped - has issues with name templating and port binding
 		// TODO: Re-enable once NVMe-oF subsystem port binding is fixed
+		{
+			name:          "iSCSI",
+			id:            "iscsi",
+			protocol:      "iscsi",
+			accessMode:    corev1.ReadWriteOnce,
+			podTimeout:    6 * time.Minute,
+			needsPodFirst: true,
+		},
 	}
 
 	for _, proto := range protocols {

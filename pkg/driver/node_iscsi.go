@@ -30,6 +30,28 @@ var (
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
 var defaultISCSIMountOptions = []string{"noatime", "_netdev"}
 
+// iscsiadmCmd builds a command to run iscsiadm, using nsenter to execute
+// in the host's namespaces when running in a container. This allows the
+// container to use the host's iscsid daemon.
+func iscsiadmCmd(ctx context.Context, args ...string) *exec.Cmd {
+	// Check if we're in a container by looking for /proc/1/ns/mnt
+	// If accessible and we have hostPID, use nsenter to run in host namespace
+	if _, err := os.Stat("/proc/1/ns/mnt"); err == nil {
+		// Use nsenter to enter host's mount namespace (for /etc/iscsi, /run)
+		// and IPC namespace (for iscsid communication)
+		nsenterArgs := make([]string, 0, 4+len(args))
+		nsenterArgs = append(nsenterArgs, "--mount=/proc/1/ns/mnt", "--ipc=/proc/1/ns/ipc", "--", "iscsiadm")
+		nsenterArgs = append(nsenterArgs, args...)
+		klog.V(5).Infof("Running iscsiadm via nsenter: nsenter %v", nsenterArgs)
+		//nolint:gosec // G204: nsenter args are controlled (iscsiadm with CSI-provided params)
+		return exec.CommandContext(ctx, "nsenter", nsenterArgs...)
+	}
+
+	// Not in container or no access to host namespaces - run directly
+	klog.V(5).Infof("Running iscsiadm directly: iscsiadm %v", args)
+	return exec.CommandContext(ctx, "iscsiadm", args...)
+}
+
 // iscsiConnectionParams holds validated iSCSI connection parameters.
 type iscsiConnectionParams struct {
 	iqn    string
@@ -108,11 +130,11 @@ func (s *NodeService) validateISCSIParams(volumeContext map[string]string) (*isc
 	return params, nil
 }
 
-// checkISCSIAdm checks if iscsiadm is installed.
+// checkISCSIAdm checks if iscsiadm is available (either directly or via nsenter).
 func (s *NodeService) checkISCSIAdm(ctx context.Context) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "iscsiadm", "--version")
+	cmd := iscsiadmCmd(checkCtx, "--version")
 	if err := cmd.Run(); err != nil {
 		return ErrISCSIAdmNotFound
 	}
@@ -128,8 +150,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer discoverCancel()
 
-	//nolint:gosec // iscsiadm with portal from volume context is expected for CSI driver
-	discoverCmd := exec.CommandContext(discoverCtx, "iscsiadm", "-m", "discovery", "-t", "sendtargets", "-p", portal)
+	discoverCmd := iscsiadmCmd(discoverCtx, "-m", "discovery", "-t", "sendtargets", "-p", portal)
 	output, err := discoverCmd.CombinedOutput()
 	if err != nil {
 		// Log the discovery error - this is critical for debugging
@@ -148,8 +169,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	klog.V(4).Infof("Checking if iSCSI target %s is in node database", params.iqn)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer checkCancel()
-	//nolint:gosec // iscsiadm with IQN from volume context is expected for CSI driver
-	checkCmd := exec.CommandContext(checkCtx, "iscsiadm", "-m", "node", "-T", params.iqn, "-p", portal)
+	checkCmd := iscsiadmCmd(checkCtx, "-m", "node", "-T", params.iqn, "-p", portal)
 	checkOutput, checkErr := checkCmd.CombinedOutput()
 	if checkErr != nil {
 		klog.Errorf("iSCSI target %s not found in node database: %v, output: %s", params.iqn, checkErr, string(checkOutput))
@@ -162,8 +182,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer loginCancel()
 
-	//nolint:gosec // iscsiadm login with IQN and portal from volume context is expected for CSI driver
-	loginCmd := exec.CommandContext(loginCtx, "iscsiadm", "-m", "node", "-T", params.iqn, "-p", portal, "--login")
+	loginCmd := iscsiadmCmd(loginCtx, "-m", "node", "-T", params.iqn, "-p", portal, "--login")
 	output, err = loginCmd.CombinedOutput()
 	if err != nil {
 		// Check if already logged in
@@ -189,8 +208,7 @@ func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnec
 	logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	//nolint:gosec // iscsiadm logout with IQN and portal from volume context is expected for CSI driver
-	cmd := exec.CommandContext(logoutCtx, "iscsiadm", "-m", "node", "-T", params.iqn, "-p", portal, "--logout")
+	cmd := iscsiadmCmd(logoutCtx, "-m", "node", "-T", params.iqn, "-p", portal, "--logout")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Check if already logged out

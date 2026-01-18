@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -236,36 +235,67 @@ func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnec
 }
 
 // findISCSIDevice finds the device path for an iSCSI LUN.
+// It queries iscsiadm for active sessions to find the device attached to our IQN.
 func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnectionParams) (string, error) {
-	_ = ctx // Reserved for future use
+	// Use iscsiadm to find the device - this is the authoritative source
+	// iscsiadm -m session -P 3 shows attached SCSI devices for each session
+	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-	// Look for device in /dev/disk/by-path/
-	// Format: ip-<server>:<port>-iscsi-<iqn>-lun-<lun>
-	// Note: We use wildcard for server:port because TrueNAS may report a different
-	// IP than the hostname we used for discovery (same issue as portal mismatch).
-	// Match by IQN only since that's guaranteed to be unique.
-	pattern := "ip-*-iscsi-" + params.iqn + "-lun-*"
-	byPathDir := "/dev/disk/by-path"
-
-	klog.V(5).Infof("Looking for iSCSI device with pattern: %s", pattern)
-	matches, err := filepath.Glob(filepath.Join(byPathDir, pattern))
+	cmd := iscsiadmCmd(sessionCtx, "-m", "session", "-P", "3")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", err
-	}
-
-	if len(matches) == 0 {
-		klog.V(5).Infof("No iSCSI device found matching pattern %s", pattern)
+		// No sessions might mean device isn't connected yet
+		klog.V(5).Infof("iscsiadm session query failed: %v", err)
 		return "", ErrISCSIDeviceNotFound
 	}
 
-	// Resolve the symlink to get the actual device path
-	devicePath, err := filepath.EvalSymlinks(matches[0])
-	if err != nil {
-		return "", err
+	// Parse the output to find our IQN and its attached disk
+	// Format:
+	// Target: iqn.2005-10.org.freenas.ctl:pvc-xxx
+	//     ...
+	//     Attached scsi disk sda    State: running
+	deviceName := parseISCSISessionDevice(string(output), params.iqn)
+	if deviceName == "" {
+		klog.V(5).Infof("No device found for IQN %s in session output", params.iqn)
+		return "", ErrISCSIDeviceNotFound
 	}
 
-	klog.V(4).Infof("Found iSCSI device: %s -> %s", matches[0], devicePath)
+	devicePath := "/dev/" + deviceName
+	klog.V(4).Infof("Found iSCSI device for IQN %s: %s", params.iqn, devicePath)
 	return devicePath, nil
+}
+
+// parseISCSISessionDevice parses iscsiadm -m session -P 3 output to find
+// the attached disk for a specific IQN.
+func parseISCSISessionDevice(output, targetIQN string) string {
+	lines := strings.Split(output, "\n")
+	inTargetSection := false
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Check if we're entering a target section
+		if strings.HasPrefix(line, "Target:") {
+			iqn := strings.TrimPrefix(line, "Target:")
+			iqn = strings.TrimSpace(iqn)
+			inTargetSection = (iqn == targetIQN)
+			continue
+		}
+
+		// If we're in the right target section, look for attached disk
+		if inTargetSection && strings.Contains(line, "Attached scsi disk") {
+			// Line format: "Attached scsi disk sda    State: running"
+			parts := strings.Fields(line)
+			for i, part := range parts {
+				if part == "disk" && i+1 < len(parts) {
+					return parts[i+1] // Return device name like "sda"
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 // waitForISCSIDevice waits for the iSCSI device to appear after login.

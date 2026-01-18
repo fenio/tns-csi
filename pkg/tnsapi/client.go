@@ -2562,13 +2562,9 @@ func (c *Client) CreateISCSIExtent(ctx context.Context, params ISCSIExtentCreate
 func (c *Client) DeleteISCSIExtent(ctx context.Context, extentID int, removeFile, force bool) error {
 	klog.V(4).Infof("Deleting iSCSI extent: %d (removeFile=%v, force=%v)", extentID, removeFile, force)
 
-	params := map[string]interface{}{
-		"remove": removeFile,
-		"force":  force,
-	}
-
+	// Pass parameters as positional arguments: id, remove, force
 	var result bool
-	err := c.Call(ctx, "iscsi.extent.delete", []interface{}{extentID, params}, &result)
+	err := c.Call(ctx, "iscsi.extent.delete", []interface{}{extentID, removeFile, force}, &result)
 	if err != nil {
 		return fmt.Errorf("failed to delete iSCSI extent: %w", err)
 	}

@@ -28,17 +28,26 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 - **TrueNAS Requirements**:
   - TrueNAS Scale 25.10+ (NVMe-oF feature introduced in this version)
   - Static IP address configured (DHCP not supported)
-  - Pre-configured NVMe-oF subsystem with TCP port (default: 4420)
-  - At least one initial namespace in subsystem
-- **Architecture**: Shared subsystem model (1 subsystem → many namespaces)
+  - Pre-configured NVMe-oF port with TCP transport (default: 4420)
+- **Architecture**: Dedicated subsystem model (1 subsystem per volume)
+
+### iSCSI (Internet Small Computer Systems Interface)
+- **Status**: ✅ Functional, testing in progress
+- **Access Modes**: ReadWriteOnce (RWO)
+- **Use Case**: Traditional block storage, broad compatibility
+- **Transport**: TCP (default port: 3260)
+- **TrueNAS Requirements**:
+  - TrueNAS Scale 25.10+
+  - iSCSI service enabled
+  - Pre-configured iSCSI portal
+- **Architecture**: Dedicated target model (1 target per volume with 1 extent)
+- **Node Requirements**: `open-iscsi` package installed on Kubernetes nodes
 
 ### Why These Protocols?
 
-**NVMe-oF over iSCSI**: NVMe-oF provides superior performance with:
-- Lower latency
-- Higher IOPS
-- Better utilization of modern NVMe SSDs
-- Native NVMe command set over fabric
+**Block Storage Options (NVMe-oF vs iSCSI)**:
+- **NVMe-oF**: Higher performance, lower latency, better for modern NVMe SSDs
+- **iSCSI**: Broader compatibility, works with any storage, well-established protocol
 
 **No SMB/CIFS Support**: Low priority due to Linux-native protocol focus. Consider Democratic-CSI driver if Windows file sharing is required.
 
@@ -48,24 +57,26 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 
 #### Dynamic Provisioning
 - **Status**: ✅ Fully implemented and functional
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Automatic creation of storage volumes when PVCs are created
 - **Implementation**:
   - NFS: Creates ZFS dataset and NFS share automatically
-  - NVMe-oF: Creates ZVOL, namespace, and configures NVMe-oF target
+  - NVMe-oF: Creates ZVOL, dedicated subsystem, and namespace
+  - iSCSI: Creates ZVOL, dedicated target, extent, and target-extent mapping
 - **Parameters**:
-  - `protocol`: nfs or nvmeof
+  - `protocol`: nfs, nvmeof, or iscsi
   - `pool`: ZFS pool name
   - `server`: TrueNAS IP/hostname
-  - `subsystemNQN`: (NVMe-oF only) Pre-configured subsystem NQN
+  - `port`: (NVMe-oF/iSCSI) Target port number
 
 #### Volume Deletion
 - **Status**: ✅ Fully implemented and functional
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Automatic cleanup when PVCs with reclaimPolicy: Delete are removed
 - **Implementation**:
   - NFS: Removes NFS share and deletes ZFS dataset
-  - NVMe-oF: Removes namespace from subsystem and deletes ZVOL
+  - NVMe-oF: Removes namespace, subsystem, and deletes ZVOL
+  - iSCSI: Removes target-extent, extent, target, and deletes ZVOL
   - Idempotent operations (safe to retry)
   - Supports `deleteStrategy` parameter for volume retention (see below)
 
@@ -124,6 +135,7 @@ reclaimPolicy: Delete
 | NFS | Linux | `vers=4.2`, `nolock` |
 | NFS | macOS | `vers=4`, `nolock` |
 | NVMe-oF | Linux | `noatime` |
+| iSCSI | Linux | `noatime`, `_netdev` |
 
 **Example StorageClass with Custom Mount Options:**
 ```yaml
@@ -400,12 +412,12 @@ spec:
 
 ### Helm Chart
 - **Status**: ✅ Production-ready chart
-- **Registry**: 
+- **Registry**:
   - Docker Hub (recommended): `oci://registry-1.docker.io/bfenski/tns-csi-driver`
   - GitHub Container Registry: `oci://ghcr.io/fenio/tns-csi-driver`
 - **Features**:
   - Configurable resource limits
-  - Multiple storage class support (NFS, NVMe-oF)
+  - Multiple storage class support (NFS, NVMe-oF, iSCSI)
   - ServiceMonitor for Prometheus
   - RBAC configuration
   - Customizable mount options
@@ -1050,14 +1062,13 @@ reclaimPolicy: Delete
 ## Roadmap / Future Considerations
 
 ### Under Consideration (Not Committed)
-- **Additional Protocols**: iSCSI or SMB support (low priority, based on community demand)
+- **SMB/CIFS Protocol**: Low priority, based on community demand
 - **Multi-pool Support**: Advanced scheduling across multiple TrueNAS pools
 - **Topology Awareness**: Multi-zone deployments
 - **Volume Migration**: Move volumes between protocols/pools
 - **Quota Management**: Advanced quota and reservation features
 
 ### Not Planned
-- **iSCSI Protocol**: NVMe-oF is superior for block storage
 - **Windows Support**: Linux-focused driver
 - **Legacy Protocol Support**: Focus on modern protocols only
 
@@ -1155,7 +1166,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ### Quick Install (NVMe-oF)
 ```bash
-# Pre-requisite: Configure NVMe-oF subsystem in TrueNAS first!
+# Pre-requisite: Configure NVMe-oF port in TrueNAS first!
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --namespace kube-system \
   --create-namespace \
@@ -1163,8 +1174,20 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses.nvmeof.enabled=true \
   --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
+  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+```
+
+### Quick Install (iSCSI)
+```bash
+# Pre-requisite: Configure iSCSI portal in TrueNAS and install open-iscsi on nodes!
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.iscsi.enabled=true \
+  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
+  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
 ```
 
 ## Support and Community

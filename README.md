@@ -40,29 +40,31 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 
 - **NFS** - Network File System for file-based storage
 - **NVMe-oF** - NVMe over Fabrics for high-performance block storage
+- **iSCSI** - Traditional block storage protocol with broad compatibility
 
 ## Comparison with Other Drivers
 
 | | TNS-CSI | truenas-csi (Official) | Democratic-CSI |
 |---|---------|------------------------|----------------|
 | **Best for** | Modern TrueNAS with NVMe-oF | iSCSI + encryption needs | Broad compatibility |
-| **Block protocol** | NVMe-oF | iSCSI | iSCSI (+ NVMe-oF for ZoL) |
+| **Block protocols** | NVMe-oF, iSCSI | iSCSI | iSCSI (+ NVMe-oF for ZoL) |
 | **Unique strength** | kubectl plugin, metrics, adoption, encryption | Scheduled snapshots | Multi-backend, Windows |
-| **Trade-off** | No iSCSI | No NVMe-oF, no plugin | SSH complexity |
+| **Trade-off** | WebSocket API only | No NVMe-oF, no plugin | SSH complexity |
 | **Maturity** | Early development | Very new (Dec 2025) | Mature, production-ready |
 
 See detailed comparisons:
 - [TNS-CSI vs truenas-csi (Official)](docs/COMPARISON-TRUENAS-CSI.md)
 - [TNS-CSI vs Democratic-CSI](docs/COMPARISON-DEMOCRATIC-CSI.md)
 
-### Why NFS and NVMe-oF?
+### Protocol Selection Guide
 
-This driver focuses on these two protocols for specific reasons:
+This driver supports three storage protocols:
 
-- **NVMe-oF over iSCSI**: NVMe-oF provides superior performance with lower latency and higher IOPS compared to iSCSI. It's designed for modern NVMe SSDs and takes full advantage of their capabilities. For block storage workloads, NVMe-oF is the clear choice.
-- **SMB protocol**: Currently has low priority due to author's preference for Linux-native protocols. If you need Windows file sharing support, consider the Democratic-CSI driver or contribute SMB support if there's sufficient community demand.
+- **NFS**: Best for shared file storage where multiple pods need concurrent access (ReadWriteMany)
+- **NVMe-oF**: Best for high-performance block storage with lowest latency and highest IOPS - ideal for databases and latency-sensitive workloads
+- **iSCSI**: Traditional block storage with broad compatibility - useful when NVMe-oF is not available or for environments already using iSCSI
 
-The driver intentionally focuses on these two production-ready protocols rather than spreading development effort across multiple less-optimal options.
+**Note:** SMB/CIFS is not supported due to the Linux-focused nature of this driver. If you need Windows file sharing, consider the Democratic-CSI driver.
 
 ## Features
 

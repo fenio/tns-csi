@@ -28,6 +28,12 @@ parameters:
   csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
   {{- end }}
   {{- end }}
+  {{- if eq $name "iscsi" }}
+  port: {{ $sc.port | default "3260" | quote }}
+  {{- if $sc.fsType }}
+  csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
+  {{- end }}
+  {{- end }}
   {{- if $sc.parameters }}
   {{- range $key, $value := $sc.parameters }}
   {{ $key }}: {{ $value | quote }}

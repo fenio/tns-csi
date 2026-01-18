@@ -27,18 +27,35 @@ This guide explains how to deploy the TrueNAS Scale CSI driver on a Kubernetes c
    # Install nvme-cli tools on all nodes
    # Ubuntu/Debian
    sudo apt-get install -y nvme-cli
-   
+
    # RHEL/CentOS
    sudo yum install -y nvme-cli
-   
+
    # Load NVMe-oF kernel modules
    sudo modprobe nvme-tcp
-   
+
    # Make module loading persistent
    echo "nvme-tcp" | sudo tee /etc/modules-load.d/nvme.conf
-   
+
    # Verify nvme-cli is installed
    nvme version
+   ```
+
+   **For iSCSI Support:**
+   ```bash
+   # Install open-iscsi on all nodes
+   # Ubuntu/Debian
+   sudo apt-get install -y open-iscsi
+
+   # RHEL/CentOS
+   sudo yum install -y iscsi-initiator-utils
+
+   # Enable and start iscsid service
+   sudo systemctl enable iscsid
+   sudo systemctl start iscsid
+
+   # Verify iSCSI is installed
+   iscsiadm --version
    ```
 
 ## Step 1: Prepare TrueNAS Scale
@@ -160,6 +177,73 @@ Or if the `subsystemNQN` parameter is missing:
 Parameter 'subsystemNQN' is required for nvmeof protocol
 ```
 
+### 1.5 Enable iSCSI Service (For iSCSI Support)
+
+**⚠️ IMPORTANT:** iSCSI requires pre-configuration before volume provisioning will work.
+
+If you plan to use iSCSI storage:
+
+#### Enable the iSCSI Service
+
+1. Navigate to **System Settings** > **Services**
+2. Find **iSCSI** service
+3. Click the toggle to enable it
+4. Click **Save** and verify the service is running
+
+#### Configure a Portal (REQUIRED)
+
+A portal defines where iSCSI targets listen for connections:
+
+1. Navigate to **Shares** → **Block (iSCSI)** → **Portals**
+2. Click **Add**
+3. Configure the portal:
+   - **Description:** `kubernetes-csi` (or any descriptive name)
+   - **IP Address:** Select your TrueNAS IP address (or `0.0.0.0` to listen on all interfaces)
+   - **Port:** `3260` (default iSCSI port)
+4. Click **Save**
+
+#### Configure an Initiator Group (REQUIRED)
+
+An initiator group controls which hosts can connect to iSCSI targets:
+
+1. Navigate to **Shares** → **Block (iSCSI)** → **Initiators**
+2. Click **Add**
+3. Configure the initiator group:
+   - **Description:** `kubernetes-csi` (or any descriptive name)
+   - **Connected Initiators:** Leave empty to allow all initiators, or add specific IQNs for security
+   - **Authorized Networks:** Leave empty to allow all networks, or specify CIDR ranges (e.g., `10.0.0.0/8`)
+4. Click **Save**
+
+**Why is this required?**
+
+- **Portal:** Defines the network endpoint where iSCSI targets listen - required for any iSCSI connectivity
+- **Initiator Group:** Controls access to targets - the CSI driver uses this when creating targets
+
+The CSI driver will automatically create targets, extents, and target-extent associations for each PVC.
+
+Without proper configuration, volume provisioning will fail with:
+
+```
+No iSCSI portal configured on TrueNAS server.
+Please configure an iSCSI portal in TrueNAS before provisioning iSCSI volumes.
+```
+
+Or:
+
+```
+No iSCSI initiator group configured on TrueNAS server.
+Please configure an iSCSI initiator group in TrueNAS before provisioning iSCSI volumes.
+```
+
+#### Architecture Comparison: iSCSI vs NVMe-oF
+
+| Aspect | iSCSI | NVMe-oF |
+|--------|-------|---------|
+| Pre-configuration | Portal + Initiator group | Subsystem + Port + Initial namespace |
+| Per-volume creation | Target + Extent + Association | Namespace in shared subsystem |
+| Target model | Dedicated target per volume | Shared subsystem, namespace per volume |
+| Complexity | Simpler setup | More complex initial setup |
+
 ## Step 2: Install Using Helm (Recommended)
 
 The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub:
@@ -192,6 +276,21 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```
 
 **Note:** Replace `nqn.2005-03.org.truenas:csi` with the actual subsystem NQN you configured in Step 1.4 (line 99).
+
+**For iSCSI:**
+```bash
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.8.0 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.iscsi.enabled=true \
+  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
+  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+```
+
+**Note:** iSCSI requires a portal and initiator group to be pre-configured. See Step 1.5 for setup instructions.
 
 This single command will:
 - Create the kube-system namespace if needed
@@ -288,10 +387,25 @@ parameters:
   # zfs.compression: "lz4"                                 # ZFS compression algorithm
 ```
 
+**For iSCSI:**
+```yaml
+parameters:
+  protocol: "iscsi"
+  pool: "storage"                                          # Your TrueNAS pool name
+  server: "YOUR-TRUENAS-IP"                                # Your TrueNAS IP/hostname
+  # Optional parameters:
+  # port: "3260"                                           # iSCSI port (default: 3260)
+  # filesystem: "ext4"                                     # Filesystem type: ext4 (default), ext3, or xfs
+  # blocksize: "16K"                                       # Block size for ZVOL (default: 16K)
+  # deleteStrategy: "retain"                               # Keep volumes on TrueNAS when PVC deleted
+  # zfs.compression: "lz4"                                 # ZFS compression algorithm
+```
+
 **Important Notes:**
 - `subsystemNQN` is **REQUIRED** for NVMe-oF - it must match the subsystem you created in Step 1.4
 - The CSI driver creates **namespaces** within this shared subsystem (not new subsystems per volume)
-- NVMe-oF volumes use `ReadWriteOnce` access mode (block storage), while NFS uses `ReadWriteMany` (shared filesystem)
+- NVMe-oF and iSCSI volumes use `ReadWriteOnce` access mode (block storage), while NFS uses `ReadWriteMany` (shared filesystem)
+- iSCSI creates dedicated targets per volume automatically
 
 ## Step 4: Deploy to Kubernetes (Manual Deployment Only)
 
@@ -505,6 +619,20 @@ kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
    - Check dmesg for NVMe errors: `sudo dmesg | grep nvme`
    - Verify subsystem exists: `sudo nvme list-subsys`
    - Check /sys/class/nvme for device entries
+
+7. **iSCSI connection failures**
+   - Verify open-iscsi is installed: `iscsiadm --version`
+   - Check iscsid service is running: `systemctl status iscsid`
+   - Verify iSCSI service is enabled on TrueNAS
+   - Check firewall allows port 3260 (default iSCSI port)
+   - Test discovery: `sudo iscsiadm -m discovery -t sendtargets -p YOUR-TRUENAS-IP:3260`
+   - Check node plugin logs for detailed error messages
+
+8. **iSCSI device not appearing**
+   - Wait a few seconds for device discovery
+   - Check dmesg for SCSI errors: `sudo dmesg | grep -i scsi`
+   - List active sessions: `sudo iscsiadm -m session`
+   - Check /dev/disk/by-path for iSCSI entries
 
 ### kubectl Plugin for Troubleshooting
 
@@ -741,6 +869,7 @@ This CSI driver supports multiple storage protocols:
 
 - **NFS** (Network File System): Shared filesystem storage with `ReadWriteMany` support
 - **NVMe-oF** (NVMe over Fabrics): High-performance block storage with `ReadWriteOnce` support
+- **iSCSI** (Internet SCSI): Traditional block storage with broad compatibility and `ReadWriteOnce` support
 
 ## Current Capabilities
 
@@ -762,4 +891,4 @@ Potential future enhancements:
 
 - **Topology**: Add topology awareness for multi-zone deployments
 
-Note: iSCSI is intentionally not supported - NVMe-oF provides superior performance for block storage. SMB support is low priority.
+Note: SMB/CIFS is not supported due to the Linux-focused nature of this driver.

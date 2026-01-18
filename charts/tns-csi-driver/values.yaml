@@ -361,6 +361,76 @@ storageClasses:
     #     - encryptionKey: hex-encoded encryption key (64 chars for 256-bit)
     parameters: {}
 
+  # iSCSI storage class (requires open-iscsi on nodes)
+  # IMPORTANT: Before enabling, ensure you have configured an iSCSI portal
+  # in TrueNAS (Shares > iSCSI). The CSI driver automatically creates a
+  # dedicated target for each volume - no pre-configured target needed.
+  iscsi:
+    enabled: false
+    name: tns-csi-iscsi
+    isDefault: false
+    # Storage pool name on TrueNAS
+    pool: "storage"
+    # TrueNAS server IP/hostname for iSCSI target
+    server: ""
+    # Optional: Parent dataset
+    parentDataset: ""
+    # iSCSI port number
+    port: "3260"
+    # Filesystem type for formatted volumes (ext4, ext3, xfs)
+    fsType: "ext4"
+    reclaimPolicy: Delete
+    # NOTE: Must use Immediate for snapshot restore to work correctly.
+    # WaitForFirstConsumer causes csi-provisioner to not pass VolumeContentSource
+    # (snapshot reference) to CreateVolume, resulting in empty volumes instead of clones.
+    volumeBindingMode: Immediate
+    allowVolumeExpansion: true
+    # Mount options for iSCSI filesystem volumes
+    # These are merged with driver defaults (noatime, _netdev)
+    # User-specified options override defaults if there's a conflict
+    # Example: ["discard", "data=ordered"]
+    mountOptions: []
+    # Additional parameters
+    # Available parameters:
+    #   deleteStrategy: "delete" or "retain"
+    #     - "delete" (default): Volume is deleted when PVC is deleted
+    #     - "retain": Volume is kept on TrueNAS when PVC is deleted (useful for data protection)
+    #   zfs.compression: ZFS compression algorithm (e.g., "lz4", "zstd", "off")
+    #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
+    #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
+    #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
+    #
+    # Volume Name Templating:
+    #   nameTemplate: Go template for volume names (e.g., "{{ .PVCNamespace }}-{{ .PVCName }}")
+    #     Available variables: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}-{{ .PVCName }}" creates "production-myapp-data"
+    #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
+    #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
+    #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
+    #
+    # Volume Adoption (for cluster migration):
+    #   markAdoptable: "true" or "false"
+    #     - When "true", newly created volumes are marked as adoptable
+    #     - Adoptable volumes can be imported into a different cluster using 'kubectl tns-csi adopt'
+    #   adoptExisting: "true" or "false"
+    #     - When "true", the driver will adopt existing volumes that match the PVC name
+    #     - Useful for migrating volumes between clusters or recovering from cluster failures
+    #
+    # Encryption (ZFS native encryption):
+    #   encryption: "true" or "false"
+    #     - Enables ZFS native encryption for the ZVOL
+    #   encryptionAlgorithm: Algorithm to use (default: "AES-256-GCM")
+    #     - Options: AES-256-GCM, AES-128-CCM, AES-192-CCM, AES-256-CCM, AES-128-GCM, AES-192-GCM
+    #   encryptionGenerateKey: "true" to auto-generate encryption key
+    #     - If true, TrueNAS generates and manages the encryption key
+    #   To use passphrase or hex key, create a Secret and reference it with:
+    #     csi.storage.k8s.io/provisioner-secret-name: <secret-name>
+    #     csi.storage.k8s.io/provisioner-secret-namespace: <secret-namespace>
+    #   Secret keys:
+    #     - encryptionPassphrase: passphrase for encryption (min 8 chars)
+    #     - encryptionKey: hex-encoded encryption key (64 chars for 256-bit)
+    parameters: {}
+
 # Snapshot support
 snapshots:
   # Enable snapshot support (adds csi-snapshotter sidecar to controller)

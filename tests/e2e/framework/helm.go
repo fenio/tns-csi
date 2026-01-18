@@ -81,6 +81,7 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			"--set", "storageClasses.nfs.pool="+h.config.TrueNASPool,
 			"--set", "storageClasses.nfs.server="+h.config.TrueNASHost,
 			"--set", "storageClasses.nvmeof.enabled=false",
+			"--set", "storageClasses.iscsi.enabled=false",
 		)
 	case "nvmeof":
 		args = append(args,
@@ -91,6 +92,17 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			"--set", "storageClasses.nvmeof.server="+h.config.TrueNASHost,
 			"--set", "storageClasses.nvmeof.transport=tcp",
 			"--set", "storageClasses.nvmeof.port=4420",
+			"--set", "storageClasses.iscsi.enabled=false",
+		)
+	case "iscsi":
+		args = append(args,
+			"--set", "storageClasses.nfs.enabled=false",
+			"--set", "storageClasses.nvmeof.enabled=false",
+			"--set", "storageClasses.iscsi.enabled=true",
+			"--set", "storageClasses.iscsi.name=tns-csi-iscsi",
+			"--set", "storageClasses.iscsi.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.iscsi.server="+h.config.TrueNASHost,
+			"--set", "storageClasses.iscsi.port=3260",
 		)
 	case "both", "all":
 		args = append(args,
@@ -104,6 +116,11 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			"--set", "storageClasses.nvmeof.server="+h.config.TrueNASHost,
 			"--set", "storageClasses.nvmeof.transport=tcp",
 			"--set", "storageClasses.nvmeof.port=4420",
+			"--set", "storageClasses.iscsi.enabled=true",
+			"--set", "storageClasses.iscsi.name=tns-csi-iscsi",
+			"--set", "storageClasses.iscsi.pool="+h.config.TrueNASPool,
+			"--set", "storageClasses.iscsi.server="+h.config.TrueNASHost,
+			"--set", "storageClasses.iscsi.port=3260",
 		)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownProtocol, protocol)

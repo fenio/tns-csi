@@ -264,6 +264,13 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		return nil, err
 	}
 
+	// Step 4.5: Reload iSCSI service to make the new target discoverable
+	// Without this, newly created targets may not be visible to iSCSI discovery
+	if reloadErr := s.apiClient.ReloadISCSIService(ctx); reloadErr != nil {
+		klog.Warningf("Failed to reload iSCSI service (target may not be immediately discoverable): %v", reloadErr)
+		// Continue anyway - the target was created, it may just take time to appear
+	}
+
 	// Construct full IQN: basename + ":" + target name
 	// TrueNAS returns just the target name in target.Name, not the full IQN
 	fullIQN := globalConfig.Basename + ":" + target.Name

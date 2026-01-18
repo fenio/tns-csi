@@ -312,6 +312,10 @@ func (m *mockAPIClient) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]t
 	return nil, errNotImplemented
 }
 
+func (m *mockAPIClient) ReloadISCSIService(_ context.Context) error {
+	return nil // No-op for tests
+}
+
 func (m *mockAPIClient) Close() {
 	// Mock client doesn't need cleanup
 }

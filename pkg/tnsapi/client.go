@@ -2691,3 +2691,29 @@ func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([
 
 	return c.QueryISCSITargetExtents(ctx, filters)
 }
+
+// ReloadISCSIService triggers a reload of the iSCSI service to pick up new configuration.
+// This is needed after creating targets to make them discoverable via iSCSI discovery.
+func (c *Client) ReloadISCSIService(ctx context.Context) error {
+	klog.V(4).Info("Reloading iSCSI service to apply configuration changes")
+
+	// service.reload reloads the service configuration without full restart.
+	// For iSCSI, the service name is "iscsitarget" on TrueNAS Scale.
+	var result bool
+	err := c.Call(ctx, "service.reload", []interface{}{"iscsitarget"}, &result)
+	if err != nil {
+		// If reload fails, try restart as fallback
+		klog.V(4).Infof("Service reload failed (%v), trying restart", err)
+		err = c.Call(ctx, "service.restart", []interface{}{"iscsitarget"}, &result)
+		if err != nil {
+			return fmt.Errorf("failed to reload/restart iSCSI service: %w", err)
+		}
+	}
+
+	if !result {
+		klog.Warning("iSCSI service reload/restart returned false - service may not have reloaded properly")
+	}
+
+	klog.V(4).Info("iSCSI service reload completed")
+	return nil
+}

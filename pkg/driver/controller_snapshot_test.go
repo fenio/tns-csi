@@ -375,6 +375,10 @@ func (m *MockAPIClientForSnapshots) ISCSITargetExtentByTarget(_ context.Context,
 	return nil, errors.New("iSCSI not implemented in snapshot mock")
 }
 
+func (m *MockAPIClientForSnapshots) ReloadISCSIService(_ context.Context) error {
+	return nil // No-op for snapshot tests
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

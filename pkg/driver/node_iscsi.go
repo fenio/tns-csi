@@ -130,14 +130,33 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	discoverCmd := exec.CommandContext(discoverCtx, "iscsiadm", "-m", "discovery", "-t", "sendtargets", "-p", portal)
 	output, err := discoverCmd.CombinedOutput()
 	if err != nil {
-		// Discovery failure is not fatal if target is already known
-		klog.Warningf("iSCSI discovery failed (may be OK if target is known): %v, output: %s", err, string(output))
+		// Log the discovery error - this is critical for debugging
+		klog.Errorf("iSCSI discovery failed at %s: %v, output: %s", portal, err, string(output))
+		// Check if it's a connection error to iscsid
+		if strings.Contains(string(output), "connect") || strings.Contains(string(output), "Connection refused") {
+			return fmt.Errorf("iSCSI discovery failed - iscsid may not be running or accessible: %s", string(output))
+		}
+		// Continue anyway - target might already be known from previous discovery
+		klog.Warningf("Continuing despite discovery failure - target may already be known")
 	} else {
-		klog.V(4).Infof("iSCSI discovery output: %s", string(output))
+		klog.Infof("iSCSI discovery successful at %s: %s", portal, string(output))
 	}
 
-	// Step 2: Login
-	klog.V(4).Infof("Logging into iSCSI target: %s at %s", params.iqn, portal)
+	// Step 2: Check if target is in node database
+	klog.V(4).Infof("Checking if iSCSI target %s is in node database", params.iqn)
+	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer checkCancel()
+	//nolint:gosec // iscsiadm with IQN from volume context is expected for CSI driver
+	checkCmd := exec.CommandContext(checkCtx, "iscsiadm", "-m", "node", "-T", params.iqn, "-p", portal)
+	checkOutput, checkErr := checkCmd.CombinedOutput()
+	if checkErr != nil {
+		klog.Errorf("iSCSI target %s not found in node database: %v, output: %s", params.iqn, checkErr, string(checkOutput))
+		return fmt.Errorf("iSCSI target not found in node database after discovery - check that TrueNAS iSCSI service is running and target is properly configured: %s", string(checkOutput))
+	}
+	klog.V(4).Infof("iSCSI target %s found in node database", params.iqn)
+
+	// Step 3: Login
+	klog.Infof("Logging into iSCSI target: %s at %s", params.iqn, portal)
 	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer loginCancel()
 

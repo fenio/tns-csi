@@ -35,11 +35,14 @@ var (
 	ErrJobAborted             = errors.New("job was aborted")
 
 	// Deletion operation errors - TrueNAS API returned false (unsuccessful).
-	ErrDatasetDeletionFailed   = errors.New("dataset deletion returned false (unsuccessful)")
-	ErrNFSShareDeletionFailed  = errors.New("NFS share deletion returned false (unsuccessful)")
-	ErrSubsystemDeletionFailed = errors.New("NVMe-oF subsystem deletion returned false (unsuccessful)")
-	ErrNamespaceDeletionFailed = errors.New("NVMe-oF namespace deletion returned false (unsuccessful)")
-	ErrSnapshotDeletionFailed  = errors.New("snapshot deletion returned false (unsuccessful)")
+	ErrDatasetDeletionFailed           = errors.New("dataset deletion returned false (unsuccessful)")
+	ErrNFSShareDeletionFailed          = errors.New("NFS share deletion returned false (unsuccessful)")
+	ErrSubsystemDeletionFailed         = errors.New("NVMe-oF subsystem deletion returned false (unsuccessful)")
+	ErrNamespaceDeletionFailed         = errors.New("NVMe-oF namespace deletion returned false (unsuccessful)")
+	ErrSnapshotDeletionFailed          = errors.New("snapshot deletion returned false (unsuccessful)")
+	ErrISCSITargetDeletionFailed       = errors.New("iSCSI target deletion returned false (unsuccessful)")
+	ErrISCSIExtentDeletionFailed       = errors.New("iSCSI extent deletion returned false (unsuccessful)")
+	ErrISCSITargetExtentDeletionFailed = errors.New("iSCSI target-extent deletion returned false (unsuccessful)")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -2337,4 +2340,354 @@ func (c *Client) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolu
 	}
 
 	return &datasets[0], nil
+}
+
+// =============================================================================
+// iSCSI API Methods
+// =============================================================================
+
+// ISCSIGlobalConfig represents the global iSCSI configuration.
+type ISCSIGlobalConfig struct {
+	PoolAvailThreshold *int   `json:"pool_avail_threshold,omitempty"`
+	Basename           string `json:"basename"`
+	ISNS               string `json:"isns_servers"`
+	ID                 int    `json:"id"`
+}
+
+// GetISCSIGlobalConfig retrieves the global iSCSI configuration.
+func (c *Client) GetISCSIGlobalConfig(ctx context.Context) (*ISCSIGlobalConfig, error) {
+	klog.V(4).Infof("Getting iSCSI global configuration")
+
+	var result ISCSIGlobalConfig
+	err := c.Call(ctx, "iscsi.global.config", []interface{}{}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get iSCSI global config: %w", err)
+	}
+
+	klog.V(4).Infof("iSCSI global config: basename=%s", result.Basename)
+	return &result, nil
+}
+
+// ISCSIPortal represents an iSCSI portal (network interface for iSCSI traffic).
+type ISCSIPortal struct {
+	Comment string              `json:"comment"`
+	Listen  []ISCSIPortalListen `json:"listen"`
+	ID      int                 `json:"id"`
+	Tag     int                 `json:"tag"`
+}
+
+// ISCSIPortalListen represents a portal listen address.
+type ISCSIPortalListen struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+}
+
+// QueryISCSIPortals retrieves all iSCSI portals.
+func (c *Client) QueryISCSIPortals(ctx context.Context) ([]ISCSIPortal, error) {
+	klog.V(4).Infof("Querying iSCSI portals")
+
+	var result []ISCSIPortal
+	err := c.Call(ctx, "iscsi.portal.query", []interface{}{}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI portals: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d iSCSI portals", len(result))
+	return result, nil
+}
+
+// ISCSIInitiator represents an iSCSI initiator group.
+type ISCSIInitiator struct {
+	Comment    string   `json:"comment"`
+	Initiators []string `json:"initiators"`
+	ID         int      `json:"id"`
+	Tag        int      `json:"tag"`
+}
+
+// QueryISCSIInitiators retrieves all iSCSI initiator groups.
+func (c *Client) QueryISCSIInitiators(ctx context.Context) ([]ISCSIInitiator, error) {
+	klog.V(4).Infof("Querying iSCSI initiators")
+
+	var result []ISCSIInitiator
+	err := c.Call(ctx, "iscsi.initiator.query", []interface{}{}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI initiators: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d iSCSI initiator groups", len(result))
+	return result, nil
+}
+
+// ISCSITargetGroup represents a target group configuration (portal + initiator + auth).
+type ISCSITargetGroup struct {
+	Auth       *int   `json:"auth,omitempty"`
+	AuthMethod string `json:"authmethod,omitempty"`
+	Portal     int    `json:"portal"`
+	Initiator  int    `json:"initiator"`
+}
+
+// ISCSITargetCreateParams represents parameters for iSCSI target creation.
+type ISCSITargetCreateParams struct {
+	Name   string             `json:"name"`             // Target name (appended to base IQN)
+	Alias  string             `json:"alias,omitempty"`  // Human-readable alias
+	Mode   string             `json:"mode,omitempty"`   // "ISCSI", "FC", "BOTH" (default: ISCSI)
+	Groups []ISCSITargetGroup `json:"groups,omitempty"` // Portal/initiator/auth groups
+}
+
+// ISCSITarget represents an iSCSI target.
+type ISCSITarget struct {
+	Name   string             `json:"name"`
+	Alias  string             `json:"alias"`
+	Mode   string             `json:"mode"`
+	Groups []ISCSITargetGroup `json:"groups"`
+	ID     int                `json:"id"`
+}
+
+// CreateISCSITarget creates a new iSCSI target.
+func (c *Client) CreateISCSITarget(ctx context.Context, params ISCSITargetCreateParams) (*ISCSITarget, error) {
+	klog.V(4).Infof("Creating iSCSI target: %s", params.Name)
+
+	// Set default mode if not specified
+	if params.Mode == "" {
+		params.Mode = "ISCSI"
+	}
+
+	var result ISCSITarget
+	err := c.Call(ctx, "iscsi.target.create", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create iSCSI target: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully created iSCSI target with ID: %d", result.ID)
+	return &result, nil
+}
+
+// DeleteISCSITarget deletes an iSCSI target.
+func (c *Client) DeleteISCSITarget(ctx context.Context, targetID int, force bool) error {
+	klog.V(4).Infof("Deleting iSCSI target: %d (force=%v)", targetID, force)
+
+	var result bool
+	err := c.Call(ctx, "iscsi.target.delete", []interface{}{targetID, force}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to delete iSCSI target: %w", err)
+	}
+
+	if !result {
+		return fmt.Errorf("%w: target ID %d", ErrISCSITargetDeletionFailed, targetID)
+	}
+
+	klog.V(4).Infof("Successfully deleted iSCSI target: %d", targetID)
+	return nil
+}
+
+// QueryISCSITargets retrieves iSCSI targets matching the given filters.
+func (c *Client) QueryISCSITargets(ctx context.Context, filters []interface{}) ([]ISCSITarget, error) {
+	klog.V(4).Infof("Querying iSCSI targets with filters: %v", filters)
+
+	if filters == nil {
+		filters = []interface{}{}
+	}
+
+	var result []ISCSITarget
+	err := c.Call(ctx, "iscsi.target.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI targets: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d iSCSI targets", len(result))
+	return result, nil
+}
+
+// ISCSITargetByName finds an iSCSI target by name.
+func (c *Client) ISCSITargetByName(ctx context.Context, name string) (*ISCSITarget, error) {
+	filters := []interface{}{
+		[]interface{}{"name", "=", name},
+	}
+
+	targets, err := c.QueryISCSITargets(ctx, filters)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(targets) == 0 {
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found"
+	}
+
+	return &targets[0], nil
+}
+
+// ISCSIExtentCreateParams represents parameters for iSCSI extent creation.
+type ISCSIExtentCreateParams struct {
+	Enabled     *bool  `json:"enabled,omitempty"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Disk        string `json:"disk,omitempty"`
+	Path        string `json:"path,omitempty"`
+	RPM         string `json:"rpm,omitempty"`
+	Comment     string `json:"comment,omitempty"`
+	Filesize    int64  `json:"filesize,omitempty"`
+	Blocksize   int    `json:"blocksize,omitempty"`
+	InsecureTPC bool   `json:"insecure_tpc,omitempty"`
+	Xen         bool   `json:"xen,omitempty"`
+}
+
+// ISCSIExtent represents an iSCSI extent.
+type ISCSIExtent struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	Disk      string `json:"disk"`
+	Path      string `json:"path"`
+	RPM       string `json:"rpm"`
+	Comment   string `json:"comment"`
+	ID        int    `json:"id"`
+	Blocksize int    `json:"blocksize"`
+	Enabled   bool   `json:"enabled"`
+}
+
+// CreateISCSIExtent creates a new iSCSI extent.
+func (c *Client) CreateISCSIExtent(ctx context.Context, params ISCSIExtentCreateParams) (*ISCSIExtent, error) {
+	klog.V(4).Infof("Creating iSCSI extent: %s (type=%s)", params.Name, params.Type)
+
+	var result ISCSIExtent
+	err := c.Call(ctx, "iscsi.extent.create", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create iSCSI extent: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully created iSCSI extent with ID: %d", result.ID)
+	return &result, nil
+}
+
+// DeleteISCSIExtent deletes an iSCSI extent.
+func (c *Client) DeleteISCSIExtent(ctx context.Context, extentID int, removeFile, force bool) error {
+	klog.V(4).Infof("Deleting iSCSI extent: %d (removeFile=%v, force=%v)", extentID, removeFile, force)
+
+	params := map[string]interface{}{
+		"remove": removeFile,
+		"force":  force,
+	}
+
+	var result bool
+	err := c.Call(ctx, "iscsi.extent.delete", []interface{}{extentID, params}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to delete iSCSI extent: %w", err)
+	}
+
+	if !result {
+		return fmt.Errorf("%w: extent ID %d", ErrISCSIExtentDeletionFailed, extentID)
+	}
+
+	klog.V(4).Infof("Successfully deleted iSCSI extent: %d", extentID)
+	return nil
+}
+
+// QueryISCSIExtents retrieves iSCSI extents matching the given filters.
+func (c *Client) QueryISCSIExtents(ctx context.Context, filters []interface{}) ([]ISCSIExtent, error) {
+	klog.V(4).Infof("Querying iSCSI extents with filters: %v", filters)
+
+	if filters == nil {
+		filters = []interface{}{}
+	}
+
+	var result []ISCSIExtent
+	err := c.Call(ctx, "iscsi.extent.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI extents: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d iSCSI extents", len(result))
+	return result, nil
+}
+
+// ISCSIExtentByName finds an iSCSI extent by name.
+func (c *Client) ISCSIExtentByName(ctx context.Context, name string) (*ISCSIExtent, error) {
+	filters := []interface{}{
+		[]interface{}{"name", "=", name},
+	}
+
+	extents, err := c.QueryISCSIExtents(ctx, filters)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(extents) == 0 {
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found"
+	}
+
+	return &extents[0], nil
+}
+
+// ISCSITargetExtentCreateParams represents parameters for target-extent association.
+type ISCSITargetExtentCreateParams struct {
+	Target int `json:"target"` // Target ID
+	Extent int `json:"extent"` // Extent ID
+	LunID  int `json:"lunid"`  // LUN number (typically 0 for single-extent targets)
+}
+
+// ISCSITargetExtent represents a target-extent association (LUN mapping).
+type ISCSITargetExtent struct {
+	ID     int `json:"id"`
+	Target int `json:"target"` // Target ID
+	Extent int `json:"extent"` // Extent ID
+	LunID  int `json:"lunid"`  // LUN number
+}
+
+// CreateISCSITargetExtent creates a target-extent association (maps extent to target as LUN).
+func (c *Client) CreateISCSITargetExtent(ctx context.Context, params ISCSITargetExtentCreateParams) (*ISCSITargetExtent, error) {
+	klog.V(4).Infof("Creating iSCSI target-extent association: target=%d, extent=%d, lun=%d",
+		params.Target, params.Extent, params.LunID)
+
+	var result ISCSITargetExtent
+	err := c.Call(ctx, "iscsi.targetextent.create", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create iSCSI target-extent association: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully created iSCSI target-extent association with ID: %d", result.ID)
+	return &result, nil
+}
+
+// DeleteISCSITargetExtent deletes a target-extent association.
+func (c *Client) DeleteISCSITargetExtent(ctx context.Context, targetExtentID int, force bool) error {
+	klog.V(4).Infof("Deleting iSCSI target-extent association: %d (force=%v)", targetExtentID, force)
+
+	var result bool
+	err := c.Call(ctx, "iscsi.targetextent.delete", []interface{}{targetExtentID, force}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to delete iSCSI target-extent association: %w", err)
+	}
+
+	if !result {
+		return fmt.Errorf("%w: target-extent ID %d", ErrISCSITargetExtentDeletionFailed, targetExtentID)
+	}
+
+	klog.V(4).Infof("Successfully deleted iSCSI target-extent association: %d", targetExtentID)
+	return nil
+}
+
+// QueryISCSITargetExtents retrieves target-extent associations matching the given filters.
+func (c *Client) QueryISCSITargetExtents(ctx context.Context, filters []interface{}) ([]ISCSITargetExtent, error) {
+	klog.V(4).Infof("Querying iSCSI target-extent associations with filters: %v", filters)
+
+	if filters == nil {
+		filters = []interface{}{}
+	}
+
+	var result []ISCSITargetExtent
+	err := c.Call(ctx, "iscsi.targetextent.query", []interface{}{filters}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI target-extent associations: %w", err)
+	}
+
+	klog.V(4).Infof("Found %d iSCSI target-extent associations", len(result))
+	return result, nil
+}
+
+// ISCSITargetExtentByTarget finds target-extent associations for a given target ID.
+func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([]ISCSITargetExtent, error) {
+	filters := []interface{}{
+		[]interface{}{"target", "=", targetID},
+	}
+
+	return c.QueryISCSITargetExtents(ctx, filters)
 }

@@ -313,6 +313,68 @@ func (m *MockAPIClientForSnapshots) FindDatasetByCSIVolumeName(ctx context.Conte
 	return nil, nil //nolint:nilnil // Mock returns "not found"
 }
 
+// iSCSI stubs - not used in snapshot tests but required by interface.
+
+func (m *MockAPIClientForSnapshots) GetISCSIGlobalConfig(_ context.Context) (*tnsapi.ISCSIGlobalConfig, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) QueryISCSIPortals(_ context.Context) ([]tnsapi.ISCSIPortal, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) QueryISCSIInitiators(_ context.Context) ([]tnsapi.ISCSIInitiator, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) CreateISCSITarget(_ context.Context, _ tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) DeleteISCSITarget(_ context.Context, _ int, _ bool) error {
+	return errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) QueryISCSITargets(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITarget, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) ISCSITargetByName(_ context.Context, _ string) (*tnsapi.ISCSITarget, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) CreateISCSIExtent(_ context.Context, _ tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) DeleteISCSIExtent(_ context.Context, _ int, _, _ bool) error {
+	return errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) QueryISCSIExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSIExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) ISCSIExtentByName(_ context.Context, _ string) (*tnsapi.ISCSIExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) CreateISCSITargetExtent(_ context.Context, _ tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) DeleteISCSITargetExtent(_ context.Context, _ int, _ bool) error {
+	return errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) QueryISCSITargetExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITargetExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
+func (m *MockAPIClientForSnapshots) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]tnsapi.ISCSITargetExtent, error) {
+	return nil, errors.New("iSCSI not implemented in snapshot mock")
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

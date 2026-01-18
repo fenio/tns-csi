@@ -59,6 +59,26 @@ type ClientInterface interface {
 	QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]NVMeOFPortSubsystem, error)
 	QueryNVMeOFPorts(ctx context.Context) ([]NVMeOFPort, error)
 
+	// iSCSI operations
+	GetISCSIGlobalConfig(ctx context.Context) (*ISCSIGlobalConfig, error)
+	QueryISCSIPortals(ctx context.Context) ([]ISCSIPortal, error)
+	QueryISCSIInitiators(ctx context.Context) ([]ISCSIInitiator, error)
+
+	CreateISCSITarget(ctx context.Context, params ISCSITargetCreateParams) (*ISCSITarget, error)
+	DeleteISCSITarget(ctx context.Context, targetID int, force bool) error
+	QueryISCSITargets(ctx context.Context, filters []interface{}) ([]ISCSITarget, error)
+	ISCSITargetByName(ctx context.Context, name string) (*ISCSITarget, error)
+
+	CreateISCSIExtent(ctx context.Context, params ISCSIExtentCreateParams) (*ISCSIExtent, error)
+	DeleteISCSIExtent(ctx context.Context, extentID int, removeFile, force bool) error
+	QueryISCSIExtents(ctx context.Context, filters []interface{}) ([]ISCSIExtent, error)
+	ISCSIExtentByName(ctx context.Context, name string) (*ISCSIExtent, error)
+
+	CreateISCSITargetExtent(ctx context.Context, params ISCSITargetExtentCreateParams) (*ISCSITargetExtent, error)
+	DeleteISCSITargetExtent(ctx context.Context, targetExtentID int, force bool) error
+	QueryISCSITargetExtents(ctx context.Context, filters []interface{}) ([]ISCSITargetExtent, error)
+	ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([]ISCSITargetExtent, error)
+
 	// Snapshot operations
 	CreateSnapshot(ctx context.Context, params SnapshotCreateParams) (*Snapshot, error)
 	DeleteSnapshot(ctx context.Context, snapshotID string) error

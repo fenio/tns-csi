@@ -83,8 +83,8 @@ jobs:
           CHANGED=$(git diff --name-only HEAD^..HEAD 2>/dev/null || echo "")
           echo "Changed files: $CHANGED"
 
-          # Check if any driver-related files changed
-          if echo "$CHANGED" | grep -qE '^(cmd/tns-csi-driver/|pkg/|Dockerfile|go\.(mod|sum)|charts/)'; then
+          # Check if any driver-related files changed (excludes docs/, README, etc.)
+          if echo "$CHANGED" | grep -qE '^(cmd/tns-csi-driver/|pkg/|Dockerfile|go\.(mod|sum)|charts/|tests/)'; then
             echo "Driver files changed - will run integration tests"
             echo "should_run=true" >> $GITHUB_OUTPUT
           else

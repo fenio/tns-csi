@@ -127,13 +127,18 @@ Compatibility tests run weekly and on-demand. See [Distro Compatibility Tests](d
 - Kubernetes 1.27+ (earlier versions may work but are not tested)
 - **TrueNAS Scale 25.10 or later** (required for full feature support including NVMe-oF)
 - For NFS: NFS client utilities on all nodes (`nfs-common` on Debian/Ubuntu, `nfs-utils` on RHEL/CentOS)
-- For NVMe-oF: 
+- For NVMe-oF:
   - TrueNAS Scale 25.10+
   - **TrueNAS must have a static IP configured** (DHCP not supported for NVMe-oF)
   - At least one NVMe-oF TCP port configured in TrueNAS (Shares > NVMe-oF Targets > Ports, default: 4420)
   - `nvme-cli` package installed on all Kubernetes nodes
   - Kernel modules: `nvme-tcp`, `nvme-fabrics`
   - Network connectivity from Kubernetes nodes to TrueNAS on port 4420
+- For iSCSI:
+  - TrueNAS Scale 25.10+
+  - iSCSI service enabled in TrueNAS (System > Services > iSCSI)
+  - `open-iscsi` package installed on all Kubernetes nodes (`iscsid` service running)
+  - Network connectivity from Kubernetes nodes to TrueNAS on port 3260
 
 ## Quick Start
 

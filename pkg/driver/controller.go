@@ -43,6 +43,9 @@ const (
 	VolumeContextKeyNVMeOFSubsystemID = "nvmeofSubsystemID"
 	VolumeContextKeyNVMeOFNamespaceID = "nvmeofNamespaceID"
 	VolumeContextKeyNSID              = "nsid"
+	VolumeContextKeyISCSIIQN          = "iscsiIQN"
+	VolumeContextKeyISCSITargetID     = "iscsiTargetID"
+	VolumeContextKeyISCSIExtentID     = "iscsiExtentID"
 	VolumeContextKeyExpectedCapacity  = "expectedCapacity"
 	VolumeContextKeyClonedFromSnap    = "clonedFromSnapshot"
 	VolumeContextValueTrue            = "true"
@@ -73,9 +76,12 @@ type VolumeMetadata struct {
 	DatasetName       string
 	Server            string // TrueNAS server address
 	NVMeOFNQN         string // NVMe-oF subsystem NQN
+	ISCSIIQN          string // iSCSI target IQN
 	NFSShareID        int
 	NVMeOFSubsystemID int
 	NVMeOFNamespaceID int
+	ISCSITargetID     int
+	ISCSIExtentID     int
 }
 
 // buildVolumeContext creates a VolumeContext map from VolumeMetadata.
@@ -111,6 +117,16 @@ func buildVolumeContext(meta VolumeMetadata) map[string]string {
 		if meta.NVMeOFNamespaceID != 0 {
 			ctx[VolumeContextKeyNVMeOFNamespaceID] = strconv.Itoa(meta.NVMeOFNamespaceID)
 		}
+	case ProtocolISCSI:
+		if meta.ISCSIIQN != "" {
+			ctx[VolumeContextKeyISCSIIQN] = meta.ISCSIIQN
+		}
+		if meta.ISCSITargetID != 0 {
+			ctx[VolumeContextKeyISCSITargetID] = strconv.Itoa(meta.ISCSITargetID)
+		}
+		if meta.ISCSIExtentID != 0 {
+			ctx[VolumeContextKeyISCSIExtentID] = strconv.Itoa(meta.ISCSIExtentID)
+		}
 	}
 
 	return ctx
@@ -125,6 +141,9 @@ func getProtocolFromVolumeContext(ctx map[string]string) string {
 	// Infer protocol from context keys
 	if ctx[VolumeContextKeyNQN] != "" {
 		return ProtocolNVMeOF
+	}
+	if ctx[VolumeContextKeyISCSIIQN] != "" || ctx[VolumeContextKeyISCSITargetID] != "" {
+		return ProtocolISCSI
 	}
 	if ctx[VolumeContextKeyShare] != "" || ctx[VolumeContextKeyNFSShareID] != "" {
 		return ProtocolNFS
@@ -200,6 +219,15 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 	}
 	if nvmeNQN, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; ok {
 		meta.NVMeOFNQN = nvmeNQN.Value
+	}
+	if iscsiTargetID, ok := props[tnsapi.PropertyISCSITargetID]; ok {
+		meta.ISCSITargetID = tnsapi.StringToInt(iscsiTargetID.Value)
+	}
+	if iscsiExtentID, ok := props[tnsapi.PropertyISCSIExtentID]; ok {
+		meta.ISCSIExtentID = tnsapi.StringToInt(iscsiExtentID.Value)
+	}
+	if iscsiIQN, ok := props[tnsapi.PropertyISCSIIQN]; ok {
+		meta.ISCSIIQN = iscsiIQN.Value
 	}
 
 	klog.V(4).Infof("Found volume: %s (dataset=%s, protocol=%s)", volumeName, dataset.ID, meta.Protocol)
@@ -414,8 +442,10 @@ func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi
 		return s.createNFSVolume(ctx, req)
 	case ProtocolNVMeOF:
 		return s.createNVMeOFVolume(ctx, req)
+	case ProtocolISCSI:
+		return s.createISCSIVolume(ctx, req)
 	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi)", protocol)
 	}
 }
 
@@ -467,6 +497,17 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		// For NVMe-oF, we would need to query subsystems and namespaces
 		// This is a placeholder for future implementation
 		klog.Warningf("NVMe-oF idempotency check not fully implemented")
+		volumeMeta = VolumeMetadata{
+			Name:        req.GetName(),
+			Protocol:    protocol,
+			DatasetID:   existingDataset.ID,
+			DatasetName: expectedDatasetName,
+		}
+
+	case ProtocolISCSI:
+		// For iSCSI, we would need to query targets and extents
+		// This is a placeholder for future implementation
+		klog.Warningf("iSCSI idempotency check not fully implemented")
 		volumeMeta = VolumeMetadata{
 			Name:        req.GetName(),
 			Protocol:    protocol,
@@ -706,6 +747,8 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		return s.deleteNFSVolume(ctx, volumeMeta)
 	case ProtocolNVMeOF:
 		return s.deleteNVMeOFVolume(ctx, volumeMeta)
+	case ProtocolISCSI:
+		return s.deleteISCSIVolume(ctx, volumeMeta)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
@@ -1224,6 +1267,11 @@ func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.Cr
 		}
 		return resp, true, nil
 
+	case ProtocolISCSI:
+		// iSCSI adoption not yet implemented - return error for now
+		return nil, true, status.Errorf(codes.Unimplemented,
+			"iSCSI volume adoption is not yet implemented")
+
 	default:
 		return nil, true, status.Errorf(codes.InvalidArgument,
 			"Unsupported protocol for adoption: %s", protocol)
@@ -1238,8 +1286,8 @@ func (s *ControllerService) expandAdoptedVolume(ctx context.Context, dataset *tn
 	case ProtocolNFS:
 		// NFS uses quota
 		updateParams.Quota = &newCapacityBytes
-	case ProtocolNVMeOF:
-		// NVMe-oF uses volsize
+	case ProtocolNVMeOF, ProtocolISCSI:
+		// NVMe-oF and iSCSI use volsize (both are ZVOLs)
 		updateParams.Volsize = &newCapacityBytes
 	}
 
@@ -1377,6 +1425,9 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	case ProtocolNVMeOF:
 		klog.Infof("Expanding NVMe-oF volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
 		return s.expandNVMeOFVolume(ctx, volumeMeta, requiredBytes)
+	case ProtocolISCSI:
+		klog.Infof("Expanding iSCSI volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+		return s.expandISCSIVolume(ctx, volumeMeta, requiredBytes)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
@@ -1413,6 +1464,8 @@ func (s *ControllerService) ControllerGetVolume(ctx context.Context, req *csi.Co
 		return s.getNFSVolumeInfo(ctx, volumeMeta)
 	case ProtocolNVMeOF:
 		return s.getNVMeOFVolumeInfo(ctx, volumeMeta)
+	case ProtocolISCSI:
+		return s.getISCSIVolumeInfo(ctx, volumeMeta)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}

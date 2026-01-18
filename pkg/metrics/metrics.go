@@ -88,6 +88,7 @@ const (
 const (
 	ProtocolNFS     = "nfs"
 	ProtocolNVMeOF  = "nvmeof"
+	ProtocolISCSI   = "iscsi"
 	ProtocolUnknown = "unknown"
 )
 

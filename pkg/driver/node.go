@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -20,6 +21,7 @@ import (
 const (
 	ProtocolNFS    = "nfs"
 	ProtocolNVMeOF = "nvmeof"
+	ProtocolISCSI  = "iscsi"
 )
 
 // Filesystem type constants.
@@ -99,9 +101,18 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		timer.ObserveSuccess()
 		return resp, nil
 
+	case ProtocolISCSI:
+		resp, err := s.stageISCSIVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
+
 	default:
 		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof)", protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi)", protocol)
 	}
 }
 
@@ -130,7 +141,8 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 	klog.V(4).Infof("Unstaging volume %s (protocol: %s) from %s", volumeID, protocol, stagingTargetPath)
 
-	if protocol == ProtocolNVMeOF {
+	switch protocol {
+	case ProtocolNVMeOF:
 		// For NVMe-oF, we need to pass the NQN which is derived from the volume ID
 		// With independent subsystems, NQN format is: nqn.2137.csi.tns:<volumeID>
 		volumeContext := map[string]string{
@@ -143,21 +155,36 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		}
 		timer.ObserveSuccess()
 		return resp, nil
-	}
 
-	// Default to NFS volume unstaging
-	klog.V(4).Infof("Unstaging NFS volume %s from %s", volumeID, stagingTargetPath)
-	resp, err := s.unstageNFSVolume(ctx, req)
-	if err != nil {
-		timer.ObserveError()
-		return nil, err
+	case ProtocolISCSI:
+		// For iSCSI, we need to pass the IQN which is derived from the volume ID
+		// IQN format is: iqn.2024-01.io.truenas.csi:<volumeID>
+		volumeContext := map[string]string{
+			VolumeContextKeyISCSIIQN: "iqn.2024-01.io.truenas.csi:" + volumeID,
+		}
+		resp, err := s.unstageISCSIVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
+
+	default:
+		// Default to NFS volume unstaging
+		klog.V(4).Infof("Unstaging NFS volume %s from %s", volumeID, stagingTargetPath)
+		resp, err := s.unstageNFSVolume(ctx, req)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
 	}
-	timer.ObserveSuccess()
-	return resp, nil
 }
 
-// detectProtocolFromStagingPath attempts to detect whether the staging path is NVMe-oF or NFS.
-// It checks the mount source to determine if it's a block device or NFS mount.
+// detectProtocolFromStagingPath attempts to detect the protocol from the staging path.
+// It checks the mount source to determine if it's a block device (NVMe-oF/iSCSI) or NFS mount.
 func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, stagingPath string) string {
 	// Check if the path exists first
 	if _, err := os.Stat(stagingPath); os.IsNotExist(err) {
@@ -168,11 +195,15 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 	// Check if it's mounted
 	mounted, err := mount.IsMounted(ctx, stagingPath)
 	if err != nil || !mounted {
-		// Not mounted or error - check if there's an NVMe device symlink
+		// Not mounted or error - check if there's a block device symlink
 		// For block volumes, the staging path is a symlink to the device
 		if info, statErr := os.Lstat(stagingPath); statErr == nil {
 			if info.Mode()&os.ModeSymlink != 0 {
-				// It's a symlink, likely a block device - NVMe-oF
+				// It's a symlink, determine the block protocol by resolving it
+				if target, readErr := os.Readlink(stagingPath); readErr == nil {
+					return s.detectBlockProtocolFromDevice(target)
+				}
+				// Default to NVMe-oF if we can't read the symlink
 				return ProtocolNVMeOF
 			}
 		}
@@ -191,8 +222,74 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 		return ProtocolNFS
 	}
 
-	// ext4, xfs etc. are typically from block devices (NVMe-oF)
+	// For block device mounts, try to determine if it's NVMe-oF or iSCSI
+	return s.detectBlockProtocolFromMount(ctx, stagingPath)
+}
+
+// detectBlockProtocolFromDevice determines whether a device path is NVMe-oF or iSCSI.
+func (s *NodeService) detectBlockProtocolFromDevice(devicePath string) string {
+	// NVMe devices are /dev/nvme*
+	if strings.Contains(devicePath, "nvme") {
+		return ProtocolNVMeOF
+	}
+	// iSCSI devices are typically /dev/sd* and can be identified via by-path
+	// Check if there's an iSCSI by-path symlink pointing to this device
+	if s.isISCSIDevice(devicePath) {
+		return ProtocolISCSI
+	}
+	// Default to NVMe-oF for unknown block devices
 	return ProtocolNVMeOF
+}
+
+// detectBlockProtocolFromMount determines the block protocol from a mounted path.
+func (s *NodeService) detectBlockProtocolFromMount(ctx context.Context, mountPath string) string {
+	// Get the source device from findmnt
+	cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ProtocolNVMeOF // Default to NVMe-oF
+	}
+
+	devicePath := strings.TrimSpace(string(output))
+	return s.detectBlockProtocolFromDevice(devicePath)
+}
+
+// isISCSIDevice checks if a device is an iSCSI device by looking for iSCSI by-path symlinks.
+func (s *NodeService) isISCSIDevice(devicePath string) bool {
+	// Resolve any symlinks to get the real device path
+	realPath := devicePath
+	if resolved, err := os.Readlink(devicePath); err == nil {
+		realPath = resolved
+	}
+
+	// Check /dev/disk/by-path for iSCSI entries
+	byPathDir := "/dev/disk/by-path"
+	entries, err := os.ReadDir(byPathDir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		// iSCSI devices have "iscsi" in their by-path name
+		if !strings.Contains(entry.Name(), "iscsi") {
+			continue
+		}
+
+		// Check if this symlink points to our device
+		linkPath := filepath.Join(byPathDir, entry.Name())
+		resolved, resErr := filepath.EvalSymlinks(linkPath)
+		if resErr != nil {
+			continue
+		}
+		isMatch := resolved == realPath ||
+			strings.HasSuffix(resolved, realPath) ||
+			strings.HasSuffix(realPath, resolved)
+		if isMatch {
+			return true
+		}
+	}
+
+	return false
 }
 
 // NodePublishVolume mounts the volume to the target path.
@@ -235,12 +332,12 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 		timer.ObserveSuccess()
 		return resp, nil
 
-	case ProtocolNVMeOF:
-		// NVMe-oF supports both block and filesystem volume modes
+	case ProtocolNVMeOF, ProtocolISCSI:
+		// Block protocols (NVMe-oF and iSCSI) support both block and filesystem volume modes
 		stagingTargetPath := req.GetStagingTargetPath()
 		if stagingTargetPath == "" {
 			timer.ObserveError()
-			return nil, status.Error(codes.InvalidArgument, "Staging target path is required for NVMe-oF volumes")
+			return nil, status.Errorf(codes.InvalidArgument, "Staging target path is required for %s volumes", protocol)
 		}
 
 		// Check volume capability to determine how to publish
@@ -473,7 +570,7 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		}, nil
 	}
 
-	// For NVMe-oF volumes, check if this is a block or filesystem volume
+	// For block protocol volumes (NVMe-oF or iSCSI), check if this is a block or filesystem volume
 	volumeCap := req.GetVolumeCapability()
 	if volumeCap != nil && volumeCap.GetBlock() != nil {
 		klog.Info("Block volume expansion, no filesystem resize needed")

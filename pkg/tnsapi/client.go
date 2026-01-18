@@ -2348,10 +2348,10 @@ func (c *Client) FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolu
 
 // ISCSIGlobalConfig represents the global iSCSI configuration.
 type ISCSIGlobalConfig struct {
-	PoolAvailThreshold *int   `json:"pool_avail_threshold,omitempty"`
-	Basename           string `json:"basename"`
-	ISNS               string `json:"isns_servers"`
-	ID                 int    `json:"id"`
+	PoolAvailThreshold *int     `json:"pool_avail_threshold,omitempty"`
+	Basename           string   `json:"basename"`
+	ISNSServers        []string `json:"isns_servers"`
+	ID                 int      `json:"id"`
 }
 
 // GetISCSIGlobalConfig retrieves the global iSCSI configuration.

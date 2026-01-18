@@ -262,6 +262,83 @@ var _ = Describe("NVMe-oF Encryption", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(ContainSubstring("bigfile"))
 		})
+
+		It("should expand encrypted volume (inline)", func() {
+			ctx := context.Background()
+
+			By("Creating encrypted StorageClass")
+			scName := "tns-csi-nvmeof-encrypted-expand-inline"
+			err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", map[string]string{
+				"protocol":                  "nvmeof",
+				"server":                    f.Config.TrueNASHost,
+				"pool":                      f.Config.TrueNASPool,
+				"transport":                 "tcp",
+				"port":                      "4420",
+				"csi.storage.k8s.io/fstype": "ext4",
+				"encryption":                "true",
+				"encryptionGenerateKey":     "true",
+			})
+			Expect(err).NotTo(HaveOccurred())
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeleteStorageClass(ctx, scName)
+			})
+
+			By("Creating PVC")
+			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
+				Name:             "encrypted-nvmeof-expand-inline",
+				StorageClassName: scName,
+				Size:             "1Gi",
+				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for PVC to be bound")
+			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Creating pod")
+			pod, err := f.CreatePod(ctx, framework.PodOptions{
+				Name:      "encrypted-nvmeof-pod-expand-inline",
+				PVCName:   pvc.Name,
+				MountPath: "/data",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Writing initial data")
+			testData := "Data before inline expansion"
+			_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{
+				"sh", "-c", fmt.Sprintf("echo '%s' > /data/test.txt && sync", testData),
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Expanding PVC to 3Gi while pod is running (inline expansion)")
+			err = f.K8s.ExpandPVC(ctx, pvc.Name, "3Gi")
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for expansion to complete")
+			Eventually(func() string {
+				capacity, _ := f.K8s.GetPVCCapacity(ctx, pvc.Name)
+				return capacity
+			}, 3*time.Minute, 5*time.Second).Should(Equal("3Gi"))
+
+			By("Verifying data after inline expansion")
+			output, err := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data/test.txt"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal(testData))
+
+			By("Writing large file to expanded space")
+			_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{
+				"sh", "-c", "dd if=/dev/zero of=/data/bigfile bs=1M count=100 2>/dev/null && sync",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			output, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"ls", "-la", "/data/bigfile"})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(ContainSubstring("bigfile"))
+		})
 	})
 
 	Context("Snapshots", func() {

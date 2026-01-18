@@ -20,6 +20,7 @@ on:
           - all
           - nfs
           - nvmeof
+          - iscsi
       test:
         description: 'Specific test to run (leave empty for all tests of selected protocol)'
         required: false
@@ -229,6 +230,44 @@ jobs:
           path: /tmp/test-logs/
           retention-days: 7
 
+  ginkgo-e2e-iscsi:
+    name: "E2E: iSCSI"
+    runs-on: new
+    timeout-minutes: 45
+    needs: compute-tag
+    if: |
+      !cancelled() && needs.compute-tag.result == 'success' &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run iSCSI E2E Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: |
+          echo "=== Running iSCSI E2E Tests ==="
+          # Run only iSCSI-specific tests from the iscsi/ directory
+          ginkgo -v --timeout=40m ./tests/e2e/iscsi/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-iscsi-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   ginkgo-e2e-shared:
     name: "E2E: Shared"
     runs-on: new
@@ -278,7 +317,7 @@ jobs:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-shared]
+    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-iscsi, ginkgo-e2e-shared]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -288,6 +327,7 @@ jobs:
             const e2eResults = {
               'NFS E2E': '${{ needs.ginkgo-e2e-nfs.result }}',
               'NVMe-oF E2E': '${{ needs.ginkgo-e2e-nvmeof.result }}',
+              'iSCSI E2E': '${{ needs.ginkgo-e2e-iscsi.result }}',
               'Shared E2E': '${{ needs.ginkgo-e2e-shared.result }}',
             };
             
@@ -332,7 +372,7 @@ jobs:
             for (const [test, result] of Object.entries(e2eResults)) {
               summary += `| ${test} | ${getIcon(result)} |\n`;
             }
-            summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for both NFS and NVMe-oF._\n`;
+            summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for NFS, NVMe-oF, and iSCSI._\n`;
             
             // Write to job summary
             await core.summary.addRaw(summary).write();

@@ -775,13 +775,19 @@ func (s *NodeService) getExpectedCapacity(ctx context.Context, devicePath, datas
 	return 0
 }
 
-// verifySizeMatch compares actual and expected sizes with tolerance.
+// verifySizeMatch compares actual and expected sizes.
+// Device being LARGER than expected is allowed (volume expansion case).
+// Device being SMALLER than expected by more than tolerance is an error (wrong device).
 func verifySizeMatch(devicePath string, actualSize, expectedCapacity int64, datasetName string, volumeContext map[string]string) error {
-	// Calculate size difference
-	sizeDiff := actualSize - expectedCapacity
-	if sizeDiff < 0 {
-		sizeDiff = -sizeDiff
+	// If device is larger than expected, that's fine (volume was expanded)
+	if actualSize >= expectedCapacity {
+		klog.V(4).Infof("Device size verification passed for %s: expected=%d, actual=%d (device is same or larger)",
+			devicePath, expectedCapacity, actualSize)
+		return nil
 	}
+
+	// Device is smaller than expected - check if within tolerance
+	sizeDiff := expectedCapacity - actualSize
 
 	// Calculate tolerance: 10% of expected capacity, minimum 100MB
 	tolerance := expectedCapacity / 10
@@ -800,7 +806,7 @@ func verifySizeMatch(devicePath string, actualSize, expectedCapacity int64, data
 			ErrDeviceSizeMismatch, expectedCapacity, actualSize, sizeDiff)
 	}
 
-	klog.V(4).Infof("Device size verification passed for %s: expected=%d, actual=%d, diff=%d (tolerance=%d)",
+	klog.V(4).Infof("Device size verification passed for %s: expected=%d, actual=%d, diff=%d (within tolerance=%d)",
 		devicePath, expectedCapacity, actualSize, sizeDiff, tolerance)
 	return nil
 }

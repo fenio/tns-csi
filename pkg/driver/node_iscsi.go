@@ -278,16 +278,20 @@ func parseISCSISessionDevice(output, targetIQN string) string {
 		line = strings.TrimSpace(line)
 
 		// Check if we're entering a target section
+		// Format: "Target: iqn.2005-10.org.freenas.ctl:pvc-xxx (non-flash)"
+		// The IQN might be followed by extra text like "(non-flash)"
 		if strings.HasPrefix(line, "Target:") {
-			iqn := strings.TrimPrefix(line, "Target:")
-			iqn = strings.TrimSpace(iqn)
-			inTargetSection = (iqn == targetIQN)
+			targetLine := strings.TrimPrefix(line, "Target:")
+			targetLine = strings.TrimSpace(targetLine)
+			// Check if this line contains our target IQN (use Contains/HasPrefix
+			// because there might be extra text after the IQN)
+			inTargetSection = strings.HasPrefix(targetLine, targetIQN)
 			continue
 		}
 
 		// If we're in the right target section, look for attached disk
 		if inTargetSection && strings.Contains(line, "Attached scsi disk") {
-			// Line format: "Attached scsi disk sda    State: running"
+			// Line format: "Attached scsi disk sda	State: running"
 			parts := strings.Fields(line)
 			for i, part := range parts {
 				if part == "disk" && i+1 < len(parts) {

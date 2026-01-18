@@ -135,7 +135,7 @@ func decodeCompactSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 	remainder := snapshotID[colonIdx+1:]
 
 	// Validate protocol
-	if protocol != ProtocolNFS && protocol != ProtocolNVMeOF {
+	if protocol != ProtocolNFS && protocol != ProtocolNVMeOF && protocol != ProtocolISCSI {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidProtocol, protocol)
 	}
 

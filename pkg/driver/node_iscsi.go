@@ -207,7 +207,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 		return fmt.Errorf("%w: %s", ErrISCSILoginFailed, string(output))
 	}
 
-	klog.V(4).Infof("Successfully logged into iSCSI target: %s", params.iqn)
+	klog.Infof("Successfully logged into iSCSI target: %s, output: %s", params.iqn, string(output))
 	return nil
 }
 
@@ -241,15 +241,20 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 
 	// Look for device in /dev/disk/by-path/
 	// Format: ip-<server>:<port>-iscsi-<iqn>-lun-<lun>
-	pattern := "ip-" + params.server + ":" + params.port + "-iscsi-" + params.iqn + "-lun-*"
+	// Note: We use wildcard for server:port because TrueNAS may report a different
+	// IP than the hostname we used for discovery (same issue as portal mismatch).
+	// Match by IQN only since that's guaranteed to be unique.
+	pattern := "ip-*-iscsi-" + params.iqn + "-lun-*"
 	byPathDir := "/dev/disk/by-path"
 
+	klog.V(5).Infof("Looking for iSCSI device with pattern: %s", pattern)
 	matches, err := filepath.Glob(filepath.Join(byPathDir, pattern))
 	if err != nil {
 		return "", err
 	}
 
 	if len(matches) == 0 {
+		klog.V(5).Infof("No iSCSI device found matching pattern %s", pattern)
 		return "", ErrISCSIDeviceNotFound
 	}
 

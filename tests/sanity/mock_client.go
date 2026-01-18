@@ -1148,6 +1148,11 @@ func (m *MockClient) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]tnsa
 	return nil, ErrISCSINotImplemented
 }
 
+// ReloadISCSIService simulates reloading the iSCSI service.
+func (m *MockClient) ReloadISCSIService(_ context.Context) error {
+	return nil // No-op for mock - always succeeds
+}
+
 // Close is a no-op for the mock client.
 func (m *MockClient) Close() {
 	// No-op for mock

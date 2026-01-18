@@ -19,10 +19,12 @@ import (
 
 // Static errors for iSCSI operations.
 var (
-	ErrISCSIAdmNotFound    = errors.New("iscsiadm command not found - please install open-iscsi")
-	ErrISCSIDeviceNotFound = errors.New("iSCSI device not found")
-	ErrISCSIDeviceTimeout  = errors.New("timeout waiting for iSCSI device to appear")
-	ErrISCSILoginFailed    = errors.New("failed to login to iSCSI target")
+	ErrISCSIAdmNotFound     = errors.New("iscsiadm command not found - please install open-iscsi")
+	ErrISCSIDeviceNotFound  = errors.New("iSCSI device not found")
+	ErrISCSIDeviceTimeout   = errors.New("timeout waiting for iSCSI device to appear")
+	ErrISCSILoginFailed     = errors.New("failed to login to iSCSI target")
+	ErrISCSIDiscoveryFailed = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
+	ErrISCSITargetNotInDB   = errors.New("iSCSI target not found in node database after discovery")
 )
 
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
@@ -134,7 +136,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 		klog.Errorf("iSCSI discovery failed at %s: %v, output: %s", portal, err, string(output))
 		// Check if it's a connection error to iscsid
 		if strings.Contains(string(output), "connect") || strings.Contains(string(output), "Connection refused") {
-			return fmt.Errorf("iSCSI discovery failed - iscsid may not be running or accessible: %s", string(output))
+			return fmt.Errorf("%w: %s", ErrISCSIDiscoveryFailed, string(output))
 		}
 		// Continue anyway - target might already be known from previous discovery
 		klog.Warningf("Continuing despite discovery failure - target may already be known")
@@ -151,7 +153,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	checkOutput, checkErr := checkCmd.CombinedOutput()
 	if checkErr != nil {
 		klog.Errorf("iSCSI target %s not found in node database: %v, output: %s", params.iqn, checkErr, string(checkOutput))
-		return fmt.Errorf("iSCSI target not found in node database after discovery - check that TrueNAS iSCSI service is running and target is properly configured: %s", string(checkOutput))
+		return fmt.Errorf("%w - check that TrueNAS iSCSI service is running and target is properly configured: %s", ErrISCSITargetNotInDB, string(checkOutput))
 	}
 	klog.V(4).Infof("iSCSI target %s found in node database", params.iqn)
 

@@ -227,13 +227,10 @@ var _ = Describe("NVMe-oF Encryption", func() {
 			err = f.K8s.ExpandPVC(ctx, pvc.Name, "3Gi")
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for expansion to complete")
-			Eventually(func() string {
-				capacity, _ := f.K8s.GetPVCCapacity(ctx, pvc.Name)
-				return capacity
-			}, 3*time.Minute, 5*time.Second).Should(Equal("3Gi"))
-
-			By("Creating new pod to verify expanded volume")
+			By("Creating new pod to trigger node expansion")
+			// NVMe-oF requires NodeExpansionRequired=true, meaning the PVC capacity
+			// won't update until a pod mounts the volume and node expansion happens.
+			// Create the pod first, then wait for capacity to update.
 			pod2, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nvmeof-pod-expand2",
 				PVCName:   pvc.Name,
@@ -243,6 +240,12 @@ var _ = Describe("NVMe-oF Encryption", func() {
 
 			err = f.K8s.WaitForPodReady(ctx, pod2.Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for expansion to complete")
+			Eventually(func() string {
+				capacity, _ := f.K8s.GetPVCCapacity(ctx, pvc.Name)
+				return capacity
+			}, 3*time.Minute, 5*time.Second).Should(Equal("3Gi"))
 
 			By("Verifying data after expansion")
 			output, err := f.K8s.ExecInPod(ctx, pod2.Name, []string{"cat", "/data/test.txt"})

@@ -245,36 +245,11 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 			klog.V(4).Infof("Using name-based dataset path for volume %s: %s", sourceVolumeID, datasetName)
 		}
 	} else {
-		// If no parent dataset specified, try to find the volume by searching shares/namespaces
-		// First try NFS shares
-		shares, err := s.apiClient.QueryAllNFSShares(ctx, sourceVolumeID)
-		if err == nil && len(shares) > 0 {
-			for _, share := range shares {
-				if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
-					// Convert mountpoint to dataset ID (strip /mnt/ prefix)
-					datasetID := mountpointToDatasetID(share.Path)
-					datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
-					if dsErr == nil && len(datasets) > 0 {
-						datasetName = datasets[0].Name
-						protocol = ProtocolNFS
-						break
-					}
-				}
-			}
-		}
-		// If not found as NFS, try NVMe-oF namespaces
-		if datasetName == "" {
-			namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-			if err == nil {
-				for _, ns := range namespaces {
-					devicePath := ns.GetDevice()
-					if strings.Contains(devicePath, sourceVolumeID) {
-						datasetName = strings.TrimPrefix(devicePath, "zvol/")
-						protocol = ProtocolNVMeOF
-						break
-					}
-				}
-			}
+		// If no parent dataset specified, try to find the volume by searching shares/namespaces/extents
+		result := s.discoverVolumeBySearching(ctx, sourceVolumeID)
+		if result != nil {
+			datasetName = result.datasetName
+			protocol = result.protocol
 		}
 	}
 
@@ -950,42 +925,10 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 	sourceVolumeID := req.GetSourceVolumeId()
 
 	// With plain volume IDs, we need to look up the volume in TrueNAS
-	// Try to find the dataset name by searching for NFS shares or NVMe-oF namespaces
-	var datasetName string
-	var protocol string
+	// Try to find the dataset name by searching shares/namespaces/extents
+	result := s.discoverVolumeBySearching(ctx, sourceVolumeID)
 
-	// First try NFS shares
-	shares, err := s.apiClient.QueryAllNFSShares(ctx, sourceVolumeID)
-	if err == nil && len(shares) > 0 {
-		for _, share := range shares {
-			if strings.HasSuffix(share.Path, "/"+sourceVolumeID) {
-				// Convert mountpoint to dataset ID (strip /mnt/ prefix)
-				datasetID := mountpointToDatasetID(share.Path)
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
-				if dsErr == nil && len(datasets) > 0 {
-					datasetName = datasets[0].Name
-					protocol = ProtocolNFS
-					break
-				}
-			}
-		}
-	}
-
-	// If not found as NFS, try NVMe-oF namespaces
-	if datasetName == "" {
-		namespaces, nsErr := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
-		if nsErr == nil {
-			for _, ns := range namespaces {
-				if strings.Contains(ns.GetDevice(), sourceVolumeID) {
-					datasetName = strings.TrimPrefix(ns.GetDevice(), "zvol/")
-					protocol = ProtocolNVMeOF
-					break
-				}
-			}
-		}
-	}
-
-	if datasetName == "" {
+	if result == nil {
 		// If we can't find the volume, return empty list
 		klog.V(4).Infof("Source volume %q not found in TrueNAS - returning empty list", sourceVolumeID)
 		return &csi.ListSnapshotsResponse{
@@ -995,7 +938,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 
 	// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", datasetName},
+		[]interface{}{"dataset", "=", result.datasetName},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
@@ -1039,7 +982,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 			SnapshotName: snapshot.ID,
 			SourceVolume: req.GetSourceVolumeId(),
 			DatasetName:  snapshot.Dataset,
-			Protocol:     protocol,
+			Protocol:     result.protocol,
 			CreatedAt:    time.Now().Unix(),
 		}
 
@@ -1652,6 +1595,59 @@ func (s *ControllerService) validateServerParameter(ctx context.Context, server 
 		}
 		return status.Error(codes.InvalidArgument, "server parameter is required")
 	}
+	return nil
+}
+
+// volumeDiscoveryResult holds the result of searching for a volume across protocols.
+type volumeDiscoveryResult struct {
+	datasetName string
+	protocol    string
+}
+
+// discoverVolumeBySearching searches for a volume by querying NFS shares, NVMe-oF namespaces, and iSCSI extents.
+// This is used as a fallback when the parent dataset is not specified.
+func (s *ControllerService) discoverVolumeBySearching(ctx context.Context, volumeID string) *volumeDiscoveryResult {
+	// First try NFS shares
+	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
+	if err == nil && len(shares) > 0 {
+		for _, share := range shares {
+			if strings.HasSuffix(share.Path, "/"+volumeID) {
+				datasetID := mountpointToDatasetID(share.Path)
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
+				if dsErr == nil && len(datasets) > 0 {
+					return &volumeDiscoveryResult{datasetName: datasets[0].Name, protocol: ProtocolNFS}
+				}
+			}
+		}
+	}
+
+	// Try NVMe-oF namespaces
+	namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	if err == nil {
+		for _, ns := range namespaces {
+			devicePath := ns.GetDevice()
+			if strings.Contains(devicePath, volumeID) {
+				return &volumeDiscoveryResult{
+					datasetName: strings.TrimPrefix(devicePath, "zvol/"),
+					protocol:    ProtocolNVMeOF,
+				}
+			}
+		}
+	}
+
+	// Try iSCSI extents
+	extents, err := s.apiClient.QueryISCSIExtents(ctx, nil)
+	if err == nil {
+		for _, extent := range extents {
+			if strings.Contains(extent.Disk, volumeID) {
+				return &volumeDiscoveryResult{
+					datasetName: strings.TrimPrefix(extent.Disk, "zvol/"),
+					protocol:    ProtocolISCSI,
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -235,36 +235,29 @@ func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnec
 }
 
 // findISCSIDevice finds the device path for an iSCSI LUN.
-// It queries iscsiadm for active sessions to find the device attached to our IQN.
 func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnectionParams) (string, error) {
-	// Use iscsiadm to find the device - this is the authoritative source
-	// iscsiadm -m session -P 3 shows attached SCSI devices for each session
+	// Query active sessions with detail level 3 to see attached devices
 	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	cmd := iscsiadmCmd(sessionCtx, "-m", "session", "-P", "3")
 	output, err := cmd.CombinedOutput()
+
+	// Always log the output for debugging
+	klog.Infof("iscsiadm -m session -P 3: err=%v, output:\n%s", err, string(output))
+
 	if err != nil {
-		// No sessions might mean device isn't connected yet
-		klog.Infof("iscsiadm session query failed: %v, output: %s", err, string(output))
 		return "", ErrISCSIDeviceNotFound
 	}
 
-	klog.V(5).Infof("iscsiadm session -P 3 output:\n%s", string(output))
-
-	// Parse the output to find our IQN and its attached disk
-	// Format:
-	// Target: iqn.2005-10.org.freenas.ctl:pvc-xxx
-	//     ...
-	//     Attached scsi disk sda    State: running
 	deviceName := parseISCSISessionDevice(string(output), params.iqn)
 	if deviceName == "" {
-		klog.Infof("No device found for IQN %s in session output (length=%d)", params.iqn, len(output))
+		klog.Infof("parseISCSISessionDevice found no device for IQN: %s", params.iqn)
 		return "", ErrISCSIDeviceNotFound
 	}
 
 	devicePath := "/dev/" + deviceName
-	klog.Infof("Found iSCSI device for IQN %s: %s", params.iqn, devicePath)
+	klog.Infof("Found iSCSI device: %s", devicePath)
 	return devicePath, nil
 }
 
@@ -306,29 +299,20 @@ func parseISCSISessionDevice(output, targetIQN string) string {
 
 // waitForISCSIDevice waits for the iSCSI device to appear after login.
 func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConnectionParams, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	attempt := 0
-
 	klog.Infof("Waiting for iSCSI device for IQN %s (timeout: %v)", params.iqn, timeout)
 
-	for time.Now().Before(deadline) {
-		attempt++
+	deadline := time.Now().Add(timeout)
+	for attempt := 1; time.Now().Before(deadline); attempt++ {
 		devicePath, err := s.findISCSIDevice(ctx, params)
 		if err == nil && devicePath != "" {
-			// Verify device is accessible
 			if _, statErr := os.Stat(devicePath); statErr == nil {
-				klog.Infof("iSCSI device found at %s after %d attempts", devicePath, attempt)
+				klog.Infof("iSCSI device ready: %s (attempt %d)", devicePath, attempt)
 				return devicePath, nil
 			}
-			klog.V(5).Infof("Device %s exists but not accessible yet", devicePath)
 		}
-		if attempt <= 3 || attempt%10 == 0 {
-			klog.Infof("Waiting for iSCSI device, attempt %d...", attempt)
-		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 
-	klog.Errorf("Timeout waiting for iSCSI device for IQN %s after %d attempts", params.iqn, attempt)
 	return "", ErrISCSIDeviceTimeout
 }
 

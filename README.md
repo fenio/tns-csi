@@ -180,6 +180,21 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 **Note:** NVMe-oF requires a TCP port to be pre-configured in TrueNAS (Shares > NVMe-oF Targets > Ports). Subsystems are automatically created per volume.
 
+**iSCSI Example:**
+```bash
+helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version 0.8.0 \
+  --namespace kube-system \
+  --create-namespace \
+  --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
+  --set truenas.apiKey="YOUR-API-KEY" \
+  --set storageClasses.iscsi.enabled=true \
+  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
+  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+```
+
+**Note:** iSCSI requires the iSCSI service to be enabled in TrueNAS (System > Services). Targets and extents are automatically created per volume.
+
 See the [Helm chart README](charts/tns-csi-driver/README.md) for detailed configuration options.
 
 ## Configuration
@@ -301,6 +316,7 @@ kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
 - [kubectl Plugin](docs/KUBECTL-PLUGIN.md) - Command-line tool for volume management
 - [Quick Start - NFS](docs/QUICKSTART.md) - Get started with NFS volumes
 - [Quick Start - NVMe-oF](docs/QUICKSTART-NVMEOF.md) - Get started with NVMe-oF volumes
+- [Quick Start - iSCSI](docs/QUICKSTART-ISCSI.md) - Get started with iSCSI volumes
 - [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning
 - [Versioning](docs/VERSIONING.md) - Version management and checking installed version
 - [Distro Compatibility](docs/DISTRO-COMPATIBILITY.md) - Kubernetes distribution compatibility testing

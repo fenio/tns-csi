@@ -187,8 +187,15 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		return nil, err
 	}
 
-	klog.V(4).Infof("Creating iSCSI volume: %s with size: %d bytes, IQN: %s",
-		params.volumeName, params.requestedCapacity, params.targetIQN)
+	// Get iSCSI global config to construct full IQN
+	globalConfig, err := s.apiClient.GetISCSIGlobalConfig(ctx)
+	if err != nil {
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to get iSCSI global config: %v", err)
+	}
+
+	klog.V(4).Infof("Creating iSCSI volume: %s with size: %d bytes, base IQN: %s",
+		params.volumeName, params.requestedCapacity, globalConfig.Basename)
 
 	// Check if ZVOL already exists (idempotency)
 	existingZvols, err := s.apiClient.QueryAllDatasets(ctx, params.zvolName)
@@ -257,6 +264,11 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		return nil, err
 	}
 
+	// Construct full IQN: basename + ":" + target name
+	// TrueNAS returns just the target name in target.Name, not the full IQN
+	fullIQN := globalConfig.Basename + ":" + target.Name
+	klog.V(4).Infof("Constructed full IQN: %s (basename=%s, target=%s)", fullIQN, globalConfig.Basename, target.Name)
+
 	// Step 5: Store ZFS user properties for metadata tracking
 	props := tnsapi.ISCSIVolumePropertiesV1(tnsapi.ISCSIVolumeParams{
 		VolumeID:       params.volumeName,
@@ -265,7 +277,7 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		DeleteStrategy: params.deleteStrategy,
 		TargetID:       target.ID,
 		ExtentID:       extent.ID,
-		TargetIQN:      target.Name, // TrueNAS generates the actual IQN in target.Name
+		TargetIQN:      fullIQN, // Full IQN for node to use during login
 		PVCName:        params.pvcName,
 		PVCNamespace:   params.pvcNamespace,
 		StorageClass:   params.storageClass,
@@ -276,11 +288,11 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		klog.Warningf("Failed to set ZFS properties on %s: %v (volume created successfully)", zvol.ID, propErr)
 	}
 
-	klog.Infof("Created iSCSI volume: %s (ZVOL: %s, Target: %s, Extent: %d)",
-		params.volumeName, zvol.ID, target.Name, extent.ID)
+	klog.Infof("Created iSCSI volume: %s (ZVOL: %s, Target: %s, IQN: %s, Extent: %d)",
+		params.volumeName, zvol.ID, target.Name, fullIQN, extent.ID)
 
 	timer.ObserveSuccess()
-	return buildISCSIVolumeResponse(params.volumeName, params.server, target.Name, zvol, target, extent, params.requestedCapacity), nil
+	return buildISCSIVolumeResponse(params.volumeName, params.server, fullIQN, zvol, target, extent, params.requestedCapacity), nil
 }
 
 // handleExistingISCSIVolume handles the case when a ZVOL already exists (idempotency).
@@ -320,11 +332,21 @@ func (s *ControllerService) handleExistingISCSIVolume(ctx context.Context, param
 		return nil, false, nil
 	}
 
-	// Volume already exists with target and extent - return existing volume
-	klog.V(4).Infof("iSCSI volume already exists (target ID: %d, extent ID: %d), returning existing volume",
-		target.ID, extent.ID)
+	// Get iSCSI global config to construct full IQN
+	globalConfig, err := s.apiClient.GetISCSIGlobalConfig(ctx)
+	if err != nil {
+		timer.ObserveError()
+		return nil, false, status.Errorf(codes.Internal, "Failed to get iSCSI global config: %v", err)
+	}
 
-	resp := buildISCSIVolumeResponse(params.volumeName, params.server, target.Name, existingZvol, target, extent, existingCapacity)
+	// Construct full IQN
+	fullIQN := globalConfig.Basename + ":" + target.Name
+
+	// Volume already exists with target and extent - return existing volume
+	klog.V(4).Infof("iSCSI volume already exists (target ID: %d, extent ID: %d, IQN: %s), returning existing volume",
+		target.ID, extent.ID, fullIQN)
+
+	resp := buildISCSIVolumeResponse(params.volumeName, params.server, fullIQN, existingZvol, target, extent, existingCapacity)
 	timer.ObserveSuccess()
 	return resp, true, nil
 }

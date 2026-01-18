@@ -39,7 +39,8 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       hostNetwork: true
-      hostPID: true  # Required for iSCSI nsenter to access host's iscsid
+      hostPID: true   # Required for iSCSI nsenter to access host's iscsid (Talos)
+      hostIPC: true   # Required for iSCSI to communicate with host's iscsid daemon
       containers:
         # TNS CSI Node Plugin
         - name: tns-csi-plugin

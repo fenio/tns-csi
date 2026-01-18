@@ -171,25 +171,29 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	}
 
 	// Step 2: Check if target is in node database
-	klog.Infof("iSCSI: Checking if target '%s' is in node database at portal '%s'", params.iqn, portal)
+	// Note: Don't specify portal here because TrueNAS may report a different portal IP
+	// than the hostname we used for discovery (e.g., discovery with hostname, but TrueNAS
+	// reports its IP). The node database stores the portal from the discovery response.
+	klog.Infof("iSCSI: Checking if target '%s' is in node database", params.iqn)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer checkCancel()
-	checkCmd := iscsiadmCmd(checkCtx, "-m", "node", "-T", params.iqn, "-p", portal)
-	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -T %s -p %s", params.iqn, portal)
+	checkCmd := iscsiadmCmd(checkCtx, "-m", "node", "-T", params.iqn)
+	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -T %s", params.iqn)
 	checkOutput, checkErr := checkCmd.CombinedOutput()
 	if checkErr != nil {
-		klog.Errorf("iSCSI target '%s' not found in node database at portal '%s': %v, output: %s",
-			params.iqn, portal, checkErr, string(checkOutput))
+		klog.Errorf("iSCSI target '%s' not found in node database: %v, output: %s",
+			params.iqn, checkErr, string(checkOutput))
 		return fmt.Errorf("%w - check that TrueNAS iSCSI service is running and target is properly configured: %s", ErrISCSITargetNotInDB, string(checkOutput))
 	}
-	klog.Infof("iSCSI target '%s' found in node database", params.iqn)
+	klog.Infof("iSCSI target '%s' found in node database: %s", params.iqn, string(checkOutput))
 
 	// Step 3: Login
-	klog.Infof("Logging into iSCSI target: %s at %s", params.iqn, portal)
+	// Don't specify portal - login to the target on whatever portal it was discovered
+	klog.Infof("Logging into iSCSI target: %s", params.iqn)
 	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer loginCancel()
 
-	loginCmd := iscsiadmCmd(loginCtx, "-m", "node", "-T", params.iqn, "-p", portal, "--login")
+	loginCmd := iscsiadmCmd(loginCtx, "-m", "node", "-T", params.iqn, "--login")
 	output, err = loginCmd.CombinedOutput()
 	if err != nil {
 		// Check if already logged in
@@ -199,7 +203,7 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 			klog.V(4).Infof("iSCSI target already logged in: %s", params.iqn)
 			return nil
 		}
-		klog.Errorf("iSCSI login failed for target %s at %s: %v, output: %s", params.iqn, portal, err, string(output))
+		klog.Errorf("iSCSI login failed for target %s: %v, output: %s", params.iqn, err, string(output))
 		return fmt.Errorf("%w: %s", ErrISCSILoginFailed, string(output))
 	}
 
@@ -209,13 +213,12 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 
 // logoutISCSITarget logs out from an iSCSI target.
 func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnectionParams) error {
-	portal := params.server + ":" + params.port
-
-	klog.V(4).Infof("Logging out from iSCSI target: %s at %s", params.iqn, portal)
+	klog.V(4).Infof("Logging out from iSCSI target: %s", params.iqn)
 	logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := iscsiadmCmd(logoutCtx, "-m", "node", "-T", params.iqn, "-p", portal, "--logout")
+	// Don't specify portal - logout from target on all portals
+	cmd := iscsiadmCmd(logoutCtx, "-m", "node", "-T", params.iqn, "--logout")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// Check if already logged out

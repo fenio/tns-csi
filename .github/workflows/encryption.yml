@@ -173,6 +173,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -211,6 +217,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
       - uses: fenio/setup-k3s@v5
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'

@@ -237,6 +237,21 @@ func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName strin
 		klog.Infof("Controller Logs (last 100 lines):\n%s", string(logsOutput))
 	}
 
+	// Get node pod logs (important for mount failures like iSCSI/NVMe-oF)
+	nodeLogsCtx, nodeLogsCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer nodeLogsCancel()
+	nodeLogsCmd := exec.CommandContext(nodeLogsCtx, "kubectl", "logs",
+		"-n", "kube-system",
+		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node",
+		"-c", "tns-csi-plugin",
+		"--tail", "200")
+	nodeLogsOutput, nodeLogsErr := nodeLogsCmd.CombinedOutput()
+	if nodeLogsErr != nil {
+		klog.Errorf("Failed to get node logs: %v", nodeLogsErr)
+	} else {
+		klog.Infof("Node Logs (last 200 lines):\n%s", string(nodeLogsOutput))
+	}
+
 	klog.Infof("=== END DIAGNOSTICS ===")
 }
 
@@ -427,9 +442,28 @@ func (k *KubernetesClient) WaitForPodReady(ctx context.Context, name string, tim
 		}
 		// Log pod events
 		k.logPodEvents(ctx, name)
+		// Log CSI node pod logs (important for mount failures)
+		k.logCSINodeLogs(ctx)
 	}
 
 	return err
+}
+
+// logCSINodeLogs logs the CSI node pod logs for debugging mount failures.
+func (k *KubernetesClient) logCSINodeLogs(ctx context.Context) {
+	nodeLogsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(nodeLogsCtx, "kubectl", "logs",
+		"-n", "kube-system",
+		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node",
+		"-c", "tns-csi-plugin",
+		"--tail", "200")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.Warningf("Failed to get CSI node logs: %v", err)
+		return
+	}
+	klog.Errorf("CSI Node Logs (last 200 lines):\n%s", string(output))
 }
 
 // logPodEvents logs events related to a pod for debugging.

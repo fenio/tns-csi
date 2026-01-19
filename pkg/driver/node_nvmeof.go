@@ -253,9 +253,9 @@ func isRetryableNVMeConnectError(err error) bool {
 // A device is considered initialized when it reports a non-zero size.
 func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 	const (
-		maxAttempts   = 30               // 30 attempts
+		maxAttempts   = 45               // 45 attempts
 		checkInterval = 1 * time.Second  // 1 second between checks
-		totalTimeout  = 35 * time.Second // Maximum wait time
+		totalTimeout  = 60 * time.Second // Maximum wait time (increased for concurrent mounts)
 	)
 
 	klog.V(4).Infof("Waiting for device %s to be fully initialized (non-zero size)", devicePath)

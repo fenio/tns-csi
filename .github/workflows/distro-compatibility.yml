@@ -119,12 +119,6 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install open-iscsi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y open-iscsi
-          sudo systemctl enable iscsid
-          sudo systemctl start iscsid
       - uses: fenio/setup-k3s@v5.0.1
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
@@ -196,12 +190,6 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install open-iscsi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y open-iscsi
-          sudo systemctl enable iscsid
-          sudo systemctl start iscsid
       - uses: fenio/setup-k0s@v5.0.1
         with:
           version: v1.34.3+k0s.0
@@ -292,12 +280,6 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install open-iscsi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y open-iscsi
-          sudo systemctl enable iscsid
-          sudo systemctl start iscsid
       - uses: fenio/setup-kubesolo@v5.0.4
         with:
           version: v1.1.0
@@ -377,12 +359,6 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install open-iscsi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y open-iscsi
-          sudo systemctl enable iscsid
-          sudo systemctl start iscsid
       - uses: fenio/setup-minikube@v5.0.5
         with:
           driver: none
@@ -526,12 +502,6 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - name: Install open-iscsi
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y open-iscsi
-          sudo systemctl enable iscsid
-          sudo systemctl start iscsid
       - uses: fenio/setup-microk8s@v5.0.1
       - name: Run Basic iSCSI Test
         env:

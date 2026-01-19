@@ -384,7 +384,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.0
+      - uses: fenio/setup-talos@v6.2.1
         with:
           version: v1.12.1
       - name: Run Basic NFS Test
@@ -407,7 +407,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.0
+      - uses: fenio/setup-talos@v6.2.1
         with:
           version: v1.12.1
           load-nvme-modules: 'true'
@@ -432,7 +432,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.0
+      - uses: fenio/setup-talos@v6.2.1
         with:
           version: v1.12.1
           mount-dev: 'true'

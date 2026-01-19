@@ -20,12 +20,13 @@ on:
       protocol:
         description: 'Protocol to test'
         required: false
-        default: 'both'
+        default: 'all'
         type: choice
         options:
-          - both
+          - all
           - nfs
           - nvmeof
+          - iscsi
   # Run weekly to catch distro-specific issues
   schedule:
     - cron: '0 3 * * 0'  # 3 AM UTC every Sunday
@@ -71,7 +72,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k3s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-k3s@v5.0.1
@@ -93,7 +94,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k3s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-k3s@v5.0.1
@@ -108,6 +109,34 @@ jobs:
           TEST_PROTOCOL: nvmeof
         run: ./tests/integration/test-distro-basic.sh
 
+  k3s-iscsi:
+    name: "K3s: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k3s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
+      - uses: fenio/setup-k3s@v5.0.1
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # K0s Tests
   # ==========================================
@@ -118,7 +147,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k0s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-k0s@v5.0.1
@@ -139,7 +168,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k0s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-k0s@v5.0.1
@@ -153,6 +182,33 @@ jobs:
           KUBELET_PATH: /var/lib/k0s/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
+  k0s-iscsi:
+    name: "K0s: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'k0s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
+      - uses: fenio/setup-k0s@v5.0.1
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+          KUBELET_PATH: /var/lib/k0s/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # KubeSolo Tests
   # ==========================================
@@ -163,7 +219,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'kubesolo' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-kubesolo@v5.0.4
@@ -193,7 +249,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'kubesolo' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-kubesolo@v5.0.4
@@ -216,6 +272,42 @@ jobs:
           KUBELET_PATH: /var/lib/kubesolo/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
+  kubesolo-iscsi:
+    name: "KubeSolo: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'kubesolo' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
+      - uses: fenio/setup-kubesolo@v5.0.4
+      - name: Debug KubeSolo on failure
+        if: failure()
+        run: |
+          echo "=== KubeSolo Service Status ==="
+          sudo systemctl status kubesolo || true
+          echo "=== KubeSolo Journalctl Logs ==="
+          sudo journalctl -u kubesolo -n 200 --no-pager || true
+          echo "=== System Journal (last 5 minutes) ==="
+          sudo journalctl --since "5 minutes ago" -n 100 --no-pager || true
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+          KUBELET_PATH: /var/lib/kubesolo/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # Minikube Tests
   # ==========================================
@@ -226,7 +318,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'minikube' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-minikube@v5.0.5
@@ -248,7 +340,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'minikube' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-minikube@v5.0.5
@@ -263,6 +355,34 @@ jobs:
           TEST_PROTOCOL: nvmeof
         run: ./tests/integration/test-distro-basic.sh
 
+  minikube-iscsi:
+    name: "Minikube: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'minikube' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
+      - uses: fenio/setup-minikube@v5.0.5
+        with:
+          driver: none
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # Talos Tests
   # ==========================================
@@ -273,7 +393,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-talos@v6.0.1
@@ -294,7 +414,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-talos@v6.0.1
@@ -311,6 +431,30 @@ jobs:
           KUBELET_PATH: /var/lib/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
+  talos-iscsi:
+    name: "Talos: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fenio/setup-talos@v6.0.1
+        with:
+          load-iscsi-modules: 'true'
+          mount-dev: 'true'
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+          KUBELET_PATH: /var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # MicroK8s Tests
   # ==========================================
@@ -321,7 +465,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'microk8s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-microk8s@v5.0.1
@@ -342,7 +486,7 @@ jobs:
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'microk8s' || github.event.inputs.distro == '') &&
-      (github.event.inputs.protocol == 'both' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
       - uses: fenio/setup-microk8s@v5.0.1
@@ -356,6 +500,33 @@ jobs:
           KUBELET_PATH: /var/snap/microk8s/common/var/lib/kubelet
         run: ./tests/integration/test-distro-basic.sh
 
+  microk8s-iscsi:
+    name: "MicroK8s: iSCSI"
+    runs-on: new
+    timeout-minutes: 15
+    needs: compute-tag
+    if: |
+      (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'microk8s' || github.event.inputs.distro == '') &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install open-iscsi
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y open-iscsi
+          sudo systemctl enable iscsid
+          sudo systemctl start iscsid
+      - uses: fenio/setup-microk8s@v5.0.1
+      - name: Run Basic iSCSI Test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          TEST_PROTOCOL: iscsi
+          KUBELET_PATH: /var/snap/microk8s/common/var/lib/kubelet
+        run: ./tests/integration/test-distro-basic.sh
+
   # ==========================================
   # Summary
   # ==========================================
@@ -363,7 +534,7 @@ jobs:
     name: "Distro Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [k3s-nfs, k3s-nvmeof, k0s-nfs, k0s-nvmeof, kubesolo-nfs, kubesolo-nvmeof, minikube-nfs, minikube-nvmeof, talos-nfs, talos-nvmeof, microk8s-nfs, microk8s-nvmeof]
+    needs: [k3s-nfs, k3s-nvmeof, k3s-iscsi, k0s-nfs, k0s-nvmeof, k0s-iscsi, kubesolo-nfs, kubesolo-nvmeof, kubesolo-iscsi, minikube-nfs, minikube-nvmeof, minikube-iscsi, talos-nfs, talos-nvmeof, talos-iscsi, microk8s-nfs, microk8s-nvmeof, microk8s-iscsi]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -373,30 +544,36 @@ jobs:
             const distroResults = {
               'K3s': {
                 'NFS': '${{ needs.k3s-nfs.result }}',
-                'NVMe-oF': '${{ needs.k3s-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.k3s-nvmeof.result }}',
+                'iSCSI': '${{ needs.k3s-iscsi.result }}'
               },
               'K0s': {
                 'NFS': '${{ needs.k0s-nfs.result }}',
-                'NVMe-oF': '${{ needs.k0s-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.k0s-nvmeof.result }}',
+                'iSCSI': '${{ needs.k0s-iscsi.result }}'
               },
               'KubeSolo': {
                 'NFS': '${{ needs.kubesolo-nfs.result }}',
-                'NVMe-oF': '${{ needs.kubesolo-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.kubesolo-nvmeof.result }}',
+                'iSCSI': '${{ needs.kubesolo-iscsi.result }}'
               },
               'Minikube': {
                 'NFS': '${{ needs.minikube-nfs.result }}',
-                'NVMe-oF': '${{ needs.minikube-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.minikube-nvmeof.result }}',
+                'iSCSI': '${{ needs.minikube-iscsi.result }}'
               },
               'Talos': {
                 'NFS': '${{ needs.talos-nfs.result }}',
-                'NVMe-oF': '${{ needs.talos-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.talos-nvmeof.result }}',
+                'iSCSI': '${{ needs.talos-iscsi.result }}'
               },
               'MicroK8s': {
                 'NFS': '${{ needs.microk8s-nfs.result }}',
-                'NVMe-oF': '${{ needs.microk8s-nvmeof.result }}'
+                'NVMe-oF': '${{ needs.microk8s-nvmeof.result }}',
+                'iSCSI': '${{ needs.microk8s-iscsi.result }}'
               }
             };
-            
+
             const getIcon = (result) => {
               switch(result) {
                 case 'success': return '✅';
@@ -406,11 +583,11 @@ jobs:
                 default: return '⚪';
               }
             };
-            
+
             let totalPassed = 0;
             let totalFailed = 0;
             let totalSkipped = 0;
-            
+
             for (const distro of Object.keys(distroResults)) {
               for (const protocol of Object.keys(distroResults[distro])) {
                 const result = distroResults[distro][protocol];
@@ -419,32 +596,33 @@ jobs:
                 else if (result === 'skipped') totalSkipped++;
               }
             }
-            
+
+            const totalTests = 18;  // 6 distros × 3 protocols
             let summary = `# Kubernetes Distribution Compatibility Results\n\n`;
-            
+
             // Overall status banner
             if (totalFailed > 0) {
               summary += `> ### ${totalFailed} test(s) failed\n\n`;
-            } else if (totalPassed === 12) {
+            } else if (totalPassed === totalTests) {
               summary += `> ### All distribution tests passed!\n\n`;
             } else {
               summary += `> ### ${totalPassed}/${totalPassed + totalFailed} tests passed (${totalSkipped} skipped)\n\n`;
             }
-            
+
             // Quick stats
             summary += `| Passed | Failed | Skipped | Total |\n`;
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
-            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | 12 |\n\n`;
-            
+            summary += `| ${totalPassed} | ${totalFailed} | ${totalSkipped} | ${totalTests} |\n\n`;
+
             // Distribution results table
             summary += `## Distribution Compatibility Matrix\n\n`;
-            summary += `| Distribution | NFS | NVMe-oF |\n`;
-            summary += `|--------------|:---:|:-------:|\n`;
-            
+            summary += `| Distribution | NFS | NVMe-oF | iSCSI |\n`;
+            summary += `|--------------|:---:|:-------:|:-----:|\n`;
+
             for (const [distro, protocols] of Object.entries(distroResults)) {
-              summary += `| ${distro} | ${getIcon(protocols['NFS'])} | ${getIcon(protocols['NVMe-oF'])} |\n`;
+              summary += `| ${distro} | ${getIcon(protocols['NFS'])} | ${getIcon(protocols['NVMe-oF'])} | ${getIcon(protocols['iSCSI'])} |\n`;
             }
-            
+
             summary += `\n## Test Details\n\n`;
             summary += `These tests verify basic CSI driver functionality:\n`;
             summary += `- Driver deployment and pod readiness\n`;
@@ -452,7 +630,7 @@ jobs:
             summary += `- Pod creation with volume mount\n`;
             summary += `- Basic I/O operations (read/write)\n`;
             summary += `- Volume cleanup\n\n`;
-            
+
             summary += `### Tested on:\n`;
             summary += `- **K3s**: Lightweight Kubernetes by Rancher\n`;
             summary += `- **K0s**: Zero-friction Kubernetes by Mirantis\n`;
@@ -460,10 +638,10 @@ jobs:
             summary += `- **Minikube**: Local Kubernetes for development\n`;
             summary += `- **Talos**: Secure, immutable Kubernetes OS\n`;
             summary += `- **MicroK8s**: Lightweight Kubernetes by Canonical\n`;
-            
+
             // Write to job summary
             await core.summary.addRaw(summary).write();
-            
+
             // Fail if any test failed
             if (totalFailed > 0) {
               core.setFailed(`${totalFailed} test(s) failed`);

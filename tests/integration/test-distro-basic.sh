@@ -28,8 +28,15 @@ case "${TEST_PROTOCOL}" in
         MANIFEST_POD="${SCRIPT_DIR}/manifests/pod-nvmeof.yaml"
         WAIT_FOR_BINDING="false"  # NVMe-oF uses WaitForFirstConsumer
         ;;
+    iscsi)
+        PVC_NAME="test-pvc-iscsi"
+        POD_NAME="test-pod-iscsi"
+        MANIFEST_PVC="${SCRIPT_DIR}/manifests/pvc-iscsi.yaml"
+        MANIFEST_POD="${SCRIPT_DIR}/manifests/pod-iscsi.yaml"
+        WAIT_FOR_BINDING="false"  # iSCSI uses WaitForFirstConsumer
+        ;;
     *)
-        echo "Error: Unknown protocol '${TEST_PROTOCOL}'. Must be 'nfs' or 'nvmeof'"
+        echo "Error: Unknown protocol '${TEST_PROTOCOL}'. Must be 'nfs', 'nvmeof', or 'iscsi'"
         exit 1
         ;;
 esac
@@ -70,6 +77,13 @@ wait_for_driver
 # For NVMe-oF, check if it's configured before proceeding
 if [[ "${TEST_PROTOCOL}" == "nvmeof" ]]; then
     if ! check_nvmeof_configured "${MANIFEST_PVC}" "${PVC_NAME}" "${PROTOCOL_UPPER}"; then
+        exit 0  # Gracefully skip test if not configured
+    fi
+fi
+
+# For iSCSI, check if it's configured before proceeding
+if [[ "${TEST_PROTOCOL}" == "iscsi" ]]; then
+    if ! check_iscsi_configured "${MANIFEST_PVC}" "${PVC_NAME}" "${PROTOCOL_UPPER}"; then
         exit 0  # Gracefully skip test if not configured
     fi
 fi

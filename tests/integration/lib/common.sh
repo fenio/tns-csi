@@ -203,6 +203,57 @@ check_nvmeof_configured() {
 }
 
 #######################################
+# Check if iSCSI is configured on TrueNAS
+#######################################
+check_iscsi_configured() {
+    local pvc_manifest=$1
+    local pvc_name=$2
+    local protocol_name=${3:-"iSCSI"}
+
+    test_info "Checking if iSCSI is configured on TrueNAS..."
+
+    kubectl apply -f "${pvc_manifest}" -n "${TEST_NAMESPACE}" || true
+
+    local timeout=10
+    local elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        if kubectl get pvc "${pvc_name}" -n "${TEST_NAMESPACE}" &>/dev/null; then
+            sleep 2
+            break
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    local logs=$(kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        --tail=20 2>/dev/null || true)
+
+    if grep -q "No iSCSI portal configured" <<< "$logs"; then
+        test_warning "iSCSI portal not configured on TrueNAS server"
+        test_warning "Skipping ${protocol_name} tests"
+        kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+        kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+        test_summary "${protocol_name}" "SKIPPED"
+        return 1
+    fi
+
+    if grep -q "No iSCSI initiator group configured" <<< "$logs"; then
+        test_warning "iSCSI initiator group not configured on TrueNAS server"
+        test_warning "Skipping ${protocol_name} tests"
+        kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+        kubectl delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --timeout=60s || true
+        test_summary "${protocol_name}" "SKIPPED"
+        return 1
+    fi
+
+    test_success "iSCSI is configured, proceeding with tests"
+    kubectl delete pvc "${pvc_name}" -n "${TEST_NAMESPACE}" --ignore-not-found=true
+    wait_for_resource_deleted "pvc" "${pvc_name}" "${TEST_NAMESPACE}" 10 || true
+    return 0
+}
+
+#######################################
 # Test result recording
 #######################################
 record_test_result() {
@@ -373,6 +424,16 @@ deploy_driver() {
                 --set storageClasses.nvmeof.server="${TRUENAS_HOST}"
                 --set storageClasses.nvmeof.transport=tcp
                 --set storageClasses.nvmeof.port=4420
+            )
+            ;;
+        iscsi)
+            base_args+=(
+                --set storageClasses.nfs.enabled=false
+                --set storageClasses.nvmeof.enabled=false
+                --set storageClasses.iscsi.enabled=true
+                --set storageClasses.iscsi.name=tns-csi-iscsi
+                --set storageClasses.iscsi.pool="${TRUENAS_POOL}"
+                --set storageClasses.iscsi.server="${TRUENAS_HOST}"
             )
             ;;
         *)

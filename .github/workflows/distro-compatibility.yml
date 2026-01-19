@@ -441,7 +441,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.1.0
+      - uses: fenio/setup-talos@v6.1.1
         with:
           mount-dev: 'true'
           iscsi-tools: 'true'

@@ -37,6 +37,7 @@ var _ = Describe("Name Templating", func() {
 		name          string // Display name for test output
 		id            string // Lowercase identifier for K8s resource names (RFC 1123)
 		protocol      string // Protocol parameter for StorageClass
+		fsType        string // Filesystem type for block devices (empty for NFS)
 		accessMode    corev1.PersistentVolumeAccessMode
 		podTimeout    time.Duration
 		needsPodFirst bool // NVMe-oF uses WaitForFirstConsumer
@@ -47,6 +48,7 @@ var _ = Describe("Name Templating", func() {
 			name:          "NFS",
 			id:            "nfs",
 			protocol:      "nfs",
+			fsType:        "", // NFS doesn't need fsType
 			accessMode:    corev1.ReadWriteMany,
 			podTimeout:    2 * time.Minute,
 			needsPodFirst: false,
@@ -57,6 +59,7 @@ var _ = Describe("Name Templating", func() {
 			name:          "iSCSI",
 			id:            "iscsi",
 			protocol:      "iscsi",
+			fsType:        "ext4", // Block device needs filesystem
 			accessMode:    corev1.ReadWriteOnce,
 			podTimeout:    6 * time.Minute,
 			needsPodFirst: true,
@@ -74,6 +77,9 @@ var _ = Describe("Name Templating", func() {
 				"pool":         f.Config.TrueNASPool,
 				"server":       f.Config.TrueNASHost,
 				"nameTemplate": "{{ .PVCNamespace }}-{{ .PVCName }}",
+			}
+			if proto.fsType != "" {
+				params["fsType"] = proto.fsType
 			}
 			err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create StorageClass with nameTemplate")
@@ -159,6 +165,9 @@ var _ = Describe("Name Templating", func() {
 				"server":     f.Config.TrueNASHost,
 				"namePrefix": "prod-",
 				"nameSuffix": "-data",
+			}
+			if proto.fsType != "" {
+				params["fsType"] = proto.fsType
 			}
 			err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create StorageClass with prefix/suffix")

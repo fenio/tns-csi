@@ -69,7 +69,7 @@ This driver supports three storage protocols:
 ## Features
 
 - **Dynamic volume provisioning** - Automatically create and delete storage volumes
-- **Multiple protocol support** - NFS for file storage, NVMe-oF for high-performance block storage
+- **Multiple protocol support** - NFS for file storage, NVMe-oF and iSCSI for block storage
 - **Volume lifecycle management** - Full create, delete, attach, detach, mount, unmount operations
 - **Volume snapshots** - Create, delete, and restore from snapshots (NFS and NVMe-oF)
 - **Volume cloning** - Create new volumes from existing snapshots
@@ -109,16 +109,16 @@ See [kubectl Plugin Documentation](docs/KUBECTL-PLUGIN.md) for full details.
 
 ## Kubernetes Distribution Compatibility
 
-This driver is tested and verified to work on **6 Kubernetes distributions** with both NFS and NVMe-oF protocols:
+This driver is tested and verified to work on **6 Kubernetes distributions** with NFS, NVMe-oF, and iSCSI protocols:
 
-| Distribution | NFS | NVMe-oF | Description |
-|--------------|:---:|:-------:|-------------|
-| K3s | ✅ | ✅ | Lightweight Kubernetes by Rancher |
-| K0s | ✅ | ✅ | Zero-friction Kubernetes by Mirantis |
-| KubeSolo | ✅ | ✅ | Single-node Kubernetes |
-| Minikube | ✅ | ✅ | Local Kubernetes for development |
-| Talos | ✅ | ✅ | Secure, immutable Kubernetes OS |
-| MicroK8s | ✅ | ✅ | Lightweight Kubernetes by Canonical |
+| Distribution | NFS | NVMe-oF | iSCSI | Description |
+|--------------|:---:|:-------:|:-----:|-------------|
+| K3s | ✅ | ✅ | ✅ | Lightweight Kubernetes by Rancher |
+| K0s | ✅ | ✅ | ✅ | Zero-friction Kubernetes by Mirantis |
+| KubeSolo | ✅ | ✅ | ✅ | Single-node Kubernetes |
+| Minikube | ✅ | ✅ | ✅ | Local Kubernetes for development |
+| Talos | ✅ | ✅ | ✅ | Secure, immutable Kubernetes OS |
+| MicroK8s | ✅ | ✅ | ✅ | Lightweight Kubernetes by Canonical |
 
 Compatibility tests run weekly and on-demand. See [Distro Compatibility Tests](docs/DISTRO-COMPATIBILITY.md) for details.
 
@@ -248,7 +248,7 @@ This driver is tested extensively using **real hardware and software** - not moc
 Every commit triggers comprehensive integration tests:
 
 **Core Functionality Tests:**
-- Basic volume provisioning and deletion (NFS & NVMe-oF)
+- Basic volume provisioning and deletion (NFS, NVMe-oF & iSCSI)
 - Volume expansion (dynamic resizing)
 - Snapshot creation and restoration
 - Volume cloning from snapshots
@@ -274,7 +274,7 @@ View test results and history: [![Test Dashboard](https://img.shields.io/badge/T
 This driver is in early development and requires extensive testing before production use. Key considerations:
 
 - **Development Phase**: Active development with ongoing testing and validation
-- **Protocol Support**: Currently supports NFS and NVMe-oF. iSCSI and SMB may be considered for future releases.
+- **Protocol Support**: Currently supports NFS, NVMe-oF, and iSCSI. SMB is not planned (Linux-focused driver).
 - **Volume Expansion**: Implemented and functional for both NFS and NVMe-oF protocols when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
 - **Snapshots**: Implemented for both NFS and NVMe-oF protocols, functional and tested
 - **Testing**: Comprehensive automated testing on real infrastructure (see Testing section above)
@@ -367,6 +367,7 @@ cd tests/sanity && ./test-sanity.sh
 # Run Ginkgo E2E tests (requires TrueNAS and Kubernetes cluster)
 ginkgo -v --timeout=25m ./tests/e2e/nfs/...
 ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+ginkgo -v --timeout=40m ./tests/e2e/iscsi/...
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for comprehensive testing documentation.

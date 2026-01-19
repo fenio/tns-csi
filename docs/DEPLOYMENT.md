@@ -875,7 +875,7 @@ This CSI driver supports multiple storage protocols:
 
 The following features are fully implemented and tested:
 
-- **Volume Provisioning**: Dynamic creation and deletion of NFS and NVMe-oF volumes
+- **Volume Provisioning**: Dynamic creation and deletion of NFS, NVMe-oF, and iSCSI volumes
 - **Volume Expansion**: Resize volumes dynamically (`allowVolumeExpansion: true` in StorageClass)
 - **Volume Retention**: Optional `deleteStrategy: retain` to keep volumes on PVC deletion
 - **Configurable Mount Options**: Custom mount options via StorageClass `mountOptions` field

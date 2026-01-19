@@ -82,7 +82,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 
 #### Delete Strategy (Volume Retention)
 - **Status**: ✅ Implemented
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Control whether volumes are actually deleted or retained when a PVC is deleted
 - **Parameter**: `deleteStrategy` in StorageClass parameters
 - **Values**:
@@ -108,24 +108,26 @@ reclaimPolicy: Delete
 
 #### Volume Attachment/Detachment
 - **Status**: ✅ Fully implemented and functional
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Attach volumes to nodes and detach when no longer needed
 - **Implementation**:
   - NFS: Handled by NFSv4 protocol
   - NVMe-oF: Uses nvme-cli for discovery, connect, and disconnect operations
+  - iSCSI: Uses open-iscsi for target discovery, login, and logout operations
 
 #### Volume Mounting/Unmounting
 - **Status**: ✅ Fully implemented and functional
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Mount volumes into pod containers at specified paths
 - **Implementation**:
   - NFS: Standard NFSv4.2 mount with optimized options
   - NVMe-oF: Block device formatting (ext4/xfs) and filesystem mount
+  - iSCSI: Block device formatting (ext4/xfs) and filesystem mount
   - Proper cleanup on unmount
 
 ### Configurable Mount Options
 - **Status**: ✅ Implemented
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Customize mount options via StorageClass `mountOptions` field
 - **Behavior**: User-specified options are merged with sensible defaults, with user options taking precedence for conflicting keys
 
@@ -178,7 +180,7 @@ reclaimPolicy: Delete
 
 ### Volume Expansion
 - **Status**: ✅ Fully implemented and functional
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Dynamically resize volumes without downtime
 - **Requirements**: StorageClass must have `allowVolumeExpansion: true` (enabled by default in Helm chart)
 - **Limitations**:
@@ -187,6 +189,7 @@ reclaimPolicy: Delete
 - **Implementation**:
   - NFS: Expands ZFS dataset quota
   - NVMe-oF: Expands ZVOL size and resizes filesystem
+  - iSCSI: Expands ZVOL size and resizes filesystem
 
 **Example:**
 ```bash
@@ -195,7 +198,7 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
 
 ### Volume Snapshots
 - **Status**: ✅ Implemented, testing in progress
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Create point-in-time copies of volumes using ZFS snapshots
 - **Features**:
   - Near-instant snapshot creation
@@ -214,7 +217,7 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
 
 ### Volume Cloning (Restore from Snapshot)
 - **Status**: ✅ Implemented, testing in progress
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Create new volumes from existing snapshots
 - **Features**:
   - Instant clone creation via ZFS clone
@@ -228,7 +231,7 @@ kubectl patch pvc my-pvc -p '{"spec":{"resources":{"requests":{"storage":"20Gi"}
 
 ### Detached Clones (Independent Clone Restoration)
 - **Status**: ✅ Implemented
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Create clones that are independent from the source snapshot
 - **Features**:
   - Clone is promoted immediately after creation
@@ -259,7 +262,7 @@ reclaimPolicy: Delete
 
 ### Detached Snapshots (Survive Source Volume Deletion)
 - **Status**: ✅ Implemented
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Create snapshots that survive deletion of the source volume
 - **Features**:
   - Uses `zfs send | zfs receive` for full data copy
@@ -311,7 +314,7 @@ spec:
 
 ### Volume Health Monitoring
 - **Status**: ✅ Implemented
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Description**: Report volume health status to Kubernetes via CSI `ControllerGetVolume` capability
 - **CSI Capability**: `GET_VOLUME` - enables Kubernetes to query volume health
 - **Features**:
@@ -328,6 +331,9 @@ spec:
 | NVMe-oF | ZVOL exists | ZVOL not found |
 | NVMe-oF | Subsystem exists | Subsystem missing |
 | NVMe-oF | Namespace exists | Namespace not found in subsystem |
+| iSCSI | ZVOL exists | ZVOL not found |
+| iSCSI | Target exists | Target missing |
+| iSCSI | Extent exists | Extent not found |
 
 **Return Values:**
 - `Abnormal: false` - Volume is healthy, all checks passed
@@ -509,7 +515,7 @@ reclaimPolicy: Delete
 ### ZFS Native Encryption
 - **Status**: ✅ Implemented
 - **Description**: Enable ZFS native encryption for datasets and ZVOLs at creation time
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 
 ZFS native encryption provides transparent, at-rest encryption for your volumes. Once enabled, all data written to the volume is automatically encrypted using AES-256-GCM (default) or other supported algorithms.
 
@@ -648,7 +654,7 @@ The driver stores metadata as ZFS user properties on each volume's dataset/ZVOL.
 | `tns-csi:schema_version` | Schema version for migrations | `"1"` |
 | `tns-csi:managed_by` | Ownership marker | `"tns-csi"` |
 | `tns-csi:csi_volume_name` | CSI volume identifier | `"pvc-abc123"` |
-| `tns-csi:protocol` | Storage protocol | `"nfs"` or `"nvmeof"` |
+| `tns-csi:protocol` | Storage protocol | `"nfs"`, `"nvmeof"`, or `"iscsi"` |
 | `tns-csi:capacity_bytes` | Volume size in bytes | `"10737418240"` |
 | `tns-csi:created_at` | Creation timestamp (RFC3339) | `"2024-01-15T10:30:00Z"` |
 | `tns-csi:delete_strategy` | Retain/delete policy | `"delete"` or `"retain"` |
@@ -675,6 +681,13 @@ The driver stores metadata as ZFS user properties on each volume's dataset/ZVOL.
 | `tns-csi:nvmeof_nqn` | Subsystem NQN (stable) | No |
 | `tns-csi:nvmeof_subsystem_id` | TrueNAS subsystem ID | Yes |
 | `tns-csi:nvmeof_namespace_id` | TrueNAS namespace ID | Yes |
+
+**iSCSI Volumes:**
+| Property | Description | Mutable? |
+|----------|-------------|----------|
+| `tns-csi:iscsi_iqn` | Target IQN (stable) | No |
+| `tns-csi:iscsi_target_id` | TrueNAS target ID | Yes |
+| `tns-csi:iscsi_extent_id` | TrueNAS extent ID | Yes |
 
 **Viewing Volume Properties:**
 ```bash
@@ -745,10 +758,11 @@ allowVolumeExpansion: true
 A volume is adoptable if it has:
 1. `tns-csi:managed_by` = `"tns-csi"` (ownership marker)
 2. Valid `tns-csi:schema_version` (currently `"1"`)
-3. `tns-csi:protocol` set to `"nfs"` or `"nvmeof"`
+3. `tns-csi:protocol` set to `"nfs"`, `"nvmeof"`, or `"iscsi"`
 4. Protocol-specific stable identifier:
    - NFS: `tns-csi:nfs_share_path`
    - NVMe-oF: `tns-csi:nvmeof_nqn`
+   - iSCSI: `tns-csi:iscsi_iqn`
 
 #### Manual Adoption Workflow
 
@@ -830,7 +844,7 @@ See [kubectl Plugin Documentation](KUBECTL-PLUGIN.md) for full details on adopti
 ### Volume Name Templating
 - **Status**: ✅ Implemented
 - **Description**: Customize volume/dataset names on TrueNAS using Go templates
-- **Protocols**: NFS, NVMe-oF
+- **Protocols**: NFS, NVMe-oF, iSCSI
 - **Use Cases**:
   - Use meaningful names instead of auto-generated PV UUIDs
   - Include namespace/PVC name in dataset names for easier identification
@@ -961,6 +975,8 @@ reclaimPolicy: Delete
   - ✅ ReadWriteMany (RWX) - Multiple pods on multiple nodes
   - ✅ ReadWriteOnce (RWO) - Single pod access
 - **NVMe-oF**:
+  - ✅ ReadWriteOnce (RWO) - Block storage limitation
+- **iSCSI**:
   - ✅ ReadWriteOnce (RWO) - Block storage limitation
 
 ### Volume Binding Modes
@@ -1207,7 +1223,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ---
 
-**Last Updated**: 2026-01-17
+**Last Updated**: 2026-01-19
 **Driver Version**: v0.8.0
 **Kubernetes Version Tested**: 1.27+
 **Go Version**: 1.25.6+

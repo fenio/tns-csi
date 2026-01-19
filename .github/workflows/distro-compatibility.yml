@@ -384,7 +384,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.2
+      - uses: fenio/setup-talos@v6.2.3
         with:
           version: v1.12.1
       - name: Run Basic NFS Test
@@ -407,7 +407,7 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.2
+      - uses: fenio/setup-talos@v6.2.3
         with:
           version: v1.12.1
           load-nvme-modules: 'true'
@@ -423,19 +423,20 @@ jobs:
         run: ./tests/integration/test-distro-basic.sh
 
   talos-iscsi:
-    name: "Talos: iSCSI"
+    name: "Talos: iSCSI (QEMU)"
     runs-on: new
-    timeout-minutes: 20
+    timeout-minutes: 25
     needs: compute-tag
     if: |
       (github.event.inputs.distro == 'all' || github.event.inputs.distro == 'talos' || github.event.inputs.distro == '') &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
-      - uses: fenio/setup-talos@v6.2.2
+      - uses: fenio/setup-talos@v6.2.3
         with:
           version: v1.12.1
-          mount-dev: 'true'
+          provisioner: qemu
+          nodes: '1'
           iscsi-tools: 'true'
       - name: Run Basic iSCSI Test
         env:

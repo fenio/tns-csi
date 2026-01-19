@@ -440,6 +440,13 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		return nil, err
 	}
 
+	// Wait for TrueNAS NVMe-oF target to fully initialize the namespace
+	// Without this delay, the node may connect before the namespace is ready,
+	// resulting in a device that reports zero size
+	const namespaceInitDelay = 3 * time.Second
+	klog.V(4).Infof("Waiting %v for NVMe-oF namespace to be fully initialized", namespaceInitDelay)
+	time.Sleep(namespaceInitDelay)
+
 	// Step 5: Store ZFS user properties for metadata tracking and ownership verification (Schema v1)
 	props := tnsapi.NVMeOFVolumePropertiesV1(tnsapi.NVMeOFVolumeParams{
 		VolumeID:       params.volumeName,
@@ -1041,6 +1048,13 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	}
 
 	klog.Infof("Created NVMe-oF namespace: ID=%d, NSID=%d", namespace.ID, namespace.NSID)
+
+	// Wait for TrueNAS NVMe-oF target to fully initialize the namespace
+	// Without this delay, the node may connect before the namespace is ready,
+	// resulting in a device that reports zero size
+	const namespaceInitDelay = 3 * time.Second
+	klog.V(4).Infof("Waiting %v for NVMe-oF namespace to be fully initialized", namespaceInitDelay)
+	time.Sleep(namespaceInitDelay)
 
 	// Get requested capacity
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()

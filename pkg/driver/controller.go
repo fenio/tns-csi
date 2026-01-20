@@ -290,6 +290,44 @@ func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDat
 	return meta, nil
 }
 
+// deleteDatasetSnapshots deletes all snapshots on a dataset before deleting the dataset itself.
+// This handles the ZFS clone promotion case where snapshots may have dependent clones that
+// prevent dataset deletion. By deleting snapshots with defer=true first, ZFS will automatically
+// clean them up once all dependents are destroyed.
+//
+// This is necessary because after ZFS clone promotion:
+//   - The snapshot moves from the source to the promoted clone.
+//   - The original source volume becomes a dependent of the promoted snapshot.
+//   - Without deleting the snapshot first, neither the clone nor the source can be deleted.
+func (s *ControllerService) deleteDatasetSnapshots(ctx context.Context, datasetID string) {
+	klog.V(4).Infof("Checking for snapshots on dataset %s before deletion", datasetID)
+
+	// Query all snapshots on this dataset
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{"dataset", "=", datasetID},
+	})
+	if err != nil {
+		klog.Warningf("Failed to query snapshots for dataset %s: %v (continuing with deletion)", datasetID, err)
+		return // Don't fail deletion if we can't query snapshots
+	}
+
+	if len(snapshots) == 0 {
+		klog.V(4).Infof("No snapshots found on dataset %s", datasetID)
+		return
+	}
+
+	klog.Infof("Found %d snapshots on dataset %s, deleting them first", len(snapshots), datasetID)
+
+	for _, snap := range snapshots {
+		klog.V(4).Infof("Deleting snapshot %s (defer=true to handle dependent clones)", snap.ID)
+		if err := s.apiClient.DeleteSnapshot(ctx, snap.ID); err != nil {
+			// Log warning but continue - the snapshot might already be deleted or
+			// have dependents that will be handled by defer=true
+			klog.Warningf("Failed to delete snapshot %s: %v (continuing)", snap.ID, err)
+		}
+	}
+}
+
 // CreateVolume creates a new volume.
 func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	// Log at Info level (not V(4)) so we can see when CreateVolume is called in CI
@@ -1268,9 +1306,11 @@ func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.Cr
 		return resp, true, nil
 
 	case ProtocolISCSI:
-		// iSCSI adoption not yet implemented - return error for now
-		return nil, true, status.Errorf(codes.Unimplemented,
-			"iSCSI volume adoption is not yet implemented")
+		resp, err := s.adoptISCSIVolume(ctx, req, dataset, params)
+		if err != nil {
+			return nil, true, err
+		}
+		return resp, true, nil
 
 	default:
 		return nil, true, status.Errorf(codes.InvalidArgument,

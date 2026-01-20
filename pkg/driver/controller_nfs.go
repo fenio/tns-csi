@@ -619,7 +619,14 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		}
 	}
 
-	// Step 2: Delete ZFS dataset with retry logic for busy resources
+	// Step 2: Delete any snapshots on the dataset first (handles promoted clone cleanup)
+	// This is necessary because after ZFS clone promotion, snapshots may have dependent
+	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
+	if meta.DatasetID != "" {
+		s.deleteDatasetSnapshots(ctx, meta.DatasetID)
+	}
+
+	// Step 3: Delete ZFS dataset with retry logic for busy resources
 	if meta.DatasetID == "" {
 		klog.V(4).Infof("No dataset ID provided, skipping dataset deletion")
 	} else {

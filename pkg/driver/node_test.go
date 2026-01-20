@@ -62,6 +62,7 @@ func TestNodeGetCapabilities(t *testing.T) {
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME: false,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS:     false,
 		csi.NodeServiceCapability_RPC_EXPAND_VOLUME:        false,
+		csi.NodeServiceCapability_RPC_VOLUME_CONDITION:     false,
 	}
 
 	for _, cap := range resp.Capabilities {
@@ -549,6 +550,13 @@ func TestNodeGetVolumeStats_TestMode(t *testing.T) {
 	}
 	if !foundBytes {
 		t.Error("Expected BYTES usage in response")
+	}
+
+	// Check for VolumeCondition (should be healthy in test mode).
+	if resp.VolumeCondition == nil {
+		t.Error("Expected VolumeCondition in response")
+	} else if resp.VolumeCondition.Abnormal {
+		t.Errorf("Expected healthy volume condition, got abnormal: %s", resp.VolumeCondition.Message)
 	}
 }
 

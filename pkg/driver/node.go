@@ -456,6 +456,10 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 					Available: 968884224,  // ~924MB
 				},
 			},
+			VolumeCondition: &csi.VolumeCondition{
+				Abnormal: false,
+				Message:  "",
+			},
 		}, nil
 	}
 
@@ -511,6 +515,16 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 
 		klog.V(4).Infof("Inode stats for %s: total=%d, used=%d, free=%d",
 			volumePath, totalInodes, usedInodes, freeInodes)
+	}
+
+	// Check volume health and add VolumeCondition to response
+	health := s.checkVolumeHealth(ctx, volumePath, req.GetStagingTargetPath())
+	resp.VolumeCondition = health.ToCSI()
+
+	if health.Abnormal {
+		klog.Warningf("Volume %s health check failed: %s", req.GetVolumeId(), health.Message)
+	} else {
+		klog.V(4).Infof("Volume %s health check passed", req.GetVolumeId())
 	}
 
 	return resp, nil
@@ -626,6 +640,13 @@ func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapab
 				Type: &csi.NodeServiceCapability_Rpc{
 					Rpc: &csi.NodeServiceCapability_RPC{
 						Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+					},
+				},
+			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
 					},
 				},
 			},

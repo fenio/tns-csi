@@ -96,7 +96,7 @@ That's it! Unlike NVMe-oF, iSCSI doesn't require pre-configured portals or targe
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -253,7 +253,7 @@ To keep volumes on TrueNAS when PVCs are deleted:
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \

@@ -20,7 +20,7 @@ The fastest way to get started is using Helm from the OCI registry:
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -252,7 +252,7 @@ kubectl describe pvc <pvc-name>
 ### Enable Debug Logging
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --reuse-values \
   --set controller.extraArgs="{--v=5}" \
@@ -310,7 +310,7 @@ storageClasses:
 Install with values file:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --values my-values.yaml
@@ -322,7 +322,7 @@ To keep volumes on TrueNAS even when PVCs are deleted (useful for data protectio
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -350,7 +350,7 @@ To use NVMe-oF instead of NFS:
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -419,7 +419,7 @@ To upgrade to a newer version:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --reuse-values
 ```

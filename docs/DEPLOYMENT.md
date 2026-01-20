@@ -251,7 +251,7 @@ The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub
 **For NFS:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -264,7 +264,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **For NVMe-oF:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -280,7 +280,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **For iSCSI:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.0 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -769,7 +769,7 @@ Volumes created with earlier versions will **not be recognized** by the new driv
 2. Upgrade the driver:
    ```bash
    helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-     --version 0.8.0 \
+     --version 0.9.0 \
      --namespace kube-system \
      --reuse-values
    ```

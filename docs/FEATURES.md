@@ -745,7 +745,7 @@ allowVolumeExpansion: true
 **Adoption Process:**
 1. When `CreateVolume` is called, the driver searches for an existing volume by CSI name
 2. If found, it checks adoption eligibility (adoptable property or adoptExisting parameter)
-3. If eligible, it re-creates any missing TrueNAS resources (NFS share or NVMe-oF subsystem/namespace)
+3. If eligible, it re-creates any missing TrueNAS resources (NFS share, NVMe-oF subsystem/namespace, or iSCSI target/extent)
 4. Volume capacity is expanded if requested size is larger than existing size
 5. Volume is returned as if newly created, but data is preserved
 

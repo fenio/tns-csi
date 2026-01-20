@@ -576,7 +576,14 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 		}
 	}
 
-	// Step 4: Delete ZVOL
+	// Step 4: Delete any snapshots on the ZVOL first (handles promoted clone cleanup)
+	// This is necessary because after ZFS clone promotion, snapshots may have dependent
+	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
+	if meta.DatasetID != "" {
+		s.deleteDatasetSnapshots(ctx, meta.DatasetID)
+	}
+
+	// Step 5: Delete ZVOL
 	if meta.DatasetID != "" {
 		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
 			if !isNotFoundError(err) {
@@ -852,6 +859,199 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 					},
 				},
 			},
+		},
+	}, nil
+}
+
+// adoptISCSIVolume adopts an orphaned iSCSI volume by recreating missing TrueNAS resources.
+// This enables GitOps workflows where clusters are recreated and need to adopt existing volumes.
+func (s *ControllerService) adoptISCSIVolume(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.DatasetWithProperties, params map[string]string) (*csi.CreateVolumeResponse, error) {
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, "adopt")
+	volumeName := req.GetName()
+	klog.Infof("Adopting iSCSI volume: %s (dataset=%s)", volumeName, dataset.ID)
+
+	// Get server parameter
+	server := params["server"]
+	if server == "" {
+		timer.ObserveError()
+		return nil, status.Error(codes.InvalidArgument, "server parameter is required for iSCSI volumes")
+	}
+
+	// Get requested capacity
+	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
+	if requestedCapacity == 0 {
+		requestedCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
+	}
+
+	// Get iSCSI global config to construct full IQN
+	globalConfig, err := s.apiClient.GetISCSIGlobalConfig(ctx)
+	if err != nil {
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to get iSCSI global config: %v", err)
+	}
+
+	// Check if target and extent already exist (by looking up stored IDs in properties)
+	var target *tnsapi.ISCSITarget
+	var extent *tnsapi.ISCSIExtent
+
+	// Try to find existing target by stored IQN
+	if iqnProp, ok := dataset.UserProperties[tnsapi.PropertyISCSIIQN]; ok && iqnProp.Value != "" {
+		// Extract target name from IQN (format: basename:targetname)
+		iqn := iqnProp.Value
+		if idx := strings.LastIndex(iqn, ":"); idx != -1 {
+			targetName := iqn[idx+1:]
+			existingTarget, lookupErr := s.apiClient.ISCSITargetByName(ctx, targetName)
+			if lookupErr == nil && existingTarget != nil {
+				target = existingTarget
+				klog.Infof("Found existing target for adopted volume: ID=%d, Name=%s", target.ID, target.Name)
+			}
+		}
+	}
+
+	// If no target found by IQN, try by volume name
+	if target == nil {
+		existingTarget, lookupErr := s.apiClient.ISCSITargetByName(ctx, volumeName)
+		if lookupErr == nil && existingTarget != nil {
+			target = existingTarget
+			klog.Infof("Found existing target by volume name: ID=%d, Name=%s", target.ID, target.Name)
+		}
+	}
+
+	// Try to find existing extent by volume name
+	existingExtent, extentErr := s.apiClient.ISCSIExtentByName(ctx, volumeName)
+	if extentErr == nil && existingExtent != nil {
+		extent = existingExtent
+		klog.Infof("Found existing extent for adopted volume: ID=%d, Name=%s", extent.ID, extent.Name)
+	}
+
+	// If no target found, create new one
+	if target == nil {
+		klog.Infof("Creating new iSCSI target for adopted volume: %s", volumeName)
+
+		newTarget, createErr := s.apiClient.CreateISCSITarget(ctx, tnsapi.ISCSITargetCreateParams{
+			Name: volumeName,
+			Groups: []tnsapi.ISCSITargetGroup{
+				{
+					Portal:    1, // Default portal
+					Initiator: 1, // Default initiator (allow all)
+				},
+			},
+		})
+		if createErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create iSCSI target for adopted volume: %v", createErr)
+		}
+		target = newTarget
+		klog.Infof("Created iSCSI target for adopted volume: ID=%d, Name=%s", target.ID, target.Name)
+	}
+
+	// If no extent found, create one
+	if extent == nil {
+		klog.Infof("Creating iSCSI extent for adopted volume: %s", volumeName)
+
+		// Extent path for ZVOL
+		extentPath := "zvol/" + dataset.Name
+
+		newExtent, createErr := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
+			Name:      volumeName,
+			Type:      "DISK",
+			Disk:      extentPath,
+			Blocksize: 512, // Standard block size
+		})
+		if createErr != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create iSCSI extent for adopted volume: %v", createErr)
+		}
+		extent = newExtent
+		klog.Infof("Created iSCSI extent for adopted volume: ID=%d, Name=%s", extent.ID, extent.Name)
+	}
+
+	// Check if target-extent association exists, create if not
+	targetExtents, err := s.apiClient.ISCSITargetExtentByTarget(ctx, target.ID)
+	if err != nil {
+		klog.Warningf("Failed to query target-extent associations: %v", err)
+	}
+
+	hasAssociation := false
+	for _, te := range targetExtents {
+		if te.Extent == extent.ID {
+			hasAssociation = true
+			klog.Infof("Found existing target-extent association: ID=%d", te.ID)
+			break
+		}
+	}
+
+	if !hasAssociation {
+		klog.Infof("Creating target-extent association for adopted volume")
+		_, err := s.apiClient.CreateISCSITargetExtent(ctx, tnsapi.ISCSITargetExtentCreateParams{
+			Target: target.ID,
+			Extent: extent.ID,
+			LunID:  0, // LUN 0
+		})
+		if err != nil {
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Internal, "Failed to create target-extent association: %v", err)
+		}
+		klog.Infof("Created target-extent association for adopted volume")
+	}
+
+	// Reload iSCSI service to make the target discoverable
+	if reloadErr := s.apiClient.ReloadISCSIService(ctx); reloadErr != nil {
+		klog.Warningf("Failed to reload iSCSI service: %v", reloadErr)
+	}
+
+	// Construct full IQN
+	fullIQN := globalConfig.Basename + ":" + target.Name
+
+	// Update ZFS properties with new IDs
+	deleteStrategy := params["deleteStrategy"]
+	if deleteStrategy == "" {
+		deleteStrategy = tnsapi.DeleteStrategyDelete
+	}
+	markAdoptable := params["markAdoptable"] == VolumeContextValueTrue
+
+	props := tnsapi.ISCSIVolumePropertiesV1(tnsapi.ISCSIVolumeParams{
+		VolumeID:       volumeName,
+		CapacityBytes:  requestedCapacity,
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		DeleteStrategy: deleteStrategy,
+		TargetID:       target.ID,
+		ExtentID:       extent.ID,
+		TargetIQN:      fullIQN,
+		PVCName:        params["csi.storage.k8s.io/pvc/name"],
+		PVCNamespace:   params["csi.storage.k8s.io/pvc/namespace"],
+		StorageClass:   params["csi.storage.k8s.io/sc/name"],
+		Adoptable:      markAdoptable,
+	})
+	if propErr := s.apiClient.SetDatasetProperties(ctx, dataset.ID, props); propErr != nil {
+		klog.Warningf("Failed to update ZFS properties on adopted volume %s: %v", dataset.ID, propErr)
+	}
+
+	// Build response
+	meta := VolumeMetadata{
+		Name:          volumeName,
+		Protocol:      ProtocolISCSI,
+		DatasetID:     dataset.ID,
+		DatasetName:   dataset.Name,
+		Server:        server,
+		ISCSITargetID: target.ID,
+		ISCSIExtentID: extent.ID,
+		ISCSIIQN:      fullIQN,
+	}
+
+	volumeContext := buildVolumeContext(meta)
+
+	// Record volume capacity metric
+	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolISCSI, requestedCapacity)
+
+	klog.Infof("Successfully adopted iSCSI volume: %s (target=%s, IQN=%s)", volumeName, target.Name, fullIQN)
+	timer.ObserveSuccess()
+
+	return &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      volumeName,
+			CapacityBytes: requestedCapacity,
+			VolumeContext: volumeContext,
 		},
 	}, nil
 }

@@ -307,6 +307,92 @@ func (v *TrueNASVerifier) DeleteNFSShare(ctx context.Context, path string) error
 	)
 }
 
+// ISCSITargetExists checks if an iSCSI target exists with the given name.
+func (v *TrueNASVerifier) ISCSITargetExists(ctx context.Context, targetName string) (bool, error) {
+	var targets []map[string]any
+	filter := []any{[]any{"name", "=", targetName}}
+	if err := v.client.Call(ctx, "iscsi.target.query", []any{filter}, &targets); err != nil {
+		return false, fmt.Errorf("failed to query iSCSI targets: %w", err)
+	}
+	return len(targets) > 0, nil
+}
+
+// ISCSIExtentExists checks if an iSCSI extent exists with the given name.
+func (v *TrueNASVerifier) ISCSIExtentExists(ctx context.Context, extentName string) (bool, error) {
+	var extents []map[string]any
+	filter := []any{[]any{"name", "=", extentName}}
+	if err := v.client.Call(ctx, "iscsi.extent.query", []any{filter}, &extents); err != nil {
+		return false, fmt.Errorf("failed to query iSCSI extents: %w", err)
+	}
+	return len(extents) > 0, nil
+}
+
+// DeleteISCSITarget deletes an iSCSI target from TrueNAS.
+// This is used for cleaning up retained iSCSI targets after tests.
+func (v *TrueNASVerifier) DeleteISCSITarget(ctx context.Context, targetName string) error {
+	// Query for the target first
+	var targets []map[string]any
+	filter := []any{[]any{"name", "=", targetName}}
+	if err := v.client.Call(ctx, "iscsi.target.query", []any{filter}, &targets); err != nil {
+		return fmt.Errorf("failed to query iSCSI target: %w", err)
+	}
+	if len(targets) == 0 {
+		return nil // Target doesn't exist
+	}
+
+	targetID, ok := targets[0]["id"]
+	if !ok {
+		return fmt.Errorf("iSCSI target %s: %w", targetName, ErrMissingIDField)
+	}
+
+	targetIDInt, err := toInt(targetID)
+	if err != nil {
+		return fmt.Errorf("invalid target ID type: %w", err)
+	}
+
+	// Delete the target (force=true to delete associated resources)
+	var result any
+	if err := v.client.Call(ctx, "iscsi.target.delete", []any{targetIDInt, true}, &result); err != nil {
+		return fmt.Errorf("failed to delete iSCSI target %s (id=%d): %w", targetName, targetIDInt, err)
+	}
+	return nil
+}
+
+// DeleteISCSIExtent deletes an iSCSI extent from TrueNAS.
+// This is used for cleaning up retained iSCSI extents after tests.
+func (v *TrueNASVerifier) DeleteISCSIExtent(ctx context.Context, extentName string) error {
+	// Query for the extent first
+	var extents []map[string]any
+	filter := []any{[]any{"name", "=", extentName}}
+	if err := v.client.Call(ctx, "iscsi.extent.query", []any{filter}, &extents); err != nil {
+		return fmt.Errorf("failed to query iSCSI extent: %w", err)
+	}
+	if len(extents) == 0 {
+		return nil // Extent doesn't exist
+	}
+
+	extentID, ok := extents[0]["id"]
+	if !ok {
+		return fmt.Errorf("iSCSI extent %s: %w", extentName, ErrMissingIDField)
+	}
+
+	extentIDInt, err := toInt(extentID)
+	if err != nil {
+		return fmt.Errorf("invalid extent ID type: %w", err)
+	}
+
+	// Delete the extent (remove_file=false, force=true)
+	var result any
+	params := map[string]any{
+		"remove": false,
+		"force":  true,
+	}
+	if err := v.client.Call(ctx, "iscsi.extent.delete", []any{extentIDInt, params}, &result); err != nil {
+		return fmt.Errorf("failed to delete iSCSI extent %s (id=%d): %w", extentName, extentIDInt, err)
+	}
+	return nil
+}
+
 // GetDatasetProperty retrieves a specific ZFS user property from a dataset.
 // Returns empty string if the property doesn't exist or is unset.
 func (v *TrueNASVerifier) GetDatasetProperty(ctx context.Context, datasetPath, propertyName string) (string, error) {

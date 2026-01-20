@@ -932,6 +932,11 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 
 	klog.Infof("deleteZVOL: Starting deletion of ZVOL %s for volume %s", meta.DatasetID, meta.Name)
 
+	// Delete any snapshots on the ZVOL first (handles promoted clone cleanup)
+	// This is necessary because after ZFS clone promotion, snapshots may have dependent
+	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
+	s.deleteDatasetSnapshots(ctx, meta.DatasetID)
+
 	retryConfig := retry.DeletionConfig("delete-zvol")
 	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)

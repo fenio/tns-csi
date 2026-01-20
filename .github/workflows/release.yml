@@ -123,8 +123,13 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # Get previous release tag (excluding plugin-v* tags)
+          CURRENT_TAG=${{ steps.version.outputs.version }}
+          PREV_TAG=$(git tag -l 'v[0-9]*' | sort -V | grep -B1 "^${CURRENT_TAG}$" | head -1)
+          # If grep returns the same tag, there's no previous
+          if [ "$PREV_TAG" = "$CURRENT_TAG" ]; then
+            PREV_TAG=""
+          fi
           
           if [ -z "$PREV_TAG" ]; then
             echo "No previous tag found, showing all commits"

@@ -24,26 +24,36 @@ var (
 	ErrSnapshotNotFound = errors.New("snapshot not found")
 	// ErrSubsystemNotFound indicates a subsystem was not found.
 	ErrSubsystemNotFound = errors.New("subsystem not found")
-	// ErrISCSINotImplemented indicates iSCSI is not implemented in mock.
-	ErrISCSINotImplemented = errors.New("iSCSI not implemented in mock")
+	// ErrISCSITargetNotFound indicates an iSCSI target was not found.
+	ErrISCSITargetNotFound = errors.New("iSCSI target not found")
+	// ErrISCSIExtentNotFound indicates an iSCSI extent was not found.
+	ErrISCSIExtentNotFound = errors.New("iSCSI extent not found")
+	// ErrISCSITargetExtentNotFound indicates an iSCSI target-extent was not found.
+	ErrISCSITargetExtentNotFound = errors.New("iSCSI target-extent not found")
 )
 
 // MockClient is a mock implementation of the TrueNAS API client for sanity testing.
 type MockClient struct {
-	datasets        map[string]mockDataset
-	nfsShares       map[int]mockNFSShare
-	nvmeofTargets   map[int]mockNVMeOFTarget
-	snapshots       map[string]mockSnapshot
-	subsystems      map[string]mockSubsystem
-	namespaces      map[int]mockNamespace
-	callLog         []string
-	nextDatasetID   int
-	nextShareID     int
-	nextTargetID    int
-	nextSnapshotID  int
-	nextSubsystemID int
-	nextNamespaceID int
-	mu              sync.Mutex
+	datasets           map[string]mockDataset
+	nfsShares          map[int]mockNFSShare
+	nvmeofTargets      map[int]mockNVMeOFTarget
+	snapshots          map[string]mockSnapshot
+	subsystems         map[string]mockSubsystem
+	namespaces         map[int]mockNamespace
+	iscsiTargets       map[int]mockISCSITarget
+	iscsiExtents       map[int]mockISCSIExtent
+	iscsiTargetExtents map[int]mockISCSITargetExtent
+	callLog            []string
+	nextDatasetID      int
+	nextShareID        int
+	nextTargetID       int
+	nextSnapshotID     int
+	nextSubsystemID    int
+	nextNamespaceID    int
+	nextISCSITargetID  int
+	nextISCSIExtentID  int
+	nextISCSITEID      int // target-extent ID
+	mu                 sync.Mutex
 }
 
 //nolint:govet // fieldalignment: field order prioritizes readability.
@@ -95,22 +105,55 @@ type mockNamespace struct {
 	NSID        int
 }
 
+type mockISCSITarget struct {
+	Name   string
+	Alias  string
+	Mode   string
+	Groups []tnsapi.ISCSITargetGroup
+	ID     int
+}
+
+type mockISCSIExtent struct {
+	Name      string
+	Type      string
+	Disk      string
+	Path      string
+	RPM       string
+	Comment   string
+	ID        int
+	Blocksize int
+	Enabled   bool
+}
+
+type mockISCSITargetExtent struct {
+	ID     int
+	Target int
+	Extent int
+	LunID  int
+}
+
 // NewMockClient creates a new mock TrueNAS API client.
 func NewMockClient() *MockClient {
 	return &MockClient{
-		datasets:        make(map[string]mockDataset),
-		nfsShares:       make(map[int]mockNFSShare),
-		nvmeofTargets:   make(map[int]mockNVMeOFTarget),
-		snapshots:       make(map[string]mockSnapshot),
-		subsystems:      make(map[string]mockSubsystem),
-		namespaces:      make(map[int]mockNamespace),
-		nextDatasetID:   1,
-		nextShareID:     1,
-		nextTargetID:    1,
-		nextSnapshotID:  1,
-		nextSubsystemID: 1,
-		nextNamespaceID: 1,
-		callLog:         make([]string, 0),
+		datasets:           make(map[string]mockDataset),
+		nfsShares:          make(map[int]mockNFSShare),
+		nvmeofTargets:      make(map[int]mockNVMeOFTarget),
+		snapshots:          make(map[string]mockSnapshot),
+		subsystems:         make(map[string]mockSubsystem),
+		namespaces:         make(map[int]mockNamespace),
+		iscsiTargets:       make(map[int]mockISCSITarget),
+		iscsiExtents:       make(map[int]mockISCSIExtent),
+		iscsiTargetExtents: make(map[int]mockISCSITargetExtent),
+		nextDatasetID:      1,
+		nextShareID:        1,
+		nextTargetID:       1,
+		nextSnapshotID:     1,
+		nextSubsystemID:    1,
+		nextNamespaceID:    1,
+		nextISCSITargetID:  1,
+		nextISCSIExtentID:  1,
+		nextISCSITEID:      1,
+		callLog:            make([]string, 0),
 	}
 }
 
@@ -478,6 +521,8 @@ func (m *MockClient) DeleteNFSShare(ctx context.Context, id int) error {
 }
 
 // QueryNFSShare mocks sharing.nfs.query by path.
+//
+//nolint:dupl // Similar loop-and-filter pattern is acceptable in test mocks.
 func (m *MockClient) QueryNFSShare(ctx context.Context, path string) ([]tnsapi.NFSShare, error) {
 	m.logCall("QueryNFSShare", path)
 
@@ -825,6 +870,8 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 }
 
 // matchesSnapshotFilters checks if a snapshot matches the provided filters.
+//
+//nolint:goconst // Filter field names are used locally in mock filter functions.
 func matchesSnapshotFilters(snap mockSnapshot, filters []any) bool {
 	if len(filters) == 0 {
 		return true
@@ -1070,86 +1117,478 @@ func (m *MockClient) GetCallLog() []string {
 }
 
 // =============================================================================
-// iSCSI operations (stubs for interface compliance - not used in sanity tests)
+// iSCSI operations
 // =============================================================================
 
 // GetISCSIGlobalConfig returns the global iSCSI configuration.
-func (m *MockClient) GetISCSIGlobalConfig(_ context.Context) (*tnsapi.ISCSIGlobalConfig, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) GetISCSIGlobalConfig(ctx context.Context) (*tnsapi.ISCSIGlobalConfig, error) {
+	m.logCall("GetISCSIGlobalConfig")
+
+	return &tnsapi.ISCSIGlobalConfig{
+		ID:                 1,
+		Basename:           "iqn.2005-10.org.freenas.ctl",
+		ISNSServers:        []string{},
+		PoolAvailThreshold: nil,
+	}, nil
 }
 
 // QueryISCSIPortals returns all iSCSI portals.
-func (m *MockClient) QueryISCSIPortals(_ context.Context) ([]tnsapi.ISCSIPortal, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) QueryISCSIPortals(ctx context.Context) ([]tnsapi.ISCSIPortal, error) {
+	m.logCall("QueryISCSIPortals")
+
+	return []tnsapi.ISCSIPortal{
+		{
+			ID:      1,
+			Tag:     1,
+			Comment: "Default portal",
+			Listen: []tnsapi.ISCSIPortalListen{
+				{IP: "0.0.0.0", Port: 3260},
+			},
+		},
+	}, nil
 }
 
 // QueryISCSIInitiators returns all iSCSI initiator groups.
-func (m *MockClient) QueryISCSIInitiators(_ context.Context) ([]tnsapi.ISCSIInitiator, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) QueryISCSIInitiators(ctx context.Context) ([]tnsapi.ISCSIInitiator, error) {
+	m.logCall("QueryISCSIInitiators")
+
+	return []tnsapi.ISCSIInitiator{
+		{
+			ID:         1,
+			Tag:        1,
+			Comment:    "Allow all initiators",
+			Initiators: []string{},
+		},
+	}, nil
 }
 
 // CreateISCSITarget creates a new iSCSI target.
-func (m *MockClient) CreateISCSITarget(_ context.Context, _ tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) CreateISCSITarget(ctx context.Context, params tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+	m.logCall("CreateISCSITarget", params.Name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	targetID := m.nextISCSITargetID
+	m.nextISCSITargetID++
+
+	mode := params.Mode
+	if mode == "" {
+		mode = "ISCSI"
+	}
+
+	m.iscsiTargets[targetID] = mockISCSITarget{
+		ID:     targetID,
+		Name:   params.Name,
+		Alias:  params.Alias,
+		Mode:   mode,
+		Groups: params.Groups,
+	}
+
+	return &tnsapi.ISCSITarget{
+		ID:     targetID,
+		Name:   params.Name,
+		Alias:  params.Alias,
+		Mode:   mode,
+		Groups: params.Groups,
+	}, nil
 }
 
 // DeleteISCSITarget deletes an iSCSI target.
-func (m *MockClient) DeleteISCSITarget(_ context.Context, _ int, _ bool) error {
-	return ErrISCSINotImplemented
+func (m *MockClient) DeleteISCSITarget(ctx context.Context, targetID int, force bool) error {
+	m.logCall("DeleteISCSITarget", targetID, force)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.iscsiTargets[targetID]; !exists {
+		return fmt.Errorf("iSCSI target %d: %w", targetID, ErrISCSITargetNotFound)
+	}
+
+	delete(m.iscsiTargets, targetID)
+	return nil
 }
 
 // QueryISCSITargets queries iSCSI targets.
-func (m *MockClient) QueryISCSITargets(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITarget, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) QueryISCSITargets(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITarget, error) {
+	m.logCall("QueryISCSITargets", filters)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.ISCSITarget
+	for _, target := range m.iscsiTargets {
+		if matchesISCSITargetFilters(target, filters) {
+			result = append(result, tnsapi.ISCSITarget{
+				ID:     target.ID,
+				Name:   target.Name,
+				Alias:  target.Alias,
+				Mode:   target.Mode,
+				Groups: target.Groups,
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// matchesISCSITargetFilters checks if a target matches the provided filters.
+//
+//nolint:dupl // Similar filter logic for different types is acceptable in test mocks.
+func matchesISCSITargetFilters(target mockISCSITarget, filters []interface{}) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	for _, filterAny := range filters {
+		filter, ok := filterAny.([]interface{})
+		if !ok || len(filter) < 3 {
+			continue
+		}
+
+		field, ok := filter[0].(string)
+		if !ok {
+			continue
+		}
+		operator, ok := filter[1].(string)
+		if !ok {
+			continue
+		}
+		value := filter[2]
+
+		switch field {
+		case "name":
+			if operator == "=" {
+				if valueStr, ok := value.(string); ok && target.Name != valueStr {
+					return false
+				}
+			}
+		case "id":
+			if operator == "=" {
+				if valueInt, ok := value.(int); ok && target.ID != valueInt {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 // ISCSITargetByName finds an iSCSI target by name.
-func (m *MockClient) ISCSITargetByName(_ context.Context, _ string) (*tnsapi.ISCSITarget, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) ISCSITargetByName(ctx context.Context, name string) (*tnsapi.ISCSITarget, error) {
+	m.logCall("ISCSITargetByName", name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, target := range m.iscsiTargets {
+		if target.Name == name {
+			return &tnsapi.ISCSITarget{
+				ID:     target.ID,
+				Name:   target.Name,
+				Alias:  target.Alias,
+				Mode:   target.Mode,
+				Groups: target.Groups,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("iSCSI target %s: %w", name, ErrISCSITargetNotFound)
 }
 
 // CreateISCSIExtent creates a new iSCSI extent.
-func (m *MockClient) CreateISCSIExtent(_ context.Context, _ tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) CreateISCSIExtent(ctx context.Context, params tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+	m.logCall("CreateISCSIExtent", params.Name, params.Disk)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	extentID := m.nextISCSIExtentID
+	m.nextISCSIExtentID++
+
+	enabled := true
+	if params.Enabled != nil {
+		enabled = *params.Enabled
+	}
+
+	blocksize := params.Blocksize
+	if blocksize == 0 {
+		blocksize = 512
+	}
+
+	m.iscsiExtents[extentID] = mockISCSIExtent{
+		ID:        extentID,
+		Name:      params.Name,
+		Type:      params.Type,
+		Disk:      params.Disk,
+		Path:      params.Path,
+		RPM:       params.RPM,
+		Comment:   params.Comment,
+		Blocksize: blocksize,
+		Enabled:   enabled,
+	}
+
+	return &tnsapi.ISCSIExtent{
+		ID:        extentID,
+		Name:      params.Name,
+		Type:      params.Type,
+		Disk:      params.Disk,
+		Path:      params.Path,
+		RPM:       params.RPM,
+		Comment:   params.Comment,
+		Blocksize: blocksize,
+		Enabled:   enabled,
+	}, nil
 }
 
 // DeleteISCSIExtent deletes an iSCSI extent.
-func (m *MockClient) DeleteISCSIExtent(_ context.Context, _ int, _, _ bool) error {
-	return ErrISCSINotImplemented
+func (m *MockClient) DeleteISCSIExtent(ctx context.Context, extentID int, remove, force bool) error {
+	m.logCall("DeleteISCSIExtent", extentID, remove, force)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.iscsiExtents[extentID]; !exists {
+		return fmt.Errorf("iSCSI extent %d: %w", extentID, ErrISCSIExtentNotFound)
+	}
+
+	delete(m.iscsiExtents, extentID)
+	return nil
 }
 
 // QueryISCSIExtents queries iSCSI extents.
-func (m *MockClient) QueryISCSIExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSIExtent, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) QueryISCSIExtents(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSIExtent, error) {
+	m.logCall("QueryISCSIExtents", filters)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.ISCSIExtent
+	for _, extent := range m.iscsiExtents {
+		if matchesISCSIExtentFilters(extent, filters) {
+			result = append(result, tnsapi.ISCSIExtent{
+				ID:        extent.ID,
+				Name:      extent.Name,
+				Type:      extent.Type,
+				Disk:      extent.Disk,
+				Path:      extent.Path,
+				RPM:       extent.RPM,
+				Comment:   extent.Comment,
+				Blocksize: extent.Blocksize,
+				Enabled:   extent.Enabled,
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// matchesISCSIExtentFilters checks if an extent matches the provided filters.
+//
+//nolint:dupl // Similar filter logic for different types is acceptable in test mocks.
+func matchesISCSIExtentFilters(extent mockISCSIExtent, filters []interface{}) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	for _, filterAny := range filters {
+		filter, ok := filterAny.([]interface{})
+		if !ok || len(filter) < 3 {
+			continue
+		}
+
+		field, ok := filter[0].(string)
+		if !ok {
+			continue
+		}
+		operator, ok := filter[1].(string)
+		if !ok {
+			continue
+		}
+		value := filter[2]
+
+		switch field {
+		case "name":
+			if operator == "=" {
+				if valueStr, ok := value.(string); ok && extent.Name != valueStr {
+					return false
+				}
+			}
+		case "id":
+			if operator == "=" {
+				if valueInt, ok := value.(int); ok && extent.ID != valueInt {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 // ISCSIExtentByName finds an iSCSI extent by name.
-func (m *MockClient) ISCSIExtentByName(_ context.Context, _ string) (*tnsapi.ISCSIExtent, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) ISCSIExtentByName(ctx context.Context, name string) (*tnsapi.ISCSIExtent, error) {
+	m.logCall("ISCSIExtentByName", name)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, extent := range m.iscsiExtents {
+		if extent.Name == name {
+			return &tnsapi.ISCSIExtent{
+				ID:        extent.ID,
+				Name:      extent.Name,
+				Type:      extent.Type,
+				Disk:      extent.Disk,
+				Path:      extent.Path,
+				RPM:       extent.RPM,
+				Comment:   extent.Comment,
+				Blocksize: extent.Blocksize,
+				Enabled:   extent.Enabled,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("iSCSI extent %s: %w", name, ErrISCSIExtentNotFound)
 }
 
 // CreateISCSITargetExtent creates a target-extent association.
-func (m *MockClient) CreateISCSITargetExtent(_ context.Context, _ tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) CreateISCSITargetExtent(ctx context.Context, params tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+	m.logCall("CreateISCSITargetExtent", params.Target, params.Extent, params.LunID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	teID := m.nextISCSITEID
+	m.nextISCSITEID++
+
+	m.iscsiTargetExtents[teID] = mockISCSITargetExtent{
+		ID:     teID,
+		Target: params.Target,
+		Extent: params.Extent,
+		LunID:  params.LunID,
+	}
+
+	return &tnsapi.ISCSITargetExtent{
+		ID:     teID,
+		Target: params.Target,
+		Extent: params.Extent,
+		LunID:  params.LunID,
+	}, nil
 }
 
 // DeleteISCSITargetExtent deletes a target-extent association.
-func (m *MockClient) DeleteISCSITargetExtent(_ context.Context, _ int, _ bool) error {
-	return ErrISCSINotImplemented
+func (m *MockClient) DeleteISCSITargetExtent(ctx context.Context, teID int, force bool) error {
+	m.logCall("DeleteISCSITargetExtent", teID, force)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.iscsiTargetExtents[teID]; !exists {
+		return fmt.Errorf("iSCSI target-extent %d: %w", teID, ErrISCSITargetExtentNotFound)
+	}
+
+	delete(m.iscsiTargetExtents, teID)
+	return nil
 }
 
 // QueryISCSITargetExtents queries target-extent associations.
-func (m *MockClient) QueryISCSITargetExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITargetExtent, error) {
-	return nil, ErrISCSINotImplemented
+func (m *MockClient) QueryISCSITargetExtents(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITargetExtent, error) {
+	m.logCall("QueryISCSITargetExtents", filters)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.ISCSITargetExtent
+	for _, te := range m.iscsiTargetExtents {
+		if matchesISCSITargetExtentFilters(te, filters) {
+			result = append(result, tnsapi.ISCSITargetExtent{
+				ID:     te.ID,
+				Target: te.Target,
+				Extent: te.Extent,
+				LunID:  te.LunID,
+			})
+		}
+	}
+
+	return result, nil
+}
+
+// matchesISCSITargetExtentFilters checks if a target-extent matches the provided filters.
+func matchesISCSITargetExtentFilters(te mockISCSITargetExtent, filters []interface{}) bool {
+	if len(filters) == 0 {
+		return true
+	}
+
+	for _, filterAny := range filters {
+		filter, ok := filterAny.([]interface{})
+		if !ok || len(filter) < 3 {
+			continue
+		}
+
+		field, ok := filter[0].(string)
+		if !ok {
+			continue
+		}
+		operator, ok := filter[1].(string)
+		if !ok {
+			continue
+		}
+		value := filter[2]
+
+		switch field {
+		case "target":
+			if operator == "=" {
+				if valueInt, ok := value.(int); ok && te.Target != valueInt {
+					return false
+				}
+			}
+		case "extent":
+			if operator == "=" {
+				if valueInt, ok := value.(int); ok && te.Extent != valueInt {
+					return false
+				}
+			}
+		case "id":
+			if operator == "=" {
+				if valueInt, ok := value.(int); ok && te.ID != valueInt {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 // ISCSITargetExtentByTarget finds target-extent associations for a target.
-func (m *MockClient) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]tnsapi.ISCSITargetExtent, error) {
-	return nil, ErrISCSINotImplemented
+//
+//nolint:dupl // Similar loop-and-filter pattern is acceptable in test mocks.
+func (m *MockClient) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([]tnsapi.ISCSITargetExtent, error) {
+	m.logCall("ISCSITargetExtentByTarget", targetID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.ISCSITargetExtent
+	for _, te := range m.iscsiTargetExtents {
+		if te.Target == targetID {
+			result = append(result, tnsapi.ISCSITargetExtent{
+				ID:     te.ID,
+				Target: te.Target,
+				Extent: te.Extent,
+				LunID:  te.LunID,
+			})
+		}
+	}
+
+	return result, nil
 }
 
 // ReloadISCSIService simulates reloading the iSCSI service.
-func (m *MockClient) ReloadISCSIService(_ context.Context) error {
+func (m *MockClient) ReloadISCSIService(ctx context.Context) error {
+	m.logCall("ReloadISCSIService")
 	return nil // No-op for mock - always succeeds
 }
 

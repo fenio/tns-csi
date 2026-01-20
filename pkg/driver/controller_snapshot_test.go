@@ -313,70 +313,95 @@ func (m *MockAPIClientForSnapshots) FindDatasetByCSIVolumeName(ctx context.Conte
 	return nil, nil //nolint:nilnil // Mock returns "not found"
 }
 
-// iSCSI stubs - not used in snapshot tests but required by interface.
+// iSCSI methods - default implementations for interface compliance.
 
 func (m *MockAPIClientForSnapshots) GetISCSIGlobalConfig(_ context.Context) (*tnsapi.ISCSIGlobalConfig, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return &tnsapi.ISCSIGlobalConfig{
+		ID:       1,
+		Basename: "iqn.2005-10.org.freenas.ctl",
+	}, nil
 }
 
 func (m *MockAPIClientForSnapshots) QueryISCSIPortals(_ context.Context) ([]tnsapi.ISCSIPortal, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSIPortal{
+		{ID: 1, Tag: 1, Listen: []tnsapi.ISCSIPortalListen{{IP: "0.0.0.0", Port: 3260}}},
+	}, nil
 }
 
 func (m *MockAPIClientForSnapshots) QueryISCSIInitiators(_ context.Context) ([]tnsapi.ISCSIInitiator, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSIInitiator{
+		{ID: 1, Tag: 1, Initiators: []string{}},
+	}, nil
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSITarget(_ context.Context, _ tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+func (m *MockAPIClientForSnapshots) CreateISCSITarget(_ context.Context, params tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+	return &tnsapi.ISCSITarget{
+		ID:     1,
+		Name:   params.Name,
+		Alias:  params.Alias,
+		Mode:   "ISCSI",
+		Groups: params.Groups,
+	}, nil
 }
 
 func (m *MockAPIClientForSnapshots) DeleteISCSITarget(_ context.Context, _ int, _ bool) error {
-	return errors.New("iSCSI not implemented in snapshot mock")
+	return nil
 }
 
 func (m *MockAPIClientForSnapshots) QueryISCSITargets(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITarget, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSITarget{}, nil
 }
 
-func (m *MockAPIClientForSnapshots) ISCSITargetByName(_ context.Context, _ string) (*tnsapi.ISCSITarget, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+func (m *MockAPIClientForSnapshots) ISCSITargetByName(_ context.Context, name string) (*tnsapi.ISCSITarget, error) {
+	return nil, errors.New("iSCSI target not found: " + name)
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSIExtent(_ context.Context, _ tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+func (m *MockAPIClientForSnapshots) CreateISCSIExtent(_ context.Context, params tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+	return &tnsapi.ISCSIExtent{
+		ID:        1,
+		Name:      params.Name,
+		Type:      params.Type,
+		Disk:      params.Disk,
+		Blocksize: 512,
+		Enabled:   true,
+	}, nil
 }
 
 func (m *MockAPIClientForSnapshots) DeleteISCSIExtent(_ context.Context, _ int, _, _ bool) error {
-	return errors.New("iSCSI not implemented in snapshot mock")
+	return nil
 }
 
 func (m *MockAPIClientForSnapshots) QueryISCSIExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSIExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSIExtent{}, nil
 }
 
-func (m *MockAPIClientForSnapshots) ISCSIExtentByName(_ context.Context, _ string) (*tnsapi.ISCSIExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+func (m *MockAPIClientForSnapshots) ISCSIExtentByName(_ context.Context, name string) (*tnsapi.ISCSIExtent, error) {
+	return nil, errors.New("iSCSI extent not found: " + name)
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSITargetExtent(_ context.Context, _ tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+func (m *MockAPIClientForSnapshots) CreateISCSITargetExtent(_ context.Context, params tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+	return &tnsapi.ISCSITargetExtent{
+		ID:     1,
+		Target: params.Target,
+		Extent: params.Extent,
+		LunID:  params.LunID,
+	}, nil
 }
 
 func (m *MockAPIClientForSnapshots) DeleteISCSITargetExtent(_ context.Context, _ int, _ bool) error {
-	return errors.New("iSCSI not implemented in snapshot mock")
+	return nil
 }
 
 func (m *MockAPIClientForSnapshots) QueryISCSITargetExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITargetExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSITargetExtent{}, nil
 }
 
 func (m *MockAPIClientForSnapshots) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]tnsapi.ISCSITargetExtent, error) {
-	return nil, errors.New("iSCSI not implemented in snapshot mock")
+	return []tnsapi.ISCSITargetExtent{}, nil
 }
 
 func (m *MockAPIClientForSnapshots) ReloadISCSIService(_ context.Context) error {
-	return nil // No-op for snapshot tests
+	return nil
 }
 
 func (m *MockAPIClientForSnapshots) Close() {

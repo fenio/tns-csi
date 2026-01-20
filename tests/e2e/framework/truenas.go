@@ -381,13 +381,10 @@ func (v *TrueNASVerifier) DeleteISCSIExtent(ctx context.Context, extentName stri
 		return fmt.Errorf("invalid extent ID type: %w", err)
 	}
 
-	// Delete the extent (remove_file=false, force=true)
+	// Delete the extent with positional arguments: id, remove_file, force
+	// TrueNAS API: iscsi.extent.delete(id, remove_file, force)
 	var result any
-	params := map[string]any{
-		"remove": false,
-		"force":  true,
-	}
-	if err := v.client.Call(ctx, "iscsi.extent.delete", []any{extentIDInt, params}, &result); err != nil {
+	if err := v.client.Call(ctx, "iscsi.extent.delete", []any{extentIDInt, false, true}, &result); err != nil {
 		return fmt.Errorf("failed to delete iSCSI extent %s (id=%d): %w", extentName, extentIDInt, err)
 	}
 	return nil

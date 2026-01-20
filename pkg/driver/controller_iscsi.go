@@ -104,7 +104,7 @@ func validateISCSIParams(req *csi.CreateVolumeRequest) (*iscsiVolumeParams, erro
 	}
 
 	// Check if volume should be marked as adoptable
-	markAdoptable := strings.EqualFold(params["adoptable"], "true")
+	markAdoptable := params["markAdoptable"] == VolumeContextValueTrue
 
 	// Get capacity
 	capacityRange := req.GetCapacityRange()

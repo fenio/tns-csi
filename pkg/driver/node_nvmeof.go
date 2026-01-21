@@ -105,27 +105,51 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 }
 
 // connectAndStageDevice connects to the NVMe-oF target and stages the device.
+// If the device doesn't appear after the first attempt, it will disconnect and retry.
 func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string, datasetName string) (*csi.NodeStageVolumeResponse, error) {
-	// Connect to NVMe-oF target (this handles both new connections and retries)
-	if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to connect to NVMe-oF target after retries: %v", connectErr)
-	}
+	const (
+		deviceWaitTimeout = 45 * time.Second // Wait up to 45s for device to appear
+		maxConnectRetries = 2                // Try up to 2 connect cycles
+	)
 
-	// Wait for device to appear (NSID is always 1 with independent subsystems)
-	devicePath, err := s.waitForNVMeDevice(ctx, params.nqn, 30*time.Second)
-	if err != nil {
-		// Cleanup: disconnect on failure
+	var lastErr error
+	for attempt := 1; attempt <= maxConnectRetries; attempt++ {
+		if attempt > 1 {
+			klog.V(4).Infof("Retrying NVMe-oF connection (attempt %d/%d) for NQN: %s", attempt, maxConnectRetries, params.nqn)
+		}
+
+		// Connect to NVMe-oF target (this handles both new connections and retries)
+		if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
+			lastErr = connectErr
+			klog.Warningf("NVMe-oF connect attempt %d failed: %v", attempt, connectErr)
+			continue
+		}
+
+		// Wait for device to appear (NSID is always 1 with independent subsystems)
+		devicePath, err := s.waitForNVMeDevice(ctx, params.nqn, deviceWaitTimeout)
+		if err == nil {
+			klog.V(4).Infof("NVMe-oF device connected at %s (NQN: %s, dataset: %s) on attempt %d",
+				devicePath, params.nqn, datasetName, attempt)
+			return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+		}
+
+		lastErr = err
+		klog.Warningf("NVMe-oF device wait failed on attempt %d: %v", attempt, err)
+
+		// Disconnect before retry (or final cleanup)
 		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
 			klog.Warningf("Failed to disconnect NVMe-oF after device wait failure: %v", disconnectErr)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to find NVMe device after connection (NQN: %s): %v",
-			params.nqn, err)
+
+		// Small delay before retry to let things settle
+		if attempt < maxConnectRetries {
+			klog.V(4).Infof("Waiting 3s before retry...")
+			time.Sleep(3 * time.Second)
+		}
 	}
 
-	klog.V(4).Infof("NVMe-oF device connected at %s (NQN: %s, dataset: %s)",
-		devicePath, params.nqn, datasetName)
-
-	return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	return nil, status.Errorf(codes.Internal, "Failed to find NVMe device after %d connection attempts (NQN: %s): %v",
+		maxConnectRetries, params.nqn, lastErr)
 }
 
 // validateNVMeOFParams validates and extracts NVMe-oF connection parameters from volume context.
@@ -636,7 +660,6 @@ func (s *NodeService) extractControllerFromParts(parts []string) string {
 // findNVMeDeviceByNQNFromSys finds NVMe device by checking /sys/class/nvme.
 // With independent subsystems, NSID is always 1.
 func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string) (string, error) {
-	_ = ctx // Reserved for future cancellation support
 	klog.V(4).Infof("Searching for NVMe device via sysfs: NQN=%s (NSID=1)", nqn)
 
 	// Read /sys/class/nvme/nvmeX/subsysnqn for each device
@@ -680,7 +703,17 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 					devicePath, deviceName, nqn)
 				return devicePath, nil
 			}
-			klog.Warningf("Found matching NQN on %s but device path %s does not exist", deviceName, devicePath)
+			// Controller exists but namespace device doesn't - try ns-rescan
+			controllerPath := "/dev/" + deviceName
+			klog.V(4).Infof("Found matching NQN on %s but device path %s does not exist, trying ns-rescan", deviceName, devicePath)
+			s.forceNamespaceRescan(ctx, controllerPath)
+			// Check again after rescan
+			if _, err := os.Stat(devicePath); err == nil {
+				klog.V(4).Infof("Found NVMe device after ns-rescan: %s (controller: %s, NQN: %s)",
+					devicePath, deviceName, nqn)
+				return devicePath, nil
+			}
+			klog.Warningf("Device path %s still does not exist after ns-rescan", devicePath)
 		} else {
 			klog.V(5).Infof("Controller %s has different NQN: %s (looking for: %s)", deviceName, deviceNQN, nqn)
 		}
@@ -688,6 +721,25 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 
 	klog.Warningf("NVMe device not found in sysfs for NQN=%s", nqn)
 	return "", fmt.Errorf("%w for NQN: %s", ErrNVMeDeviceNotFound, nqn)
+}
+
+// forceNamespaceRescan forces the kernel to rescan namespaces on an NVMe controller.
+func (s *NodeService) forceNamespaceRescan(ctx context.Context, controllerPath string) {
+	rescanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	klog.V(4).Infof("Forcing namespace rescan on controller %s", controllerPath)
+
+	cmd := exec.CommandContext(rescanCtx, "nvme", "ns-rescan", controllerPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("nvme ns-rescan failed for %s: %v, output: %s (continuing anyway)", controllerPath, err, string(output))
+	} else {
+		klog.V(4).Infof("nvme ns-rescan completed for %s", controllerPath)
+	}
+
+	// Also trigger udev after rescan
+	triggerUdevForNVMeSubsystem(ctx)
 }
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.

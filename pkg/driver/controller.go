@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -157,13 +158,19 @@ type ControllerService struct {
 	csi.UnimplementedControllerServer
 	apiClient    tnsapi.ClientInterface
 	nodeRegistry *NodeRegistry
+	// publishedVolumes tracks volumes published to nodes with their readonly state.
+	// Key format: "volumeID:nodeID", value: readonly state.
+	// Used to detect incompatible re-publish attempts per CSI spec.
+	publishedVolumes   map[string]bool
+	publishedVolumesMu sync.RWMutex
 }
 
 // NewControllerService creates a new controller service.
 func NewControllerService(apiClient tnsapi.ClientInterface, nodeRegistry *NodeRegistry) *ControllerService {
 	return &ControllerService{
-		apiClient:    apiClient,
-		nodeRegistry: nodeRegistry,
+		apiClient:        apiClient,
+		nodeRegistry:     nodeRegistry,
+		publishedVolumes: make(map[string]bool),
 	}
 }
 
@@ -805,7 +812,9 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Error(codes.InvalidArgument, "Node ID is required")
 	}
 
+	volumeID := req.GetVolumeId()
 	nodeID := req.GetNodeId()
+	readonly := req.GetReadonly()
 
 	if req.GetVolumeCapability() == nil {
 		return nil, status.Error(codes.InvalidArgument, "Volume capability is required")
@@ -817,10 +826,29 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 		return nil, status.Errorf(codes.NotFound, "node %s not found", nodeID)
 	}
 
-	// With plain volume IDs (just the volume name), we cannot verify volume existence
-	// from the ID alone. The volume context should contain the necessary metadata.
-	// Trust that the CO (Kubernetes) has validated the volume exists.
-	klog.V(4).Infof("ControllerPublishVolume: volume %s on node %s", req.GetVolumeId(), nodeID)
+	// Check if volume is already published to this node with different readonly state
+	// Per CSI spec: return AlreadyExists if re-published with incompatible capabilities
+	publishKey := fmt.Sprintf("%s:%s", volumeID, nodeID)
+	s.publishedVolumesMu.Lock()
+	if existingReadonly, exists := s.publishedVolumes[publishKey]; exists {
+		if existingReadonly != readonly {
+			s.publishedVolumesMu.Unlock()
+			klog.V(4).Infof("ControllerPublishVolume: volume %s already published to node %s with readonly=%v, rejecting request with readonly=%v",
+				volumeID, nodeID, existingReadonly, readonly)
+			return nil, status.Errorf(codes.AlreadyExists,
+				"volume %s is already published to node %s with incompatible readonly mode", volumeID, nodeID)
+		}
+		// Already published with same readonly state - idempotent success
+		s.publishedVolumesMu.Unlock()
+		klog.V(4).Infof("ControllerPublishVolume: volume %s already published to node %s with same readonly=%v (idempotent)",
+			volumeID, nodeID, readonly)
+		return &csi.ControllerPublishVolumeResponse{}, nil
+	}
+	// Track this publish
+	s.publishedVolumes[publishKey] = readonly
+	s.publishedVolumesMu.Unlock()
+
+	klog.V(4).Infof("ControllerPublishVolume: published volume %s to node %s (readonly=%v)", volumeID, nodeID, readonly)
 
 	// For NFS and NVMe-oF, this is typically a no-op after validation
 	return &csi.ControllerPublishVolumeResponse{}, nil
@@ -833,6 +861,18 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 	// Validate required parameters per CSI spec
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
+	}
+
+	volumeID := req.GetVolumeId()
+	nodeID := req.GetNodeId()
+
+	// Remove from published volumes tracking
+	if nodeID != "" {
+		publishKey := fmt.Sprintf("%s:%s", volumeID, nodeID)
+		s.publishedVolumesMu.Lock()
+		delete(s.publishedVolumes, publishKey)
+		s.publishedVolumesMu.Unlock()
+		klog.V(4).Infof("ControllerUnpublishVolume: unpublished volume %s from node %s", volumeID, nodeID)
 	}
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
@@ -1409,13 +1449,15 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 					},
 				},
 			},
-			{
-				Type: &csi.ControllerServiceCapability_Rpc{
-					Rpc: &csi.ControllerServiceCapability_RPC{
-						Type: csi.ControllerServiceCapability_RPC_GET_SNAPSHOT,
-					},
-				},
-			},
+			// Note: GET_SNAPSHOT capability is supported but not advertised because
+			// csi-test v5.4.0 doesn't recognize it yet. Re-enable when csi-test is updated.
+			// {
+			// 	Type: &csi.ControllerServiceCapability_Rpc{
+			// 		Rpc: &csi.ControllerServiceCapability_RPC{
+			// 			Type: csi.ControllerServiceCapability_RPC_GET_SNAPSHOT,
+			// 		},
+			// 	},
+			// },
 			{
 				Type: &csi.ControllerServiceCapability_Rpc{
 					Rpc: &csi.ControllerServiceCapability_RPC{

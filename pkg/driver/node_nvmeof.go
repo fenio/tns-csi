@@ -181,9 +181,18 @@ func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFCon
 		OperationName:     fmt.Sprintf("nvme-connect(%s)", params.nqn),
 	}
 
-	return retry.WithRetryNoResult(ctx, config, func() error {
+	if err := retry.WithRetryNoResult(ctx, config, func() error {
 		return s.attemptNVMeConnect(ctx, params)
-	})
+	}); err != nil {
+		return err
+	}
+
+	// After successful connection, trigger udev to process new NVMe devices.
+	// This helps ensure the kernel and udev properly enumerate the newly connected device,
+	// reducing the chance of device discovery timeouts.
+	triggerUdevForNVMeSubsystem(ctx)
+
+	return nil
 }
 
 // attemptNVMeConnect performs a single NVMe connect attempt.
@@ -246,6 +255,67 @@ func isRetryableNVMeConnectError(err error) bool {
 		}
 	}
 
+	return false
+}
+
+// triggerUdevForNVMeSubsystem triggers udev to process new NVMe devices after a connection.
+// This helps ensure the kernel and udev properly enumerate newly connected NVMe-oF devices.
+func triggerUdevForNVMeSubsystem(ctx context.Context) {
+	klog.V(4).Infof("Triggering udev to process new NVMe devices")
+
+	// Trigger udev to process any new NVMe devices
+	triggerCtx, triggerCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer triggerCancel()
+	triggerCmd := exec.CommandContext(triggerCtx, "udevadm", "trigger", "--action=add", "--subsystem-match=nvme")
+	if output, err := triggerCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("udevadm trigger for NVMe subsystem failed: %v, output: %s (continuing anyway)", err, string(output))
+	} else {
+		klog.V(4).Infof("Triggered udev add events for NVMe subsystem")
+	}
+
+	// Also trigger block subsystem in case block devices need processing
+	blockTriggerCtx, blockTriggerCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer blockTriggerCancel()
+	blockTriggerCmd := exec.CommandContext(blockTriggerCtx, "udevadm", "trigger", "--action=add", "--subsystem-match=block")
+	if output, err := blockTriggerCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("udevadm trigger for block subsystem failed: %v, output: %s (continuing anyway)", err, string(output))
+	} else {
+		klog.V(4).Infof("Triggered udev add events for block subsystem")
+	}
+
+	// Wait for udev to settle (process the events)
+	settleCtx, settleCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer settleCancel()
+	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=10")
+	if output, err := settleCmd.CombinedOutput(); err != nil {
+		klog.V(4).Infof("udevadm settle failed: %v, output: %s (continuing anyway)", err, string(output))
+	} else {
+		klog.V(4).Infof("udevadm settle completed after NVMe connection")
+	}
+}
+
+// verifyNVMeSubsystemConnected verifies that an NVMe subsystem is connected using nvme list-subsys.
+// This is useful to confirm the kernel has registered the connection before looking for devices.
+func verifyNVMeSubsystemConnected(ctx context.Context, nqn string) bool {
+	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	// Use nvme list-subsys to get all connected subsystems
+	cmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("nvme list-subsys failed: %v, output: %s", err, string(output))
+		return false
+	}
+
+	// Simple string search for the NQN in the output
+	// The JSON output contains "NQN" : "nqn.xxx" entries
+	if strings.Contains(string(output), nqn) {
+		klog.V(4).Infof("Verified NVMe subsystem %s is connected (found in nvme list-subsys)", nqn)
+		return true
+	}
+
+	klog.V(4).Infof("NVMe subsystem %s not yet visible in nvme list-subsys", nqn)
 	return false
 }
 
@@ -625,20 +695,41 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	attempt := 0
+	subsystemVerified := false
+
 	for time.Now().Before(deadline) {
 		attempt++
+
+		// First, verify the subsystem is registered with the kernel (using nvme list-subsys)
+		// This helps diagnose issues where nvme connect succeeded but the subsystem isn't visible
+		if !subsystemVerified {
+			if verifyNVMeSubsystemConnected(ctx, nqn) {
+				subsystemVerified = true
+				klog.V(4).Infof("NVMe subsystem %s verified as connected on attempt %d", nqn, attempt)
+			} else if attempt%5 == 0 {
+				// Every 5 attempts, log that we're still waiting for subsystem
+				klog.V(4).Infof("Still waiting for NVMe subsystem %s to appear in kernel (attempt %d)", nqn, attempt)
+				// Re-trigger udev in case it missed the initial events
+				triggerUdevForNVMeSubsystem(ctx)
+			}
+		}
+
 		devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
 		if err == nil && devicePath != "" {
 			// Verify device is accessible
 			if _, err := os.Stat(devicePath); err == nil {
-				klog.V(4).Infof("NVMe device found at %s after %d attempts", devicePath, attempt)
+				klog.V(4).Infof("NVMe device found at %s after %d attempts (subsystem verified: %v)", devicePath, attempt, subsystemVerified)
 				return devicePath, nil
 			}
 		}
 		time.Sleep(1 * time.Second)
 	}
 
-	return "", fmt.Errorf("%w after %d attempts", ErrNVMeDeviceTimeout, attempt)
+	// Provide detailed error message for debugging
+	if !subsystemVerified {
+		return "", fmt.Errorf("%w after %d attempts (subsystem %s never appeared in nvme list-subsys - kernel may not have registered the connection)", ErrNVMeDeviceTimeout, attempt, nqn)
+	}
+	return "", fmt.Errorf("%w after %d attempts (subsystem was connected but device path not found in sysfs)", ErrNVMeDeviceTimeout, attempt)
 }
 
 // handleDeviceFormatting checks if a device needs formatting and formats it if necessary.

@@ -103,8 +103,8 @@ var _ = Describe("Snapshot Restore", func() {
 
 			By("Waiting for source pod to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
-			if err != nil {
-				// Capture diagnostics on failure
+			if err != nil && f.Verbose() {
+				// Capture diagnostics on failure (verbose mode only)
 				GinkgoWriter.Printf("Pod failed to become ready, capturing diagnostics...\n")
 				if podObj, getErr := f.K8s.GetPod(ctx, pod.Name); getErr == nil {
 					GinkgoWriter.Printf("Pod status: %s\n", podObj.Status.Phase)
@@ -266,10 +266,12 @@ var _ = Describe("Snapshot Restore", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(exists).To(BeFalse(), "Restore2 should not have restore1 modification")
 
-			GinkgoWriter.Printf("[%s] Snapshot restore test completed successfully\n", proto.name)
-			GinkgoWriter.Printf("  - Snapshot 1: Version 1 data, no v2 directory, no modified.txt\n")
-			GinkgoWriter.Printf("  - Snapshot 2: Version 2 data, v2 directory present, modified.txt present\n")
-			GinkgoWriter.Printf("  - All restored volumes are independent\n")
+			if f.Verbose() {
+				GinkgoWriter.Printf("[%s] Snapshot restore test completed successfully\n", proto.name)
+				GinkgoWriter.Printf("  - Snapshot 1: Version 1 data, no v2 directory, no modified.txt\n")
+				GinkgoWriter.Printf("  - Snapshot 2: Version 2 data, v2 directory present, modified.txt present\n")
+				GinkgoWriter.Printf("  - All restored volumes are independent\n")
+			}
 		})
 	}
 })

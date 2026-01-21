@@ -377,6 +377,11 @@ func (f *Framework) Protocol() string {
 	return f.protocol
 }
 
+// Verbose returns whether verbose output is enabled.
+func (f *Framework) Verbose() bool {
+	return f.Config.Verbose
+}
+
 // UniqueName generates a unique name for test resources with a given prefix.
 func (f *Framework) UniqueName(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())

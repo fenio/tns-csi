@@ -127,8 +127,10 @@ var _ = Describe("Name Templating", func() {
 			Expect(volumeHandle).To(ContainSubstring(expectedPattern),
 				"Volume handle should contain templated name: %s", expectedPattern)
 
-			GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
-			GinkgoWriter.Printf("Expected pattern: %s\n", expectedPattern)
+			if f.Verbose() {
+				GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
+				GinkgoWriter.Printf("Expected pattern: %s\n", expectedPattern)
+			}
 
 			// Create pod for NFS (not created above)
 			if !proto.needsPodFirst {
@@ -210,7 +212,9 @@ var _ = Describe("Name Templating", func() {
 			volumeHandle, err := f.K8s.GetVolumeHandle(ctx, pvName)
 			Expect(err).NotTo(HaveOccurred(), "Failed to get volume handle")
 
-			GinkgoWriter.Printf("Volume handle with prefix/suffix: %s\n", volumeHandle)
+			if f.Verbose() {
+				GinkgoWriter.Printf("Volume handle with prefix/suffix: %s\n", volumeHandle)
+			}
 			Expect(volumeHandle).To(ContainSubstring("prod-"), "Volume handle should contain prefix 'prod-'")
 			Expect(volumeHandle).To(ContainSubstring("-data"), "Volume handle should contain suffix '-data'")
 		})

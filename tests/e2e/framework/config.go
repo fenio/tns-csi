@@ -31,6 +31,7 @@ type Config struct {
 
 	// Test settings
 	Timeout time.Duration
+	Verbose bool // Enable verbose test output (E2E_VERBOSE=true)
 }
 
 // NewConfig creates a Config from environment variables.
@@ -43,6 +44,7 @@ func NewConfig() (*Config, error) {
 		CSIImageTag:   getEnvOrDefault("CSI_IMAGE_TAG", "latest"),
 		Kubeconfig:    getEnvOrDefault("KUBECONFIG", defaultKubeconfig()),
 		Timeout:       parseDurationOrDefault(os.Getenv("TEST_TIMEOUT"), 5*time.Minute),
+		Verbose:       os.Getenv("E2E_VERBOSE") == "true",
 	}
 
 	if err := cfg.Validate(); err != nil {

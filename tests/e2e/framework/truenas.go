@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"k8s.io/klog/v2"
 )
 
 // ErrDatasetDeleteTimeout is returned when waiting for a dataset to be deleted times out.
@@ -63,7 +64,7 @@ func (v *TrueNASVerifier) WaitForDatasetDeleted(ctx context.Context, datasetPath
 		exists, err := v.DatasetExists(ctx, datasetPath)
 		if err != nil {
 			// Log but continue polling - transient errors are possible
-			fmt.Printf("Warning: error checking dataset existence: %v\n", err)
+			klog.V(1).Infof("Warning: error checking dataset existence: %v", err)
 		} else if !exists {
 			return nil // Dataset is deleted
 		}

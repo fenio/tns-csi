@@ -83,9 +83,15 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 
 		zvolPath := fmt.Sprintf("%s/%s", f.Config.TrueNASPool, volumeHandle)
 		subsystemNQN := "nqn.2137.csi.tns:" + volumeHandle
-		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
-		GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
-		GinkgoWriter.Printf("Expected NVMe-oF subsystem NQN: %s\n", subsystemNQN)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
+		}
+		if f.Verbose() {
+			GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
+		}
+		if f.Verbose() {
+			GinkgoWriter.Printf("Expected NVMe-oF subsystem NQN: %s\n", subsystemNQN)
+		}
 
 		By("Creating a pod to write test data")
 		podName := "test-pod-nvmeof-adoption"
@@ -138,7 +144,9 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 		subsystemExists, err := f.TrueNAS.NVMeOFSubsystemExists(ctx, subsystemNQN)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(subsystemExists).To(BeFalse(), "NVMe-oF subsystem should be deleted")
-		GinkgoWriter.Printf("Volume is now orphaned: ZVOL exists at %s but NVMe-oF subsystem is missing\n", zvolPath)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Volume is now orphaned: ZVOL exists at %s but NVMe-oF subsystem is missing\n", zvolPath)
+		}
 
 		By("Creating StorageClass with adoptExisting=true for adoption")
 		adoptingStorageClass := "tns-csi-nvmeof-adopting"
@@ -177,7 +185,9 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 		Expect(err).NotTo(HaveOccurred())
 		newVolumeHandle, err := f.K8s.GetVolumeHandle(ctx, newPVName)
 		Expect(err).NotTo(HaveOccurred())
-		GinkgoWriter.Printf("New volume handle: %s\n", newVolumeHandle)
+		if f.Verbose() {
+			GinkgoWriter.Printf("New volume handle: %s\n", newVolumeHandle)
+		}
 
 		By("Creating a pod to verify the new volume")
 		adoptedPodName := "test-pod-nvmeof-adopted"
@@ -212,7 +222,9 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 		_ = f.TrueNAS.DeleteNVMeOFSubsystem(ctx, subsystemNQN)
 		err = f.TrueNAS.DeleteDataset(ctx, zvolPath)
 		Expect(err).NotTo(HaveOccurred())
-		GinkgoWriter.Printf("Cleaned up orphaned ZVOL: %s\n", zvolPath)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Cleaned up orphaned ZVOL: %s\n", zvolPath)
+		}
 	})
 
 	It("should mark a volume as adoptable when markAdoptable=true", func() {
@@ -256,15 +268,21 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 
 		zvolPath := fmt.Sprintf("%s/%s", f.Config.TrueNASPool, volumeHandle)
 		subsystemNQN := "nqn.2137.csi.tns:" + volumeHandle
-		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
-		GinkgoWriter.Printf("ZVOL path: %s\n", zvolPath)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
+		}
+		if f.Verbose() {
+			GinkgoWriter.Printf("ZVOL path: %s\n", zvolPath)
+		}
 
 		By("Verifying adoptable property is set on TrueNAS dataset")
 		Expect(f.TrueNAS).NotTo(BeNil())
 		adoptableValue, err := f.TrueNAS.GetDatasetProperty(ctx, zvolPath, "tns-csi:adoptable")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(adoptableValue).To(Equal("true"), "Dataset should have tns-csi:adoptable=true")
-		GinkgoWriter.Printf("Dataset %s has adoptable property set to: %s\n", zvolPath, adoptableValue)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Dataset %s has adoptable property set to: %s\n", zvolPath, adoptableValue)
+		}
 
 		By("Deleting PVC to trigger retain (not delete)")
 		err = f.K8s.DeletePVC(ctx, pvcName)
@@ -283,6 +301,8 @@ var _ = Describe("NVMe-oF Volume Adoption", func() {
 		_ = f.TrueNAS.DeleteNVMeOFSubsystem(ctx, subsystemNQN)
 		err = f.TrueNAS.DeleteDataset(ctx, zvolPath)
 		Expect(err).NotTo(HaveOccurred())
-		GinkgoWriter.Printf("Cleaned up retained dataset: %s\n", zvolPath)
+		if f.Verbose() {
+			GinkgoWriter.Printf("Cleaned up retained dataset: %s\n", zvolPath)
+		}
 	})
 })

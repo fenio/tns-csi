@@ -82,13 +82,14 @@ var _ = Describe("Error Handling", func() {
 				strings.Contains(strings.ToLower(logs), "failed") ||
 				strings.Contains(strings.ToLower(logs), "not found"))
 
-		if hasPoolError {
-			GinkgoWriter.Printf("Controller logged error for invalid pool as expected\n")
-		} else {
-			GinkgoWriter.Printf("Note: No specific pool error found in recent logs\n")
+		if f.Verbose() {
+			if hasPoolError {
+				GinkgoWriter.Printf("Controller logged error for invalid pool as expected\n")
+			} else {
+				GinkgoWriter.Printf("Note: No specific pool error found in recent logs\n")
+			}
+			GinkgoWriter.Printf("Invalid pool test completed - PVC correctly stays Pending\n")
 		}
-
-		GinkgoWriter.Printf("Invalid pool test completed - PVC correctly stays Pending\n")
 	})
 
 	It("should handle missing server parameter gracefully", func() {
@@ -135,17 +136,23 @@ var _ = Describe("Error Handling", func() {
 		// might cause immediate failure, delayed failure, or fallback to defaults.
 		switch pvc.Status.Phase {
 		case corev1.ClaimPending:
-			GinkgoWriter.Printf("Missing server test: PVC correctly stays Pending\n")
+			if f.Verbose() {
+				GinkgoWriter.Printf("Missing server test: PVC correctly stays Pending\n")
+			}
 		case corev1.ClaimBound:
 			// If it bound, the driver might have defaults - log this but don't fail
-			GinkgoWriter.Printf("Missing server test: PVC became Bound - driver may have default server handling\n")
-			GinkgoWriter.Printf("Note: Consider validating server parameter in CreateVolume for stricter error handling\n")
+			if f.Verbose() {
+				GinkgoWriter.Printf("Missing server test: PVC became Bound - driver may have default server handling\n")
+				GinkgoWriter.Printf("Note: Consider validating server parameter in CreateVolume for stricter error handling\n")
+			}
 		default:
 			// Other states (Lost, etc.) are unexpected
 			Fail(fmt.Sprintf("Unexpected PVC phase: %s", pvc.Status.Phase))
 		}
 
-		GinkgoWriter.Printf("Missing server test completed\n")
+		if f.Verbose() {
+			GinkgoWriter.Printf("Missing server test completed\n")
+		}
 	})
 
 	It("should handle invalid protocol parameter gracefully", func() {
@@ -193,13 +200,14 @@ var _ = Describe("Error Handling", func() {
 		hasProtocolError := strings.Contains(strings.ToLower(logs), "unsupported") &&
 			strings.Contains(strings.ToLower(logs), "protocol")
 
-		if hasProtocolError {
-			GinkgoWriter.Printf("Controller logged error for invalid protocol as expected\n")
-		} else {
-			GinkgoWriter.Printf("Note: Protocol validation may occur at different level\n")
+		if f.Verbose() {
+			if hasProtocolError {
+				GinkgoWriter.Printf("Controller logged error for invalid protocol as expected\n")
+			} else {
+				GinkgoWriter.Printf("Note: Protocol validation may occur at different level\n")
+			}
+			GinkgoWriter.Printf("Invalid protocol test completed - PVC correctly stays Pending\n")
 		}
-
-		GinkgoWriter.Printf("Invalid protocol test completed - PVC correctly stays Pending\n")
 	})
 
 	It("should recover and work normally after error conditions", func() {
@@ -264,7 +272,9 @@ var _ = Describe("Error Handling", func() {
 		err = f.K8s.WaitForPVCBound(ctx, validPVCName, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Valid PVC should bind after error recovery")
 
-		GinkgoWriter.Printf("Recovery test passed - driver works normally after errors\n")
+		if f.Verbose() {
+			GinkgoWriter.Printf("Recovery test passed - driver works normally after errors\n")
+		}
 	})
 
 	It("should not crash or panic under error conditions", func() {
@@ -284,16 +294,18 @@ var _ = Describe("Error Handling", func() {
 
 		By("Verifying controller pod is still running")
 		// If we can get logs, the pod is running
-		GinkgoWriter.Printf("Controller is healthy - no panics or crashes detected\n")
+		if f.Verbose() {
+			GinkgoWriter.Printf("Controller is healthy - no panics or crashes detected\n")
 
-		// Analyze log patterns
-		errorCount := strings.Count(strings.ToLower(logs), "error")
-		warningCount := strings.Count(strings.ToLower(logs), "warning") + strings.Count(strings.ToLower(logs), "warn")
-		successCount := strings.Count(strings.ToLower(logs), "success") + strings.Count(strings.ToLower(logs), "completed")
+			// Analyze log patterns
+			errorCount := strings.Count(strings.ToLower(logs), "error")
+			warningCount := strings.Count(strings.ToLower(logs), "warning") + strings.Count(strings.ToLower(logs), "warn")
+			successCount := strings.Count(strings.ToLower(logs), "success") + strings.Count(strings.ToLower(logs), "completed")
 
-		GinkgoWriter.Printf("Log analysis:\n")
-		GinkgoWriter.Printf("  - Error entries: ~%d\n", errorCount)
-		GinkgoWriter.Printf("  - Warning entries: ~%d\n", warningCount)
-		GinkgoWriter.Printf("  - Success entries: ~%d\n", successCount)
+			GinkgoWriter.Printf("Log analysis:\n")
+			GinkgoWriter.Printf("  - Error entries: ~%d\n", errorCount)
+			GinkgoWriter.Printf("  - Warning entries: ~%d\n", warningCount)
+			GinkgoWriter.Printf("  - Success entries: ~%d\n", successCount)
+		}
 	})
 })

@@ -175,7 +175,7 @@ func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, tim
 	pvc, getErr := k.GetPVC(ctx, name)
 	if getErr == nil && pvc.Spec.VolumeName != "" {
 		if volumeHandle, handleErr := k.GetVolumeHandle(ctx, pvc.Spec.VolumeName); handleErr == nil {
-			fmt.Printf("PVC %s bound to PV %s (VolumeHandle/TrueNAS path: %s)\n", name, pvc.Spec.VolumeName, volumeHandle)
+			klog.V(1).Infof("PVC %s bound to PV %s (VolumeHandle/TrueNAS path: %s)", name, pvc.Spec.VolumeName, volumeHandle)
 		}
 	}
 

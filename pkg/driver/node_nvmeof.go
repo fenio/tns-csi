@@ -747,6 +747,10 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		}
 
 		deviceNQN := strings.TrimSpace(string(data))
+		// Log all NQN comparisons at V(4) for debugging device discovery issues
+		klog.V(4).Infof("Controller %s sysfs NQN: %q (looking for: %q, match: %v)",
+			deviceName, deviceNQN, nqn, deviceNQN == nqn)
+
 		if deviceNQN == nqn {
 			// Found the device, construct path with NSID=1 (independent subsystems)
 			devicePath := fmt.Sprintf("/dev/%sn1", deviceName)
@@ -766,8 +770,6 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 				return devicePath, nil
 			}
 			klog.Warningf("Device path %s still does not exist after ns-rescan", devicePath)
-		} else {
-			klog.V(5).Infof("Controller %s has different NQN: %s (looking for: %s)", deviceName, deviceNQN, nqn)
 		}
 	}
 
@@ -932,13 +934,31 @@ func (s *NodeService) logNVMeDiscoveryDiagnostics(ctx context.Context, nqn strin
 		klog.V(2).Infof("nvme list failed: %v", err)
 	}
 
-	// List /sys/class/nvme contents
+	// List /sys/class/nvme contents and their NQNs
 	if entries, err := os.ReadDir("/sys/class/nvme"); err == nil {
 		names := make([]string, 0, len(entries))
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
 		klog.V(2).Infof("/sys/class/nvme contents: %v", names)
+
+		// Read subsysnqn for each controller
+		nvmeSysDir := "/sys/class/nvme"
+		for _, e := range entries {
+			if !e.IsDir() || !strings.HasPrefix(e.Name(), "nvme") || strings.Contains(e.Name(), "-") {
+				continue
+			}
+			if len(e.Name()) > 4 && strings.Contains(e.Name()[4:], "n") {
+				continue // Skip namespace entries
+			}
+			nqnPath := nvmeSysDir + "/" + e.Name() + "/subsysnqn"
+			//nolint:gosec // Reading NVMe subsystem info from standard sysfs path for diagnostics
+			if data, readErr := os.ReadFile(nqnPath); readErr == nil {
+				klog.V(2).Infof("  %s/subsysnqn = %q", e.Name(), strings.TrimSpace(string(data)))
+			} else {
+				klog.V(2).Infof("  %s/subsysnqn: error reading: %v", e.Name(), readErr)
+			}
+		}
 	}
 
 	// List /dev/nvme* devices

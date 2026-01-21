@@ -815,10 +815,14 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 
 		devicePath, err := s.findNVMeDeviceByNQN(ctx, nqn)
 		if err == nil && devicePath != "" {
-			// Verify device is accessible
-			if _, err := os.Stat(devicePath); err == nil {
-				klog.V(4).Infof("NVMe device found at %s after %d attempts (subsystem verified: %v)", devicePath, attempt, subsystemVerified)
-				return devicePath, nil
+			// Verify device is accessible AND healthy (non-zero size)
+			// This prevents returning a device that exists but isn't functional yet
+			if _, statErr := os.Stat(devicePath); statErr == nil {
+				if s.isDeviceHealthy(ctx, devicePath) {
+					klog.V(4).Infof("NVMe device found and healthy at %s after %d attempts (subsystem verified: %v)", devicePath, attempt, subsystemVerified)
+					return devicePath, nil
+				}
+				klog.V(4).Infof("Device %s exists but reports zero size, waiting for initialization (attempt %d)", devicePath, attempt)
 			}
 		}
 		time.Sleep(1 * time.Second)
@@ -829,6 +833,23 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 		return "", fmt.Errorf("%w after %d attempts (subsystem %s never appeared in nvme list-subsys - kernel may not have registered the connection)", ErrNVMeDeviceTimeout, attempt, nqn)
 	}
 	return "", fmt.Errorf("%w after %d attempts (subsystem was connected but device path not found in sysfs)", ErrNVMeDeviceTimeout, attempt)
+}
+
+// isDeviceHealthy does a quick check if a device is functional (non-zero size).
+// This is a single check, not a retry loop like verifyDeviceHealthy.
+func (s *NodeService) isDeviceHealthy(ctx context.Context, devicePath string) bool {
+	sizeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+
+	sizeStr := strings.TrimSpace(string(output))
+	size, parseErr := strconv.ParseInt(sizeStr, 10, 64)
+	return parseErr == nil && size > 0
 }
 
 // handleDeviceFormatting checks if a device needs formatting and formats it if necessary.

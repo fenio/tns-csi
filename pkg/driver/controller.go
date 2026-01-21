@@ -1412,6 +1412,13 @@ func (s *ControllerService) ControllerGetCapabilities(_ context.Context, _ *csi.
 			{
 				Type: &csi.ControllerServiceCapability_Rpc{
 					Rpc: &csi.ControllerServiceCapability_RPC{
+						Type: csi.ControllerServiceCapability_RPC_GET_SNAPSHOT,
+					},
+				},
+			},
+			{
+				Type: &csi.ControllerServiceCapability_Rpc{
+					Rpc: &csi.ControllerServiceCapability_RPC{
 						Type: csi.ControllerServiceCapability_RPC_CLONE_VOLUME,
 					},
 				},

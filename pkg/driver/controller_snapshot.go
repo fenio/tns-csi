@@ -818,6 +818,35 @@ func (s *ControllerService) ListSnapshots(ctx context.Context, req *csi.ListSnap
 	return s.listAllSnapshots(ctx, req)
 }
 
+// ControllerGetSnapshot returns information about a specific snapshot.
+// This is a CSI 1.12+ capability that provides a more efficient way to get a single snapshot
+// compared to ListSnapshots with a snapshot_id filter.
+func (s *ControllerService) ControllerGetSnapshot(ctx context.Context, req *csi.GetSnapshotRequest) (*csi.GetSnapshotResponse, error) {
+	klog.V(4).Infof("ControllerGetSnapshot called with request: %+v", req)
+
+	snapshotID := req.GetSnapshotId()
+	if snapshotID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Snapshot ID is required")
+	}
+
+	// Reuse ListSnapshots logic which already handles all snapshot types
+	listResp, err := s.ListSnapshots(ctx, &csi.ListSnapshotsRequest{
+		SnapshotId: snapshotID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// ListSnapshots returns empty list if not found, but GetSnapshot should return NotFound
+	if len(listResp.Entries) == 0 {
+		return nil, status.Errorf(codes.NotFound, "Snapshot %s not found", snapshotID)
+	}
+
+	return &csi.GetSnapshotResponse{
+		Snapshot: listResp.Entries[0].Snapshot,
+	}, nil
+}
+
 // listSnapshotByID handles listing a specific snapshot by ID.
 func (s *ControllerService) listSnapshotByID(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	snapshotMeta, err := decodeSnapshotID(req.GetSnapshotId())

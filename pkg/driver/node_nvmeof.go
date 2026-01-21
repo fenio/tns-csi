@@ -87,13 +87,26 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 		return nil, "", nil //nolint:nilerr // intentionally swallowing "device not found" as this is expected
 	}
 
-	klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s - reusing existing connection (idempotent)",
+	klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s - checking if connection is healthy",
 		devicePath, params.nqn)
 
 	// Rescan the namespace to ensure we have fresh data from the target
 	if rescanErr := s.rescanNVMeNamespace(ctx, devicePath); rescanErr != nil {
 		klog.Warningf("Failed to rescan NVMe namespace %s: %v (continuing anyway)", devicePath, rescanErr)
 	}
+
+	// Verify the existing connection is healthy by checking device size
+	// A stale connection may have the device file but report zero size
+	if healthy := s.verifyDeviceHealthy(ctx, devicePath); !healthy {
+		klog.Warningf("Existing NVMe device %s appears stale (zero size) - disconnecting to force reconnect", devicePath)
+		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
+			klog.Warningf("Failed to disconnect stale NVMe-oF connection: %v", disconnectErr)
+		}
+		// Return nil to trigger a full reconnect
+		return nil, "", nil
+	}
+
+	klog.V(4).Infof("Existing NVMe-oF device %s is healthy - reusing connection (idempotent)", devicePath)
 
 	// Proceed directly to staging with the existing device
 	resp, err = s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
@@ -102,6 +115,40 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 		return nil, devicePath, err
 	}
 	return resp, devicePath, nil
+}
+
+// verifyDeviceHealthy checks if an NVMe device is healthy by verifying it reports a non-zero size.
+// Returns true if the device is healthy, false if it appears stale or broken.
+func (s *NodeService) verifyDeviceHealthy(ctx context.Context, devicePath string) bool {
+	const (
+		maxAttempts   = 5                      // Quick check, don't wait too long
+		checkInterval = 500 * time.Millisecond // Half second between checks
+	)
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		sizeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		cmd := exec.CommandContext(sizeCtx, "blockdev", "--getsize64", devicePath)
+		output, err := cmd.CombinedOutput()
+		cancel()
+
+		if err == nil {
+			sizeStr := strings.TrimSpace(string(output))
+			if size, parseErr := strconv.ParseInt(sizeStr, 10, 64); parseErr == nil && size > 0 {
+				klog.V(4).Infof("Device %s health check passed: size=%d bytes (attempt %d)", devicePath, size, attempt)
+				return true
+			}
+			klog.V(4).Infof("Device %s health check attempt %d/%d: size=%s (zero)", devicePath, attempt, maxAttempts, sizeStr)
+		} else {
+			klog.V(4).Infof("Device %s health check attempt %d/%d failed: %v", devicePath, attempt, maxAttempts, err)
+		}
+
+		if attempt < maxAttempts {
+			time.Sleep(checkInterval)
+		}
+	}
+
+	klog.V(4).Infof("Device %s failed health check after %d attempts (size remained zero)", devicePath, maxAttempts)
+	return false
 }
 
 // connectAndStageDevice connects to the NVMe-oF target and stages the device.

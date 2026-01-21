@@ -53,7 +53,7 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 	}
 	fmt.Printf("Configuration: OK\n")
 	fmt.Printf("  URL: %s\n", cfg.URL)
-	fmt.Printf("  API Key: %s...%s\n", cfg.APIKey[:4], cfg.APIKey[len(cfg.APIKey)-4:])
+	fmt.Printf("  API Key: [configured, %d chars]\n", len(cfg.APIKey))
 	fmt.Println()
 
 	// Create context with timeout

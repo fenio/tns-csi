@@ -752,22 +752,26 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		if deviceNQN == nqn {
 			// Found the device, construct path with NSID=1 (independent subsystems)
 			devicePath := fmt.Sprintf("/dev/%sn1", deviceName)
+			// Check if device exists AND is healthy (non-zero size block device)
 			if _, err := os.Stat(devicePath); err == nil {
-				klog.V(4).Infof("Found NVMe device from sysfs: %s (controller: %s, NQN: %s)",
-					devicePath, deviceName, nqn)
-				return devicePath, nil
+				if s.isDeviceHealthy(ctx, devicePath) {
+					klog.V(4).Infof("Found healthy NVMe device from sysfs: %s (controller: %s, NQN: %s)",
+						devicePath, deviceName, nqn)
+					return devicePath, nil
+				}
+				klog.V(2).Infof("Device %s exists but is not healthy (zero size or not a block device), trying ns-rescan", devicePath)
 			}
-			// Controller exists but namespace device doesn't - try ns-rescan
+			// Controller exists but namespace device doesn't exist or isn't healthy - try ns-rescan
 			controllerPath := "/dev/" + deviceName
-			klog.V(4).Infof("Found matching NQN on %s but device path %s does not exist, trying ns-rescan", deviceName, devicePath)
+			klog.V(4).Infof("Found matching NQN on %s but device path %s not ready, trying ns-rescan", deviceName, devicePath)
 			s.forceNamespaceRescan(ctx, controllerPath)
-			// Check again after rescan
-			if _, err := os.Stat(devicePath); err == nil {
-				klog.V(4).Infof("Found NVMe device after ns-rescan: %s (controller: %s, NQN: %s)",
+			// Check again after rescan - device must exist AND be healthy
+			if _, err := os.Stat(devicePath); err == nil && s.isDeviceHealthy(ctx, devicePath) {
+				klog.V(4).Infof("Found healthy NVMe device after ns-rescan: %s (controller: %s, NQN: %s)",
 					devicePath, deviceName, nqn)
 				return devicePath, nil
 			}
-			klog.Warningf("Device path %s still does not exist after ns-rescan", devicePath)
+			klog.Warningf("Device path %s still not ready after ns-rescan", devicePath)
 		}
 	}
 

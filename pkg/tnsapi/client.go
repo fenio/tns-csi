@@ -7,14 +7,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/fenio/tns-csi/pkg/metrics"
-	"github.com/gorilla/websocket"
 	"k8s.io/klog/v2"
 )
 
@@ -242,54 +244,46 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 func (c *Client) connect() error {
 	klog.V(4).Infof("Connecting to storage WebSocket at %s", c.url)
 
-	dialer := &websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Configure HTTP client with TLS settings
+	httpClient := &http.Client{}
 
 	// For wss:// connections, configure TLS based on skipTLSVerify setting
 	if strings.HasPrefix(c.url, "wss://") {
+		var tlsConfig *tls.Config
 		if c.skipTLSVerify {
 			klog.V(4).Info("TLS certificate verification disabled (skipTLSVerify=true)")
 			//nolint:gosec // G402: TLS InsecureSkipVerify set true - intentional when user explicitly enables skipTLSVerify for self-signed certs
-			dialer.TLSClientConfig = &tls.Config{
+			tlsConfig = &tls.Config{
 				InsecureSkipVerify: true,
 				MinVersion:         tls.VersionTLS12,
 			}
 		} else {
 			// Use secure TLS config with system CA pool
-			dialer.TLSClientConfig = &tls.Config{
+			tlsConfig = &tls.Config{
 				MinVersion: tls.VersionTLS12,
 			}
 		}
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: tlsConfig,
+		}
 	}
 
-	//nolint:bodyclose // WebSocket connections don't return response bodies to close
-	conn, _, err := dialer.Dial(c.url, nil)
+	// coder/websocket handles ping/pong automatically
+	conn, resp, err := websocket.Dial(ctx, c.url, &websocket.DialOptions{
+		HTTPClient: httpClient,
+	})
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
 	if err != nil {
 		return fmt.Errorf("failed to dial: %w", err)
 	}
 
-	// Set up pong handler to respond to server pings
-	// Note: TrueNAS does not send pings, but it responds to ours with pongs
-	// Reset read deadline when we receive pongs to keep connection alive through firewalls
-	conn.SetPongHandler(func(_ string) error {
-		klog.V(6).Info("Received WebSocket pong")
-		// Reset read deadline since we got activity
-		if err := conn.SetReadDeadline(time.Now().Add(40 * time.Second)); err != nil {
-			klog.Warningf("Failed to reset read deadline in pong handler: %v", err)
-		}
-		return nil
-	})
-
-	// Set up ping handler in case server sends pings (respond automatically)
-	conn.SetPingHandler(func(appData string) error {
-		klog.V(6).Info("Received WebSocket ping, sending pong")
-		// gorilla/websocket automatically sends pongs, just reset deadline
-		if err := conn.SetReadDeadline(time.Now().Add(40 * time.Second)); err != nil {
-			klog.Warningf("Failed to reset read deadline in ping handler: %v", err)
-		}
-		return nil
-	})
+	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
+	// We still run our own ping loop for connection health monitoring and metrics.
 
 	c.conn = conn
 	c.connectedAt = time.Now()
@@ -328,6 +322,9 @@ func (c *Client) authenticate() error {
 func (c *Client) authenticateDirect() error {
 	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key (direct mode)")
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	c.mu.Lock()
 
 	// Generate request ID
@@ -343,20 +340,14 @@ func (c *Client) authenticateDirect() error {
 
 	// Send request (log method only, not params which contain sensitive data)
 	klog.V(5).Infof("Sending authentication request: method=%s, id=%s", req.Method, req.ID)
-	if err := c.conn.WriteJSON(req); err != nil {
+	if err := wsjson.Write(ctx, c.conn, req); err != nil {
 		c.mu.Unlock()
 		return fmt.Errorf("failed to send authentication request: %w", err)
-	}
-
-	// Set read deadline for authentication response
-	if err := c.conn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-		c.mu.Unlock()
-		return fmt.Errorf("failed to set read deadline: %w", err)
 	}
 	c.mu.Unlock()
 
 	// Read response directly (don't use readLoop)
-	_, rawMsg, err := c.conn.ReadMessage()
+	_, rawMsg, err := c.conn.Read(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to read authentication response: %w", err)
 	}
@@ -496,7 +487,11 @@ func (c *Client) callOnce(ctx context.Context, method string, params []interface
 
 	// Send request (log method and id only to avoid logging sensitive data in params)
 	klog.V(5).Infof("Sending request: method=%s, id=%s", method, id)
-	if err := c.conn.WriteJSON(req); err != nil {
+	// Use a short timeout for writing to avoid blocking forever
+	writeCtx, writeCancel := context.WithTimeout(ctx, 10*time.Second)
+	err := wsjson.Write(writeCtx, c.conn, req)
+	writeCancel()
+	if err != nil {
 		delete(c.pending, id)
 		c.mu.Unlock()
 		return fmt.Errorf("failed to send request: %w", err)
@@ -536,11 +531,11 @@ func (c *Client) readLoop() {
 	defer c.cleanupReadLoop()
 
 	for {
-		if err := c.setReadDeadlineIfConnected(); err != nil {
-			klog.Warningf("Failed to set read deadline: %v", err)
-		}
+		// Use context with timeout for read operations (replaces SetReadDeadline)
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		_, rawMsg, err := c.conn.Read(ctx)
+		cancel()
 
-		_, rawMsg, err := c.conn.ReadMessage()
 		if err != nil {
 			if c.handleReadError(err) {
 				continue // Successfully handled, continue loop
@@ -564,16 +559,6 @@ func (c *Client) cleanupReadLoop() {
 	close(c.closeCh)
 }
 
-// setReadDeadlineIfConnected sets read deadline if connection is active.
-func (c *Client) setReadDeadlineIfConnected() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return nil
-	}
-	return c.conn.SetReadDeadline(time.Now().Add(40 * time.Second))
-}
-
 // handleReadError handles WebSocket read errors with reconnection logic.
 // Returns true if error was handled and loop should continue, false if loop should exit.
 func (c *Client) handleReadError(err error) bool {
@@ -586,7 +571,9 @@ func (c *Client) handleReadError(err error) bool {
 	c.mu.Unlock()
 
 	// Log error only if not a normal closure
-	if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+	// coder/websocket uses CloseStatus to check close codes
+	closeStatus := websocket.CloseStatus(err)
+	if closeStatus != websocket.StatusNormalClosure && closeStatus != websocket.StatusGoingAway {
 		klog.Errorf("WebSocket read error: %v", err)
 	}
 
@@ -689,9 +676,10 @@ func (c *Client) reconnect() bool {
 		// Close old connection
 		c.mu.Lock()
 		if c.conn != nil {
-			if err := c.conn.Close(); err != nil {
-				klog.V(5).Infof("Error closing old connection: %v", err)
-			}
+			// coder/websocket Close takes status code and reason
+			// Ignore close error during reconnection - connection may already be broken
+			//nolint:errcheck,gosec // G104: Intentionally ignoring close error during reconnection
+			c.conn.Close(websocket.StatusGoingAway, "reconnecting")
 		}
 		// Reset pending requests for new connection
 		for _, ch := range c.pending {
@@ -738,25 +726,18 @@ func (c *Client) pingLoop() {
 				metrics.SetWSConnectionDuration(time.Since(c.connectedAt))
 			}
 
-			// Set write deadline for ping
-			if err := c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-				klog.Errorf("Failed to set write deadline: %v", err)
-				c.mu.Unlock()
-				continue
-			}
-
-			// Send ping
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				klog.Warningf("Failed to send ping: %v", err)
-				c.mu.Unlock()
-				continue
-			}
-
-			// Reset write deadline
-			if err := c.conn.SetWriteDeadline(time.Time{}); err != nil {
-				klog.Warningf("Failed to reset write deadline: %v", err)
-			}
+			conn := c.conn
 			c.mu.Unlock()
+
+			// Send ping using coder/websocket's Ping method with timeout context
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err := conn.Ping(ctx)
+			cancel()
+
+			if err != nil {
+				klog.Warningf("Failed to send ping: %v", err)
+				continue
+			}
 
 			klog.V(6).Info("Sent WebSocket ping")
 
@@ -779,12 +760,10 @@ func (c *Client) Close() {
 	c.closed = true
 
 	if c.conn != nil {
-		if err := c.conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-			klog.V(5).Infof("Error sending close message: %v", err)
-		}
-		if err := c.conn.Close(); err != nil {
-			klog.V(5).Infof("Error closing connection: %v", err)
-		}
+		// coder/websocket Close sends close frame and closes the connection
+		// Ignore close error - we're shutting down anyway
+		//nolint:errcheck,gosec // G104: Intentionally ignoring close error during shutdown
+		c.conn.Close(websocket.StatusNormalClosure, "client closing")
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 )
 
 // mockWSServer provides a mock WebSocket server for testing.
@@ -19,7 +19,6 @@ import (
 //nolint:govet // fieldalignment not critical for test code
 type mockWSServer struct {
 	server          *httptest.Server
-	upgrader        websocket.Upgrader
 	handler         func(*websocket.Conn)
 	authResult      bool
 	authError       *Error
@@ -31,19 +30,16 @@ type mockWSServer struct {
 
 func newMockWSServer() *mockWSServer {
 	m := &mockWSServer{
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
-		},
 		authResult:    true,
 		expectAuthKey: "test-api-key",
 	}
 
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := m.upgrader.Upgrade(w, r, nil)
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer conn.Close(websocket.StatusNormalClosure, "")
 
 		if m.handler != nil {
 			m.handler(conn)
@@ -51,13 +47,13 @@ func newMockWSServer() *mockWSServer {
 		}
 
 		// Default handler - echo server with auth support
-		m.defaultHandler(conn)
+		m.defaultHandler(r.Context(), conn)
 	}))
 
 	return m
 }
 
-func (m *mockWSServer) defaultHandler(conn *websocket.Conn) {
+func (m *mockWSServer) defaultHandler(ctx context.Context, conn *websocket.Conn) {
 	for {
 		m.mu.Lock()
 		m.msgCount++
@@ -68,7 +64,7 @@ func (m *mockWSServer) defaultHandler(conn *websocket.Conn) {
 			return
 		}
 
-		_, message, err := conn.ReadMessage()
+		_, message, err := conn.Read(ctx)
 		if err != nil {
 			return
 		}
@@ -102,7 +98,7 @@ func (m *mockWSServer) defaultHandler(conn *websocket.Conn) {
 
 			respBytes, errMarshal := json.Marshal(resp)
 			if errMarshal == nil {
-				conn.WriteMessage(websocket.TextMessage, respBytes)
+				conn.Write(ctx, websocket.MessageText, respBytes)
 			}
 			continue
 		}
@@ -114,7 +110,7 @@ func (m *mockWSServer) defaultHandler(conn *websocket.Conn) {
 		}
 		respBytes, errMarshal := json.Marshal(resp)
 		if errMarshal == nil {
-			conn.WriteMessage(websocket.TextMessage, respBytes)
+			conn.Write(ctx, websocket.MessageText, respBytes)
 		}
 	}
 }
@@ -266,8 +262,9 @@ func TestClientCall(t *testing.T) {
 			params: []interface{}{},
 			setupServer: func(m *mockWSServer) {
 				m.handler = func(conn *websocket.Conn) {
+					ctx := context.Background()
 					// Handle auth first
-					_, message, _ := conn.ReadMessage()
+					_, message, _ := conn.Read(ctx)
 					var req Request
 					json.Unmarshal(message, &req)
 					if req.Method == "auth.login_with_api_key" {
@@ -277,12 +274,12 @@ func TestClientCall(t *testing.T) {
 						}
 						respBytes, err := json.Marshal(resp)
 						if err == nil {
-							conn.WriteMessage(websocket.TextMessage, respBytes)
+							conn.Write(ctx, websocket.MessageText, respBytes)
 						}
 					}
 
 					// Handle actual call with error
-					_, message, _ = conn.ReadMessage()
+					_, message, _ = conn.Read(ctx)
 					json.Unmarshal(message, &req)
 					resp := Response{
 						ID: req.ID,
@@ -293,7 +290,7 @@ func TestClientCall(t *testing.T) {
 					}
 					respBytes, err := json.Marshal(resp)
 					if err == nil {
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 				}
 			},
@@ -338,8 +335,9 @@ func TestClientCall(t *testing.T) {
 func TestClientCallTimeout(t *testing.T) {
 	server := newMockWSServer()
 	server.handler = func(conn *websocket.Conn) {
+		ctx := context.Background()
 		// Handle auth
-		_, message, _ := conn.ReadMessage()
+		_, message, _ := conn.Read(ctx)
 		var req Request
 		json.Unmarshal(message, &req)
 		if req.Method == "auth.login_with_api_key" {
@@ -349,12 +347,12 @@ func TestClientCallTimeout(t *testing.T) {
 			}
 			respBytes, err := json.Marshal(resp)
 			if err == nil {
-				conn.WriteMessage(websocket.TextMessage, respBytes)
+				conn.Write(ctx, websocket.MessageText, respBytes)
 			}
 		}
 
 		// Don't respond to next request - simulate timeout
-		conn.ReadMessage()
+		conn.Read(ctx)
 		time.Sleep(5 * time.Second)
 	}
 	defer server.Close()
@@ -411,21 +409,15 @@ func TestClientCallAfterClose(t *testing.T) {
 // Manual testing shows reconnection works correctly in production.
 
 func TestClientPingPong(t *testing.T) {
-	pongReceived := make(chan bool, 1)
+	// Note: coder/websocket handles ping/pong automatically.
+	// This test verifies the client remains functional with ping loop running.
 
 	server := newMockWSServer()
 	server.handler = func(conn *websocket.Conn) {
-		// Set pong handler
-		conn.SetPongHandler(func(appData string) error {
-			select {
-			case pongReceived <- true:
-			default:
-			}
-			return nil
-		})
+		ctx := context.Background()
 
 		// Handle auth
-		_, message, _ := conn.ReadMessage()
+		_, message, _ := conn.Read(ctx)
 		var req Request
 		json.Unmarshal(message, &req)
 		if req.Method == "auth.login_with_api_key" {
@@ -435,13 +427,13 @@ func TestClientPingPong(t *testing.T) {
 			}
 			respBytes, err := json.Marshal(resp)
 			if err == nil {
-				conn.WriteMessage(websocket.TextMessage, respBytes)
+				conn.Write(ctx, websocket.MessageText, respBytes)
 			}
 		}
 
 		// Keep connection alive and respond to requests
 		for {
-			_, message, err := conn.ReadMessage()
+			_, message, err := conn.Read(ctx)
 			if err != nil {
 				break
 			}
@@ -456,7 +448,7 @@ func TestClientPingPong(t *testing.T) {
 					}
 					respBytes, err := json.Marshal(resp)
 					if err == nil {
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 				}
 			}
@@ -626,8 +618,9 @@ func TestClientClose(t *testing.T) {
 func TestResponseIDMismatch(t *testing.T) {
 	server := newMockWSServer()
 	server.handler = func(conn *websocket.Conn) {
+		ctx := context.Background()
 		// Handle auth
-		_, message, _ := conn.ReadMessage()
+		_, message, _ := conn.Read(ctx)
 		var req Request
 		json.Unmarshal(message, &req)
 		if req.Method == "auth.login_with_api_key" {
@@ -637,19 +630,19 @@ func TestResponseIDMismatch(t *testing.T) {
 			}
 			respBytes, err := json.Marshal(resp)
 			if err == nil {
-				conn.WriteMessage(websocket.TextMessage, respBytes)
+				conn.Write(ctx, websocket.MessageText, respBytes)
 			}
 		}
 
 		// Send response with mismatched ID
-		conn.ReadMessage()
+		conn.Read(ctx)
 		resp := Response{
 			ID:     "wrong-id-12345",
 			Result: json.RawMessage(`true`),
 		}
 		respBytes, err := json.Marshal(resp)
 		if err == nil {
-			conn.WriteMessage(websocket.TextMessage, respBytes)
+			conn.Write(ctx, websocket.MessageText, respBytes)
 		}
 	}
 	defer server.Close()
@@ -725,8 +718,9 @@ func TestQueryPool(t *testing.T) {
 			poolName: "tank",
 			setupServer: func(m *mockWSServer) {
 				m.handler = func(conn *websocket.Conn) {
+					ctx := context.Background()
 					// Handle auth
-					_, message, _ := conn.ReadMessage()
+					_, message, _ := conn.Read(ctx)
 					var req Request
 					_ = json.Unmarshal(message, &req)
 					if req.Method == "auth.login_with_api_key" {
@@ -738,11 +732,11 @@ func TestQueryPool(t *testing.T) {
 						if err != nil {
 							return
 						}
-						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
+						_ = conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 
 					// Handle pool.query
-					_, message, _ = conn.ReadMessage()
+					_, message, _ = conn.Read(ctx)
 					_ = json.Unmarshal(message, &req)
 					if req.Method == "pool.query" {
 						poolData := []Pool{{
@@ -788,7 +782,7 @@ func TestQueryPool(t *testing.T) {
 						if err != nil {
 							return
 						}
-						_ = conn.WriteMessage(websocket.TextMessage, respBytes)
+						_ = conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 				}
 			},
@@ -802,8 +796,9 @@ func TestQueryPool(t *testing.T) {
 			poolName: "nonexistent",
 			setupServer: func(m *mockWSServer) {
 				m.handler = func(conn *websocket.Conn) {
+					ctx := context.Background()
 					// Handle auth
-					_, message, _ := conn.ReadMessage()
+					_, message, _ := conn.Read(ctx)
 					var req Request
 					json.Unmarshal(message, &req)
 					if req.Method == "auth.login_with_api_key" {
@@ -816,11 +811,11 @@ func TestQueryPool(t *testing.T) {
 							t.Errorf("failed to marshal response: %v", err)
 							return
 						}
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 
 					// Handle pool.query - return empty array
-					_, message, _ = conn.ReadMessage()
+					_, message, _ = conn.Read(ctx)
 					json.Unmarshal(message, &req)
 					if req.Method == "pool.query" {
 						resp := Response{
@@ -832,7 +827,7 @@ func TestQueryPool(t *testing.T) {
 							t.Errorf("failed to marshal response: %v", err)
 							return
 						}
-						conn.WriteMessage(websocket.TextMessage, respBytes)
+						conn.Write(ctx, websocket.MessageText, respBytes)
 					}
 				}
 			},

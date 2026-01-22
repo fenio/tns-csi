@@ -159,7 +159,14 @@ func main() {
 			shouldInclude = true
 		} else {
 			// Safe mode: only CSI test artifacts
-			if strings.Contains(name, "pvc-") || strings.Contains(name, "test-csi") {
+			// - pvc-* datasets (volumes)
+			// - test-csi* datasets (test artifacts)
+			// - snapshot-* datasets (detached snapshots)
+			// - csi-detached-snapshots folder and its contents
+			if strings.Contains(name, "pvc-") ||
+			   strings.Contains(name, "test-csi") ||
+			   strings.Contains(name, "snapshot-") ||
+			   strings.Contains(name, "csi-detached-snapshots") {
 				shouldInclude = true
 			}
 		}

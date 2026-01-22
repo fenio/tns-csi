@@ -664,31 +664,42 @@ func main() {
 		fmt.Printf("  Sorted %d dataset(s) by clone dependency\n", len(sortedDatasets))
 	}
 
-	// Helper function to force unmount a dataset
-	forceUnmount := func(dsName string) error {
-		mountPath := "/mnt/" + dsName
-		fmt.Printf("    Attempting force unmount of %s...\n", mountPath)
+	// Track if we've already tried restarting NFS
+	nfsRestarted := false
 
-		var umountResult interface{}
-		umountParams := []interface{}{
-			mountPath,
-			map[string]interface{}{
-				"force": true,
-			},
+	// Helper function to restart NFS service to release stale mounts
+	restartNFS := func() error {
+		if nfsRestarted {
+			return fmt.Errorf("NFS already restarted this session")
+		}
+		fmt.Println("    Restarting NFS service to release stale mounts...")
+
+		// Use service.stop then service.start (service.control doesn't have a restart action)
+		var result interface{}
+
+		// Stop NFS
+		stopParams := []interface{}{"nfs", map[string]interface{}{"ha_propagate": false}}
+		if err := client.Call(ctx, "service.stop", stopParams, &result); err != nil {
+			fmt.Printf("    Warning: service.stop failed: %v\n", err)
+		} else {
+			fmt.Println("    NFS service stopped")
 		}
 
-		if err := client.Call(ctx, "filesystem.umount", umountParams, &umountResult); err != nil {
-			// Try alternative: just the path without options
-			if err2 := client.Call(ctx, "filesystem.umount", []interface{}{mountPath}, &umountResult); err2 != nil {
-				return fmt.Errorf("umount failed: %v", err)
-			}
+		time.Sleep(2 * time.Second)
+
+		// Start NFS
+		startParams := []interface{}{"nfs", map[string]interface{}{"ha_propagate": false}}
+		if err := client.Call(ctx, "service.start", startParams, &result); err != nil {
+			return fmt.Errorf("service.start failed: %v", err)
 		}
-		fmt.Printf("    ✓ Force unmount successful\n")
-		time.Sleep(500 * time.Millisecond)
+		fmt.Println("    NFS service started")
+
+		nfsRestarted = true
+		time.Sleep(3 * time.Second) // Give NFS time to fully start
 		return nil
 	}
 
-	// Delete datasets with force unmount for busy datasets
+	// Delete datasets with NFS restart for busy datasets
 	successCount := 0
 	failCount := 0
 	if len(sortedDatasets) > 0 {
@@ -711,29 +722,30 @@ func main() {
 			if err := client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
 				errStr := err.Error()
 
-				// Check if it's a "busy" error - try force unmount first
+				// Check if it's a "busy" error - try restarting NFS to release stale mounts
 				if strings.Contains(errStr, "EBUSY") || strings.Contains(errStr, "busy") || strings.Contains(errStr, "cannot unmount") {
-					fmt.Printf("    Dataset is busy, attempting force unmount...\n")
+					fmt.Printf("    Dataset is busy...\n")
 
-					// Try to force unmount
-					if umountErr := forceUnmount(dsName); umountErr != nil {
-						fmt.Printf("    Warning: %v\n", umountErr)
+					// Try restarting NFS service to release stale mounts
+					if nfsErr := restartNFS(); nfsErr != nil {
+						fmt.Printf("    Warning: %v\n", nfsErr)
 					}
 
-					time.Sleep(1 * time.Second)
+					time.Sleep(2 * time.Second)
 
-					// Retry delete after unmount attempt
+					// Retry delete after NFS restart
 					if err2 := client.Call(ctx, "pool.dataset.delete", params, &result); err2 != nil {
 						errStr2 := err2.Error()
 
-						// If still busy, try one more time with longer delay
+						// If still busy, wait longer and try once more
 						if strings.Contains(errStr2, "EBUSY") || strings.Contains(errStr2, "busy") {
-							fmt.Printf("    Still busy, waiting 3s and retrying...\n")
-							time.Sleep(3 * time.Second)
+							fmt.Printf("    Still busy, waiting 5s and retrying...\n")
+							time.Sleep(5 * time.Second)
 
 							// Final attempt
 							if err3 := client.Call(ctx, "pool.dataset.delete", params, &result); err3 != nil {
-								fmt.Printf("    ⚠ Failed after multiple retries: %v\n", err3)
+								fmt.Printf("    ⚠ Failed after NFS restart: %v\n", err3)
+								fmt.Printf("    → Manual cleanup required: zfs destroy -f %s\n", dsName)
 								failCount++
 							} else {
 								fmt.Printf("    ✓ Deleted on final retry\n")
@@ -745,11 +757,12 @@ func main() {
 							successCount++
 							deleted = true
 						} else {
-							fmt.Printf("    ⚠ Still failed after unmount: %v\n", err2)
+							fmt.Printf("    ⚠ Still failed after NFS restart: %v\n", err2)
+							fmt.Printf("    → Manual cleanup required: zfs destroy -f %s\n", dsName)
 							failCount++
 						}
 					} else {
-						fmt.Printf("    ✓ Deleted after force unmount\n")
+						fmt.Printf("    ✓ Deleted after NFS restart\n")
 						successCount++
 						deleted = true
 					}

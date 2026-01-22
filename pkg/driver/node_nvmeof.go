@@ -724,11 +724,9 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 	klog.V(2).Infof("Searching %d NVMe controller(s) in sysfs for NQN: %s", len(entries), nqn)
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
 		deviceName := entry.Name()
-		// Skip non-controller entries
+		// Skip non-controller entries (controllers are named nvme0, nvme1, etc.)
+		// Note: Don't check entry.IsDir() because sysfs entries are symlinks
 		if !strings.HasPrefix(deviceName, "nvme") || strings.Contains(deviceName, "-") {
 			continue
 		}

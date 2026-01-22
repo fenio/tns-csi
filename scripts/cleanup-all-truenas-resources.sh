@@ -664,7 +664,31 @@ func main() {
 		fmt.Printf("  Sorted %d dataset(s) by clone dependency\n", len(sortedDatasets))
 	}
 
-	// Delete datasets with retry for busy datasets
+	// Helper function to force unmount a dataset
+	forceUnmount := func(dsName string) error {
+		mountPath := "/mnt/" + dsName
+		fmt.Printf("    Attempting force unmount of %s...\n", mountPath)
+
+		var umountResult interface{}
+		umountParams := []interface{}{
+			mountPath,
+			map[string]interface{}{
+				"force": true,
+			},
+		}
+
+		if err := client.Call(ctx, "filesystem.umount", umountParams, &umountResult); err != nil {
+			// Try alternative: just the path without options
+			if err2 := client.Call(ctx, "filesystem.umount", []interface{}{mountPath}, &umountResult); err2 != nil {
+				return fmt.Errorf("umount failed: %v", err)
+			}
+		}
+		fmt.Printf("    ✓ Force unmount successful\n")
+		time.Sleep(500 * time.Millisecond)
+		return nil
+	}
+
+	// Delete datasets with force unmount for busy datasets
 	successCount := 0
 	failCount := 0
 	if len(sortedDatasets) > 0 {
@@ -687,18 +711,45 @@ func main() {
 			if err := client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
 				errStr := err.Error()
 
-				// Check if it's a "busy" error - retry with additional options
-				if strings.Contains(errStr, "EBUSY") || strings.Contains(errStr, "busy") {
-					fmt.Printf("    Dataset is busy, retrying with force unmount...\n")
+				// Check if it's a "busy" error - try force unmount first
+				if strings.Contains(errStr, "EBUSY") || strings.Contains(errStr, "busy") || strings.Contains(errStr, "cannot unmount") {
+					fmt.Printf("    Dataset is busy, attempting force unmount...\n")
+
+					// Try to force unmount
+					if umountErr := forceUnmount(dsName); umountErr != nil {
+						fmt.Printf("    Warning: %v\n", umountErr)
+					}
+
 					time.Sleep(1 * time.Second)
 
-					// Retry - TrueNAS should handle force unmount with force:true
-					// but let's try again after a delay
+					// Retry delete after unmount attempt
 					if err2 := client.Call(ctx, "pool.dataset.delete", params, &result); err2 != nil {
-						fmt.Printf("    ⚠ Still failed after retry: %v\n", err2)
-						failCount++
+						errStr2 := err2.Error()
+
+						// If still busy, try one more time with longer delay
+						if strings.Contains(errStr2, "EBUSY") || strings.Contains(errStr2, "busy") {
+							fmt.Printf("    Still busy, waiting 3s and retrying...\n")
+							time.Sleep(3 * time.Second)
+
+							// Final attempt
+							if err3 := client.Call(ctx, "pool.dataset.delete", params, &result); err3 != nil {
+								fmt.Printf("    ⚠ Failed after multiple retries: %v\n", err3)
+								failCount++
+							} else {
+								fmt.Printf("    ✓ Deleted on final retry\n")
+								successCount++
+								deleted = true
+							}
+						} else if strings.Contains(errStr2, "does not exist") || strings.Contains(errStr2, "ENOENT") {
+							fmt.Printf("    ✓ Already deleted\n")
+							successCount++
+							deleted = true
+						} else {
+							fmt.Printf("    ⚠ Still failed after unmount: %v\n", err2)
+							failCount++
+						}
 					} else {
-						fmt.Printf("    ✓ Deleted on retry\n")
+						fmt.Printf("    ✓ Deleted after force unmount\n")
 						successCount++
 						deleted = true
 					}
@@ -707,6 +758,11 @@ func main() {
 					fmt.Printf("    ✓ Already deleted\n")
 					successCount++
 					deleted = true
+				} else if strings.Contains(errStr, "dependent clones") {
+					// Clone dependency issue - the clone should have been deleted first
+					// but if it failed, we can't delete the parent
+					fmt.Printf("    ⚠ Has dependent clones (clone deletion may have failed): %v\n", err)
+					failCount++
 				} else {
 					fmt.Printf("    ⚠ Failed to delete dataset: %v\n", err)
 					failCount++

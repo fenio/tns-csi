@@ -721,7 +721,7 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		return "", fmt.Errorf("failed to read %s: %w", nvmeDir, err)
 	}
 
-	klog.V(4).Infof("Found %d NVMe controller(s) in sysfs", len(entries))
+	klog.V(2).Infof("Searching %d NVMe controller(s) in sysfs for NQN: %s", len(entries), nqn)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -747,8 +747,8 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 		}
 
 		deviceNQN := strings.TrimSpace(string(data))
-		// Log all NQN comparisons at V(4) for debugging device discovery issues
-		klog.V(4).Infof("Controller %s sysfs NQN: %q (looking for: %q, match: %v)",
+		// Log all NQN comparisons at V(2) for debugging device discovery issues
+		klog.V(2).Infof("Controller %s sysfs NQN: %q (looking for: %q, match: %v)",
 			deviceName, deviceNQN, nqn, deviceNQN == nqn)
 
 		if deviceNQN == nqn {

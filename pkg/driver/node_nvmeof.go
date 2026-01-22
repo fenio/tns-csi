@@ -23,6 +23,7 @@ import (
 var (
 	ErrNVMeCLINotFound             = errors.New("nvme command not found - please install nvme-cli")
 	ErrNVMeDeviceNotFound          = errors.New("NVMe device not found")
+	ErrNVMeDeviceUnhealthy         = errors.New("NVMe device exists but is unhealthy (zero size)")
 	ErrNVMeDeviceTimeout           = errors.New("timeout waiting for NVMe device to appear")
 	ErrDeviceInitializationTimeout = errors.New("device failed to initialize - size remained zero or unreadable")
 	ErrNVMeControllerNotFound      = errors.New("could not extract NVMe controller path from device path")
@@ -82,6 +83,19 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (resp *csi.NodeStageVolumeResponse, devicePath string, err error) {
 	// With independent subsystems, NSID is always 1
 	devicePath, findErr := s.findNVMeDeviceByNQN(ctx, params.nqn)
+
+	// Check if we found an unhealthy device (stale connection from previous run)
+	// This is different from "not found" - we need to disconnect it before reconnecting
+	if errors.Is(findErr, ErrNVMeDeviceUnhealthy) {
+		klog.Warningf("Found stale NVMe connection for NQN %s (unhealthy device) - disconnecting before reconnect", params.nqn)
+		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
+			klog.Warningf("Failed to disconnect stale NVMe-oF connection: %v", disconnectErr)
+		}
+		// Wait for cleanup
+		time.Sleep(2 * time.Second)
+		return nil, "", nil
+	}
+
 	if findErr != nil || devicePath == "" {
 		// Device not found is expected when not previously connected - return nil to try other methods
 		return nil, "", nil //nolint:nilerr // intentionally swallowing "device not found" as this is expected
@@ -771,12 +785,15 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 					devicePath, deviceName, nqn)
 				return devicePath, nil
 			}
-			// NQN matches but device is unhealthy - this is a stale controller
-			// Disconnect it so the caller can reconnect fresh
-			klog.Warningf("Device path %s still not ready after ns-rescan - disconnecting stale controller %s", devicePath, deviceName)
-			s.disconnectStaleController(ctx, nqn, deviceName)
-			// Return error so caller will reconnect
-			return "", fmt.Errorf("%w for NQN: %s (stale controller %s disconnected)", ErrNVMeDeviceNotFound, nqn, deviceName)
+			// NQN matches but device is unhealthy after ns-rescan
+			// Return ErrNVMeDeviceUnhealthy - let the caller decide whether to:
+			// - Disconnect (if this is a stale connection from previous run)
+			// - Wait (if this is a freshly connected device still initializing)
+			// NOTE: We do NOT disconnect here because this function is also called
+			// during waitForNVMeDevice after a fresh connect, and disconnecting
+			// would break the freshly connected controller.
+			klog.V(2).Infof("Device path %s still not ready after ns-rescan (controller: %s) - returning unhealthy status", devicePath, deviceName)
+			return devicePath, fmt.Errorf("%w: %s (controller: %s)", ErrNVMeDeviceUnhealthy, devicePath, deviceName)
 		}
 	}
 
@@ -829,7 +846,8 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 		}
 
 		devicePath, controllerName, err := s.findNVMeDeviceByNQNWithController(ctx, nqn)
-		if err == nil && devicePath != "" {
+		switch {
+		case err == nil && devicePath != "":
 			// Verify device is accessible AND healthy (non-zero size)
 			// This prevents returning a device that exists but isn't functional yet
 			if _, statErr := os.Stat(devicePath); statErr == nil {
@@ -849,7 +867,11 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
 				}
 			}
-		} else if subsystemVerified && attempt%5 == 0 {
+		case errors.Is(err, ErrNVMeDeviceUnhealthy):
+			// Device found but unhealthy - this is expected for freshly connected devices
+			// that are still initializing. Keep waiting without disconnecting.
+			klog.V(4).Infof("NVMe device found but still initializing (unhealthy), waiting... (attempt %d, path: %s)", attempt, devicePath)
+		case subsystemVerified && attempt%5 == 0:
 			// Subsystem verified but can't find device - do diagnostic dump
 			s.logNVMeDiscoveryDiagnostics(ctx, nqn)
 		}
@@ -1249,28 +1271,6 @@ func extractNVMeController(devicePath string) string {
 		}
 	}
 	return ""
-}
-
-// disconnectStaleController disconnects a stale NVMe controller that has matching NQN but unhealthy device.
-// This allows the caller to reconnect fresh.
-func (s *NodeService) disconnectStaleController(ctx context.Context, nqn, controllerName string) {
-	klog.V(2).Infof("Disconnecting stale NVMe controller %s (NQN: %s)", controllerName, nqn)
-
-	disconnectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Disconnect by NQN - this will remove the controller
-	cmd := exec.CommandContext(disconnectCtx, "nvme", "disconnect", "-n", nqn)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Not fatal - log and continue, the reconnect may still work
-		klog.V(2).Infof("Failed to disconnect stale controller %s: %v, output: %s (continuing anyway)", controllerName, err, string(output))
-	} else {
-		klog.V(2).Infof("Successfully disconnected stale controller %s", controllerName)
-	}
-
-	// Wait for kernel to cleanup
-	time.Sleep(2 * time.Second)
 }
 
 // disconnectNVMeOF disconnects from an NVMe-oF target and waits for device cleanup.

@@ -45,6 +45,11 @@ func (v *TrueNASVerifier) Close() {
 	}
 }
 
+// Client returns the underlying TrueNAS API client for advanced queries.
+func (v *TrueNASVerifier) Client() *tnsapi.Client {
+	return v.client
+}
+
 // DatasetExists checks if a dataset exists on TrueNAS.
 func (v *TrueNASVerifier) DatasetExists(ctx context.Context, datasetPath string) (bool, error) {
 	var datasets []map[string]any
@@ -389,6 +394,47 @@ func (v *TrueNASVerifier) DeleteISCSIExtent(ctx context.Context, extentName stri
 		return fmt.Errorf("failed to delete iSCSI extent %s (id=%d): %w", extentName, extentIDInt, err)
 	}
 	return nil
+}
+
+// GetDatasetOrigin returns the origin of a dataset (if it's a clone).
+// Returns empty string if the dataset is not a clone.
+// The origin is the snapshot from which the clone was created.
+func (v *TrueNASVerifier) GetDatasetOrigin(ctx context.Context, datasetPath string) (string, error) {
+	var datasets []map[string]any
+	filter := []any{[]any{"id", "=", datasetPath}}
+	if err := v.client.Call(ctx, "pool.dataset.query", []any{filter}, &datasets); err != nil {
+		return "", fmt.Errorf("failed to query dataset: %w", err)
+	}
+	if len(datasets) == 0 {
+		return "", fmt.Errorf("%s: %w", datasetPath, ErrDatasetNotFound)
+	}
+
+	dataset := datasets[0]
+	// The origin property is returned as {"value": "pool/dataset@snapshot", "source": "local", ...}
+	origin, ok := dataset["origin"]
+	if !ok {
+		return "", nil // No origin property
+	}
+
+	// Handle the origin structure
+	if originMap, isMap := origin.(map[string]any); isMap {
+		if val, hasValue := originMap["value"]; hasValue {
+			if strVal, isStr := val.(string); isStr && strVal != "" && strVal != "-" {
+				return strVal, nil
+			}
+		}
+	}
+
+	return "", nil // Not a clone
+}
+
+// IsDatasetClone checks if a dataset is a ZFS clone (has an origin).
+func (v *TrueNASVerifier) IsDatasetClone(ctx context.Context, datasetPath string) (isClone bool, origin string, err error) {
+	origin, err = v.GetDatasetOrigin(ctx, datasetPath)
+	if err != nil {
+		return false, "", err
+	}
+	return origin != "", origin, nil
 }
 
 // GetDatasetProperty retrieves a specific ZFS user property from a dataset.

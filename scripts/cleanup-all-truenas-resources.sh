@@ -306,11 +306,77 @@ func main() {
 		}
 	}
 
+	// List iSCSI target-extent mappings and extents
+	fmt.Println("\n=== Listing iSCSI extents ===")
+	var iscsiExtents []map[string]interface{}
+	targetExtents := []map[string]interface{}{}
+	if err := client.Call(ctx, "iscsi.extent.query", []interface{}{}, &iscsiExtents); err != nil {
+		fmt.Printf("Warning: Failed to query iSCSI extents: %v\n", err)
+	} else {
+		for _, extent := range iscsiExtents {
+			disk, _ := extent["disk"].(string) // e.g., "zvol/storage/pvc-xxx"
+			path, _ := extent["path"].(string) // alternative path field
+			extentPath := disk
+			if extentPath == "" {
+				extentPath = path
+			}
+
+			shouldInclude := false
+			if mode == "all" {
+				if strings.Contains(extentPath, pool+"/") {
+					shouldInclude = true
+				}
+			} else {
+				if strings.Contains(extentPath, "pvc-") || strings.Contains(extentPath, "test-csi") {
+					shouldInclude = true
+				}
+			}
+
+			if shouldInclude {
+				targetExtents = append(targetExtents, extent)
+				extentID := extent["id"]
+				extentName, _ := extent["name"].(string)
+				fmt.Printf("  Found iSCSI extent: ID=%v, Name=%s, Path=%s\n", extentID, extentName, extentPath)
+			}
+		}
+	}
+
+	// List iSCSI targets
+	fmt.Println("\n=== Listing iSCSI targets ===")
+	var iscsiTargets []map[string]interface{}
+	targetISCSITargets := []map[string]interface{}{}
+	if err := client.Call(ctx, "iscsi.target.query", []interface{}{}, &iscsiTargets); err != nil {
+		fmt.Printf("Warning: Failed to query iSCSI targets: %v\n", err)
+	} else {
+		for _, target := range iscsiTargets {
+			name, _ := target["name"].(string)
+
+			shouldInclude := false
+			if mode == "all" {
+				if strings.Contains(name, "pvc-") || strings.Contains(name, "test-") || strings.Contains(name, "csi-") {
+					shouldInclude = true
+				}
+			} else {
+				if strings.Contains(name, "pvc-") || strings.Contains(name, "test-csi") {
+					shouldInclude = true
+				}
+			}
+
+			if shouldInclude {
+				targetISCSITargets = append(targetISCSITargets, target)
+				targetID := target["id"]
+				fmt.Printf("  Found iSCSI target: ID=%v, Name=%s\n", targetID, name)
+			}
+		}
+	}
+
 	if dryRun {
 		fmt.Println("\n=== DRY RUN - No changes will be made ===")
 		fmt.Printf("Would delete %d NFS share(s)\n", len(targetShares))
 		fmt.Printf("Would delete %d NVMe-oF namespace(s)\n", len(targetNamespaces))
 		fmt.Printf("Would delete %d NVMe-oF subsystem(s)\n", len(targetSubsystems))
+		fmt.Printf("Would delete %d iSCSI extent(s)\n", len(targetExtents))
+		fmt.Printf("Would delete %d iSCSI target(s)\n", len(targetISCSITargets))
 		fmt.Printf("Would delete %d dataset(s)\n", len(targetDatasets))
 		return
 	}
@@ -414,15 +480,202 @@ func main() {
 		fmt.Println("\n=== No NVMe-oF subsystems to delete ===")
 	}
 
-	// Delete datasets
+	// Delete iSCSI target-extent mappings first, then extents, then targets
+	// Query target-extent mappings
+	var targetExtentMappings []map[string]interface{}
+	if err := client.Call(ctx, "iscsi.targetextent.query", []interface{}{}, &targetExtentMappings); err != nil {
+		fmt.Printf("Warning: Failed to query iSCSI target-extent mappings: %v\n", err)
+	}
+
+	// Build set of extent IDs and target IDs we want to delete
+	extentIDsToDelete := make(map[int]bool)
+	for _, extent := range targetExtents {
+		if id, ok := extent["id"].(float64); ok {
+			extentIDsToDelete[int(id)] = true
+		}
+	}
+	targetIDsToDelete := make(map[int]bool)
+	for _, target := range targetISCSITargets {
+		if id, ok := target["id"].(float64); ok {
+			targetIDsToDelete[int(id)] = true
+		}
+	}
+
+	// Delete target-extent mappings for our targets/extents
+	mappingSuccessCount := 0
+	mappingFailCount := 0
+	if len(targetExtentMappings) > 0 && (len(extentIDsToDelete) > 0 || len(targetIDsToDelete) > 0) {
+		fmt.Println("\n=== Deleting iSCSI target-extent mappings ===")
+		for _, mapping := range targetExtentMappings {
+			mappingID := 0
+			extentID := 0
+			targetID := 0
+
+			if id, ok := mapping["id"].(float64); ok {
+				mappingID = int(id)
+			}
+			if id, ok := mapping["extent"].(float64); ok {
+				extentID = int(id)
+			}
+			if id, ok := mapping["target"].(float64); ok {
+				targetID = int(id)
+			}
+
+			// Delete if this mapping references an extent or target we want to delete
+			if extentIDsToDelete[extentID] || targetIDsToDelete[targetID] {
+				fmt.Printf("  Deleting mapping ID=%d (target=%d, extent=%d)...\n", mappingID, targetID, extentID)
+				var result interface{}
+				if err := client.Call(ctx, "iscsi.targetextent.delete", []interface{}{mappingID, true}, &result); err != nil {
+					fmt.Printf("    ⚠ Failed: %v\n", err)
+					mappingFailCount++
+				} else {
+					fmt.Printf("    ✓ Deleted\n")
+					mappingSuccessCount++
+				}
+				time.Sleep(300 * time.Millisecond)
+			}
+		}
+	}
+
+	// Delete iSCSI extents
+	extentSuccessCount := 0
+	extentFailCount := 0
+	if len(targetExtents) > 0 {
+		fmt.Printf("\n=== Deleting %d iSCSI extent(s) ===\n", len(targetExtents))
+		for _, extent := range targetExtents {
+			extentID := 0
+			if id, ok := extent["id"].(float64); ok {
+				extentID = int(id)
+			}
+			extentName, _ := extent["name"].(string)
+			fmt.Printf("  Deleting extent: ID=%d, Name=%s...\n", extentID, extentName)
+
+			var result interface{}
+			// Pass remove=true to also remove the underlying file/zvol if applicable
+			if err := client.Call(ctx, "iscsi.extent.delete", []interface{}{extentID, true, true}, &result); err != nil {
+				fmt.Printf("    ⚠ Failed: %v\n", err)
+				extentFailCount++
+			} else {
+				fmt.Printf("    ✓ Deleted\n")
+				extentSuccessCount++
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	} else {
+		fmt.Println("\n=== No iSCSI extents to delete ===")
+	}
+
+	// Delete iSCSI targets
+	iscsiTargetSuccessCount := 0
+	iscsiTargetFailCount := 0
+	if len(targetISCSITargets) > 0 {
+		fmt.Printf("\n=== Deleting %d iSCSI target(s) ===\n", len(targetISCSITargets))
+		for _, target := range targetISCSITargets {
+			targetID := 0
+			if id, ok := target["id"].(float64); ok {
+				targetID = int(id)
+			}
+			targetName, _ := target["name"].(string)
+			fmt.Printf("  Deleting target: ID=%d, Name=%s...\n", targetID, targetName)
+
+			var result interface{}
+			if err := client.Call(ctx, "iscsi.target.delete", []interface{}{targetID, true}, &result); err != nil {
+				fmt.Printf("    ⚠ Failed: %v\n", err)
+				iscsiTargetFailCount++
+			} else {
+				fmt.Printf("    ✓ Deleted\n")
+				iscsiTargetSuccessCount++
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	} else {
+		fmt.Println("\n=== No iSCSI targets to delete ===")
+	}
+
+	// Delete datasets - need to sort by clone dependencies (delete clones before origins)
+	// First, get origin information for all datasets
+	fmt.Println("\n=== Analyzing dataset dependencies ===")
+	datasetOrigins := make(map[string]string) // dataset -> origin
+	for _, ds := range datasets {
+		name, ok := ds["name"].(string)
+		if !ok {
+			continue
+		}
+		// Check if this dataset has an origin (is a clone)
+		if origin, ok := ds["origin"].(map[string]interface{}); ok {
+			if originValue, ok := origin["value"].(string); ok && originValue != "" {
+				// Origin format is "pool/dataset@snapshot", extract just the dataset part
+				originDS := originValue
+				if atIdx := strings.Index(originValue, "@"); atIdx > 0 {
+					originDS = originValue[:atIdx]
+				}
+				datasetOrigins[name] = originDS
+				fmt.Printf("  %s is a clone of %s\n", name, originDS)
+			}
+		}
+	}
+
+	// Sort datasets: clones before their origins
+	// Use a simple approach: datasets with origins (clones) first, then others
+	// For nested clones, sort by depth (more origins = delete first)
+	sortedDatasets := make([]string, 0, len(targetDatasets))
+
+	// Helper to count clone depth
+	getCloneDepth := func(ds string) int {
+		depth := 0
+		current := ds
+		visited := make(map[string]bool)
+		for {
+			origin, hasOrigin := datasetOrigins[current]
+			if !hasOrigin || visited[current] {
+				break
+			}
+			visited[current] = true
+			depth++
+			current = origin
+		}
+		return depth
+	}
+
+	// Create a slice with depths for sorting
+	type datasetWithDepth struct {
+		name  string
+		depth int
+	}
+	dsWithDepths := make([]datasetWithDepth, 0, len(targetDatasets))
+	for _, ds := range targetDatasets {
+		dsWithDepths = append(dsWithDepths, datasetWithDepth{name: ds, depth: getCloneDepth(ds)})
+	}
+
+	// Sort by depth descending (deepest clones first)
+	for i := 0; i < len(dsWithDepths); i++ {
+		for j := i + 1; j < len(dsWithDepths); j++ {
+			if dsWithDepths[j].depth > dsWithDepths[i].depth {
+				dsWithDepths[i], dsWithDepths[j] = dsWithDepths[j], dsWithDepths[i]
+			}
+		}
+	}
+
+	for _, dwd := range dsWithDepths {
+		sortedDatasets = append(sortedDatasets, dwd.name)
+	}
+
+	if len(datasetOrigins) > 0 {
+		fmt.Printf("  Sorted %d dataset(s) by clone dependency\n", len(sortedDatasets))
+	}
+
+	// Delete datasets with retry for busy datasets
 	successCount := 0
 	failCount := 0
-	if len(targetDatasets) > 0 {
-		fmt.Printf("\n=== Deleting %d dataset(s) ===\n", len(targetDatasets))
-		for _, dsName := range targetDatasets {
+	if len(sortedDatasets) > 0 {
+		fmt.Printf("\n=== Deleting %d dataset(s) ===\n", len(sortedDatasets))
+		for _, dsName := range sortedDatasets {
 			fmt.Printf("  Deleting dataset: %s...\n", dsName)
-			
+
 			var result interface{}
+			deleted := false
+
+			// First attempt with recursive and force
 			params := []interface{}{
 				dsName,
 				map[string]interface{}{
@@ -430,28 +683,61 @@ func main() {
 					"force":     true,
 				},
 			}
-			
+
 			if err := client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
-				fmt.Printf("    ⚠ Failed to delete dataset: %v\n", err)
-				failCount++
+				errStr := err.Error()
+
+				// Check if it's a "busy" error - retry with additional options
+				if strings.Contains(errStr, "EBUSY") || strings.Contains(errStr, "busy") {
+					fmt.Printf("    Dataset is busy, retrying with force unmount...\n")
+					time.Sleep(1 * time.Second)
+
+					// Retry - TrueNAS should handle force unmount with force:true
+					// but let's try again after a delay
+					if err2 := client.Call(ctx, "pool.dataset.delete", params, &result); err2 != nil {
+						fmt.Printf("    ⚠ Still failed after retry: %v\n", err2)
+						failCount++
+					} else {
+						fmt.Printf("    ✓ Deleted on retry\n")
+						successCount++
+						deleted = true
+					}
+				} else if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "ENOENT") {
+					// Dataset already gone, that's fine
+					fmt.Printf("    ✓ Already deleted\n")
+					successCount++
+					deleted = true
+				} else {
+					fmt.Printf("    ⚠ Failed to delete dataset: %v\n", err)
+					failCount++
+				}
 			} else {
 				fmt.Printf("    ✓ Deleted\n")
 				successCount++
+				deleted = true
 			}
-			time.Sleep(500 * time.Millisecond)
+
+			if deleted {
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				time.Sleep(1 * time.Second) // Longer delay after failures
+			}
 		}
 	} else {
 		fmt.Println("\n=== No datasets to delete ===")
 	}
 
 	fmt.Println("\n=== Summary ===")
-	fmt.Printf("NFS shares:         %d deleted, %d failed\n", nfsSuccessCount, nfsFailCount)
-	fmt.Printf("NVMe-oF namespaces: %d deleted, %d failed\n", nsSuccessCount, nsFailCount)
+	fmt.Printf("NFS shares:            %d deleted, %d failed\n", nfsSuccessCount, nfsFailCount)
+	fmt.Printf("NVMe-oF namespaces:    %d deleted, %d failed\n", nsSuccessCount, nsFailCount)
 	fmt.Printf("NVMe-oF port bindings: %d removed\n", portBindingCount)
-	fmt.Printf("NVMe-oF subsystems: %d deleted, %d failed\n", ssSuccessCount, ssFailCount)
-	fmt.Printf("Datasets:           %d deleted, %d failed\n", successCount, failCount)
-	
-	totalFailed := nfsFailCount + nsFailCount + ssFailCount + failCount
+	fmt.Printf("NVMe-oF subsystems:    %d deleted, %d failed\n", ssSuccessCount, ssFailCount)
+	fmt.Printf("iSCSI mappings:        %d deleted, %d failed\n", mappingSuccessCount, mappingFailCount)
+	fmt.Printf("iSCSI extents:         %d deleted, %d failed\n", extentSuccessCount, extentFailCount)
+	fmt.Printf("iSCSI targets:         %d deleted, %d failed\n", iscsiTargetSuccessCount, iscsiTargetFailCount)
+	fmt.Printf("Datasets:              %d deleted, %d failed\n", successCount, failCount)
+
+	totalFailed := nfsFailCount + nsFailCount + ssFailCount + mappingFailCount + extentFailCount + iscsiTargetFailCount + failCount
 	if totalFailed > 0 {
 		fmt.Printf("\n⚠ %d resource(s) failed to delete\n", totalFailed)
 	}

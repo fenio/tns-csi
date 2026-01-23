@@ -167,10 +167,12 @@ func (s *NodeService) verifyDeviceHealthy(ctx context.Context, devicePath string
 
 // connectAndStageDevice connects to the NVMe-oF target and stages the device.
 // If the device doesn't appear after the first attempt, it will disconnect and retry.
+// Uses aggressive retry logic similar to democratic-csi to handle transient failures.
 func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string, datasetName string) (*csi.NodeStageVolumeResponse, error) {
 	const (
-		deviceWaitTimeout = 45 * time.Second // Wait up to 45s for device to appear
-		maxConnectRetries = 2                // Try up to 2 connect cycles
+		deviceWaitTimeout = 60 * time.Second // Wait up to 60s for device to appear (increased for reliability)
+		maxConnectRetries = 10               // Try up to 10 connect cycles (increased from 2 for reliability)
+		retryDelay        = 2 * time.Second  // Delay between retries
 	)
 
 	var lastErr error
@@ -183,7 +185,16 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 		if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
 			lastErr = connectErr
 			klog.Warningf("NVMe-oF connect attempt %d failed: %v", attempt, connectErr)
+			if attempt < maxConnectRetries {
+				time.Sleep(retryDelay)
+			}
 			continue
+		}
+
+		// Verify subsystem is registered with kernel before waiting for device
+		// This helps catch connection failures early
+		if !verifyNVMeSubsystemConnected(ctx, params.nqn) {
+			klog.V(4).Infof("Subsystem %s not yet visible after connect on attempt %d, will retry in waitForNVMeDevice", params.nqn, attempt)
 		}
 
 		// Wait for device to appear (NSID is always 1 with independent subsystems)
@@ -202,10 +213,10 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 			klog.Warningf("Failed to disconnect NVMe-oF after device wait failure: %v", disconnectErr)
 		}
 
-		// Small delay before retry to let things settle
+		// Delay before retry to let things settle
 		if attempt < maxConnectRetries {
-			klog.V(4).Infof("Waiting 3s before retry...")
-			time.Sleep(3 * time.Second)
+			klog.V(4).Infof("Waiting %v before retry...", retryDelay)
+			time.Sleep(retryDelay)
 		}
 	}
 

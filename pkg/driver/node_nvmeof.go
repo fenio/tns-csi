@@ -25,9 +25,15 @@ var (
 	ErrNVMeDeviceNotFound          = errors.New("NVMe device not found")
 	ErrNVMeDeviceUnhealthy         = errors.New("NVMe device exists but is unhealthy (zero size)")
 	ErrNVMeDeviceTimeout           = errors.New("timeout waiting for NVMe device to appear")
+	ErrNVMeSubsystemTimeout        = errors.New("timeout waiting for NVMe subsystem to become live")
 	ErrDeviceInitializationTimeout = errors.New("device failed to initialize - size remained zero or unreadable")
 	ErrNVMeControllerNotFound      = errors.New("could not extract NVMe controller path from device path")
 	ErrDeviceSizeMismatch          = errors.New("device size does not match expected capacity")
+)
+
+// NVMe subsystem states.
+const (
+	nvmeSubsystemStateLive = "live"
 )
 
 // defaultNVMeOFMountOptions are sensible defaults for NVMe-oF filesystem mounts.
@@ -167,21 +173,26 @@ func (s *NodeService) verifyDeviceHealthy(ctx context.Context, devicePath string
 
 // connectAndStageDevice connects to the NVMe-oF target and stages the device.
 // If the device doesn't appear after the first attempt, it will disconnect and retry.
-// Uses aggressive retry logic similar to democratic-csi to handle transient failures.
+// Uses aggressive retry logic similar to democratic-csi to handle transient failures:
+// 1. Connect to target
+// 2. Wait for subsystem state to become "live" (blocking)
+// 3. Wait for device path to appear
+// 4. Retry entire cycle if any step fails.
 func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string, datasetName string) (*csi.NodeStageVolumeResponse, error) {
 	const (
-		deviceWaitTimeout = 60 * time.Second // Wait up to 60s for device to appear (increased for reliability)
-		maxConnectRetries = 10               // Try up to 10 connect cycles (increased from 2 for reliability)
+		stateWaitTimeout  = 60 * time.Second // Wait for subsystem to become "live"
+		deviceWaitTimeout = 60 * time.Second // Wait for device path to appear
+		maxConnectRetries = 10               // Try up to 10 connect cycles
 		retryDelay        = 2 * time.Second  // Delay between retries
 	)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxConnectRetries; attempt++ {
 		if attempt > 1 {
-			klog.V(4).Infof("Retrying NVMe-oF connection (attempt %d/%d) for NQN: %s", attempt, maxConnectRetries, params.nqn)
+			klog.Infof("Retrying NVMe-oF connection (attempt %d/%d) for NQN: %s", attempt, maxConnectRetries, params.nqn)
 		}
 
-		// Connect to NVMe-oF target (this handles both new connections and retries)
+		// Step 1: Connect to NVMe-oF target
 		if connectErr := s.connectNVMeOFTarget(ctx, params); connectErr != nil {
 			lastErr = connectErr
 			klog.Warningf("NVMe-oF connect attempt %d failed: %v", attempt, connectErr)
@@ -191,16 +202,29 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 			continue
 		}
 
-		// Verify subsystem is registered with kernel before waiting for device
-		// This helps catch connection failures early
-		if !verifyNVMeSubsystemConnected(ctx, params.nqn) {
-			klog.V(4).Infof("Subsystem %s not yet visible after connect on attempt %d, will retry in waitForNVMeDevice", params.nqn, attempt)
+		// Step 2: Wait for subsystem to become "live" (critical for reliability)
+		// This is what democratic-csi does - it blocks until state == "live" before looking for devices
+		klog.V(4).Infof("Waiting for subsystem %s to become live...", params.nqn)
+		if stateErr := waitForSubsystemLive(ctx, params.nqn, stateWaitTimeout); stateErr != nil {
+			lastErr = stateErr
+			klog.Warningf("NVMe-oF subsystem %s did not become live on attempt %d: %v", params.nqn, attempt, stateErr)
+
+			// Disconnect before retry
+			if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
+				klog.Warningf("Failed to disconnect after subsystem state timeout: %v", disconnectErr)
+			}
+
+			if attempt < maxConnectRetries {
+				klog.V(4).Infof("Waiting %v before retry...", retryDelay)
+				time.Sleep(retryDelay)
+			}
+			continue
 		}
 
-		// Wait for device to appear (NSID is always 1 with independent subsystems)
+		// Step 3: Wait for device path to appear (NSID is always 1 with independent subsystems)
 		devicePath, err := s.waitForNVMeDevice(ctx, params.nqn, deviceWaitTimeout)
 		if err == nil {
-			klog.V(4).Infof("NVMe-oF device connected at %s (NQN: %s, dataset: %s) on attempt %d",
+			klog.Infof("NVMe-oF device connected at %s (NQN: %s, dataset: %s) on attempt %d",
 				devicePath, params.nqn, datasetName, attempt)
 			return s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 		}
@@ -395,29 +419,99 @@ func triggerUdevForNVMeSubsystem(ctx context.Context) {
 	}
 }
 
-// verifyNVMeSubsystemConnected verifies that an NVMe subsystem is connected using nvme list-subsys.
-// This is useful to confirm the kernel has registered the connection before looking for devices.
-func verifyNVMeSubsystemConnected(ctx context.Context, nqn string) bool {
+// getSubsystemState returns the connection state of an NVMe subsystem ("live", "connecting", etc.)
+// Returns empty string if subsystem not found or state cannot be determined.
+func getSubsystemState(ctx context.Context, nqn string) string {
 	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Use nvme list-subsys to get all connected subsystems
 	cmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		klog.V(4).Infof("nvme list-subsys failed: %v, output: %s", err, string(output))
-		return false
+		klog.V(4).Infof("nvme list-subsys failed: %v", err)
+		return ""
 	}
 
-	// Simple string search for the NQN in the output
-	// The JSON output contains "NQN" : "nqn.xxx" entries
-	if strings.Contains(string(output), nqn) {
-		klog.V(4).Infof("Verified NVMe subsystem %s is connected (found in nvme list-subsys)", nqn)
-		return true
+	// Parse the JSON to find the subsystem and its state
+	// Look for the NQN and then find the State field in the same subsystem block
+	lines := strings.Split(string(output), "\n")
+	foundNQN := false
+	for _, line := range lines {
+		if strings.Contains(line, nqn) {
+			foundNQN = true
+		}
+		// Once we found the NQN, look for the State field
+		if foundNQN && strings.Contains(line, "\"State\"") {
+			// Extract state value: "State" : "live"
+			parts := strings.Split(line, "\"")
+			for i, part := range parts {
+				if part == "State" && i+2 < len(parts) {
+					state := strings.TrimSpace(parts[i+2])
+					klog.V(4).Infof("Subsystem %s state: %s", nqn, state)
+					return state
+				}
+			}
+		}
+		// Stop if we hit the next subsystem (next NQN)
+		if foundNQN && strings.Contains(line, "\"NQN\"") && !strings.Contains(line, nqn) {
+			break
+		}
 	}
 
-	klog.V(4).Infof("NVMe subsystem %s not yet visible in nvme list-subsys", nqn)
-	return false
+	if foundNQN {
+		klog.V(4).Infof("Found NQN %s but could not extract state", nqn)
+	}
+	return ""
+}
+
+// waitForSubsystemLive waits for the NVMe subsystem to reach "live" state.
+// This is critical because even after nvme connect succeeds, the subsystem may not
+// be immediately ready for device operations. Democratic-csi uses this pattern.
+func waitForSubsystemLive(ctx context.Context, nqn string, timeout time.Duration) error {
+	const (
+		pollInterval = 2 * time.Second
+		maxAttempts  = 30 // 30 × 2s = 60s max
+	)
+
+	klog.V(4).Infof("Waiting for NVMe subsystem %s to reach 'live' state (timeout: %v)", nqn, timeout)
+
+	deadline := time.Now().Add(timeout)
+	attempt := 0
+
+	for time.Now().Before(deadline) && attempt < maxAttempts {
+		attempt++
+
+		state := getSubsystemState(ctx, nqn)
+		if state == nvmeSubsystemStateLive {
+			klog.V(4).Infof("NVMe subsystem %s is now live after %d attempts", nqn, attempt)
+			return nil
+		}
+
+		if state != "" {
+			klog.V(4).Infof("NVMe subsystem %s state is '%s', waiting for 'live' (attempt %d/%d)", nqn, state, attempt, maxAttempts)
+		} else {
+			klog.V(4).Infof("NVMe subsystem %s not yet visible in nvme list-subsys (attempt %d/%d)", nqn, attempt, maxAttempts)
+		}
+
+		// Trigger udev periodically to help device enumeration
+		if attempt%5 == 0 {
+			triggerUdevForNVMeSubsystem(ctx)
+		}
+
+		select {
+		case <-time.After(pollInterval):
+		case <-ctx.Done():
+			return fmt.Errorf("context canceled while waiting for subsystem %s to become live: %w", nqn, ctx.Err())
+		}
+	}
+
+	// Final state check
+	finalState := getSubsystemState(ctx, nqn)
+	if finalState == nvmeSubsystemStateLive {
+		return nil
+	}
+
+	return fmt.Errorf("%w: NQN=%s, last state=%q, attempts=%d", ErrNVMeSubsystemTimeout, nqn, finalState, attempt)
 }
 
 // waitForDeviceInitialization waits for an NVMe device to be fully initialized.
@@ -833,28 +927,18 @@ func (s *NodeService) forceNamespaceRescan(ctx context.Context, controllerPath s
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
 // With independent subsystems, NSID is always 1.
+// Note: This should be called AFTER waitForSubsystemLive() has confirmed the subsystem is "live".
 func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout time.Duration) (string, error) {
+	const pollInterval = 2 * time.Second // Match democratic-csi polling interval
+
 	deadline := time.Now().Add(timeout)
 	attempt := 0
-	subsystemVerified := false
 	lastControllerFound := ""
+
+	klog.V(4).Infof("Waiting for NVMe device for NQN %s (timeout: %v)", nqn, timeout)
 
 	for time.Now().Before(deadline) {
 		attempt++
-
-		// First, verify the subsystem is registered with the kernel (using nvme list-subsys)
-		// This helps diagnose issues where nvme connect succeeded but the subsystem isn't visible
-		if !subsystemVerified {
-			if verifyNVMeSubsystemConnected(ctx, nqn) {
-				subsystemVerified = true
-				klog.V(4).Infof("NVMe subsystem %s verified as connected on attempt %d", nqn, attempt)
-			} else if attempt%5 == 0 {
-				// Every 5 attempts, log that we're still waiting for subsystem
-				klog.V(4).Infof("Still waiting for NVMe subsystem %s to appear in kernel (attempt %d)", nqn, attempt)
-				// Re-trigger udev in case it missed the initial events
-				triggerUdevForNVMeSubsystem(ctx)
-			}
-		}
 
 		devicePath, controllerName, err := s.findNVMeDeviceByNQNWithController(ctx, nqn)
 		switch {
@@ -863,40 +947,47 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 			// This prevents returning a device that exists but isn't functional yet
 			if _, statErr := os.Stat(devicePath); statErr == nil {
 				if s.isDeviceHealthy(ctx, devicePath) {
-					klog.V(4).Infof("NVMe device found and healthy at %s after %d attempts (subsystem verified: %v)", devicePath, attempt, subsystemVerified)
+					klog.Infof("NVMe device found and healthy at %s after %d attempts", devicePath, attempt)
 					return devicePath, nil
 				}
 				klog.V(4).Infof("Device %s exists but reports zero size, waiting for initialization (attempt %d)", devicePath, attempt)
+				// Force rescan to help with initialization
+				if controllerName != "" && attempt%2 == 0 {
+					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
+				}
 			} else if controllerName != "" {
 				// Device path doesn't exist but we found the controller - try ns-rescan
 				if controllerName != lastControllerFound {
 					klog.V(4).Infof("Found controller %s for NQN %s but device %s doesn't exist, forcing ns-rescan", controllerName, nqn, devicePath)
 					lastControllerFound = controllerName
 				}
-				// Aggressively rescan every 3 attempts when controller is found but device isn't
-				if attempt%3 == 0 {
-					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
-				}
+				// Aggressively rescan every attempt when controller is found but device isn't
+				s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
 			}
 		case errors.Is(err, ErrNVMeDeviceUnhealthy):
-			// Device found but unhealthy - this is expected for freshly connected devices
-			// that are still initializing. Keep waiting without disconnecting.
+			// Device found but unhealthy - keep waiting, force rescan
 			klog.V(4).Infof("NVMe device found but still initializing (unhealthy), waiting... (attempt %d, path: %s)", attempt, devicePath)
-		case subsystemVerified && attempt%5 == 0:
-			// Subsystem verified but can't find device - do diagnostic dump
-			s.logNVMeDiscoveryDiagnostics(ctx, nqn)
+			if controllerName := extractNVMeController(devicePath); controllerName != "" {
+				s.forceNamespaceRescan(ctx, controllerName)
+			}
+		default:
+			// Can't find device - do diagnostic dump every 5 attempts
+			if attempt%5 == 0 {
+				s.logNVMeDiscoveryDiagnostics(ctx, nqn)
+			}
 		}
-		time.Sleep(1 * time.Second)
+
+		select {
+		case <-time.After(pollInterval):
+		case <-ctx.Done():
+			return "", fmt.Errorf("context canceled while waiting for NVMe device: %w", ctx.Err())
+		}
 	}
 
 	// Final diagnostic dump before failing
 	s.logNVMeDiscoveryDiagnostics(ctx, nqn)
 
-	// Provide detailed error message for debugging
-	if !subsystemVerified {
-		return "", fmt.Errorf("%w after %d attempts (subsystem %s never appeared in nvme list-subsys - kernel may not have registered the connection)", ErrNVMeDeviceTimeout, attempt, nqn)
-	}
-	return "", fmt.Errorf("%w after %d attempts (subsystem was connected but device path not found in sysfs)", ErrNVMeDeviceTimeout, attempt)
+	return "", fmt.Errorf("%w after %d attempts (NQN: %s, timeout: %v)", ErrNVMeDeviceTimeout, attempt, nqn, timeout)
 }
 
 // findNVMeDeviceByNQNWithController finds NVMe device and returns both device path and controller name.

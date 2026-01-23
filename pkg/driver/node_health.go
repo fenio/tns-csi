@@ -149,8 +149,8 @@ func (s *NodeService) checkNVMeOFHealth(ctx context.Context, volumePath string) 
 	if err != nil {
 		klog.V(4).Infof("Failed to get NVMe controller state: %v", err)
 		// Don't fail health check if we can't read controller state
-	} else if ctrlState != "live" {
-		return Unhealthy(fmt.Sprintf("NVMe controller state is %q (expected: live)", ctrlState))
+	} else if ctrlState != nvmeSubsystemStateLive {
+		return Unhealthy(fmt.Sprintf("NVMe controller state is %q (expected: %s)", ctrlState, nvmeSubsystemStateLive))
 	}
 
 	return Healthy()

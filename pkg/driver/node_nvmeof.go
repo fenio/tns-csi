@@ -422,7 +422,7 @@ func triggerUdevForNVMeSubsystem(ctx context.Context) {
 // getSubsystemState returns the connection state of an NVMe subsystem ("live", "connecting", etc.)
 // Returns empty string if subsystem not found or state cannot be determined.
 func getSubsystemState(ctx context.Context, nqn string) string {
-	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	cmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
@@ -758,7 +758,7 @@ func (s *NodeService) findNVMeDeviceByNQN(ctx context.Context, nqn string) (stri
 
 // runNVMeListSubsys executes nvme list-subsys and returns the output.
 func (s *NodeService) runNVMeListSubsys(ctx context.Context) ([]byte, error) {
-	listCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	subsysCmd := exec.CommandContext(listCtx, "nvme", "list-subsys", "-o", "json")
 	return subsysCmd.CombinedOutput()
@@ -907,6 +907,7 @@ func (s *NodeService) findNVMeDeviceByNQNFromSys(ctx context.Context, nqn string
 }
 
 // forceNamespaceRescan forces the kernel to rescan namespaces on an NVMe controller.
+// This is a lightweight version that just does ns-rescan without full udev processing.
 func (s *NodeService) forceNamespaceRescan(ctx context.Context, controllerPath string) {
 	rescanCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -920,9 +921,8 @@ func (s *NodeService) forceNamespaceRescan(ctx context.Context, controllerPath s
 	} else {
 		klog.V(4).Infof("nvme ns-rescan completed for %s", controllerPath)
 	}
-
-	// Also trigger udev after rescan
-	triggerUdevForNVMeSubsystem(ctx)
+	// Note: Don't call triggerUdevForNVMeSubsystem here - it's too slow (10s+ settle)
+	// udev trigger is done periodically in waitForNVMeDevice instead
 }
 
 // waitForNVMeDevice waits for the NVMe device to appear after connection.
@@ -951,8 +951,8 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 					return devicePath, nil
 				}
 				klog.V(4).Infof("Device %s exists but reports zero size, waiting for initialization (attempt %d)", devicePath, attempt)
-				// Force rescan to help with initialization
-				if controllerName != "" && attempt%2 == 0 {
+				// Force rescan periodically to help with initialization (every 5 attempts)
+				if controllerName != "" && attempt%5 == 0 {
 					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
 				}
 			} else if controllerName != "" {
@@ -960,21 +960,31 @@ func (s *NodeService) waitForNVMeDevice(ctx context.Context, nqn string, timeout
 				if controllerName != lastControllerFound {
 					klog.V(4).Infof("Found controller %s for NQN %s but device %s doesn't exist, forcing ns-rescan", controllerName, nqn, devicePath)
 					lastControllerFound = controllerName
+					// First time seeing this controller - do immediate rescan
+					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
+				} else if attempt%5 == 0 {
+					// Periodic rescan every 5 attempts
+					s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
 				}
-				// Aggressively rescan every attempt when controller is found but device isn't
-				s.forceNamespaceRescan(ctx, "/dev/"+controllerName)
 			}
 		case errors.Is(err, ErrNVMeDeviceUnhealthy):
-			// Device found but unhealthy - keep waiting, force rescan
+			// Device found but unhealthy - keep waiting, periodic rescan
 			klog.V(4).Infof("NVMe device found but still initializing (unhealthy), waiting... (attempt %d, path: %s)", attempt, devicePath)
-			if controllerName := extractNVMeController(devicePath); controllerName != "" {
-				s.forceNamespaceRescan(ctx, controllerName)
+			if attempt%5 == 0 {
+				if ctrl := extractNVMeController(devicePath); ctrl != "" {
+					s.forceNamespaceRescan(ctx, ctrl)
+				}
 			}
 		default:
-			// Can't find device - do diagnostic dump every 5 attempts
-			if attempt%5 == 0 {
+			// Can't find device - do diagnostic dump every 10 attempts
+			if attempt%10 == 0 {
 				s.logNVMeDiscoveryDiagnostics(ctx, nqn)
 			}
+		}
+
+		// Trigger full udev processing periodically (every 10 attempts) to help enumeration
+		if attempt%10 == 0 {
+			triggerUdevForNVMeSubsystem(ctx)
 		}
 
 		select {

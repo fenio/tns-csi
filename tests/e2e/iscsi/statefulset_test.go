@@ -79,12 +79,12 @@ var _ = Describe("iSCSI StatefulSet", func() {
 			})
 		}
 
-		By("Waiting for all pods to be ready")
+		By("Waiting for all PODs to be ready")
 		// iSCSI uses WaitForFirstConsumer, so PVCs bind when pods are scheduled
 		err = f.K8s.WaitForStatefulSetReady(ctx, stsName, replicas, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Verifying each pod has unique PVC bound")
+		By("Verifying each POD has unique PVC bound")
 		for i := range replicas {
 			pvcName := f.K8s.GetStatefulSetPVCName(stsName, volumeName, int(i))
 			pvc, pvcErr := f.K8s.GetPVC(ctx, pvcName)
@@ -126,7 +126,7 @@ var _ = Describe("iSCSI StatefulSet", func() {
 		// Give system time to settle after pod deletion (iSCSI device cleanup)
 		time.Sleep(5 * time.Second)
 
-		By("Verifying remaining pods retained their data")
+		By("Verifying remaining PODs retained their data")
 		for i := range newReplicas {
 			podName := f.K8s.GetStatefulSetPodName(stsName, int(i))
 			output, execErr := f.K8s.ExecInPod(ctx, podName, []string{"cat", "/data/replica-data.txt"})
@@ -135,7 +135,7 @@ var _ = Describe("iSCSI StatefulSet", func() {
 				fmt.Sprintf("Pod %s should retain data after scale down", podName))
 		}
 
-		By("Verifying PVC for scaled-down pod is retained")
+		By("Verifying PVC for scaled-down POD is retained")
 		scaledDownPVC := f.K8s.GetStatefulSetPVCName(stsName, volumeName, int(replicas-1))
 		pvc, err := f.K8s.GetPVC(ctx, scaledDownPVC)
 		Expect(err).NotTo(HaveOccurred())
@@ -150,13 +150,13 @@ var _ = Describe("iSCSI StatefulSet", func() {
 		err = f.K8s.WaitForPodReady(ctx, scaledUpPod, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Verifying scaled-up pod reattached to original volume with preserved data")
+		By("Verifying scaled-up POD reattached to original volume with preserved data")
 		output, err := f.K8s.ExecInPod(ctx, scaledUpPod, []string{"cat", "/data/pod-identity.txt"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(output).To(ContainSubstring("Pod: "+scaledUpPod),
 			"Scaled-up pod should reattach to original volume")
 
-		By("Testing rolling update - deleting pod and waiting for recreation")
+		By("Testing rolling update - deleting POD and waiting for recreation")
 		testPod := f.K8s.GetStatefulSetPodName(stsName, 1)
 		err = f.K8s.DeletePod(ctx, testPod)
 		Expect(err).NotTo(HaveOccurred())
@@ -165,7 +165,7 @@ var _ = Describe("iSCSI StatefulSet", func() {
 		err = f.K8s.WaitForPodReady(ctx, testPod, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Verifying recreated pod has original data")
+		By("Verifying recreated POD has original data")
 		output, err = f.K8s.ExecInPod(ctx, testPod, []string{"cat", "/data/replica-data.txt"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(output).To(Equal("Unique data for replica 1"),

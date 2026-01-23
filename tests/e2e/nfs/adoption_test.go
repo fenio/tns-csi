@@ -90,7 +90,7 @@ var _ = Describe("NFS Volume Adoption", func() {
 			GinkgoWriter.Printf("Expected NFS share path on TrueNAS: %s\n", nfsSharePath)
 		}
 
-		By("Creating a pod to write test data")
+		By("Creating a POD to write test data")
 		podName := "test-pod-adoption"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
@@ -100,7 +100,7 @@ var _ = Describe("NFS Volume Adoption", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pod).NotTo(BeNil())
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -111,7 +111,7 @@ var _ = Describe("NFS Volume Adoption", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting the pod")
+		By("Deleting the POD")
 		err = f.K8s.DeletePod(ctx, podName)
 		Expect(err).NotTo(HaveOccurred())
 		err = f.K8s.WaitForPodDeleted(ctx, podName, deleteTimeout)
@@ -226,7 +226,7 @@ var _ = Describe("NFS Volume Adoption", func() {
 		// will create a new volume (not adopt the orphaned one) unless the csi_volume_name
 		// matches. This is expected behavior - adoption requires matching names.
 
-		By("Creating a pod to verify the new volume")
+		By("Creating a POD to verify the new volume")
 		adoptedPodName := "test-pod-adopted"
 		adoptedPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      adoptedPodName,
@@ -236,7 +236,7 @@ var _ = Describe("NFS Volume Adoption", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(adoptedPod).NotTo(BeNil())
 
-		By("Waiting for adopted pod to be ready")
+		By("Waiting for adopted POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, adoptedPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 

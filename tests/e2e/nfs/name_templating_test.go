@@ -82,15 +82,15 @@ var _ = Describe("Name Templating", func() {
 			GinkgoWriter.Printf("Expected pattern: %s\n", expectedPattern)
 		}
 
-		By("Creating test pod to verify volume works")
+		By("Creating test POD to verify volume works")
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      "name-template-pod-nfs",
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 

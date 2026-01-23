@@ -137,7 +137,7 @@ var _ = Describe("Shared Encryption", func() {
 					return f.K8s.DeletePod(ctx, podName)
 				})
 
-				By(fmt.Sprintf("Testing %s: Waiting for pod to be ready", proto.name))
+				By(fmt.Sprintf("Testing %s: Waiting for POD to be ready", proto.name))
 				err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -195,7 +195,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod and writing initial data")
+			By("Creating POD and writing initial data")
 			podName := "encrypted-snap-pod-" + proto.id
 			pod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
@@ -245,7 +245,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod to verify restored data")
+			By("Creating POD to verify restored data")
 			restoredPodName := "encrypted-restored-pod-" + proto.id
 			restoredPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      restoredPodName,
@@ -308,7 +308,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod and writing initial data")
+			By("Creating POD and writing initial data")
 			podName := "encrypted-snap-pod-" + proto.id
 			pod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
@@ -340,7 +340,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, 3*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting source pod before restore (NVMe-oF ReadWriteOnce)")
+			By("Deleting source POD before restore (NVMe-oF ReadWriteOnce)")
 			err = f.K8s.DeletePod(ctx, pod.Name)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, proto.podTimeout)
@@ -358,7 +358,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod to verify restored data")
+			By("Creating POD to verify restored data")
 			restoredPodName := "encrypted-restored-pod-" + proto.id
 			restoredPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      restoredPodName,
@@ -416,7 +416,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod and writing initial data")
+			By("Creating POD and writing initial data")
 			podName := "encrypted-snap-pod-" + proto.id
 			pod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
@@ -448,7 +448,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, 3*time.Minute)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting source pod before restore (iSCSI ReadWriteOnce)")
+			By("Deleting source POD before restore (iSCSI ReadWriteOnce)")
 			err = f.K8s.DeletePod(ctx, pod.Name)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, proto.podTimeout)
@@ -466,7 +466,7 @@ var _ = Describe("Shared Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, proto.pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod to verify restored data")
+			By("Creating POD to verify restored data")
 			restoredPodName := "encrypted-restored-pod-" + proto.id
 			restoredPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      restoredPodName,

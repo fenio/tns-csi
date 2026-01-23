@@ -86,7 +86,7 @@ var _ = Describe("iSCSI Delete Strategy Retain", func() {
 		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
 		GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
 
-		By("Creating a pod to verify volume works")
+		By("Creating a POD to verify volume works")
 		podName := "test-pod-retain"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
@@ -96,7 +96,7 @@ var _ = Describe("iSCSI Delete Strategy Retain", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pod).NotTo(BeNil())
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -107,7 +107,7 @@ var _ = Describe("iSCSI Delete Strategy Retain", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting the pod")
+		By("Deleting the POD")
 		err = f.K8s.DeletePod(ctx, podName)
 		Expect(err).NotTo(HaveOccurred())
 		err = f.K8s.WaitForPodDeleted(ctx, podName, deleteTimeout)

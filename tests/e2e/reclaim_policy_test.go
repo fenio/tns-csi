@@ -95,16 +95,16 @@ var _ = Describe("Reclaim Policy", func() {
 			})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC")
 
-			By("Creating pod to trigger volume provisioning")
+			By("Creating POD to trigger volume provisioning")
 			podName := "reclaim-delete-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
 				MountPath: "/data",
 			})
-			Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+			Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
 			Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
@@ -121,7 +121,7 @@ var _ = Describe("Reclaim Policy", func() {
 				GinkgoWriter.Printf("[%s] PV created: %s\n", proto.name, pvName)
 			}
 
-			By("Deleting pod")
+			By("Deleting POD")
 			err = f.K8s.DeletePod(ctx, pod.Name)
 			Expect(err).NotTo(HaveOccurred(), "Failed to delete pod")
 			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, 2*time.Minute)
@@ -171,16 +171,16 @@ var _ = Describe("Reclaim Policy", func() {
 			})
 			Expect(err).NotTo(HaveOccurred(), "Failed to create PVC")
 
-			By("Creating pod to trigger volume provisioning")
+			By("Creating POD to trigger volume provisioning")
 			podName := "reclaim-retain-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
 				MountPath: "/data",
 			})
-			Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+			Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
 			Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
@@ -197,7 +197,7 @@ var _ = Describe("Reclaim Policy", func() {
 				GinkgoWriter.Printf("[%s] PV created: %s\n", proto.name, pvName)
 			}
 
-			By("Deleting pod")
+			By("Deleting POD")
 			err = f.K8s.DeletePod(ctx, pod.Name)
 			Expect(err).NotTo(HaveOccurred(), "Failed to delete pod")
 			err = f.K8s.WaitForPodDeleted(ctx, pod.Name, 2*time.Minute)

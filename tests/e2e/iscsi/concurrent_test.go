@@ -42,7 +42,7 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 		}
 	})
 
-	It("should handle concurrent PVC+Pod creation without race conditions", func() {
+	It("should handle concurrent PVC+POD creation without race conditions", func() {
 		// iSCSI uses WaitForFirstConsumer, so we need to create pods
 		// along with PVCs to trigger binding
 		pvcNames := make([]string, numVolumes)
@@ -107,10 +107,10 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 			})
 		}
 
-		By("Waiting for all pods to be ready (triggers PVC binding)")
+		By("Waiting for all PODs to be ready (triggers PVC binding)")
 		for _, podName := range podNames {
 			err := f.K8s.WaitForPodReady(ctx, podName, podTimeout)
-			Expect(err).NotTo(HaveOccurred(), "Pod %s should become ready", podName)
+			Expect(err).NotTo(HaveOccurred(), "POD %s should become ready", podName)
 		}
 
 		By("Waiting for all PVCs to become Bound")
@@ -158,7 +158,7 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 		}
 	})
 
-	It("should handle sequential pod failover on same PVC", func() {
+	It("should handle sequential POD failover on same PVC", func() {
 		// iSCSI uses ReadWriteOnce, so only one pod can access at a time
 		// This test verifies data persists across pod recreation
 		const pvcName = "failover-pvc-iscsi"
@@ -176,7 +176,7 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc).NotTo(BeNil())
 
-		By("Creating original pod")
+		By("Creating original POD")
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      originalPodName,
 			PVCName:   pvcName,
@@ -185,28 +185,28 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pod).NotTo(BeNil())
 
-		By("Waiting for original pod to be ready")
+		By("Waiting for original POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, originalPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Writing data from original pod")
+		By("Writing to POD")
 		_, err = f.K8s.ExecInPod(ctx, originalPodName, []string{
 			"sh", "-c", fmt.Sprintf("echo '%s' > /data/test.txt && sync", testData),
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting original pod (simulating failover)")
+		By("Deleting original POD (simulating failover)")
 		err = f.K8s.DeletePod(ctx, originalPodName)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Waiting for original pod to be deleted")
+		By("Waiting for original POD to be deleted")
 		err = f.K8s.WaitForPodDeleted(ctx, originalPodName, 120*time.Second)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Give time for volume to detach
 		time.Sleep(10 * time.Second)
 
-		By("Creating new pod to access the same PVC")
+		By("Creating new POD to access the same PVC")
 		newPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 			Name:      newPodName,
 			PVCName:   pvcName,
@@ -220,24 +220,24 @@ var _ = Describe("iSCSI Concurrent Operations", func() {
 			return f.K8s.DeletePod(ctx, newPodName)
 		})
 
-		By("Waiting for new pod to be ready")
+		By("Waiting for new POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, newPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Verifying data persisted across pod failover")
+		By("Verifying data persisted across POD failover")
 		output, err := f.K8s.ExecInPod(ctx, newPodName, []string{"cat", "/data/test.txt"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(output).To(Equal(testData), "Data should persist across pod failover")
+		Expect(output).To(Equal(testData), "Data should persist across POD failover")
 
-		By("Writing additional data from new pod")
+		By("Writing to POD")
 		_, err = f.K8s.ExecInPod(ctx, newPodName, []string{
-			"sh", "-c", "echo 'Data from new pod' >> /data/test.txt && sync",
+			"sh", "-c", "echo 'Data from new POD' >> /data/test.txt && sync",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Verifying new data was written")
 		output, err = f.K8s.ExecInPod(ctx, newPodName, []string{"cat", "/data/test.txt"})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(output).To(ContainSubstring("Data from new pod"))
+		Expect(output).To(ContainSubstring("Data from new POD"))
 	})
 })

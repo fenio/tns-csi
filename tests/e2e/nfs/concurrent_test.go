@@ -120,7 +120,7 @@ var _ = Describe("NFS Concurrent Operations", func() {
 			pvcName := pvcNames[idx]
 			podName := fmt.Sprintf("test-pod-%d", idx+1)
 
-			By("Creating test pod for PVC " + pvcName)
+			By("Creating test POD for PVC " + pvcName)
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvcName,
@@ -129,7 +129,7 @@ var _ = Describe("NFS Concurrent Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(pod).NotTo(BeNil())
 
-			By(fmt.Sprintf("Waiting for pod %s to be ready", podName))
+			By(fmt.Sprintf("Waiting for POD %s to be ready", podName))
 			err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -146,7 +146,7 @@ var _ = Describe("NFS Concurrent Operations", func() {
 		}
 	})
 
-	It("should handle concurrent pod creation on same PVC (ReadWriteMany)", func() {
+	It("should handle concurrent POD creation on same PVC (ReadWriteMany)", func() {
 		const sharedPVCName = "shared-rwx-pvc"
 		const numPods = 3
 
@@ -199,13 +199,13 @@ var _ = Describe("NFS Concurrent Operations", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		By("Waiting for all pods to be ready")
+		By("Waiting for all PODs to be ready")
 		for _, podName := range podNames {
 			err := f.K8s.WaitForPodReady(ctx, podName, podTimeout)
-			Expect(err).NotTo(HaveOccurred(), "Pod %s should become ready", podName)
+			Expect(err).NotTo(HaveOccurred(), "POD %s should become ready", podName)
 		}
 
-		By("Testing concurrent writes from different pods")
+		By("Testing concurrent writes from different PODs")
 		var writeWg sync.WaitGroup
 		for i, podName := range podNames {
 			writeWg.Add(1)
@@ -223,7 +223,7 @@ var _ = Describe("NFS Concurrent Operations", func() {
 		}
 		writeWg.Wait()
 
-		By("Verifying all pods can read all files")
+		By("Verifying all PODs can read all files")
 		for _, readerPod := range podNames {
 			for i := range numPods {
 				fileName := fmt.Sprintf("/data/pod%d.txt", i+1)

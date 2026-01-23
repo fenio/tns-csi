@@ -38,7 +38,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 	})
 
 	Context("ReadWriteOnce (RWO)", func() {
-		It("should allow single pod to mount and use the block volume", func() {
+		It("should allow single POD to mount and use the block volume", func() {
 			By("Creating a RWO PVC with iSCSI")
 			pvcName := "iscsi-rwo"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -53,7 +53,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePVC(ctx, pvcName)
 			})
 
-			By("Creating a pod to mount the volume (triggers binding)")
+			By("Creating a POD to mount the volume (triggers binding)")
 			podName := "rwo-test-pod"
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
@@ -66,7 +66,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePod(ctx, podName)
 			})
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -88,7 +88,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 	})
 
 	Context("ReadWriteOncePod (RWOP)", func() {
-		It("should allow single pod exclusive access to the volume", func() {
+		It("should allow single POD exclusive access to the volume", func() {
 			By("Creating a RWOP PVC with iSCSI")
 			pvcName := "iscsi-rwop"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -103,7 +103,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePVC(ctx, pvcName)
 			})
 
-			By("Creating a pod to mount the RWOP volume")
+			By("Creating a POD to mount the RWOP volume")
 			pod1Name := "rwop-test-pod-1"
 			pod1, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod1Name,
@@ -116,7 +116,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod1Name)
 			})
 
-			By("Waiting for first pod to be ready")
+			By("Waiting for first POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod1Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -131,7 +131,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Attempting to create a second pod with the same RWOP volume")
+			By("Attempting to create a second POD with the same RWOP volume")
 			pod2Name := "rwop-violation-pod"
 			_, err = f.K8s.CreatePod(ctx, framework.PodOptions{
 				Name:      pod2Name,
@@ -143,29 +143,29 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod2Name)
 			})
 
-			By("Waiting to see if second pod gets blocked")
+			By("Waiting to see if second POD gets blocked")
 			// The second pod should remain in Pending state because RWOP enforces single-pod access
 			time.Sleep(15 * time.Second)
 
-			By("Checking second pod status")
+			By("Checking second POD status")
 			pod2, err := f.K8s.GetPod(ctx, pod2Name)
 			Expect(err).NotTo(HaveOccurred())
 
 			// RWOP should keep the second pod in Pending state
 			Expect(pod2.Status.Phase).To(Equal(corev1.PodPending),
-				"Second pod should be blocked from mounting RWOP volume")
+				"Second POD should be blocked from mounting RWOP volume")
 
-			By("Verifying first pod still has exclusive access")
+			By("Verifying first POD still has exclusive access")
 			output, err := f.K8s.ExecInPod(ctx, pod1Name, []string{"cat", "/data/exclusive.txt"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal(testData), "First pod should still have access to data")
+			Expect(output).To(Equal(testData), "First POD should still have access to data")
 
-			By("Deleting the violating pod")
+			By("Deleting the violating POD")
 			err = f.K8s.DeletePod(ctx, pod2Name)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should allow second pod access after first pod is deleted", func() {
+		It("should allow second POD access after first POD is deleted", func() {
 			By("Creating a RWOP PVC with iSCSI")
 			pvcName := "iscsi-rwop-succession"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -180,7 +180,7 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePVC(ctx, pvcName)
 			})
 
-			By("Creating first pod to mount the RWOP volume")
+			By("Creating first POD to mount the RWOP volume")
 			pod1Name := "rwop-first-pod"
 			_, err = f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod1Name,
@@ -192,24 +192,24 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod1Name)
 			})
 
-			By("Waiting for first pod to be ready")
+			By("Waiting for first POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod1Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Writing data from first pod")
+			By("Writing to POD")
 			testData := "Data from first pod"
 			_, err = f.K8s.ExecInPod(ctx, pod1Name, []string{
 				"sh", "-c", "echo '" + testData + "' > /data/succession.txt && sync",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting first pod")
+			By("Deleting first POD")
 			err = f.K8s.DeletePod(ctx, pod1Name)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodDeleted(ctx, pod1Name, 120*time.Second)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating second pod to mount the same RWOP volume")
+			By("Creating second POD to mount the same RWOP volume")
 			pod2Name := "rwop-second-pod"
 			_, err = f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod2Name,
@@ -221,23 +221,23 @@ var _ = Describe("iSCSI Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod2Name)
 			})
 
-			By("Waiting for second pod to be ready")
+			By("Waiting for second POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod2Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying second pod can read data written by first pod")
+			By("Verifying second POD can read data written by first pod")
 			output, err := f.K8s.ExecInPod(ctx, pod2Name, []string{"cat", "/data/succession.txt"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal(testData), "Second pod should see data from first pod")
+			Expect(output).To(Equal(testData), "Second POD should see data from first pod")
 
-			By("Writing new data from second pod")
+			By("Writing to POD")
 			newData := "Data from second pod"
 			_, err = f.K8s.ExecInPod(ctx, pod2Name, []string{
 				"sh", "-c", "echo '" + newData + "' > /data/new-data.txt && sync",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying second pod write succeeded")
+			By("Verifying second POD write succeeded")
 			output, err = f.K8s.ExecInPod(ctx, pod2Name, []string{"cat", "/data/new-data.txt"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal(newData))

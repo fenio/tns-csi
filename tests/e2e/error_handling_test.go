@@ -292,7 +292,7 @@ var _ = Describe("Error Handling", func() {
 			strings.Contains(logs, "runtime error:")
 		Expect(hasCriticalError).To(BeFalse(), "Controller should not have critical errors")
 
-		By("Verifying controller pod is still running")
+		By("Verifying controller POD is still running")
 		// If we can get logs, the pod is running
 		if f.Verbose() {
 			GinkgoWriter.Printf("Controller is healthy - no panics or crashes detected\n")

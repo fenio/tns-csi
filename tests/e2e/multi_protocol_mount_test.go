@@ -32,7 +32,7 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		}
 	})
 
-	It("should mount NFS, NVMe-oF, and iSCSI volumes in a single pod", func() {
+	It("should mount NFS, NVMe-oF, and iSCSI volumes in a single POD", func() {
 		ctx := context.Background()
 
 		By("Creating an NFS PVC")
@@ -75,14 +75,14 @@ var _ = Describe("Multi-Protocol Mount", func() {
 			return f.K8s.DeletePVC(context.Background(), pvcISCSI.Name)
 		})
 
-		By("Creating a pod with all three volumes mounted")
+		By("Creating a POD with all three volumes mounted")
 		pod, err := createMultiMountPod(ctx, f, "multi-mount-pod", pvcNFS.Name, pvcNVMe.Name, pvcISCSI.Name)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create multi-mount pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create multi-mount POD")
 		f.Cleanup.Add(func() error {
 			return f.K8s.DeletePod(context.Background(), pod.Name)
 		})
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		// Block protocols have longer timeout due to WaitForFirstConsumer binding
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 6*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")

@@ -67,7 +67,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod")
+			By("Creating POD")
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-pod-basic",
 				PVCName:   pvc.Name,
@@ -75,7 +75,7 @@ var _ = Describe("NFS Encryption", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -136,7 +136,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod and verifying I/O")
+			By("Creating POD and verifying I/O")
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-pod-aes128",
 				PVCName:   pvc.Name,
@@ -190,7 +190,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod")
+			By("Creating POD")
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-pod-expand",
 				PVCName:   pvc.Name,
@@ -274,7 +274,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod and writing data")
+			By("Creating POD and writing data")
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-snapshot-pod",
 				PVCName:   pvc.Name,
@@ -314,7 +314,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod to verify restored data")
+			By("Creating POD to verify restored data")
 			restoredPod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-restored-pod",
 				PVCName:   restoredPVCName,
@@ -363,7 +363,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, sourcePVC.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating source pod and writing data")
+			By("Creating source POD and writing data")
 			sourcePod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-clone-source-pod",
 				PVCName:   sourcePVC.Name,
@@ -391,7 +391,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, clonePVCName, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating pod to verify cloned data")
+			By("Creating POD to verify cloned data")
 			clonePod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-clone-pod",
 				PVCName:   clonePVCName,
@@ -421,7 +421,7 @@ var _ = Describe("NFS Encryption", func() {
 	})
 
 	Context("Persistence", func() {
-		It("should persist data across pod restart", func() {
+		It("should persist data across POD restart", func() {
 			ctx := context.Background()
 
 			By("Creating encrypted StorageClass")
@@ -451,7 +451,7 @@ var _ = Describe("NFS Encryption", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvc.Name, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating first pod and writing data")
+			By("Creating first POD and writing data")
 			pod1, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-persist-pod1",
 				PVCName:   pvc.Name,
@@ -468,13 +468,13 @@ var _ = Describe("NFS Encryption", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Deleting first pod")
+			By("Deleting first POD")
 			err = f.K8s.DeletePod(ctx, pod1.Name)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodDeleted(ctx, pod1.Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating second pod")
+			By("Creating second POD")
 			pod2, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      "encrypted-nfs-persist-pod2",
 				PVCName:   pvc.Name,

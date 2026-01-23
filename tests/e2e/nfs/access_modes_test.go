@@ -38,7 +38,7 @@ var _ = Describe("NFS Access Modes", func() {
 	})
 
 	Context("ReadWriteMany (RWX)", func() {
-		It("should allow multiple pods to mount the same volume concurrently", func() {
+		It("should allow multiple PODs to mount the same volume concurrently", func() {
 			By("Creating a RWX PVC")
 			pvcName := "access-mode-rwx"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -57,7 +57,7 @@ var _ = Describe("NFS Access Modes", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvcName, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating first pod mounting the RWX volume")
+			By("Creating first POD mounting the RWX volume")
 			pod1Name := "access-test-pod-1"
 			pod1, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod1Name,
@@ -70,17 +70,17 @@ var _ = Describe("NFS Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod1Name)
 			})
 
-			By("Waiting for first pod to be ready")
+			By("Waiting for first POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod1Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Writing data from first pod")
+			By("Writing to POD")
 			_, err = f.K8s.ExecInPod(ctx, pod1Name, []string{
-				"sh", "-c", "echo 'Data from pod 1' > /data/pod1.txt",
+				"sh", "-c", "echo 'Data from POD 1' > /data/pod1.txt",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating second pod mounting the same RWX volume")
+			By("Creating second POD mounting the same RWX volume")
 			pod2Name := "access-test-pod-2"
 			pod2, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod2Name,
@@ -93,28 +93,28 @@ var _ = Describe("NFS Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod2Name)
 			})
 
-			By("Waiting for second pod to be ready")
+			By("Waiting for second POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod2Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying second pod can read data written by first pod")
+			By("Verifying second POD can read data written by first pod")
 			output, err := f.K8s.ExecInPod(ctx, pod2Name, []string{"cat", "/data/pod1.txt"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("Data from pod 1"), "Pod 2 should read data from pod 1")
+			Expect(output).To(Equal("Data from POD 1"), "POD 2 should read data from POD 1")
 
-			By("Writing data from second pod")
+			By("Writing to POD")
 			_, err = f.K8s.ExecInPod(ctx, pod2Name, []string{
-				"sh", "-c", "echo 'Data from pod 2' > /data/pod2.txt",
+				"sh", "-c", "echo 'Data from POD 2' > /data/pod2.txt",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying first pod can read data written by second pod")
+			By("Verifying first POD can read data written by second pod")
 			output, err = f.K8s.ExecInPod(ctx, pod1Name, []string{"cat", "/data/pod2.txt"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("Data from pod 2"), "Pod 1 should read data from pod 2")
+			Expect(output).To(Equal("Data from POD 2"), "POD 1 should read data from POD 2")
 		})
 
-		It("should handle concurrent writes from multiple pods", func() {
+		It("should handle concurrent writes from multiple PODs", func() {
 			By("Creating a RWX PVC")
 			pvcName := "concurrent-rwx"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -133,7 +133,7 @@ var _ = Describe("NFS Access Modes", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvcName, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating first pod")
+			By("Creating first POD")
 			pod1Name := "concurrent-pod-1"
 			_, err = f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod1Name,
@@ -145,7 +145,7 @@ var _ = Describe("NFS Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod1Name)
 			})
 
-			By("Creating second pod")
+			By("Creating second POD")
 			pod2Name := "concurrent-pod-2"
 			_, err = f.CreatePod(ctx, framework.PodOptions{
 				Name:      pod2Name,
@@ -157,30 +157,30 @@ var _ = Describe("NFS Access Modes", func() {
 				return f.K8s.DeletePod(ctx, pod2Name)
 			})
 
-			By("Waiting for both pods to be ready")
+			By("Waiting for both PODs to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod1Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 			err = f.K8s.WaitForPodReady(ctx, pod2Name, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Performing concurrent writes from both pods")
-			// Write from pod 1 (5 lines)
+			By("Performing concurrent writes from both PODs")
+			// Write from POD 1 (5 lines)
 			_, err = f.K8s.ExecInPod(ctx, pod1Name, []string{
 				"sh", "-c", "for i in 1 2 3 4 5; do echo \"pod1-$i\" >> /data/concurrent.txt; done",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Write from pod 2 (5 lines)
+			// Write from POD 2 (5 lines)
 			_, err = f.K8s.ExecInPod(ctx, pod2Name, []string{
 				"sh", "-c", "for i in 1 2 3 4 5; do echo \"pod2-$i\" >> /data/concurrent.txt; done",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying both pods wrote to the shared file")
+			By("Verifying both PODs wrote to the shared file")
 			output, err := f.K8s.ExecInPod(ctx, pod1Name, []string{"cat", "/data/concurrent.txt"})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(ContainSubstring("pod1-"), "File should contain data from pod 1")
-			Expect(output).To(ContainSubstring("pod2-"), "File should contain data from pod 2")
+			Expect(output).To(ContainSubstring("pod1-"), "File should contain data from POD 1")
+			Expect(output).To(ContainSubstring("pod2-"), "File should contain data from POD 2")
 
 			By("Counting total lines written")
 			countOutput, err := f.K8s.ExecInPod(ctx, pod1Name, []string{
@@ -193,7 +193,7 @@ var _ = Describe("NFS Access Modes", func() {
 	})
 
 	Context("ReadWriteOnce (RWO)", func() {
-		It("should allow single pod to mount and use the volume", func() {
+		It("should allow single POD to mount and use the volume", func() {
 			By("Creating a RWO PVC with NFS")
 			pvcName := "access-mode-rwo"
 			pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
@@ -212,7 +212,7 @@ var _ = Describe("NFS Access Modes", func() {
 			err = f.K8s.WaitForPVCBound(ctx, pvcName, pvcTimeout)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Creating a pod to mount the RWO volume")
+			By("Creating a POD to mount the RWO volume")
 			podName := "rwo-test-pod"
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
@@ -225,7 +225,7 @@ var _ = Describe("NFS Access Modes", func() {
 				return f.K8s.DeletePod(ctx, podName)
 			})
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 			Expect(err).NotTo(HaveOccurred())
 

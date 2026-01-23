@@ -69,7 +69,7 @@ var _ = Describe("iSCSI ZFS Properties", func() {
 			return f.K8s.DeletePVC(ctx, pvcName)
 		})
 
-		By("Creating a pod to trigger PVC binding and test volume I/O")
+		By("Creating a POD to trigger PVC binding and test volume I/O")
 		podName := "test-pod-iscsi-zfsprops"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
@@ -82,7 +82,7 @@ var _ = Describe("iSCSI ZFS Properties", func() {
 			return f.K8s.DeletePod(ctx, podName)
 		})
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 

@@ -32,7 +32,7 @@ var _ = Describe("NFS Crash Simulation", func() {
 		}
 	})
 
-	It("should persist data after pod crash (force delete)", func() {
+	It("should persist data after POD crash (force delete)", func() {
 		ctx := context.Background()
 		timestamp := time.Now().Unix()
 		testData := fmt.Sprintf("Crash Test Data - %d", timestamp)
@@ -50,13 +50,13 @@ var _ = Describe("NFS Crash Simulation", func() {
 		err = f.K8s.WaitForPVCBound(ctx, pvc.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "PVC did not become Bound")
 
-		By("Creating pod and writing test data")
+		By("Creating POD and writing test data")
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      fmt.Sprintf("crash-pod-nfs-%d", timestamp),
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
@@ -75,22 +75,22 @@ var _ = Describe("NFS Crash Simulation", func() {
 		originalChecksum := strings.TrimSpace(checksumOutput)
 		GinkgoWriter.Printf("Original checksum: %s\n", originalChecksum)
 
-		By("Simulating pod crash with force delete")
+		By("Simulating POD crash with force delete")
 		err = f.K8s.ForceDeletePod(ctx, pod.Name)
-		Expect(err).NotTo(HaveOccurred(), "Failed to force delete pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to force delete POD")
 
-		time.Sleep(10 * time.Second) // Wait for pod to be fully removed
+		time.Sleep(10 * time.Second) // Wait for POD to be fully removed
 
-		By("Creating new pod to verify data survived crash")
+		By("Creating new POD to verify data survived crash")
 		newPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      fmt.Sprintf("crash-pod-nfs-recovery-%d", timestamp),
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create recovery pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create recovery POD")
 
 		err = f.K8s.WaitForPodReady(ctx, newPod.Name, 2*time.Minute)
-		Expect(err).NotTo(HaveOccurred(), "Recovery pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Recovery POD did not become ready")
 
 		By("Verifying test data persisted after crash")
 		output, err := f.K8s.ExecInPod(ctx, newPod.Name, []string{"cat", "/data/test.txt"})

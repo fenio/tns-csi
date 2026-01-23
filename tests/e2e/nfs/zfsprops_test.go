@@ -72,7 +72,7 @@ var _ = Describe("NFS ZFS Properties", func() {
 		err = f.K8s.WaitForPVCBound(ctx, pvcName, pvcTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Creating a pod to test volume I/O")
+		By("Creating a POD to test volume I/O")
 		podName := "test-pod-zfsprops"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
@@ -85,7 +85,7 @@ var _ = Describe("NFS ZFS Properties", func() {
 			return f.K8s.DeletePod(ctx, podName)
 		})
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 

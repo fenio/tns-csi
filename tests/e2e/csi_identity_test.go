@@ -94,7 +94,7 @@ var _ = Describe("CSI Identity", func() {
 		Expect(desired).To(BeNumerically(">", 0), "Should have at least one node pod")
 
 		if f.Verbose() {
-			GinkgoWriter.Printf("Node daemonset: %d/%d pods ready\n", ready, desired)
+			GinkgoWriter.Printf("Node daemonset: %d/%d PODs ready\n", ready, desired)
 		}
 	})
 

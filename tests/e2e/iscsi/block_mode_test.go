@@ -61,7 +61,7 @@ var _ = Describe("iSCSI Block Mode", func() {
 			return f.K8s.DeletePVC(ctx, pvcName)
 		})
 
-		By("Creating pod with block device")
+		By("Creating POD with block device")
 		pod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 			Name:       podName,
 			PVCName:    pvcName,
@@ -71,7 +71,7 @@ var _ = Describe("iSCSI Block Mode", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pod).NotTo(BeNil())
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, podName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -132,7 +132,7 @@ var _ = Describe("iSCSI Block Mode", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("should persist data on block device across pod restarts", func() {
+	It("should persist data on block device across POD restarts", func() {
 		blockMode := corev1.PersistentVolumeBlock
 		const testPattern = "PERSISTENT_BLOCK_DATA"
 
@@ -152,7 +152,7 @@ var _ = Describe("iSCSI Block Mode", func() {
 			return f.K8s.DeletePVC(ctx, persistPVCName)
 		})
 
-		By("Creating first pod")
+		By("Creating first POD")
 		firstPodName := podName + "-first"
 		firstPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 			Name:       firstPodName,
@@ -163,28 +163,28 @@ var _ = Describe("iSCSI Block Mode", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(firstPod).NotTo(BeNil())
 
-		By("Waiting for first pod to be ready")
+		By("Waiting for first POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, firstPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Writing test pattern to block device from first pod")
+		By("Writing to POD")
 		_, err = f.K8s.ExecInPod(ctx, firstPodName, []string{
 			"sh", "-c", "echo '" + testPattern + "' | dd of=" + devicePath + " bs=512 count=1 conv=fsync 2>/dev/null",
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting first pod")
+		By("Deleting first POD")
 		err = f.K8s.DeletePod(ctx, firstPodName)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Waiting for first pod to be deleted")
+		By("Waiting for first POD to be deleted")
 		err = f.K8s.WaitForPodDeleted(ctx, firstPodName, 120*time.Second)
 		Expect(err).NotTo(HaveOccurred())
 
 		// Give time for volume to detach
 		time.Sleep(10 * time.Second)
 
-		By("Creating second pod")
+		By("Creating second POD")
 		secondPodName := podName + "-second"
 		secondPod, err := f.K8s.CreatePod(ctx, framework.PodOptions{
 			Name:       secondPodName,
@@ -199,17 +199,17 @@ var _ = Describe("iSCSI Block Mode", func() {
 			return f.K8s.DeletePod(ctx, secondPodName)
 		})
 
-		By("Waiting for second pod to be ready")
+		By("Waiting for second POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, secondPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Reading pattern from block device in second pod")
+		By("Reading pattern from block device in second POD")
 		output, err := f.K8s.ExecInPod(ctx, secondPodName, []string{
 			"sh", "-c", fmt.Sprintf("dd if=%s bs=512 count=1 2>/dev/null | head -c %d", devicePath, len(testPattern)),
 		})
 		Expect(err).NotTo(HaveOccurred())
 		// Note: Due to potential alignment issues, we check if pattern is contained
 		Expect(output).To(Or(Equal(testPattern), ContainSubstring(testPattern[:10])),
-			"Data should persist on block device across pod restarts")
+			"Data should persist on block device across POD restarts")
 	})
 })

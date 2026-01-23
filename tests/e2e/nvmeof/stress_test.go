@@ -58,18 +58,18 @@ var _ = Describe("Snapshot Stress", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
-		By("Creating source pod")
+		By("Creating source POD")
 		podName := "snapshot-stress-pod-nvmeof"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create source POD")
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Source pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Source POD did not become ready")
 
 		By("Waiting for source PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, pvc.Name, 2*time.Minute)
@@ -113,11 +113,11 @@ var _ = Describe("Snapshot Stress", func() {
 			Expect(err).NotTo(HaveOccurred(), "Snapshot %s should be ready", snapshotName)
 		}
 
-		By("Deleting source pod before restoring (RWO constraint)")
+		By("Deleting source POD before restoring (RWO constraint)")
 		err = f.K8s.DeletePod(ctx, pod.Name)
-		Expect(err).NotTo(HaveOccurred(), "Failed to delete source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete source POD")
 		err = f.K8s.WaitForPodDeleted(ctx, pod.Name, 2*time.Minute)
-		Expect(err).NotTo(HaveOccurred(), "Source pod was not deleted")
+		Expect(err).NotTo(HaveOccurred(), "Source POD was not deleted")
 
 		By("Restoring from first and last snapshots to verify data integrity")
 		// Restore from first snapshot
@@ -134,7 +134,7 @@ var _ = Describe("Snapshot Stress", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from last snapshot")
 		f.RegisterPVCCleanup(restoreLastPVC)
 
-		By("Creating pods to verify restored data")
+		By("Creating PODs to verify restored data")
 		restore1PodName := "snapshot-stress-restore-pod-1-nvmeof"
 		restore1Pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      restore1PodName,
@@ -278,12 +278,12 @@ var _ = Describe("Volume Stress", func() {
 			Expect(err).NotTo(HaveOccurred())
 		}
 
-		By("Waiting for all pods to become Ready")
+		By("Waiting for all PODs to become Ready")
 		for _, podName := range podNames {
 			err := f.K8s.WaitForPodReady(ctx, podName, podTimeout)
-			Expect(err).NotTo(HaveOccurred(), "Pod %s did not become Ready", podName)
+			Expect(err).NotTo(HaveOccurred(), "POD %s did not become Ready", podName)
 			if f.Verbose() {
-				GinkgoWriter.Printf("[NVMe-oF] Pod %s ready\n", podName)
+				GinkgoWriter.Printf("[NVMe-oF] POD %s ready\n", podName)
 			}
 		}
 
@@ -296,7 +296,7 @@ var _ = Describe("Volume Stress", func() {
 		By("Verifying data in all volumes")
 		for i, podName := range podNames {
 			output, err := f.K8s.ExecInPod(ctx, podName, []string{"cat", "/data/test.txt"})
-			Expect(err).NotTo(HaveOccurred(), "Failed to read from pod %s", podName)
+			Expect(err).NotTo(HaveOccurred(), "Failed to read from POD %s", podName)
 			Expect(output).To(ContainSubstring(fmt.Sprintf("Pod %d data", i+1)))
 		}
 

@@ -53,18 +53,18 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
-		By("Creating source pod to write data")
+		By("Creating source POD to write data")
 		sourcePodName := "detached-snap-source-pod-iscsi"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      sourcePodName,
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create source POD")
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Source pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Source POD did not become ready")
 
 		By("Waiting for source PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, pvc.Name, 2*time.Minute)
@@ -99,11 +99,11 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, 5*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Detached snapshot did not become ready")
 
-		By("Deleting source pod before restoring")
+		By("Deleting source POD before restoring")
 		err = f.K8s.DeletePod(ctx, sourcePodName)
-		Expect(err).NotTo(HaveOccurred(), "Failed to delete source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete source POD")
 		err = f.K8s.WaitForPodDeleted(ctx, sourcePodName, 2*time.Minute)
-		Expect(err).NotTo(HaveOccurred(), "Source pod was not deleted")
+		Expect(err).NotTo(HaveOccurred(), "Source POD was not deleted")
 
 		By("Restoring PVC from detached snapshot")
 		restoredPVCName := "detached-snap-restored-iscsi"
@@ -112,18 +112,18 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from detached snapshot")
 		f.RegisterPVCCleanup(restoredPVCName)
 
-		By("Creating pod to mount restored volume")
+		By("Creating POD to mount restored volume")
 		restoredPodName := "detached-snap-restored-pod-iscsi"
 		restoredPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      restoredPodName,
 			PVCName:   restoredPVCName,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create restored pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create restored POD")
 
-		By("Waiting for restored pod to be ready")
+		By("Waiting for restored POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, restoredPod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Restored pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Restored POD did not become ready")
 
 		By("Waiting for restored PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, 2*time.Minute)
@@ -156,18 +156,18 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
-		By("Creating source pod to write data")
+		By("Creating source POD to write data")
 		sourcePodName := "detached-dr-source-pod-iscsi"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      sourcePodName,
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create source POD")
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Source pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Source POD did not become ready")
 
 		By("Waiting for source PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, pvc.Name, 2*time.Minute)
@@ -202,11 +202,11 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		err = f.K8s.WaitForSnapshotReady(ctx, snapshotName, 5*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Detached snapshot did not become ready")
 
-		By("Deleting source pod")
+		By("Deleting source POD")
 		err = f.K8s.DeletePod(ctx, sourcePodName)
-		Expect(err).NotTo(HaveOccurred(), "Failed to delete source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete source POD")
 		err = f.K8s.WaitForPodDeleted(ctx, sourcePodName, 60*time.Second)
-		Expect(err).NotTo(HaveOccurred(), "Source pod was not deleted")
+		Expect(err).NotTo(HaveOccurred(), "Source POD was not deleted")
 
 		By("Deleting source PVC (this would delete regular snapshots but not detached)")
 		err = f.K8s.DeletePVC(ctx, sourcePVCName)
@@ -242,18 +242,18 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from detached snapshot")
 		f.RegisterPVCCleanup(restoredPVCName)
 
-		By("Creating pod to mount restored volume")
+		By("Creating POD to mount restored volume")
 		restoredPodName := "detached-dr-restored-pod-iscsi"
 		restoredPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      restoredPodName,
 			PVCName:   restoredPVCName,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create restored pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create restored POD")
 
-		By("Waiting for restored pod to be ready")
+		By("Waiting for restored POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, restoredPod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Restored pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Restored POD did not become ready")
 
 		By("Waiting for restored PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, restoredPVCName, 2*time.Minute)

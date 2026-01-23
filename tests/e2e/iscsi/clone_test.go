@@ -46,17 +46,17 @@ var _ = Describe("iSCSI Volume Clone", func() {
 		err = f.K8s.WaitForPVCBound(ctx, sourcePVC.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Source PVC did not become Bound")
 
-		By("Creating source pod")
+		By("Creating source POD")
 		sourcePod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      "clone-source-pod-iscsi",
 			PVCName:   sourcePVC.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create source POD")
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, sourcePod.Name, 2*time.Minute)
-		Expect(err).NotTo(HaveOccurred(), "Source pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Source POD did not become ready")
 
 		By("Writing test data to source volume")
 		_, err = f.K8s.ExecInPod(ctx, sourcePod.Name, []string{"sh", "-c", "echo 'Source Volume Data' > /data/test.txt && sync"})
@@ -79,17 +79,17 @@ var _ = Describe("iSCSI Volume Clone", func() {
 		err = f.K8s.WaitForPVCBound(ctx, clonePVCName, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Clone PVC did not become Bound")
 
-		By("Creating pod to mount cloned volume")
+		By("Creating POD to mount cloned volume")
 		clonePod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      "clone-pod-iscsi",
 			PVCName:   clonePVCName,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create clone pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create clone POD")
 
-		By("Waiting for clone pod to be ready")
+		By("Waiting for clone POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, clonePod.Name, 2*time.Minute)
-		Expect(err).NotTo(HaveOccurred(), "Clone pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Clone POD did not become ready")
 
 		By("Listing cloned volume contents")
 		output, err = f.K8s.ExecInPod(ctx, clonePod.Name, []string{"ls", "-la", "/data/"})

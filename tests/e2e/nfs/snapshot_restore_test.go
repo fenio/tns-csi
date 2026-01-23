@@ -54,21 +54,21 @@ var _ = Describe("Snapshot Restore", func() {
 		})
 		Expect(err).NotTo(HaveOccurred(), "Failed to create source PVC")
 
-		By("Creating source pod")
+		By("Creating source POD")
 		podName := "snapshot-restore-source-pod-nfs"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create source pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create source POD")
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, podTimeout)
 		if err != nil && f.Verbose() {
 			GinkgoWriter.Printf("Pod failed to become ready, capturing diagnostics...\n")
 			if podObj, getErr := f.K8s.GetPod(ctx, pod.Name); getErr == nil {
-				GinkgoWriter.Printf("Pod status: %s\n", podObj.Status.Phase)
+				GinkgoWriter.Printf("POD status: %s\n", podObj.Status.Phase)
 				for _, cond := range podObj.Status.Conditions {
 					GinkgoWriter.Printf("  Condition %s: %s (reason: %s)\n", cond.Type, cond.Status, cond.Reason)
 				}
@@ -80,7 +80,7 @@ var _ = Describe("Snapshot Restore", func() {
 				}
 			}
 		}
-		Expect(err).NotTo(HaveOccurred(), "Source pod did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Source POD did not become ready")
 
 		By("Waiting for source PVC to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, pvc.Name, 2*time.Minute)
@@ -138,18 +138,18 @@ var _ = Describe("Snapshot Restore", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 1")
 		f.RegisterPVCCleanup(restore1PVC)
 
-		By("Creating pod for restored PVC 1")
+		By("Creating POD for restored PVC 1")
 		restore1PodName := "snapshot-restore-pod-1-nfs"
 		restore1Pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      restore1PodName,
 			PVCName:   restore1PVC,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod for restore 1")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD for restore 1")
 
-		By("Waiting for restore pod 1 to be ready")
+		By("Waiting for restore POD 1 to be ready")
 		err = f.K8s.WaitForPodReady(ctx, restore1Pod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Restore pod 1 did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Restore POD 1 did not become ready")
 
 		By("Waiting for restored PVC 1 to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, restore1PVC, 2*time.Minute)
@@ -178,18 +178,18 @@ var _ = Describe("Snapshot Restore", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to create PVC from snapshot 2")
 		f.RegisterPVCCleanup(restore2PVC)
 
-		By("Creating pod for restored PVC 2")
+		By("Creating POD for restored PVC 2")
 		restore2PodName := "snapshot-restore-pod-2-nfs"
 		restore2Pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      restore2PodName,
 			PVCName:   restore2PVC,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod for restore 2")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD for restore 2")
 
-		By("Waiting for restore pod 2 to be ready")
+		By("Waiting for restore POD 2 to be ready")
 		err = f.K8s.WaitForPodReady(ctx, restore2Pod.Name, podTimeout)
-		Expect(err).NotTo(HaveOccurred(), "Restore pod 2 did not become ready")
+		Expect(err).NotTo(HaveOccurred(), "Restore POD 2 did not become ready")
 
 		By("Waiting for restored PVC 2 to become Bound")
 		err = f.K8s.WaitForPVCBound(ctx, restore2PVC, 2*time.Minute)

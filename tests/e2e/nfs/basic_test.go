@@ -52,16 +52,16 @@ var _ = Describe("NFS Mount and Expansion", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvc.Status.Phase).To(Equal(corev1.ClaimBound))
 
-		By("Creating a test pod")
+		By("Creating a test POD")
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      "test-pod-nfs",
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 		Expect(pod).NotTo(BeNil())
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 

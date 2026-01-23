@@ -61,7 +61,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		err = f.K8s.WaitForPVCBound(ctx, sourcePVCName, pvcTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Creating a pod to write test data")
+		By("Creating a POD to write test data")
 		sourcePodName := "source-pod"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      sourcePodName,
@@ -72,7 +72,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		Expect(pod).NotTo(BeNil())
 		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, sourcePodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -128,7 +128,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		err = f.K8s.WaitForPVCBound(ctx, detachedPVCName, pvcTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Creating a pod to mount the detached clone")
+		By("Creating a POD to mount the detached clone")
 		detachedPodName := "detached-pod"
 		detachedPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      detachedPodName,
@@ -139,7 +139,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		Expect(detachedPod).NotTo(BeNil())
 		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
-		By("Waiting for detached pod to be ready")
+		By("Waiting for detached POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, detachedPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -155,7 +155,7 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting the source pod first")
+		By("Deleting the source POD first")
 		err = f.K8s.DeletePod(ctx, sourcePodName)
 		Expect(err).NotTo(HaveOccurred())
 		err = f.K8s.WaitForPodDeleted(ctx, sourcePodName, deleteTimeout)
@@ -168,10 +168,10 @@ var _ = Describe("NFS Detached Snapshot", func() {
 		By("Waiting a moment for any cascading effects")
 		time.Sleep(5 * time.Second)
 
-		By("Verifying detached pod is still running")
+		By("Verifying detached POD is still running")
 		pod, err = f.K8s.GetPod(ctx, detachedPodName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), "Detached pod should still be running")
+		Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), "Detached POD should still be running")
 
 		By("Verifying original data is still accessible")
 		output, err = f.K8s.ExecInPod(ctx, detachedPodName, []string{"cat", "/data/test.txt"})

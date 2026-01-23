@@ -82,16 +82,16 @@ var _ = Describe("Volume Expansion", func() {
 				return f.K8s.DeletePVC(context.Background(), pvc.Name)
 			})
 
-			By("Creating pod to trigger volume provisioning and mount")
+			By("Creating POD to trigger volume provisioning and mount")
 			podName := "expand-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
 				MountPath: "/data",
 			})
-			Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+			Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
 			Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
@@ -168,16 +168,16 @@ var _ = Describe("Volume Expansion", func() {
 				return f.K8s.DeletePVC(context.Background(), pvc.Name)
 			})
 
-			By("Creating pod to trigger volume provisioning")
+			By("Creating POD to trigger volume provisioning")
 			podName := "expand-pv-check-pod-" + proto.id
 			pod, err := f.CreatePod(ctx, framework.PodOptions{
 				Name:      podName,
 				PVCName:   pvc.Name,
 				MountPath: "/data",
 			})
-			Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+			Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-			By("Waiting for pod to be ready")
+			By("Waiting for POD to be ready")
 			err = f.K8s.WaitForPodReady(ctx, pod.Name, proto.podTimeout)
 			Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 

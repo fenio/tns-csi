@@ -195,7 +195,7 @@ func (h *HelmDeployer) waitForDeployment(name string, timeout time.Duration) err
 	return runKubectl(ctx, args...)
 }
 
-// waitForDaemonSet waits for a daemonset to have all pods ready.
+// waitForDaemonSet waits for a daemonset to have all PODs ready.
 func (h *HelmDeployer) waitForDaemonSet(name string, timeout time.Duration) error {
 	// kubectl wait doesn't work well with daemonsets, so we use rollout status
 	args := []string{

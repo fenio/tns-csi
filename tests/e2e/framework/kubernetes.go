@@ -238,7 +238,7 @@ func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName strin
 		klog.Infof("Controller Logs (last 100 lines):\n%s", string(logsOutput))
 	}
 
-	// Get node pod logs (important for mount failures like iSCSI/NVMe-oF)
+	// Get node POD logs (important for mount failures like iSCSI/NVMe-oF)
 	nodeLogsCtx, nodeLogsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer nodeLogsCancel()
 	nodeLogsCmd := exec.CommandContext(nodeLogsCtx, "kubectl", "logs",
@@ -443,14 +443,14 @@ func (k *KubernetesClient) WaitForPodReady(ctx context.Context, name string, tim
 		}
 		// Log pod events
 		k.logPodEvents(ctx, name)
-		// Log CSI node pod logs (important for mount failures)
+		// Log CSI node POD logs (important for mount failures)
 		k.logCSINodeLogs(ctx)
 	}
 
 	return err
 }
 
-// logCSINodeLogs logs the CSI node pod logs for debugging mount failures.
+// logCSINodeLogs logs the CSI node POD logs for debugging mount failures.
 func (k *KubernetesClient) logCSINodeLogs(ctx context.Context) {
 	nodeLogsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -1033,7 +1033,7 @@ func (k *KubernetesClient) WaitForPodToBeDeleted(ctx context.Context, name strin
 		if strings.Contains(stderr.String(), "not found") {
 			return nil
 		}
-		return fmt.Errorf("wait for pod delete failed: %w\nstderr: %s", err, stderr.String())
+		return fmt.Errorf("wait for POD delete failed: %w\nstderr: %s", err, stderr.String())
 	}
 	return nil
 }

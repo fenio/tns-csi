@@ -37,7 +37,7 @@ var _ = Describe("Metrics and Observability", func() {
 	It("should expose controller metrics endpoint", func() {
 		ctx := context.Background()
 
-		By("Getting controller pod")
+		By("Getting controller POD")
 		pods, err := f.K8s.GetPodsWithLabel(ctx, "kube-system", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller")
 		Expect(err).NotTo(HaveOccurred(), "Failed to get controller pods")
 		Expect(pods).NotTo(BeEmpty(), "No controller pods found")
@@ -95,12 +95,12 @@ var _ = Describe("Metrics and Observability", func() {
 	It("should have node logs with mount operation details", func() {
 		ctx := context.Background()
 
-		By("Getting node pods")
+		By("Getting node PODs")
 		pods, err := f.K8s.GetPodsWithLabel(ctx, "kube-system", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node")
-		Expect(err).NotTo(HaveOccurred(), "Failed to get node pods")
+		Expect(err).NotTo(HaveOccurred(), "Failed to get node PODs")
 		Expect(pods).NotTo(BeEmpty(), "No node pods found")
 
-		By("Checking node pod logs")
+		By("Checking node POD logs")
 		nodePod := pods[0]
 		_, err = f.K8s.GetPodLogs(ctx, "kube-system", nodePod.Name, "tns-csi-driver", 100)
 		if err != nil {
@@ -110,7 +110,7 @@ var _ = Describe("Metrics and Observability", func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to get node logs")
 
 		if f.Verbose() {
-			GinkgoWriter.Printf("Node pod %s has logs available\n", nodePod.Name)
+			GinkgoWriter.Printf("Node POD %s has logs available\n", nodePod.Name)
 		}
 	})
 
@@ -130,16 +130,16 @@ var _ = Describe("Metrics and Observability", func() {
 			return f.K8s.DeletePVC(context.Background(), pvc.Name)
 		})
 
-		By("Creating pod to trigger provisioning")
+		By("Creating POD to trigger provisioning")
 		podName := "metrics-test-pod"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      podName,
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 
@@ -178,15 +178,15 @@ var _ = Describe("Metrics and Observability", func() {
 			return f.K8s.DeletePVC(context.Background(), pvc.Name)
 		})
 
-		By("Creating pod to trigger provisioning")
+		By("Creating POD to trigger provisioning")
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      "metrics-events-pod",
 			PVCName:   pvc.Name,
 			MountPath: "/data",
 		})
-		Expect(err).NotTo(HaveOccurred(), "Failed to create pod")
+		Expect(err).NotTo(HaveOccurred(), "Failed to create POD")
 
-		By("Waiting for pod to be ready")
+		By("Waiting for POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)
 		Expect(err).NotTo(HaveOccurred(), "Pod did not become ready")
 

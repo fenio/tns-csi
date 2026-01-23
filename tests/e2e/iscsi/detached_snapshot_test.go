@@ -57,7 +57,7 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		Expect(pvc).NotTo(BeNil())
 		// Note: f.CreatePVC already registers cleanup with PV wait - no manual cleanup needed
 
-		By("Creating a pod to write test data (triggers WaitForFirstConsumer binding)")
+		By("Creating a POD to write test data (triggers WaitForFirstConsumer binding)")
 		sourcePodName := "source-pod"
 		pod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      sourcePodName,
@@ -68,7 +68,7 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		Expect(pod).NotTo(BeNil())
 		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
-		By("Waiting for source pod to be ready")
+		By("Waiting for source POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, sourcePodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -130,7 +130,7 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		// Register cleanup with PV wait (clone must be fully deleted before source)
 		f.RegisterPVCCleanup(detachedPVCName)
 
-		By("Creating a pod to mount the detached clone (triggers WaitForFirstConsumer binding)")
+		By("Creating a POD to mount the detached clone (triggers WaitForFirstConsumer binding)")
 		detachedPodName := "detached-pod"
 		detachedPod, err := f.CreatePod(ctx, framework.PodOptions{
 			Name:      detachedPodName,
@@ -141,7 +141,7 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		Expect(detachedPod).NotTo(BeNil())
 		// Note: f.CreatePod already registers cleanup - no manual cleanup needed
 
-		By("Waiting for detached pod to be ready")
+		By("Waiting for detached POD to be ready")
 		err = f.K8s.WaitForPodReady(ctx, detachedPodName, podTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -161,7 +161,7 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		By("Deleting the source pod first")
+		By("Deleting the source POD first")
 		err = f.K8s.DeletePod(ctx, sourcePodName)
 		Expect(err).NotTo(HaveOccurred())
 		err = f.K8s.WaitForPodDeleted(ctx, sourcePodName, deleteTimeout)
@@ -174,10 +174,10 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		By("Waiting a moment for any cascading effects")
 		time.Sleep(5 * time.Second)
 
-		By("Verifying detached pod is still running")
+		By("Verifying detached POD is still running")
 		pod, err = f.K8s.GetPod(ctx, detachedPodName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), "Detached pod should still be running")
+		Expect(pod.Status.Phase).To(Equal(corev1.PodRunning), "Detached POD should still be running")
 
 		By("Verifying original data is still accessible")
 		output, err = f.K8s.ExecInPod(ctx, detachedPodName, []string{"cat", "/data/test-pattern.txt"})

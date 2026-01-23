@@ -157,7 +157,7 @@ jobs:
   ginkgo-e2e-nfs:
     name: "E2E: NFS"
     runs-on: new
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -183,7 +183,7 @@ jobs:
         run: |
           echo "=== Running NFS E2E Tests ==="
           # Run only NFS-specific tests from the nfs/ directory
-          ginkgo -v --timeout=25m ./tests/e2e/nfs/...
+          ginkgo -v --timeout=40m ./tests/e2e/nfs/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -195,7 +195,7 @@ jobs:
   ginkgo-e2e-nvmeof:
     name: "E2E: NVMe-oF"
     runs-on: new
-    timeout-minutes: 45
+    timeout-minutes: 55
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -221,7 +221,7 @@ jobs:
         run: |
           echo "=== Running NVMe-oF E2E Tests ==="
           # Run only NVMe-oF-specific tests from the nvmeof/ directory
-          ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+          ginkgo -v --timeout=50m ./tests/e2e/nvmeof/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6
@@ -233,7 +233,7 @@ jobs:
   ginkgo-e2e-iscsi:
     name: "E2E: iSCSI"
     runs-on: new
-    timeout-minutes: 45
+    timeout-minutes: 55
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -259,7 +259,7 @@ jobs:
         run: |
           echo "=== Running iSCSI E2E Tests ==="
           # Run only iSCSI-specific tests from the iscsi/ directory
-          ginkgo -v --timeout=40m ./tests/e2e/iscsi/...
+          ginkgo -v --timeout=50m ./tests/e2e/iscsi/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6

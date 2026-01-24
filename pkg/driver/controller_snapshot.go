@@ -20,7 +20,24 @@ import (
 // Detached snapshot configuration constants.
 const (
 	// DetachedSnapshotsParam is the VolumeSnapshotClass parameter to enable detached snapshots.
+	// When true, snapshots are created via zfs send/receive as independent datasets.
 	DetachedSnapshotsParam = "detachedSnapshots"
+
+	// DetachedVolumesFromSnapshotsParam is the StorageClass parameter to create independent volumes
+	// when restoring from snapshots. When true, the clone is promoted to break the parent-child relationship.
+	// This is equivalent to democratic-csi's detachedVolumesFromSnapshots parameter.
+	DetachedVolumesFromSnapshotsParam = "detachedVolumesFromSnapshots"
+
+	// DetachedVolumesFromVolumesParam is the StorageClass parameter to create independent volumes
+	// when cloning from other volumes. When true, the clone is promoted and the temporary snapshot
+	// is deleted. When false (default), the temporary snapshot is kept to maintain the COW clone
+	// relationship (more space-efficient but creates a dependency).
+	// This is equivalent to democratic-csi's detachedVolumesFromVolumes parameter.
+	DetachedVolumesFromVolumesParam = "detachedVolumesFromVolumes"
+
+	// VolumeSourceSnapshotPrefix is the prefix for temporary snapshots created during volume-to-volume
+	// cloning. Uses the same naming convention as democratic-csi for compatibility.
+	VolumeSourceSnapshotPrefix = "volume-source-for-volume-"
 
 	// DetachedSnapshotsParentDatasetParam is the VolumeSnapshotClass parameter for the parent dataset
 	// where detached snapshots will be stored. If not specified, defaults to {pool}/csi-detached-snapshots.
@@ -1193,18 +1210,19 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		return nil, validateErr
 	}
 
-	// Check if detached clone is requested (StorageClass parameter)
+	// Check if detached clone is requested (StorageClass parameter: detachedVolumesFromSnapshots)
 	// A detached clone is independent from the source snapshot (promoted)
+	// This matches democratic-csi's detachedVolumesFromSnapshots parameter
 	params := req.GetParameters()
 	if params == nil {
 		params = make(map[string]string)
 	}
-	detachedClone := params["detached"] == VolumeContextValueTrue
+	detachedClone := params[DetachedVolumesFromSnapshotsParam] == VolumeContextValueTrue
 
 	// Clone/restore the snapshot based on source type and clone mode:
 	// 1. Detached snapshot (dataset) -> executeDetachedSnapshotRestore (always promoted)
-	// 2. Regular snapshot + detached=true -> executeDetachedSnapshotClone (promoted clone)
-	// 3. Regular snapshot + detached=false -> executeSnapshotClone (COW clone)
+	// 2. Regular snapshot + detachedVolumesFromSnapshots=true -> executeDetachedSnapshotClone (promoted clone)
+	// 3. Regular snapshot + detachedVolumesFromSnapshots=false -> executeSnapshotClone (COW clone)
 	var clonedDataset *tnsapi.Dataset
 	var cloneErr error
 	switch {

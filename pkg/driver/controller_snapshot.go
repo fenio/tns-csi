@@ -1439,36 +1439,86 @@ func (s *ControllerService) executeSnapshotClone(ctx context.Context, snapshotMe
 // This is useful when you want to create a completely independent copy of data
 // from a snapshot, without maintaining a dependency on the original snapshot.
 func (s *ControllerService) executeDetachedSnapshotClone(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
-	klog.Infof("Creating detached clone from snapshot %s to dataset %s", snapshotMeta.SnapshotName, params.newDatasetName)
+	klog.Infof("Creating detached clone from snapshot %s to dataset %s via replication", snapshotMeta.SnapshotName, params.newDatasetName)
 
-	// Step 1: Clone the snapshot to the new dataset
-	cloneParams := tnsapi.CloneSnapshotParams{
-		Snapshot: snapshotMeta.SnapshotName,
-		Dataset:  params.newDatasetName,
+	// Parse the snapshot name to get dataset and snapshot parts
+	// Format: "pool/path/volume@snapshot"
+	parts := strings.SplitN(snapshotMeta.SnapshotName, "@", 2)
+	if len(parts) != 2 {
+		return nil, status.Errorf(codes.Internal, "Invalid snapshot name format: %s", snapshotMeta.SnapshotName)
+	}
+	sourceDataset := parts[0]
+	snapshotName := parts[1]
+
+	klog.V(4).Infof("Running one-time replication from %s (snapshot: %s) to %s", sourceDataset, snapshotName, params.newDatasetName)
+
+	// Use replication to create a truly independent copy
+	// This performs zfs send/receive which creates a full copy with no clone dependency
+	replicationParams := tnsapi.ReplicationRunOnetimeParams{
+		Direction:               "PUSH",
+		Transport:               "LOCAL",
+		SourceDatasets:          []string{sourceDataset},
+		TargetDataset:           params.newDatasetName,
+		Recursive:               false,
+		Properties:              true,
+		PropertiesExclude:       []string{"mountpoint", "sharenfs", "sharesmb", tnsapi.PropertyCSIVolumeName},
+		Replicate:               false,
+		Encryption:              false,
+		NameRegex:               &snapshotName,
+		NamingSchema:            []string{},
+		AlsoIncludeNamingSchema: []string{},
+		RetentionPolicy:         "NONE",
+		Readonly:                "IGNORE",
+		AllowFromScratch:        true,
 	}
 
-	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
+	err := s.apiClient.RunOnetimeReplicationAndWait(ctx, replicationParams, ReplicationPollInterval)
 	if err != nil {
-		klog.Errorf("Failed to clone snapshot for detached clone: %v", err)
-		s.cleanupPartialClone(ctx, params.newDatasetName)
-		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
-	}
-
-	klog.Infof("Clone created, now promoting dataset to make it independent: %s", clonedDataset.Name)
-
-	// Step 2: Promote the clone to break the parent-child relationship
-	// This makes the clone independent - it no longer depends on the source snapshot
-	if err := s.apiClient.PromoteDataset(ctx, clonedDataset.Name); err != nil {
-		klog.Errorf("Failed to promote cloned dataset %s: %v. Cleaning up...", clonedDataset.Name, err)
-		// Cleanup the clone since promotion failed
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.Name); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset after promotion failure: %v", delErr)
+		klog.Warningf("Detached clone replication failed: %v. Attempting cleanup of %s", err, params.newDatasetName)
+		if delErr := s.apiClient.DeleteDataset(ctx, params.newDatasetName); delErr != nil {
+			klog.Warningf("Failed to cleanup partial detached clone dataset: %v", delErr)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to promote cloned dataset: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to create detached clone via replication: %v", err)
 	}
 
-	klog.Infof("Successfully created detached clone: %s (independent from source snapshot)", clonedDataset.Name)
-	return clonedDataset, nil
+	klog.Infof("Replication completed for detached clone: %s", params.newDatasetName)
+
+	// NOTE: We intentionally do NOT promote the clone.
+	// LOCAL replication creates clone relationships for efficiency. Promoting would
+	// reverse the dependency (source would depend on target), making the target
+	// undeletable while the source exists.
+	//
+	// Without promotion:
+	// - Target (clone) depends on source snapshot
+	// - Can delete target (clone) freely
+	// - Can't delete source snapshot until all clones are deleted
+	//
+	// This matches user expectations for detachedVolumesFromSnapshots:
+	// clones can be deleted anytime, snapshots can be deleted after all clones are gone.
+
+	// Clean up the replicated snapshot on the target
+	// The replication copies the snapshot to the target, we don't need it
+	targetSnapshot := params.newDatasetName + "@" + snapshotName
+	klog.V(4).Infof("Cleaning up replicated snapshot %s", targetSnapshot)
+	if delErr := s.apiClient.DeleteSnapshot(ctx, targetSnapshot); delErr != nil {
+		klog.Warningf("Failed to delete replicated snapshot %s: %v", targetSnapshot, delErr)
+		// This is not fatal - snapshot will just remain on the target
+	}
+
+	// Query the created dataset to return proper metadata
+	datasets, err := s.apiClient.QueryAllDatasets(ctx, params.newDatasetName)
+	if err != nil || len(datasets) == 0 {
+		klog.Warningf("Failed to query detached clone dataset %s: %v", params.newDatasetName, err)
+		// Return minimal info since replication succeeded
+		return &tnsapi.Dataset{
+			ID:   params.newDatasetName,
+			Name: params.newDatasetName,
+			Type: "VOLUME",
+		}, nil
+	}
+
+	klog.Infof("Successfully created detached clone: %s (via replication)", datasets[0].Name)
+	return &datasets[0], nil
 }
 
 // executeDetachedSnapshotRestore restores a volume from a detached snapshot.

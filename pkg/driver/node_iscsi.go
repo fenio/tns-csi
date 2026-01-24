@@ -60,6 +60,7 @@ type iscsiConnectionParams struct {
 }
 
 // stageISCSIVolume stages an iSCSI volume by logging into the target.
+// It uses a retry mechanism to handle transient device stability issues.
 func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
@@ -87,25 +88,72 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 		return nil, status.Errorf(codes.FailedPrecondition, "open-iscsi not available: %v", checkErr)
 	}
 
-	// Discover and login to iSCSI target
-	if loginErr := s.loginISCSITarget(ctx, params); loginErr != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to login to iSCSI target: %v", loginErr)
-	}
+	// Retry parameters for handling device stability issues
+	const (
+		maxRetries = 3
+		retryDelay = 5 * time.Second
+	)
 
-	// Wait for device to appear
-	devicePath, err := s.waitForISCSIDevice(ctx, params, 30*time.Second)
-	if err != nil {
-		// Cleanup: logout on failure
-		if logoutErr := s.logoutISCSITarget(ctx, params); logoutErr != nil {
-			klog.Warningf("Failed to logout from iSCSI target after device wait failure: %v", logoutErr)
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			klog.Infof("iSCSI staging attempt %d/%d for volume %s", attempt, maxRetries, volumeID)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to find iSCSI device after login: %v", err)
+
+		// Discover and login to iSCSI target
+		if loginErr := s.loginISCSITarget(ctx, params); loginErr != nil {
+			lastErr = loginErr
+			klog.Warningf("iSCSI login attempt %d failed: %v", attempt, loginErr)
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		// Wait for device to appear
+		devicePath, err := s.waitForISCSIDevice(ctx, params, 30*time.Second)
+		if err != nil {
+			lastErr = err
+			klog.Warningf("iSCSI device wait failed on attempt %d: %v", attempt, err)
+			// Cleanup: logout before retry
+			if logoutErr := s.logoutISCSITarget(ctx, params); logoutErr != nil {
+				klog.Warningf("Failed to logout from iSCSI target after device wait failure: %v", logoutErr)
+			}
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		klog.V(4).Infof("iSCSI device connected at %s (IQN: %s, LUN: %d, dataset: %s) on attempt %d",
+			devicePath, params.iqn, params.lun, datasetName, attempt)
+
+		// Try staging - if device becomes unavailable during staging, retry the whole connection
+		stageResp, stageErr := s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+		if stageErr == nil {
+			return stageResp, nil
+		}
+
+		// Check if this is a retryable error (device disappeared during staging)
+		if status.Code(stageErr) == codes.Unavailable {
+			lastErr = stageErr
+			klog.Warningf("iSCSI staging failed on attempt %d (device unstable): %v", attempt, stageErr)
+			// Logout and retry - the device may have become stale
+			if logoutErr := s.logoutISCSITarget(ctx, params); logoutErr != nil {
+				klog.Warningf("Failed to logout from iSCSI target after staging failure: %v", logoutErr)
+			}
+			if attempt < maxRetries {
+				time.Sleep(retryDelay)
+			}
+			continue
+		}
+
+		// Non-retryable error - fail immediately
+		return nil, stageErr
 	}
 
-	klog.V(4).Infof("iSCSI device connected at %s (IQN: %s, LUN: %d, dataset: %s)",
-		devicePath, params.iqn, params.lun, datasetName)
-
-	return s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	// All retries exhausted
+	return nil, status.Errorf(codes.Internal, "Failed to stage iSCSI volume after %d attempts: %v", maxRetries, lastErr)
 }
 
 // validateISCSIParams validates and extracts iSCSI connection parameters from volume context.
@@ -318,9 +366,22 @@ func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConne
 
 // stageISCSIDevice stages an iSCSI device as either block or filesystem volume.
 func (s *NodeService) stageISCSIDevice(ctx context.Context, volumeID, devicePath, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
+	// Verify device still exists before proceeding (it may have disappeared due to race conditions
+	// with previous volume cleanup or iSCSI session issues)
+	if _, err := os.Stat(devicePath); err != nil {
+		klog.Warningf("iSCSI device %s disappeared before staging could complete: %v", devicePath, err)
+		return nil, status.Errorf(codes.Unavailable,
+			"iSCSI device %s became unavailable: %v", devicePath, err)
+	}
+
 	// For filesystem volumes, wait for device to be fully initialized
 	if !isBlockVolume {
 		if err := waitForDeviceInitialization(ctx, devicePath); err != nil {
+			// Check if device disappeared during initialization
+			if _, statErr := os.Stat(devicePath); statErr != nil {
+				return nil, status.Errorf(codes.Unavailable,
+					"iSCSI device %s became unavailable during initialization: %v", devicePath, err)
+			}
 			return nil, status.Errorf(codes.Internal, "Device initialization timeout: %v", err)
 		}
 
@@ -333,6 +394,13 @@ func (s *NodeService) stageISCSIDevice(ctx context.Context, volumeID, devicePath
 		const deviceMetadataDelay = 2 * time.Second
 		klog.V(4).Infof("Waiting %v for device %s metadata to stabilize", deviceMetadataDelay, devicePath)
 		time.Sleep(deviceMetadataDelay)
+
+		// Verify device still exists after stabilization
+		if _, err := os.Stat(devicePath); err != nil {
+			klog.Warningf("iSCSI device %s disappeared after stabilization: %v", devicePath, err)
+			return nil, status.Errorf(codes.Unavailable,
+				"iSCSI device %s became unavailable after stabilization: %v", devicePath, err)
+		}
 	}
 
 	if isBlockVolume {

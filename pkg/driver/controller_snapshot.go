@@ -519,9 +519,24 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		return nil, status.Errorf(codes.Internal, "Failed to create detached snapshot via replication: %v", err)
 	}
 
-	klog.Infof("Successfully created detached snapshot dataset: %s", targetDataset)
+	klog.Infof("Replication completed for detached snapshot dataset: %s", targetDataset)
 
-	// Step 3: Clean up the temporary snapshot that was replicated to the target
+	// Step 3: Promote the target dataset to break clone dependency
+	// TrueNAS LOCAL replication may create clone relationships for efficiency.
+	// Promotion makes the dataset independent, allowing the source volume to be deleted.
+	klog.V(4).Infof("Promoting detached snapshot dataset %s to break clone dependency", targetDataset)
+	if err := s.apiClient.PromoteDataset(ctx, targetDataset); err != nil {
+		// Promotion failure is critical - without it, the source volume cannot be deleted
+		klog.Errorf("Failed to promote detached snapshot dataset %s: %v. Cleaning up.", targetDataset, err)
+		if delErr := s.apiClient.DeleteDataset(ctx, targetDataset); delErr != nil {
+			klog.Errorf("Failed to cleanup detached snapshot dataset after promotion failure: %v", delErr)
+		}
+		timer.ObserveError()
+		return nil, status.Errorf(codes.Internal, "Failed to promote detached snapshot: %v", err)
+	}
+	klog.Infof("Successfully promoted detached snapshot dataset: %s (now independent from source)", targetDataset)
+
+	// Step 4: Clean up the temporary snapshot that was replicated to the target
 	// The replication copies the snapshot to the target, so we need to remove it
 	targetTempSnapshot := fmt.Sprintf("%s@%s", targetDataset, tempSnapshotName)
 	klog.V(4).Infof("Cleaning up replicated temporary snapshot %s", targetTempSnapshot)
@@ -529,7 +544,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		klog.Warningf("Failed to delete replicated temporary snapshot %s: %v", targetTempSnapshot, delErr)
 	}
 
-	// Step 4: Set CSI metadata properties on the detached snapshot dataset
+	// Step 5: Set CSI metadata properties on the detached snapshot dataset
 	props := map[string]string{
 		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
 		tnsapi.PropertySnapshotID:       snapshotName,

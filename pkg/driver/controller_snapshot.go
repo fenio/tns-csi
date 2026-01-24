@@ -522,17 +522,17 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 	klog.Infof("Replication completed for detached snapshot dataset: %s", targetDataset)
 
 	// Step 3: Attempt to promote the target dataset to break clone dependency
-	// TrueNAS LOCAL replication may create clone relationships for efficiency.
-	// Promotion makes the dataset independent, allowing the source volume to be deleted.
-	// Note: If the dataset is already independent (true zfs send/receive), promotion will fail
-	// with "not a clone" error - this is expected and we continue anyway.
-	klog.V(4).Infof("Attempting to promote detached snapshot dataset %s to break clone dependency", targetDataset)
-	if err := s.apiClient.PromoteDataset(ctx, targetDataset); err != nil {
-		// Promotion can fail if the dataset is not a clone (already independent).
-		// Log a warning but continue - the snapshot creation should still succeed.
-		klog.Warningf("Could not promote detached snapshot dataset %s: %v (may already be independent)", targetDataset, err)
+	// TrueNAS LOCAL replication creates clone relationships for efficiency (instant, space-efficient).
+	// Promotion breaks the clone->origin dependency, allowing the source volume to be deleted later.
+	// Without promotion, deleting the source will fail with "volume has dependent clones".
+	klog.Infof("Attempting to promote detached snapshot dataset %s to break clone dependency", targetDataset)
+	if promoteErr := s.apiClient.PromoteDataset(ctx, targetDataset); promoteErr != nil {
+		// Log the full error for debugging - this helps identify why promotion failed
+		klog.Warningf("PromoteDataset(%s) failed: %v", targetDataset, promoteErr)
+		klog.Warningf("Promotion failure may cause source volume deletion to fail later with 'dependent clones' error")
+		// Continue anyway - snapshot creation can still succeed, but source deletion may be blocked
 	} else {
-		klog.Infof("Successfully promoted detached snapshot dataset: %s (now independent from source)", targetDataset)
+		klog.Infof("Successfully promoted detached snapshot dataset: %s (clone dependency broken)", targetDataset)
 	}
 
 	// Step 4: Clean up the temporary snapshot that was replicated to the target

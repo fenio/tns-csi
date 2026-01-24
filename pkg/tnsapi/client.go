@@ -1695,7 +1695,7 @@ func (c *Client) CloneSnapshot(ctx context.Context, params CloneSnapshotParams) 
 //
 // Note: This uses the TrueNAS pool.dataset.promote API which wraps ZFS promote.
 func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
-	klog.V(4).Infof("Promoting dataset: %s", datasetID)
+	klog.Infof("PromoteDataset: Calling pool.dataset.promote for dataset: %s", datasetID)
 
 	// TrueNAS pool.dataset.promote takes the dataset ID and returns success/failure
 	// The API expects just the dataset ID as a string parameter
@@ -1704,12 +1704,13 @@ func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
 	var result json.RawMessage
 	err := c.Call(ctx, "pool.dataset.promote", []interface{}{datasetID}, &result)
 	if err != nil {
+		klog.Errorf("PromoteDataset: API call failed for %s: %v", datasetID, err)
 		return fmt.Errorf("failed to promote dataset %s: %w", datasetID, err)
 	}
 
 	// If no error was returned, the promote operation succeeded.
 	// TrueNAS returns null on success, which is valid.
-	klog.V(4).Infof("Successfully promoted dataset: %s (raw response: %s)", datasetID, string(result))
+	klog.Infof("PromoteDataset: Success for %s (raw response: %s)", datasetID, string(result))
 	return nil
 }
 
@@ -2150,15 +2151,17 @@ func (e ejsonDate) MarshalJSON() ([]byte, error) {
 //
 // Returns the job ID which can be used to poll for completion status.
 func (c *Client) RunOnetimeReplication(ctx context.Context, params ReplicationRunOnetimeParams) (int, error) {
-	klog.V(4).Infof("Running one-time replication: %s -> %s", params.SourceDatasets, params.TargetDataset)
+	klog.Infof("RunOnetimeReplication: Starting replication %s -> %s (transport: %s)",
+		params.SourceDatasets, params.TargetDataset, params.Transport)
 
 	var jobID int
 	err := c.Call(ctx, "replication.run_onetime", []interface{}{params}, &jobID)
 	if err != nil {
+		klog.Errorf("RunOnetimeReplication: Failed to start: %v", err)
 		return 0, fmt.Errorf("failed to start one-time replication: %w", err)
 	}
 
-	klog.V(4).Infof("Started one-time replication job: %d", jobID)
+	klog.Infof("RunOnetimeReplication: Started job %d for %s -> %s", jobID, params.SourceDatasets, params.TargetDataset)
 	return jobID, nil
 }
 

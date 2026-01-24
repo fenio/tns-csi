@@ -1472,57 +1472,60 @@ func (s *ControllerService) executeDetachedSnapshotClone(ctx context.Context, sn
 }
 
 // executeDetachedSnapshotRestore restores a volume from a detached snapshot.
-// Detached snapshots are stored as datasets (not ZFS snapshots), so we need to:
-// 1. Create a temporary ZFS snapshot of the detached snapshot dataset
-// 2. Clone that temporary snapshot to create the new volume
-// 3. Promote the clone to make it independent (always, since temp snapshot will be deleted)
-// 4. Delete the temporary snapshot
+// Detached snapshots are stored as datasets (not ZFS snapshots), so we need to
+// create a ZFS snapshot of it first, then clone from that snapshot.
 //
-// This is different from executeDetachedSnapshotClone which creates a promoted clone
-// from a regular ZFS snapshot. Here, the source is already a dataset (detached snapshot).
+// IMPORTANT: We do NOT promote the cloned volume. This maintains the correct
+// dependency direction:
+// - Restored volume depends on detached snapshot (via the temp snapshot)
+// - Can delete restored volumes freely (they're the dependents, not origins)
+// - Can't delete detached snapshot while restored volumes exist (expected for backups)
+//
+// If we promoted, the dependency would be REVERSED - the detached snapshot would
+// depend on the restored volume's snapshot, preventing deletion of restored volumes.
+//
+// The temp snapshot on the detached snapshot dataset is kept because the restored
+// volume depends on it. It will be cleaned up when the restored volume is deleted.
 func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) (*tnsapi.Dataset, error) {
 	klog.Infof("Restoring volume from detached snapshot dataset %s to %s", snapshotMeta.DatasetName, params.newDatasetName)
 
 	// Step 1: Create a temporary ZFS snapshot of the detached snapshot dataset
-	tempSnapshotName := fmt.Sprintf("csi-restore-temp-%d", time.Now().UnixNano())
-	tempSnapshotFullName := fmt.Sprintf("%s@%s", snapshotMeta.DatasetName, tempSnapshotName)
+	// This snapshot will persist because the cloned volume depends on it
+	tempSnapshotName := "csi-restore-for-" + params.newVolumeName
+	tempSnapshotFullName := snapshotMeta.DatasetName + "@" + tempSnapshotName
 
-	klog.V(4).Infof("Creating temporary snapshot %s for restore operation", tempSnapshotFullName)
+	klog.V(4).Infof("Creating snapshot %s for restore operation", tempSnapshotFullName)
 
-	_, err := s.apiClient.CreateSnapshot(ctx, tnsapi.SnapshotCreateParams{
-		Dataset:   snapshotMeta.DatasetName,
-		Name:      tempSnapshotName,
-		Recursive: false,
+	// Check if snapshot already exists (idempotency for retried operations)
+	existingSnapshots, queryErr := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{"dataset", "=", snapshotMeta.DatasetName},
 	})
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot of detached snapshot dataset: %v", err)
+	if queryErr != nil {
+		klog.V(4).Infof("Failed to query existing snapshots (will attempt to create): %v", queryErr)
+	}
+	snapshotExists := false
+	for _, snap := range existingSnapshots {
+		if snap.Name == tempSnapshotFullName {
+			klog.Infof("Snapshot %s already exists, reusing for restore", tempSnapshotFullName)
+			snapshotExists = true
+			break
+		}
 	}
 
-	// Track whether promotion succeeded - determines where to clean up the temp snapshot
-	promoted := false
-
-	// Ensure we clean up the temporary snapshot regardless of outcome
-	// IMPORTANT: After promotion, the temp snapshot moves from the source dataset to the cloned dataset.
-	// ZFS promotion reverses the parent-child relationship, transferring the snapshot to the clone.
-	defer func() {
-		if promoted {
-			// After promotion, the temp snapshot is now on the cloned dataset
-			promotedSnapshotName := fmt.Sprintf("%s@%s", params.newDatasetName, tempSnapshotName)
-			klog.V(4).Infof("Cleaning up promoted temporary snapshot %s", promotedSnapshotName)
-			if delErr := s.apiClient.DeleteSnapshot(ctx, promotedSnapshotName); delErr != nil {
-				klog.Warningf("Failed to delete promoted temporary snapshot %s: %v", promotedSnapshotName, delErr)
-			}
-		} else {
-			// Before promotion (or if promotion failed), snapshot is still on the source
-			klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshotFullName)
-			if delErr := s.apiClient.DeleteSnapshot(ctx, tempSnapshotFullName); delErr != nil {
-				klog.Warningf("Failed to delete temporary snapshot %s: %v", tempSnapshotFullName, delErr)
-			}
+	if !snapshotExists {
+		_, err := s.apiClient.CreateSnapshot(ctx, tnsapi.SnapshotCreateParams{
+			Dataset:   snapshotMeta.DatasetName,
+			Name:      tempSnapshotName,
+			Recursive: false,
+		})
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to create snapshot of detached snapshot dataset: %v", err)
 		}
-	}()
+	}
 
-	// Step 2: Clone the temporary snapshot to the new dataset
-	klog.V(4).Infof("Cloning temporary snapshot %s to %s", tempSnapshotFullName, params.newDatasetName)
+	// Step 2: Clone the snapshot to create the new volume
+	// The clone will depend on the snapshot (correct dependency direction)
+	klog.V(4).Infof("Cloning snapshot %s to %s", tempSnapshotFullName, params.newDatasetName)
 
 	cloneParams := tnsapi.CloneSnapshotParams{
 		Snapshot: tempSnapshotFullName,
@@ -1531,29 +1534,20 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 
 	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
 	if err != nil {
-		klog.Errorf("Failed to clone temporary snapshot: %v", err)
-		s.cleanupPartialClone(ctx, params.newDatasetName)
+		klog.Errorf("Failed to clone snapshot: %v", err)
+		// Don't delete the temp snapshot - it might be used by other restores
+		// or might be needed for a retry
 		return nil, status.Errorf(codes.Internal, "Failed to clone detached snapshot: %v", err)
 	}
 
-	klog.Infof("Clone created from detached snapshot (name: %s, type: %s), now promoting to make it independent",
-		clonedDataset.Name, clonedDataset.Type)
+	klog.Infof("Successfully restored volume from detached snapshot: %s -> %s (clone depends on %s)",
+		snapshotMeta.DatasetName, clonedDataset.Name, tempSnapshotFullName)
 
-	// Step 3: Promote the clone to break the parent-child relationship
-	// This is required because the temp snapshot will be deleted, so the clone must be independent
-	// IMPORTANT: After promotion, the temp snapshot moves from snapshotMeta.DatasetName to clonedDataset.Name
-	if err := s.apiClient.PromoteDataset(ctx, clonedDataset.Name); err != nil {
-		klog.Errorf("Failed to promote cloned dataset %s: %v. Cleaning up...", clonedDataset.Name, err)
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.Name); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset after promotion failure: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to promote restored volume: %v", err)
-	}
+	// NOTE: We intentionally do NOT promote the clone. This keeps the dependency
+	// direction correct: restored volume depends on detached snapshot.
+	// The temp snapshot will be cleaned up when the restored volume is deleted
+	// (ZFS will allow deletion of the snapshot once no clones depend on it).
 
-	// Mark that promotion succeeded so cleanup targets the correct snapshot location
-	promoted = true
-
-	klog.Infof("Successfully restored volume from detached snapshot: %s -> %s", snapshotMeta.DatasetName, clonedDataset.Name)
 	return clonedDataset, nil
 }
 

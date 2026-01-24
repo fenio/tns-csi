@@ -1498,11 +1498,26 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot of detached snapshot dataset: %v", err)
 	}
 
+	// Track whether promotion succeeded - determines where to clean up the temp snapshot
+	promoted := false
+
 	// Ensure we clean up the temporary snapshot regardless of outcome
+	// IMPORTANT: After promotion, the temp snapshot moves from the source dataset to the cloned dataset.
+	// ZFS promotion reverses the parent-child relationship, transferring the snapshot to the clone.
 	defer func() {
-		klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshotFullName)
-		if delErr := s.apiClient.DeleteSnapshot(ctx, tempSnapshotFullName); delErr != nil {
-			klog.Warningf("Failed to delete temporary snapshot %s: %v", tempSnapshotFullName, delErr)
+		if promoted {
+			// After promotion, the temp snapshot is now on the cloned dataset
+			promotedSnapshotName := fmt.Sprintf("%s@%s", params.newDatasetName, tempSnapshotName)
+			klog.V(4).Infof("Cleaning up promoted temporary snapshot %s", promotedSnapshotName)
+			if delErr := s.apiClient.DeleteSnapshot(ctx, promotedSnapshotName); delErr != nil {
+				klog.Warningf("Failed to delete promoted temporary snapshot %s: %v", promotedSnapshotName, delErr)
+			}
+		} else {
+			// Before promotion (or if promotion failed), snapshot is still on the source
+			klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshotFullName)
+			if delErr := s.apiClient.DeleteSnapshot(ctx, tempSnapshotFullName); delErr != nil {
+				klog.Warningf("Failed to delete temporary snapshot %s: %v", tempSnapshotFullName, delErr)
+			}
 		}
 	}()
 
@@ -1526,6 +1541,7 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 
 	// Step 3: Promote the clone to break the parent-child relationship
 	// This is required because the temp snapshot will be deleted, so the clone must be independent
+	// IMPORTANT: After promotion, the temp snapshot moves from snapshotMeta.DatasetName to clonedDataset.Name
 	if err := s.apiClient.PromoteDataset(ctx, clonedDataset.Name); err != nil {
 		klog.Errorf("Failed to promote cloned dataset %s: %v. Cleaning up...", clonedDataset.Name, err)
 		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.Name); delErr != nil {
@@ -1533,6 +1549,9 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 		}
 		return nil, status.Errorf(codes.Internal, "Failed to promote restored volume: %v", err)
 	}
+
+	// Mark that promotion succeeded so cleanup targets the correct snapshot location
+	promoted = true
 
 	klog.Infof("Successfully restored volume from detached snapshot: %s -> %s", snapshotMeta.DatasetName, clonedDataset.Name)
 	return clonedDataset, nil

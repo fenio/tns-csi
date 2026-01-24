@@ -41,9 +41,10 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 	})
 
 	It("should create detached clone that survives snapshot deletion", func() {
-		// NOTE: Cleanup is LIFO (Last In, First Out). For ZFS clone dependencies,
-		// the detached PVC (clone) must be deleted BEFORE the source PVC.
-		// Registration order: source PVC first, then detached PVC, so cleanup deletes detached first.
+		// NOTE: With detachedVolumesFromSnapshots=true, clone+promote reverses ZFS dependency.
+		// After promotion, the SOURCE depends on the CLONE (not vice versa).
+		// Therefore, source must be deleted BEFORE the clone during cleanup.
+		// We explicitly delete the source PVC at the end of the test to ensure correct order.
 
 		By("Creating a source PVC")
 		sourcePVCName := "source-pvc"
@@ -200,5 +201,13 @@ var _ = Describe("iSCSI Detached Snapshot", func() {
 		output, err = f.K8s.ExecInPod(ctx, detachedPodName, []string{"cat", "/data/post-delete.txt"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(output).To(Equal(postDeleteData), "Should be able to write after snapshot deletion")
+
+		// Explicitly delete source PVC before automatic cleanup runs.
+		// With clone+promote, source depends on clone, so source must be deleted first.
+		By("Deleting source PVC (must happen before clone due to ZFS dependency reversal)")
+		err = f.K8s.DeletePVC(ctx, sourcePVCName)
+		Expect(err).NotTo(HaveOccurred())
+		err = f.K8s.WaitForPVCDeleted(ctx, sourcePVCName, 4*time.Minute)
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

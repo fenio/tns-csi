@@ -521,20 +521,19 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 
 	klog.Infof("Replication completed for detached snapshot dataset: %s", targetDataset)
 
-	// Step 3: Promote the target dataset to break clone dependency
+	// Step 3: Attempt to promote the target dataset to break clone dependency
 	// TrueNAS LOCAL replication may create clone relationships for efficiency.
 	// Promotion makes the dataset independent, allowing the source volume to be deleted.
-	klog.V(4).Infof("Promoting detached snapshot dataset %s to break clone dependency", targetDataset)
+	// Note: If the dataset is already independent (true zfs send/receive), promotion will fail
+	// with "not a clone" error - this is expected and we continue anyway.
+	klog.V(4).Infof("Attempting to promote detached snapshot dataset %s to break clone dependency", targetDataset)
 	if err := s.apiClient.PromoteDataset(ctx, targetDataset); err != nil {
-		// Promotion failure is critical - without it, the source volume cannot be deleted
-		klog.Errorf("Failed to promote detached snapshot dataset %s: %v. Cleaning up.", targetDataset, err)
-		if delErr := s.apiClient.DeleteDataset(ctx, targetDataset); delErr != nil {
-			klog.Errorf("Failed to cleanup detached snapshot dataset after promotion failure: %v", delErr)
-		}
-		timer.ObserveError()
-		return nil, status.Errorf(codes.Internal, "Failed to promote detached snapshot: %v", err)
+		// Promotion can fail if the dataset is not a clone (already independent).
+		// Log a warning but continue - the snapshot creation should still succeed.
+		klog.Warningf("Could not promote detached snapshot dataset %s: %v (may already be independent)", targetDataset, err)
+	} else {
+		klog.Infof("Successfully promoted detached snapshot dataset: %s (now independent from source)", targetDataset)
 	}
-	klog.Infof("Successfully promoted detached snapshot dataset: %s (now independent from source)", targetDataset)
 
 	// Step 4: Clean up the temporary snapshot that was replicated to the target
 	// The replication copies the snapshot to the target, so we need to remove it

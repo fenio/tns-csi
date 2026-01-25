@@ -58,7 +58,7 @@ This driver supports three storage protocols:
 - **Volume cloning** - Create new volumes from existing snapshots
 - **Volume expansion** - Resize volumes dynamically (supported for both NFS and NVMe-oF)
 - **Volume retention** - Optional `deleteStrategy: retain` to keep volumes on PVC deletion
-- **Volume adoption** - Automatically adopt orphaned volumes for GitOps and disaster recovery workflows
+- **Volume adoption** - Automatically adopt orphaned volumes for GitOps and disaster recovery workflows (see [Adoption Guide](docs/ADOPTION.md))
 - **Configurable mount options** - Customize NFS/NVMe-oF mount options via StorageClass
 - **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support

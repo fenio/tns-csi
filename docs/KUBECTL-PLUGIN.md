@@ -242,6 +242,10 @@ kubectl tns-csi mark-adoptable --unmark --all        # Remove from all
 
 ### Adoption Commands
 
+**For complete adoption workflows including Kubernetes-side steps, see [ADOPTION.md](ADOPTION.md).**
+
+The commands below handle the TrueNAS-side operations. Full adoption also requires Kubernetes-side steps (scaling down workloads, managing PVCs, etc.) which are documented in the adoption guide.
+
 #### `import`
 Import an existing dataset into tns-csi management.
 

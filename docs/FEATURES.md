@@ -716,6 +716,9 @@ zfs get all tank/csi/pvc-12345678 | grep tns-csi
   - Disaster recovery - restore volumes to a new cluster
   - Cluster migration - move workloads between clusters
   - Upgrade recovery - re-import retained volumes after breaking upgrades
+  - **Migration from democratic-csi** - move volumes without data loss
+
+**For step-by-step migration and adoption instructions, see [ADOPTION.md](ADOPTION.md).**
 
 #### Automatic Adoption (GitOps)
 
@@ -1129,6 +1132,7 @@ reclaimPolicy: Delete
 - ✅ QUICKSTART.md - NFS quick start guide
 - ✅ QUICKSTART-NVMEOF.md - NVMe-oF setup guide
 - ✅ SNAPSHOTS.md - Snapshot and cloning guide
+- ✅ ADOPTION.md - Volume adoption and migration guide (including democratic-csi migration)
 - ✅ METRICS.md - Prometheus metrics documentation
 - ✅ TESTING.md - Comprehensive testing guide and infrastructure details
 - ✅ FEATURES.md - This document

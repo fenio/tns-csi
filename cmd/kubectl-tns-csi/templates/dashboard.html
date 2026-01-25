@@ -273,6 +273,187 @@
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
+
+        /* Clickable table rows */
+        tr.clickable {
+            cursor: pointer;
+        }
+
+        tr.clickable:hover {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Detail panel overlay */
+        .detail-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+        }
+
+        .detail-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Slide-in detail panel */
+        .detail-panel-container {
+            position: fixed;
+            top: 0;
+            right: -500px;
+            width: 500px;
+            max-width: 90vw;
+            height: 100vh;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            z-index: 101;
+            overflow-y: auto;
+            transition: right 0.3s ease-out;
+        }
+
+        .detail-panel-container.active {
+            right: 0;
+        }
+
+        .detail-panel {
+            padding: 20px;
+        }
+
+        .detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 20px;
+        }
+
+        .detail-header h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .close-btn {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-btn:hover {
+            background: var(--accent-red);
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section h4 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 12px;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 120px 1fr;
+            gap: 8px 16px;
+        }
+
+        .detail-grid dt {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .detail-grid dd {
+            font-size: 0.875rem;
+            word-break: break-word;
+        }
+
+        .properties-grid {
+            grid-template-columns: 180px 1fr;
+        }
+
+        .detail-loading {
+            padding: 40px;
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        /* Controller Status Bar */
+        .controller-status {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 20px;
+        }
+
+        .status-loading {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+        }
+
+        .status-item .label {
+            color: var(--text-secondary);
+        }
+
+        .status-item .value {
+            font-weight: 600;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-red);
+        }
+
+        .status-indicator.connected {
+            background: var(--accent-green);
+        }
+
+        .status-error {
+            color: var(--accent-red);
+            font-size: 0.875rem;
+        }
+
+        .status-divider {
+            width: 1px;
+            height: 20px;
+            background: var(--border-color);
+        }
     </style>
 </head>
 <body>
@@ -299,6 +480,16 @@
 
         <div id="summary-cards">
             {{template "summary_cards.html" .Summary}}
+        </div>
+
+        <!-- Controller Status Bar -->
+        <div id="controller-status" class="controller-status"
+             hx-get="/partials/metrics"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="status-loading">
+                <span class="spinner"></span> Loading controller status...
+            </div>
         </div>
 
         <div class="tabs">
@@ -379,6 +570,20 @@
                 {{template "unmanaged_table.html" .Unmanaged}}
             </div>
         </div>
+
+    </div>
+
+    <!-- Detail panel overlay -->
+    <div class="detail-overlay" id="detail-overlay" onclick="closeDetailPanel()"></div>
+
+    <!-- Slide-in detail panel -->
+    <div class="detail-panel-container" id="detail-panel-container">
+        <div id="detail-content">
+            <div class="detail-loading">
+                <span class="spinner"></span>
+                <p>Loading...</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -391,6 +596,33 @@
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             btn.classList.add('active');
         }
+
+        function showVolumeDetail(volumeId) {
+            // Show overlay and panel
+            document.getElementById('detail-overlay').classList.add('active');
+            document.getElementById('detail-panel-container').classList.add('active');
+
+            // Show loading state
+            document.getElementById('detail-content').innerHTML = '<div class="detail-loading"><span class="spinner"></span><p>Loading...</p></div>';
+
+            // Fetch volume details
+            htmx.ajax('GET', '/partials/volume-detail/' + encodeURIComponent(volumeId), {
+                target: '#detail-content',
+                swap: 'innerHTML'
+            });
+        }
+
+        function closeDetailPanel() {
+            document.getElementById('detail-overlay').classList.remove('active');
+            document.getElementById('detail-panel-container').classList.remove('active');
+        }
+
+        // Close panel on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeDetailPanel();
+            }
+        });
     </script>
 </body>
 </html>

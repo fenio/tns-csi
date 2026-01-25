@@ -12,7 +12,7 @@
     </thead>
     <tbody>
         {{range .}}
-        <tr>
+        <tr class="clickable" onclick="showVolumeDetail('{{.VolumeID}}')" title="Click for details">
             <td class="mono">{{.VolumeID}}</td>
             <td class="mono text-muted">{{.Dataset}}</td>
             <td>

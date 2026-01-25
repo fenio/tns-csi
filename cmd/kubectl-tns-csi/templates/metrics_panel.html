@@ -1,0 +1,62 @@
+{{define "metrics_panel.html"}}
+{{if .Error}}
+<div class="status-error">
+    Controller: {{.Error}}
+</div>
+{{else}}
+<div class="status-bar">
+    <div class="status-item">
+        <span class="status-indicator {{if .WebSocketConnected}}connected{{end}}"></span>
+        <span class="label">TrueNAS:</span>
+        <span class="value">{{if .WebSocketConnected}}Connected{{else}}Disconnected{{end}}</span>
+    </div>
+
+    <div class="status-divider"></div>
+
+    <div class="status-item">
+        <span class="label">Operations:</span>
+        <span class="value">{{.TotalOperations}}</span>
+        {{if gt .ErrorOperations 0}}
+        <span style="color: var(--accent-red);">({{.ErrorOperations}} errors)</span>
+        {{end}}
+    </div>
+
+    <div class="status-divider"></div>
+
+    <div class="status-item">
+        <span class="label">NFS:</span>
+        <span class="value" style="color: var(--accent-blue);">{{.NFSOperations}}</span>
+    </div>
+
+    <div class="status-item">
+        <span class="label">NVMe-oF:</span>
+        <span class="value" style="color: var(--accent-purple);">{{.NVMeOFOperations}}</span>
+    </div>
+
+    <div class="status-item">
+        <span class="label">iSCSI:</span>
+        <span class="value" style="color: var(--accent-yellow);">{{.ISCSIOperations}}</span>
+    </div>
+
+    <div class="status-divider"></div>
+
+    <div class="status-item">
+        <span class="label">WebSocket Messages:</span>
+        <span class="value">{{.MessagesSent}} / {{.MessagesReceived}}</span>
+    </div>
+
+    {{if gt .WebSocketReconnects 0}}
+    <div class="status-item">
+        <span class="label">Reconnects:</span>
+        <span class="value" style="color: var(--accent-yellow);">{{.WebSocketReconnects}}</span>
+    </div>
+    {{end}}
+
+    <div class="status-divider"></div>
+
+    <div class="status-item">
+        <a href="/api/metrics/raw" target="_blank" style="color: var(--text-secondary); text-decoration: none; font-size: 0.75rem;">View Raw Metrics</a>
+    </div>
+</div>
+{{end}}
+{{end}}

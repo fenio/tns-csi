@@ -1,0 +1,182 @@
+{{define "volume_detail.html"}}
+<div class="detail-panel">
+    <div class="detail-header">
+        <h3>{{.VolumeID}}</h3>
+        <button class="close-btn" onclick="closeDetailPanel()">x</button>
+    </div>
+
+    <div class="detail-section">
+        <h4>Basic Information</h4>
+        <dl class="detail-grid">
+            <dt>Dataset</dt>
+            <dd class="mono">{{.Dataset}}</dd>
+
+            <dt>Protocol</dt>
+            <dd>
+                {{if eq .Protocol "nfs"}}
+                <span class="badge badge-nfs">NFS</span>
+                {{else if eq .Protocol "nvmeof"}}
+                <span class="badge badge-nvmeof">NVMe-oF</span>
+                {{else if eq .Protocol "iscsi"}}
+                <span class="badge badge-iscsi">iSCSI</span>
+                {{else}}
+                <span class="badge">{{.Protocol}}</span>
+                {{end}}
+            </dd>
+
+            <dt>Type</dt>
+            <dd>{{.Type}}</dd>
+
+            {{if .MountPath}}
+            <dt>Mount Path</dt>
+            <dd class="mono">{{.MountPath}}</dd>
+            {{end}}
+
+            <dt>Delete Strategy</dt>
+            <dd>
+                {{if eq .DeleteStrategy "retain"}}
+                <span class="badge badge-cow">Retain</span>
+                {{else}}
+                <span class="badge">Delete</span>
+                {{end}}
+            </dd>
+
+            <dt>Adoptable</dt>
+            <dd>
+                {{if .Adoptable}}
+                <span class="badge badge-nfs">Yes</span>
+                {{else}}
+                <span class="text-muted">No</span>
+                {{end}}
+            </dd>
+        </dl>
+    </div>
+
+    <div class="detail-section">
+        <h4>Capacity</h4>
+        <dl class="detail-grid">
+            <dt>Total</dt>
+            <dd>{{.CapacityHuman}}</dd>
+
+            <dt>Used</dt>
+            <dd>{{.UsedHuman}}</dd>
+
+            {{if .CreatedAt}}
+            <dt>Created</dt>
+            <dd>{{.CreatedAt}}</dd>
+            {{end}}
+        </dl>
+    </div>
+
+    {{if or .ContentSourceType .CloneMode}}
+    <div class="detail-section">
+        <h4>Clone Information</h4>
+        <dl class="detail-grid">
+            {{if .CloneMode}}
+            <dt>Clone Mode</dt>
+            <dd>
+                {{if eq .CloneMode "cow"}}
+                <span class="badge badge-cow">COW</span>
+                {{else if eq .CloneMode "promoted"}}
+                <span class="badge badge-promoted">Promoted</span>
+                {{else if eq .CloneMode "detached"}}
+                <span class="badge badge-detached">Detached</span>
+                {{else}}
+                <span class="badge">{{.CloneMode}}</span>
+                {{end}}
+            </dd>
+            {{end}}
+
+            {{if .ContentSourceType}}
+            <dt>Source Type</dt>
+            <dd>{{.ContentSourceType}}</dd>
+            {{end}}
+
+            {{if .ContentSourceID}}
+            <dt>Source ID</dt>
+            <dd class="mono">{{.ContentSourceID}}</dd>
+            {{end}}
+
+            {{if .OriginSnapshot}}
+            <dt>Origin Snapshot</dt>
+            <dd class="mono">{{.OriginSnapshot}}</dd>
+            {{end}}
+
+            {{if .ZFSOrigin}}
+            <dt>ZFS Origin</dt>
+            <dd class="mono">{{.ZFSOrigin}}</dd>
+            {{end}}
+        </dl>
+    </div>
+    {{end}}
+
+    {{if .NFSShare}}
+    <div class="detail-section">
+        <h4>NFS Share</h4>
+        <dl class="detail-grid">
+            <dt>Share ID</dt>
+            <dd>{{.NFSShare.ID}}</dd>
+
+            <dt>Path</dt>
+            <dd class="mono">{{.NFSShare.Path}}</dd>
+
+            <dt>Enabled</dt>
+            <dd>
+                {{if .NFSShare.Enabled}}
+                <span class="badge badge-nfs">Yes</span>
+                {{else}}
+                <span class="badge badge-detached">No</span>
+                {{end}}
+            </dd>
+
+            {{if .NFSShare.Hosts}}
+            <dt>Allowed Hosts</dt>
+            <dd>{{range $i, $h := .NFSShare.Hosts}}{{if $i}}, {{end}}{{$h}}{{end}}</dd>
+            {{end}}
+        </dl>
+    </div>
+    {{end}}
+
+    {{if .NVMeOFSubsystem}}
+    <div class="detail-section">
+        <h4>NVMe-oF Subsystem</h4>
+        <dl class="detail-grid">
+            <dt>Subsystem ID</dt>
+            <dd>{{.NVMeOFSubsystem.ID}}</dd>
+
+            <dt>Name</dt>
+            <dd class="mono">{{.NVMeOFSubsystem.Name}}</dd>
+
+            <dt>NQN</dt>
+            <dd class="mono" style="word-break: break-all;">{{.NVMeOFSubsystem.NQN}}</dd>
+
+            {{if .NVMeOFSubsystem.Serial}}
+            <dt>Serial</dt>
+            <dd class="mono">{{.NVMeOFSubsystem.Serial}}</dd>
+            {{end}}
+
+            <dt>Enabled</dt>
+            <dd>
+                {{if .NVMeOFSubsystem.Enabled}}
+                <span class="badge badge-nvmeof">Yes</span>
+                {{else}}
+                <span class="badge badge-detached">No</span>
+                {{end}}
+            </dd>
+        </dl>
+    </div>
+    {{end}}
+
+    {{if .Properties}}
+    <div class="detail-section">
+        <h4>ZFS Properties</h4>
+        <dl class="detail-grid properties-grid">
+            {{range $key, $value := .Properties}}
+            <dt>{{$key}}</dt>
+            <dd class="mono">{{$value}}</dd>
+            {{end}}
+        </dl>
+    </div>
+    {{end}}
+</div>
+{{end}}

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -130,7 +131,12 @@ func runServe(ctx context.Context, url, apiKey, secretRef *string, skipTLSVerify
 	mux.HandleFunc("/partials/clones", server.handlePartialClones)
 	mux.HandleFunc("/partials/unmanaged", server.handlePartialUnmanaged)
 	mux.HandleFunc("/partials/summary", server.handlePartialSummary)
+	mux.HandleFunc("/partials/volume-detail/", server.handlePartialVolumeDetail)
+	mux.HandleFunc("/partials/metrics", server.handlePartialMetrics)
 	mux.HandleFunc("/api/unmanaged", server.handleAPIUnmanaged)
+	mux.HandleFunc("/api/volumes/", server.handleAPIVolumeDetail)
+	mux.HandleFunc("/api/metrics", server.handleAPIMetrics)
+	mux.HandleFunc("/api/metrics/raw", server.handleAPIMetricsRaw)
 
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -467,6 +473,102 @@ func (s *dashboardServer) handleAPIUnmanaged(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSONResponse(w, unmanaged)
+}
+
+func (s *dashboardServer) handlePartialVolumeDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract volume ID from URL path: /partials/volume-detail/{id}
+	volumeID := strings.TrimPrefix(r.URL.Path, "/partials/volume-detail/")
+	if volumeID == "" {
+		http.Error(w, "Volume ID required", http.StatusBadRequest)
+		return
+	}
+
+	client, err := s.getClient(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer client.Close()
+
+	details, err := getVolumeDetails(ctx, client, volumeID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "volume_detail.html", details); err != nil {
+		klog.Errorf("Template error: %v", err)
+	}
+}
+
+func (s *dashboardServer) handleAPIVolumeDetail(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Extract volume ID from URL path: /api/volumes/{id}
+	volumeID := strings.TrimPrefix(r.URL.Path, "/api/volumes/")
+	if volumeID == "" {
+		writeJSONError(w, errPoolNotConfigured) // Reuse error for consistency
+		return
+	}
+
+	client, err := s.getClient(ctx)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+	defer client.Close()
+
+	details, err := getVolumeDetails(ctx, client, volumeID)
+	if err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	writeJSONResponse(w, details)
+}
+
+func (s *dashboardServer) handlePartialMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	metrics, err := fetchControllerMetrics(ctx)
+	if err != nil {
+		metrics = &MetricsSummary{Error: err.Error()}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, "metrics_panel.html", metrics); err != nil {
+		klog.Errorf("Template error: %v", err)
+	}
+}
+
+func (s *dashboardServer) handleAPIMetrics(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	metrics, err := fetchControllerMetrics(ctx)
+	if err != nil {
+		metrics = &MetricsSummary{Error: err.Error()}
+	}
+	// Don't include raw metrics in JSON response to keep it small
+	metrics.RawMetrics = ""
+
+	writeJSONResponse(w, metrics)
+}
+
+func (s *dashboardServer) handleAPIMetricsRaw(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	rawMetrics, err := fetchRawMetrics(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	//nolint:errcheck,gosec // Best effort response
+	w.Write([]byte(rawMetrics))
 }
 
 func writeJSONResponse(w http.ResponseWriter, data any) {

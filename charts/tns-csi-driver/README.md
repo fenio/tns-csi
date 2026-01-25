@@ -30,7 +30,7 @@ A Container Storage Interface (CSI) driver for TrueNAS Scale 25.10+ that enables
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -89,7 +89,7 @@ storageClasses:
 Install with:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --create-namespace \
   --values my-values.yaml
@@ -109,7 +109,7 @@ helm install tns-csi ./charts/tns-csi-driver \
 From OCI registry:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -134,7 +134,7 @@ helm install tns-csi ./charts/tns-csi-driver \
 From OCI registry:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -263,7 +263,7 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `image.repository` | CSI driver image repository | `bfenski/tns-csi` |
-| `image.tag` | Image tag | `v0.0.1` |
+| `image.tag` | Image tag | `v0.9.2` |
 | `image.pullPolicy` | Image pull policy | `Always` |
 
 ## Usage
@@ -320,7 +320,7 @@ To upgrade the chart from OCI registry:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --reuse-values
 ```
@@ -329,7 +329,7 @@ Or with new values:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.0.1 \
+  --version 0.9.2 \
   --namespace kube-system \
   --values my-values.yaml
 ```
@@ -483,12 +483,12 @@ helm package charts/tns-csi-driver
 
 Push to OCI registry (Docker Hub):
 ```bash
-helm push tns-csi-driver-0.0.1.tgz oci://registry-1.docker.io/bfenski
+helm push tns-csi-driver-0.9.2.tgz oci://registry-1.docker.io/bfenski
 ```
 
 Pull chart from OCI registry:
 ```bash
-helm pull oci://registry-1.docker.io/bfenski/tns-csi-driver --version 0.0.1
+helm pull oci://registry-1.docker.io/bfenski/tns-csi-driver --version 0.9.2
 ```
 
 ## Support

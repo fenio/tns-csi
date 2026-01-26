@@ -12,6 +12,7 @@ import (
 )
 
 func TestValidateISCSIParams(t *testing.T) {
+	//nolint:govet // fieldalignment: test struct optimizes for readability
 	tests := []struct {
 		name     string
 		req      *csi.CreateVolumeRequest
@@ -201,6 +202,7 @@ func TestGenerateIQN(t *testing.T) {
 func TestCreateISCSIVolume(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // fieldalignment: test struct optimizes for readability
 	tests := []struct {
 		name          string
 		req           *csi.CreateVolumeRequest
@@ -432,6 +434,7 @@ func TestCreateISCSIVolume(t *testing.T) {
 func TestDeleteISCSIVolume(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // fieldalignment: test struct optimizes for readability
 	tests := []struct {
 		name      string
 		meta      *VolumeMetadata
@@ -540,6 +543,7 @@ func TestDeleteISCSIVolume(t *testing.T) {
 func TestExpandISCSIVolume(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // fieldalignment: test struct optimizes for readability
 	tests := []struct {
 		name          string
 		meta          *VolumeMetadata
@@ -648,6 +652,7 @@ func TestExpandISCSIVolume(t *testing.T) {
 func TestGetISCSIVolumeInfo(t *testing.T) {
 	ctx := context.Background()
 
+	//nolint:govet // fieldalignment: test struct optimizes for readability
 	tests := []struct {
 		name      string
 		meta      *VolumeMetadata

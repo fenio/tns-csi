@@ -47,14 +47,17 @@ func (s *NodeService) publishBlockVolume(ctx context.Context, stagingTargetPath,
 		return nil, status.Errorf(codes.Internal, "Failed to create target directory %s: %v", targetDir, mkdirErr)
 	}
 
-	// Create target file if it doesn't exist
-	if _, statErr := os.Stat(targetPath); os.IsNotExist(statErr) {
-		klog.V(4).Infof("Creating target file: %s", targetPath)
-		//nolint:gosec // Target path from CSI request is validated by Kubernetes CSI framework
-		file, fileErr := os.OpenFile(targetPath, os.O_CREATE, 0o600)
-		if fileErr != nil {
+	// Create target file atomically (O_EXCL ensures no race condition)
+	//nolint:gosec // Target path from CSI request is validated by Kubernetes CSI framework
+	file, fileErr := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL, 0o600)
+	if fileErr != nil {
+		if !os.IsExist(fileErr) {
 			return nil, status.Errorf(codes.Internal, "Failed to create target file %s: %v", targetPath, fileErr)
 		}
+		// File already exists, which is fine
+		klog.V(4).Infof("Target file %s already exists", targetPath)
+	} else {
+		klog.V(4).Infof("Created target file: %s", targetPath)
 		if closeErr := file.Close(); closeErr != nil {
 			klog.Warningf("Failed to close target file %s: %v", targetPath, closeErr)
 		}

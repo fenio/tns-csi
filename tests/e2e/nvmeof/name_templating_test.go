@@ -41,6 +41,7 @@ var _ = Describe("Name Templating", func() {
 			"protocol":     "nvmeof",
 			"pool":         f.Config.TrueNASPool,
 			"server":       f.Config.TrueNASHost,
+			"fsType":       "ext4",
 			"nameTemplate": "{{ .PVCNamespace }}-{{ .PVCName }}",
 		}
 		err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
@@ -112,6 +113,7 @@ var _ = Describe("Name Templating", func() {
 			"protocol":   "nvmeof",
 			"pool":       f.Config.TrueNASPool,
 			"server":     f.Config.TrueNASHost,
+			"fsType":     "ext4",
 			"namePrefix": "prod-",
 			"nameSuffix": "-data",
 		}

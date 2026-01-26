@@ -54,12 +54,12 @@ This driver supports three storage protocols:
 - **Dynamic volume provisioning** - Automatically create and delete storage volumes
 - **Multiple protocol support** - NFS for file storage, NVMe-oF and iSCSI for block storage
 - **Volume lifecycle management** - Full create, delete, attach, detach, mount, unmount operations
-- **Volume snapshots** - Create, delete, and restore from snapshots (NFS and NVMe-oF)
+- **Volume snapshots** - Create, delete, and restore from snapshots (NFS, NVMe-oF, and iSCSI)
 - **Volume cloning** - Create new volumes from existing snapshots
-- **Volume expansion** - Resize volumes dynamically (supported for both NFS and NVMe-oF)
+- **Volume expansion** - Resize volumes dynamically (NFS, NVMe-oF, and iSCSI)
 - **Volume retention** - Optional `deleteStrategy: retain` to keep volumes on PVC deletion
 - **Volume adoption** - Automatically adopt orphaned volumes for GitOps and disaster recovery workflows (see [Adoption Guide](docs/ADOPTION.md))
-- **Configurable mount options** - Customize NFS/NVMe-oF mount options via StorageClass
+- **Configurable mount options** - Customize NFS/NVMe-oF/iSCSI mount options via StorageClass
 - **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
@@ -259,8 +259,8 @@ This driver is in early development and requires extensive testing before produc
 
 - **Development Phase**: Active development with ongoing testing and validation
 - **Protocol Support**: Currently supports NFS, NVMe-oF, and iSCSI. SMB is not planned (Linux-focused driver).
-- **Volume Expansion**: Implemented and functional for both NFS and NVMe-oF protocols when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
-- **Snapshots**: Implemented for both NFS and NVMe-oF protocols, functional and tested
+- **Volume Expansion**: Implemented and functional for NFS, NVMe-oF, and iSCSI protocols when `allowVolumeExpansion: true` is set in the StorageClass (Helm chart enables this by default)
+- **Snapshots**: Implemented for NFS, NVMe-oF, and iSCSI protocols, functional and tested
 - **Testing**: Comprehensive automated testing on real infrastructure (see Testing section above)
 - **Stability**: Core features functional but may have undiscovered edge cases or bugs
 

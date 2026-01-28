@@ -29,7 +29,7 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 
 | | TNS-CSI | truenas-csi (Official) | Democratic-CSI |
 |---|---------|------------------------|----------------|
-| **Best for** | Modern TrueNAS with NVMe-oF | iSCSI + encryption needs | Broad compatibility |
+| **Best for** | Modern TrueNAS with NVMe-oF | Scheduled snapshots, CHAP auth | Broad compatibility |
 | **Block protocols** | NVMe-oF, iSCSI | iSCSI | iSCSI (+ NVMe-oF for ZoL) |
 | **Unique strength** | kubectl plugin, metrics, adoption, encryption | Scheduled snapshots | Multi-backend, Windows |
 | **Trade-off** | WebSocket API only | No NVMe-oF, no plugin | SSH complexity |
@@ -61,7 +61,7 @@ This driver supports three storage protocols:
 - **Volume adoption** - Automatically adopt orphaned volumes for GitOps and disaster recovery workflows (see [Adoption Guide](docs/ADOPTION.md))
 - **Configurable mount options** - Customize NFS/NVMe-oF/iSCSI mount options via StorageClass
 - **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
-- **Access modes** - ReadWriteOnce (RWO) and ReadWriteMany (RWX) support
+- **Access modes** - ReadWriteOnce (RWO), ReadWriteOncePod (RWOP), and ReadWriteMany (RWX) support
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
 

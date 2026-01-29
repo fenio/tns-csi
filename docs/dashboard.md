@@ -7,7 +7,7 @@ The test results dashboard provides real-time visualization of integration test 
 The dashboard displays:
 - Total test counts (passed, failed, skipped)
 - Success rate percentage
-- Test results by protocol (NFS vs NVMe-oF)
+- Test results by protocol (NFS, NVMe-oF, iSCSI)
 - Test results by type (basic, snapshot, concurrent, etc.)
 - Recent failures with links to workflow runs
 

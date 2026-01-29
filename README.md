@@ -306,7 +306,6 @@ kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
 - [Distro Compatibility](docs/DISTRO-COMPATIBILITY.md) - Kubernetes distribution compatibility testing
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring
 - [Kind Setup](docs/KIND.md) - Local development with Kind
-- [Security](docs/SECURITY-SANITIZATION.md) - Security considerations
 - [Comparison with truenas-csi](docs/COMPARISON-TRUENAS-CSI.md) - vs official TrueNAS CSI driver
 - [Comparison with Democratic-CSI](docs/COMPARISON-DEMOCRATIC-CSI.md) - vs democratic-csi
 

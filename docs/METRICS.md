@@ -23,11 +23,11 @@ These metrics track all CSI RPC operations:
 
 ### Volume Operation Metrics
 
-Protocol-specific volume operations (NFS and NVMe-oF):
+Protocol-specific volume operations (NFS, NVMe-oF, and iSCSI):
 
 - **`tns_volume_operations_total`** (counter)
   - Total number of volume operations
-  - Labels: `protocol` (nfs or nvmeof), `operation` (create, delete, expand), `status` (success or error)
+  - Labels: `protocol` (nfs, nvmeof, or iscsi), `operation` (create, delete, expand), `status` (success or error)
 
 - **`tns_volume_operations_duration_seconds`** (histogram)
   - Duration of volume operations in seconds
@@ -258,4 +258,4 @@ Metrics are collected in:
 - `pkg/metrics/metrics.go` - Metric definitions and registration
 - `pkg/driver/driver.go` - CSI operation metrics via gRPC interceptor
 - `pkg/tnsapi/client.go` - WebSocket connection metrics
-- `pkg/driver/controller_nfs.go` and `controller_nvmeof.go` - Protocol-specific volume operation metrics
+- `pkg/driver/controller_nfs.go`, `controller_nvmeof.go`, and `controller_iscsi.go` - Protocol-specific volume operation metrics

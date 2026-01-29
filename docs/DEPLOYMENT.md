@@ -129,40 +129,31 @@ TrueNAS 25.10 only shows interfaces with static IPs in the NVMe-oF port configur
 
 This creates the ZVOL needed for the initial namespace.
 
-#### Configure NVMe-oF Subsystem with Port and Namespace (REQUIRED)
+#### Configure NVMe-oF Port (REQUIRED)
 
-**⚠️ ARCHITECTURE NOTE:** The CSI driver uses a **shared subsystem model**:
-- **1 Subsystem → Many Namespaces** (one namespace per PVC)
-- The subsystem is **pre-configured infrastructure** (like a storage pool)
-- The CSI driver creates **namespaces** (not subsystems) for each volume
+**⚠️ ARCHITECTURE NOTE:** The CSI driver uses an **independent subsystem model**:
+- **1 Volume = 1 Subsystem + 1 Namespace** (dedicated subsystem per PVC)
+- The CSI driver automatically creates and deletes subsystems for each volume
+- Only the **port** must be pre-configured as infrastructure
 
-**Now create the subsystem with namespace and port:**
+**Create the NVMe-oF port:**
 
-1. Navigate to **Shares** → **NVMe-oF Subsystems**
-2. Click **Add** to create a new subsystem
-3. Configure the subsystem:
-   - **Subsystem Name:** Enter a qualified name (e.g., `nqn.2005-03.org.truenas:csi`)
-     - **IMPORTANT:** Remember this NQN - you'll need it for the StorageClass configuration
-   - **Namespace:** Select the ZVOL you just created (e.g., `pool1/nvmeof-init`)
-4. Click **Save**
-5. After creating the subsystem, click **Add Port**
-6. Configure the port:
-   - **Address:** Select your network interface with static IP (should now appear in dropdown)
+1. Navigate to **Shares** → **NVMe-oF Targets** → **Ports**
+2. Click **Add** to create a new port
+3. Configure the port:
+   - **Address:** Select your network interface with static IP
    - **Port:** `4420` (default NVMe-oF TCP port)
    - **Transport:** `TCP`
-7. Click **Save**
-8. Verify the subsystem appears in the list with:
-   - At least one namespace (the ZVOL you created)
-   - At least one TCP port configured
+4. Click **Save**
+5. Verify the port appears in the list
 
 **Why is this required?**
 
 - **Static IP:** TrueNAS only allows binding NVMe-oF to interfaces with static IPs
-- **Initial Namespace/ZVOL:** Empty subsystems are not valid - you need at least one namespace
-- **Port:** The CSI driver cannot create ports - they must be pre-configured
-- **Shared Subsystem:** All CSI-provisioned volumes share this subsystem as separate namespaces
+- **Port:** The CSI driver cannot create ports - they must be pre-configured infrastructure
+- **Subsystems:** Automatically created and deleted by the CSI driver for each volume
 
-The CSI driver will create additional namespaces automatically for each PVC within this shared subsystem.
+The CSI driver will automatically create a dedicated subsystem (with NQN like `nqn.2137.csi.tns:<volume-name>`) for each PVC.
 
 Without proper configuration, volume provisioning will fail with:
 

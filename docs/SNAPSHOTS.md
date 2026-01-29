@@ -8,16 +8,17 @@ This guide explains how to use volume snapshots with the TrueNAS CSI driver.
 
 ## Overview
 
-The TrueNAS CSI driver supports creating, deleting, and restoring from volume snapshots for both NFS and NVMe-oF protocols. Snapshots leverage ZFS snapshot capabilities on TrueNAS, providing instant, space-efficient point-in-time copies of your data.
+The TrueNAS CSI driver supports creating, deleting, and restoring from volume snapshots for NFS, NVMe-oF, and iSCSI protocols. Snapshots leverage ZFS snapshot capabilities on TrueNAS, providing instant, space-efficient point-in-time copies of your data.
 
 ## Features (Implementation Status)
 
-- ✅ **Create snapshots** - Implemented for both NFS and NVMe-oF (testing in progress)
-- ✅ **Delete snapshots** - Implemented for both protocols (testing in progress)
+- ✅ **Create snapshots** - Implemented for NFS, NVMe-oF, and iSCSI (testing in progress)
+- ✅ **Delete snapshots** - Implemented for all protocols (testing in progress)
 - ✅ **List snapshots** - Implemented (testing in progress)
 - ✅ **Restore from snapshots** - Create new volumes from snapshots via cloning (testing in progress)
 - ✅ **NFS support** - Snapshot operations implemented (validation needed)
 - ✅ **NVMe-oF support** - Snapshot operations implemented (validation needed)
+- ✅ **iSCSI support** - Snapshot operations implemented (validation needed)
 - ✅ **Idempotent operations** - Safe to retry create/delete operations
 - ✅ **Detached snapshots** - Independent dataset copies via zfs send/receive that survive source volume deletion
 
@@ -267,9 +268,9 @@ EOF
 kubectl logs reader-pod
 ```
 
-## NVMe-oF Snapshot Example
+## NVMe-oF and iSCSI Snapshot Examples
 
-The process is identical for NVMe-oF volumes, just use the NVMe-oF storage class and snapshot class:
+The process is identical for NVMe-oF and iSCSI volumes, just use the appropriate storage class and snapshot class:
 
 ```yaml
 ---

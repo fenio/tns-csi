@@ -438,7 +438,7 @@ helm uninstall tns-csi --namespace kube-system
 
 ## Snapshots and Cloning
 
-The driver supports volume snapshots and cloning for both NFS and NVMe-oF protocols.
+The driver supports volume snapshots and cloning for NFS, NVMe-oF, and iSCSI protocols.
 
 ### Quick Snapshot Example
 

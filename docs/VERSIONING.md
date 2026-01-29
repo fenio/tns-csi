@@ -6,15 +6,15 @@ This document describes the versioning strategy for tns-csi.
 
 tns-csi follows [Semantic Versioning](https://semver.org/) (SemVer):
 
-- **MAJOR.MINOR.PATCH** (e.g., `v0.8.0`)
-- Tags are prefixed with `v` (e.g., `v0.8.0`, `v1.0.0`)
+- **MAJOR.MINOR.PATCH** (e.g., `v0.9.2`)
+- Tags are prefixed with `v` (e.g., `v0.9.2`, `v1.0.0`)
 
 ## Version Sources
 
 The version is determined at **build time** and embedded in the binary. The version comes from:
 
 1. **Git tags** (preferred) - When building from a tagged commit, the version is the tag name
-2. **Git describe** - For non-tagged commits, format is `v0.8.0-3-gabc1234` (3 commits after v0.8.0)
+2. **Git describe** - For non-tagged commits, format is `v0.9.2-3-gabc1234` (3 commits after v0.9.2)
 3. **"dev"** - Fallback when git is not available
 
 ## What's Embedded
@@ -23,7 +23,7 @@ Each build includes:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| Version | Semantic version from git tag | `v0.8.0` |
+| Version | Semantic version from git tag | `v0.9.2` |
 | Git Commit | Short SHA of the commit | `abc1234` |
 | Build Date | UTC timestamp of build | `2025-12-21T10:30:00Z` |
 | Go Version | Go compiler version | `go1.25.6` |
@@ -39,7 +39,7 @@ tns-csi-driver --show-version
 
 Output:
 ```
-tns.csi.io version: v0.8.0
+tns.csi.io version: v0.9.2
   Git commit: abc1234
   Build date: 2025-12-21T10:30:00Z
   Go version: go1.25.6
@@ -61,7 +61,7 @@ curl http://localhost:8080/version
 Response:
 ```json
 {
-  "version": "v0.8.0",
+  "version": "v0.9.2",
   "gitCommit": "abc1234",
   "buildDate": "2025-12-21T10:30:00Z",
   "goVersion": "go1.25.6",
@@ -73,7 +73,7 @@ Response:
 
 The version is logged at startup:
 ```
-Starting TNS CSI Driver v0.8.0 (commit: abc1234, built: 2025-12-21T10:30:00Z)
+Starting TNS CSI Driver v0.9.2 (commit: abc1234, built: 2025-12-21T10:30:00Z)
 ```
 
 ### From Helm
@@ -91,7 +91,7 @@ When a version is released, Docker images are tagged with:
 
 | Tag | Description | Stability |
 |-----|-------------|-----------|
-| `v0.8.0` | Exact version | Immutable |
+| `v0.9.2` | Exact version | Immutable |
 | `0.5` | Major.Minor | Points to latest patch |
 | `0` | Major only | Points to latest minor |
 | `latest` | Most recent release | Mutable - not recommended for production |
@@ -108,15 +108,15 @@ The Helm chart version is kept in sync with the application version:
 
 | Chart.yaml Field | Value |
 |------------------|-------|
-| `version` | `0.8.0` (chart version, no `v` prefix) |
-| `appVersion` | `v0.8.0` (app version, with `v` prefix) |
+| `version` | `0.9.2` (chart version, no `v` prefix) |
+| `appVersion` | `v0.9.2` (app version, with `v` prefix) |
 
 ### Image Tag Resolution
 
 The Helm chart resolves the image tag in this order:
 
-1. **Explicit override**: `--set image.tag=v0.8.0`
-2. **Chart's appVersion**: Automatically uses `v0.8.0` when installing `--version 0.8.0`
+1. **Explicit override**: `--set image.tag=v0.9.2`
+2. **Chart's appVersion**: Automatically uses `v0.9.2` when installing `--version 0.9.2`
 
 ## Best Practices
 
@@ -127,14 +127,14 @@ The Helm chart resolves the image tag in this order:
 ```bash
 # Install specific chart version (uses matching image tag automatically)
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.2 \
   ...
 ```
 
 Or explicitly set the image tag:
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
-  --set image.tag=v0.8.0 \
+  --set image.tag=v0.9.2 \
   ...
 ```
 
@@ -160,7 +160,7 @@ kubectl logs -n kube-system deployment/tns-csi-controller | head -1
 Upgrade to a new version:
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.8.0 \
+  --version 0.9.2 \
   --reuse-values
 ```
 
@@ -178,6 +178,6 @@ kubectl exec -n kube-system deployment/tns-csi-controller -- \
 ```
 
 Include in your issue:
-- Version (e.g., `v0.8.0`)
+- Version (e.g., `v0.9.2`)
 - Git commit (e.g., `abc1234`)
 - How you installed (Helm version, custom image, etc.)

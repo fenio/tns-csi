@@ -58,7 +58,7 @@ All integration tests use [Ginkgo](https://onsi.github.io/ginkgo/) v2 and [Gomeg
 
 ### Ginkgo E2E Integration Tests
 
-Every push to main triggers comprehensive integration tests organized into three test suites:
+Every push to main triggers comprehensive integration tests organized into protocol-specific test suites:
 
 #### NFS Test Suite (`tests/e2e/nfs/`)
 
@@ -90,11 +90,26 @@ Every push to main triggers comprehensive integration tests organized into three
 | `statefulset_test.go` | StatefulSet with VolumeClaimTemplates |
 | `zfsprops_test.go` | Custom ZFS properties via StorageClass |
 
+#### iSCSI Test Suite (`tests/e2e/iscsi/`)
+
+| Test File | Description |
+|-----------|-------------|
+| `basic_test.go` | Volume provisioning, mounting, I/O operations, deletion |
+| `access_modes_test.go` | RWO access mode validation |
+| `block_mode_test.go` | Raw block device mode testing |
+| `clone_test.go` | Volume cloning from snapshots |
+| `concurrent_test.go` | 5 simultaneous volume creations |
+| `delete_strategy_retain_test.go` | Volume retention on PVC deletion |
+| `detached_snapshot_test.go` | Snapshot lifecycle without attached pods |
+| `persistence_test.go` | Data survives pod restarts |
+| `statefulset_test.go` | StatefulSet with VolumeClaimTemplates |
+| `zfsprops_test.go` | Custom ZFS properties via StorageClass |
+
 #### Shared Test Suite (`tests/e2e/`)
 
 | Test File | Description |
 |-----------|-------------|
-| `snapshot_restore_test.go` | Snapshot creation and restoration (both protocols) |
+| `snapshot_restore_test.go` | Snapshot creation and restoration (all protocols) |
 | `detached_snapshot_advanced_test.go` | Detached snapshots via zfs send/receive, DR scenario testing |
 | `stress_test.go` | Volume stress testing |
 | `name_templating_test.go` | Custom volume naming templates |
@@ -112,6 +127,9 @@ ginkgo -v --timeout=25m ./tests/e2e/nfs/...
 
 # NVMe-oF tests (~40 minutes)
 ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
+
+# iSCSI tests (~40 minutes)
+ginkgo -v --timeout=40m ./tests/e2e/iscsi/...
 
 # Shared tests (~25 minutes)
 ginkgo -v --timeout=25m ./tests/e2e/
@@ -152,6 +170,7 @@ Interactive test results dashboard with history and metrics:
 - TrueNAS API key with admin privileges
 - For NFS: `nfs-common` installed
 - For NVMe-oF: `nvme-cli` installed, kernel modules loaded
+- For iSCSI: `open-iscsi` installed, `iscsid` service running
 
 ### Environment Variables
 
@@ -181,6 +200,9 @@ ginkgo -v --timeout=25m ./tests/e2e/nfs/...
 # Run NVMe-oF tests only
 ginkgo -v --timeout=40m ./tests/e2e/nvmeof/...
 
+# Run iSCSI tests only
+ginkgo -v --timeout=40m ./tests/e2e/iscsi/...
+
 # Run shared tests only
 ginkgo -v --timeout=25m ./tests/e2e/
 
@@ -207,6 +229,9 @@ make test-e2e-nfs
 
 # Run NVMe-oF E2E tests
 make test-e2e-nvmeof
+
+# Run iSCSI E2E tests
+make test-e2e-iscsi
 ```
 
 ## Test Coverage
@@ -215,8 +240,8 @@ make test-e2e-nvmeof
 
 - **CSI Spec Compliance** - Full CSI spec validation via csi-test
 - **Volume Lifecycle** - Create, attach, mount, unmount, detach, delete
-- **Volume Expansion** - Dynamic resizing (NFS & NVMe-oF)
-- **Snapshots** - Create, restore, clone (NFS & NVMe-oF)
+- **Volume Expansion** - Dynamic resizing (NFS, NVMe-oF & iSCSI)
+- **Snapshots** - Create, restore, clone (NFS, NVMe-oF & iSCSI)
 - **StatefulSets** - VolumeClaimTemplates and pod identity
 - **Data Persistence** - Data survives pod restarts
 - **Concurrent Operations** - Race condition detection
@@ -269,6 +294,12 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 - Verify kernel modules: `nvme-tcp`, `nvme-fabrics`
 - Check TrueNAS NVMe-oF service is enabled
 - Verify port 4420 is accessible
+
+**iSCSI test fails with "login failed":**
+- Ensure open-iscsi is installed on test node
+- Verify iscsid service is running: `systemctl status iscsid`
+- Check TrueNAS iSCSI service is enabled
+- Verify port 3260 is accessible
 
 **Test cleanup fails:**
 - May need to manually delete datasets/shares in TrueNAS UI

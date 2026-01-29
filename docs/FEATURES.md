@@ -12,7 +12,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 
 ### NFS (Network File System)
 - **Status**: ✅ Functional, testing in progress
-- **Access Modes**: ReadWriteMany (RWX), ReadWriteOnce (RWO)
+- **Access Modes**: ReadWriteMany (RWX), ReadWriteOnce (RWO), ReadWriteOncePod (RWOP)
 - **Use Case**: Shared filesystem storage, multi-pod access
 - **Mount Protocol**: NFSv4.2 with nolock option
 - **TrueNAS Requirements**: 
@@ -22,7 +22,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 
 ### NVMe-oF (NVMe over Fabrics - TCP)
 - **Status**: ✅ Functional, testing in progress
-- **Access Modes**: ReadWriteOnce (RWO)
+- **Access Modes**: ReadWriteOnce (RWO), ReadWriteOncePod (RWOP)
 - **Use Case**: High-performance block storage, low-latency workloads
 - **Transport**: TCP (nvme-tcp)
 - **TrueNAS Requirements**:
@@ -33,7 +33,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 
 ### iSCSI (Internet Small Computer Systems Interface)
 - **Status**: ✅ Functional, testing in progress
-- **Access Modes**: ReadWriteOnce (RWO)
+- **Access Modes**: ReadWriteOnce (RWO), ReadWriteOncePod (RWOP)
 - **Use Case**: Traditional block storage, broad compatibility
 - **Transport**: TCP (default port: 3260)
 - **TrueNAS Requirements**:
@@ -939,7 +939,7 @@ reclaimPolicy: Delete
 - **Platform**: GitHub Actions with self-hosted runner
 - **Workflows**:
   - CI (lint, build, unit tests)
-  - Integration tests (NFS and NVMe-oF)
+  - Integration tests (NFS, NVMe-oF, and iSCSI)
   - Release automation
   - Dashboard generation
 
@@ -947,11 +947,11 @@ reclaimPolicy: Delete
 - **Status**: ✅ Comprehensive test suite
 - **Infrastructure**: Self-hosted (k3s + real TrueNAS)
 - **Test Scenarios**:
-  - Basic volume provisioning and deletion (NFS, NVMe-oF)
-  - Volume expansion (NFS, NVMe-oF)
+  - Basic volume provisioning and deletion (NFS, NVMe-oF, iSCSI)
+  - Volume expansion (NFS, NVMe-oF, iSCSI)
   - Concurrent volume operations
   - StatefulSet workloads
-  - Snapshot creation and restoration (NFS, NVMe-oF)
+  - Snapshot creation and restoration (NFS, NVMe-oF, iSCSI)
   - Volume adoption (GitOps workflows)
   - Connection resilience
   - Orphaned resource cleanup
@@ -990,10 +990,13 @@ reclaimPolicy: Delete
 - **NFS**:
   - ✅ ReadWriteMany (RWX) - Multiple pods on multiple nodes
   - ✅ ReadWriteOnce (RWO) - Single pod access
+  - ✅ ReadWriteOncePod (RWOP) - Single pod access with stricter enforcement
 - **NVMe-oF**:
   - ✅ ReadWriteOnce (RWO) - Block storage limitation
+  - ✅ ReadWriteOncePod (RWOP) - Single pod access with stricter enforcement
 - **iSCSI**:
   - ✅ ReadWriteOnce (RWO) - Block storage limitation
+  - ✅ ReadWriteOncePod (RWOP) - Single pod access with stricter enforcement
 
 ### Volume Binding Modes
 - ✅ Immediate - Volume provisioned immediately when PVC created
@@ -1083,7 +1086,7 @@ reclaimPolicy: Delete
 - TCP transport only (RDMA not implemented)
 
 ### Snapshots
-- Cross-protocol cloning not supported (NFS ↔ NVMe-oF)
+- Cross-protocol cloning not supported (NFS ↔ NVMe-oF ↔ iSCSI)
 - Cross-pool cloning not supported
 - Restored volumes must be same size or larger
 
@@ -1160,7 +1163,7 @@ All features are tested on **real infrastructure** - not mocks or simulators:
 - ✅ Full CSI specification compliance verified
 
 **Integration Test Coverage:**
-- ✅ Basic volume operations (NFS & NVMe-oF)
+- ✅ Basic volume operations (NFS, NVMe-oF & iSCSI)
 - ✅ Volume expansion testing
 - ✅ Snapshot creation and restoration
 - ✅ Volume adoption (GitOps workflows)
@@ -1183,7 +1186,7 @@ See [TESTING.md](TESTING.md) for comprehensive testing documentation.
 2. TrueNAS Scale 25.10+
 3. TrueNAS API key
 4. Helm 3.0+
-5. NFS client tools (NFS) or nvme-cli (NVMe-oF) on nodes
+5. Protocol-specific tools on nodes: NFS client (NFS), nvme-cli (NVMe-oF), or open-iscsi (iSCSI)
 
 ### Quick Install (NFS)
 ```bash
@@ -1240,7 +1243,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ---
 
-**Last Updated**: 2026-01-19
-**Driver Version**: v0.8.0
+**Last Updated**: 2026-01-29
+**Driver Version**: v0.9.2
 **Kubernetes Version Tested**: 1.27+
 **Go Version**: 1.25.6+

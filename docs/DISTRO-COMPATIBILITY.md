@@ -17,20 +17,20 @@ This test suite runs basic CSI driver functionality tests across multiple Kubern
 
 ### Compatibility Matrix
 
-All 6 distributions are tested with both NFS and NVMe-oF protocols:
+All 6 distributions are tested with NFS, NVMe-oF, and iSCSI protocols:
 
-| Distribution | NFS | NVMe-oF |
-|--------------|:---:|:-------:|
-| K3s | ✅ | ✅ |
-| K0s | ✅ | ✅ |
-| KubeSolo | ✅ | ✅ |
-| Minikube | ✅ | ✅ |
-| Talos | ✅ | ✅ |
-| MicroK8s | ✅ | ✅ |
+| Distribution | NFS | NVMe-oF | iSCSI |
+|--------------|:---:|:-------:|:-----:|
+| K3s | ✅ | ✅ | ✅ |
+| K0s | ✅ | ✅ | ✅ |
+| KubeSolo | ✅ | ✅ | ✅ |
+| Minikube | ✅ | ✅ | ✅ |
+| Talos | ✅ | ✅ | ✅ |
+| MicroK8s | ✅ | ✅ | ✅ |
 
 ## What's Tested
 
-Each distribution runs basic tests for both NFS and NVMe-oF protocols:
+Each distribution runs basic tests for NFS, NVMe-oF, and iSCSI protocols:
 
 1. **Driver Deployment** - Helm installation and pod startup
 2. **PVC Creation** - Volume provisioning

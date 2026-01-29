@@ -60,9 +60,9 @@ NFS works perfectly in containers and doesn't require special kernel modules.
 
 #### ⚠️ Required: Configure NVMe-oF Port on TrueNAS
 
-**Before provisioning NVMe-oF volumes**, you must configure an NVMe-oF port on TrueNAS 25.10+.
+**Before provisioning NVMe-oF volumes**, you must configure an NVMe-oF TCP port on TrueNAS 25.10+.
 
-The CSI driver uses an **independent subsystem architecture** where each volume gets its own dedicated NVMe-oF subsystem. The driver automatically creates and deletes subsystems, but **ports must be pre-configured** by the administrator.
+The CSI driver uses an **independent subsystem architecture** where each volume gets its own dedicated NVMe-oF subsystem (1 subsystem per volume). The driver automatically creates and deletes subsystems, but **ports must be pre-configured** by the administrator.
 
 ##### Step 1: Configure Static IP Address (REQUIRED)
 

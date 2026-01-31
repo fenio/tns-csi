@@ -15,11 +15,60 @@ This guide covers importing existing TrueNAS volumes into tns-csi management and
 
 **READ THIS BEFORE PROCEEDING**
 
-1. **Always back up critical data** before any migration
+1. **Always back up critical data** before any migration - Use `pg_dump`, application-level backups, or ZFS snapshots
 2. **Scale down workloads first** - Never migrate volumes while pods are using them
 3. **Set Retain policy** - Prevent accidental deletion during migration
 4. **Test with non-critical volumes first** - Verify the process works in your environment
 5. **StatefulSet volumes require exact PVC names** - Plan carefully for stateful workloads
+6. **Suspend GitOps reconciliation** - If using Flux/ArgoCD, suspend kustomizations before manual changes
+
+### Operator-Managed Workloads (CloudNativePG, etc.)
+
+**Do NOT attempt PVC adoption for database operators like CloudNativePG, Zalando PostgreSQL Operator, or similar.**
+
+These operators manage their own PVC lifecycle and expect specific naming conventions (e.g., `postgres-1`, `postgres-2`, `postgres-3` for CNPG). Attempting to adopt PVCs with different names will cause:
+- Cluster stuck in "unrecoverable" state
+- Operators continuously trying to recreate pods with wrong volumes
+- Data corruption risks
+
+**Instead, use dump/restore:**
+
+```bash
+# 1. Create a backup pod with the old volume mounted
+kubectl run pg-recovery --image=postgres:16 --restart=Never \
+  --overrides='{"spec":{"containers":[{"name":"pg-recovery","image":"postgres:16",
+    "command":["sleep","infinity"],
+    "volumeMounts":[{"name":"data","mountPath":"/var/lib/postgresql/data"}]}],
+    "volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"old-pvc-name"}}]}}'
+
+# 2. Start postgres and dump data
+kubectl exec -it pg-recovery -- bash
+pg_ctl start -D /var/lib/postgresql/data/pgdata
+pg_dumpall -U postgres > /tmp/backup.sql
+
+# 3. Copy backup out
+kubectl cp pg-recovery:/tmp/backup.sql ./backup.sql
+
+# 4. Restore to new cluster
+kubectl exec -i postgres-1 -n db -- psql -U postgres < backup.sql
+```
+
+### Finalizers Can Block Deletion
+
+PVs and PVCs have finalizers (`kubernetes.io/pv-protection`, `kubernetes.io/pvc-protection`) that prevent deletion while in use. If a PV/PVC is stuck in `Terminating`:
+
+```bash
+# Check finalizers
+kubectl get pv <pv-name> -o jsonpath='{.metadata.finalizers}'
+
+# Remove finalizers (only after confirming no pod is using the volume!)
+kubectl patch pv <pv-name> -p '{"metadata":{"finalizers":null}}' --type=merge
+kubectl patch pvc <pvc-name> -n <namespace> -p '{"metadata":{"finalizers":null}}' --type=merge
+```
+
+**Warning**: Only remove finalizers after confirming:
+- No pods are mounting the volume
+- Data is backed up or you're certain the PV data is safe
 
 ## Adoption Workflow Overview
 
@@ -216,6 +265,46 @@ kubectl tns-csi import storage/iscsi/v/pvc-xxx --protocol iscsi
 
 Note: iSCSI requires the iSCSI portal to be configured in TrueNAS.
 
+## Migrating from Older tns-csi Versions
+
+Older versions of tns-csi (pre-0.8) used base64-encoded JSON volumeHandles instead of plain volume IDs. These volumes work correctly but won't appear in `kubectl tns-csi list`.
+
+### Identifying Old-Format Volumes
+
+```bash
+# Check volumeHandle length (old format is ~316 chars, new is ~40 chars)
+kubectl get pv -o json | jq -r '
+  .items[] |
+  select(.spec.csi.driver == "tns.csi.io") |
+  "\(.metadata.name): \(.spec.csi.volumeHandle | length) chars"'
+```
+
+### Fixing VolumeHandle Format
+
+The `volumeHandle` field is immutable, so you must recreate the PV/PVC:
+
+1. **Scale down workload**
+2. **Set Retain policy on PV**
+3. **Delete PVC**
+4. **Delete old PV**
+5. **Create new PV with plain volumeHandle**
+6. **Create new PVC**
+7. **Import dataset** (to set ZFS properties so it shows in `tns-csi list`)
+8. **Scale up workload**
+
+```bash
+# Example: Convert volumeHandle from base64 to plain
+# Old PV had: volumeHandle: eyJuYW1lIjoicHZjLTEyMzQ1...
+# New PV uses: volumeHandle: pvc-12345-xxxx-xxxx-xxxx
+
+# 1. Get the plain name from the base64
+kubectl get pv <pv-name> -o jsonpath='{.spec.csi.volumeHandle}' | base64 -d | jq -r '.name'
+
+# 2. Recreate PV with that plain name as volumeHandle
+# 3. Import dataset to set ZFS properties:
+kubectl tns-csi import <dataset-path> --protocol nfs
+```
+
 ## Disaster Recovery
 
 When a Kubernetes cluster is lost but TrueNAS data survives, use this process to recover volumes.
@@ -352,6 +441,44 @@ If the NFS share was deleted but the dataset exists:
 
 ```bash
 kubectl tns-csi import <dataset> --protocol nfs --create-share
+```
+
+### GitOps Conflicts (Flux/ArgoCD)
+
+If using GitOps, you may see errors like:
+```
+PVC <name> spec is immutable after creation
+```
+
+This happens when your GitOps manifests have a different `storageClassName` than the live PVC.
+
+**Solution:**
+1. Suspend the relevant kustomization/application
+2. Update your Git manifests to match the new storage class
+3. Include both PV and PVC in your manifests (static provisioning)
+4. Commit and push
+5. Resume reconciliation
+
+```bash
+# Flux example
+flux suspend kustomization <name>
+# ... make changes, commit, push ...
+flux resume kustomization <name>
+```
+
+### Operators Keep Recreating Pods
+
+If operators (vm-operator, coroot-operator, etc.) keep recreating pods during migration:
+
+```bash
+# Scale down the operator first
+kubectl scale deploy <operator-name> -n <namespace> --replicas=0
+
+# Do your migration
+# ...
+
+# Scale operator back up
+kubectl scale deploy <operator-name> -n <namespace> --replicas=1
 ```
 
 ### Data Not Visible in Pod

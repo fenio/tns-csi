@@ -184,7 +184,7 @@ func runDashboard(ctx context.Context, url, apiKey, secretRef *string, skipTLSVe
 			openCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := openURL(openCtx, dashboardURL); err != nil {
-				klog.V(2).Infof("Could not open browser: %v", err)
+				fmt.Printf("Could not open browser automatically: %v\n", err)
 			}
 		}()
 	}

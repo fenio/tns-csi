@@ -181,6 +181,7 @@ func runDashboard(ctx context.Context, url, apiKey, secretRef *string, skipTLSVe
 		go func() {
 			// Small delay to ensure server is ready
 			time.Sleep(500 * time.Millisecond)
+			fmt.Printf("Opening browser...\n")
 			openCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := openURL(openCtx, dashboardURL); err != nil {
@@ -212,7 +213,11 @@ func openURL(ctx context.Context, url string) error {
 		return errUnsupportedPlatform
 	}
 
-	return cmd.Start()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, string(output))
+	}
+	return nil
 }
 
 func (s *dashboardServer) getClient(ctx context.Context) (tnsapi.ClientInterface, error) {

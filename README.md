@@ -39,6 +39,10 @@ See detailed comparisons:
 - [TNS-CSI vs truenas-csi (Official)](docs/COMPARISON-TRUENAS-CSI.md)
 - [TNS-CSI vs Democratic-CSI](docs/COMPARISON-DEMOCRATIC-CSI.md)
 
+## Dashboard
+
+<img width="1380" height="914" alt="image" src="https://github.com/user-attachments/assets/269cbf0e-cde8-4f66-95ca-f9a4abcfca48" />
+
 ### Protocol Selection Guide
 
 This driver supports three storage protocols:

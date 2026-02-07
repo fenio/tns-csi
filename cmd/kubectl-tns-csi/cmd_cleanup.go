@@ -44,6 +44,7 @@ type CleanupVolumeInfo struct {
 func newCleanupCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
 	var (
 		dryRun        bool
+		execute       bool
 		yes           bool
 		force         bool
 		allNamespaces bool
@@ -78,18 +79,19 @@ Examples:
   # Output in JSON for scripting
   kubectl tns-csi cleanup -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if execute {
+				dryRun = false
+			}
 			return runCleanup(cmd.Context(), url, apiKey, secretRef, outputFormat, skipTLSVerify, dryRun, yes, force, allNamespaces)
 		},
 	}
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", true, "Preview what would be deleted without making changes")
-	cmd.Flags().BoolVar(&dryRun, "execute", false, "Actually delete the volumes (sets dry-run=false)")
+	cmd.Flags().BoolVar(&execute, "execute", false, "Actually delete the volumes (sets dry-run=false)")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation prompt")
 	cmd.Flags().BoolVar(&force, "force", false, "Delete volumes even if not marked adoptable")
 	cmd.Flags().BoolVarP(&allNamespaces, "all-namespaces", "A", true, "Search all namespaces for PVCs")
-
-	// Mark execute as inverse of dry-run
-	cmd.Flags().Lookup("execute").NoOptDefVal = "true"
+	cmd.MarkFlagsMutuallyExclusive("dry-run", "execute")
 
 	return cmd
 }

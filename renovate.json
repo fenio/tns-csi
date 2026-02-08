@@ -3,6 +3,17 @@
   "extends": ["config:recommended"],
   "labels": ["dependencies"],
   "ignorePresets": [":ignoreModulesAndTests"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Helm values: registry.k8s.io sidecar images",
+      "fileMatch": ["charts/.+/values\\.yaml$"],
+      "matchStrings": [
+        "repository:\\s*(?<registryUrl>registry\\.k8s\\.io)/(?<depName>[^\\s]+)\\s+tag:\\s*(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "Go modules",

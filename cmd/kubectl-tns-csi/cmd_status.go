@@ -253,19 +253,19 @@ func outputStatus(status *VolumeStatus, format string) error {
 	case outputFormatTable, "":
 		fmt.Printf("Volume:     %s\n", status.VolumeID)
 		fmt.Printf("Dataset:    %s\n", status.Dataset)
-		fmt.Printf("Protocol:   %s\n", status.Protocol)
+		fmt.Printf("Protocol:   %s\n", protocolBadge(status.Protocol))
 		fmt.Printf("Type:       %s\n", status.Type)
 		fmt.Printf("Capacity:   %s\n", status.CapacityHuman)
 
 		if status.Protocol == tnsapi.ProtocolNFS {
-			fmt.Printf("\nNFS Status:\n")
+			colorHeader.Printf("\nNFS Status:\n") //nolint:errcheck,gosec
 			fmt.Printf("  Share ID:   %d\n", status.NFSShareID)
 			fmt.Printf("  Share Path: %s\n", status.NFSSharePath)
 			fmt.Printf("  Enabled:    %t\n", status.NFSEnabled)
 		}
 
 		if status.Protocol == tnsapi.ProtocolNVMeOF {
-			fmt.Printf("\nNVMe-oF Status:\n")
+			colorHeader.Printf("\nNVMe-oF Status:\n") //nolint:errcheck,gosec
 			fmt.Printf("  Subsystem ID:  %d\n", status.NVMeSubsystemID)
 			fmt.Printf("  Namespace ID:  %d\n", status.NVMeNamespaceID)
 			fmt.Printf("  NQN:           %s\n", status.NVMeNQN)
@@ -273,11 +273,11 @@ func outputStatus(status *VolumeStatus, format string) error {
 
 		fmt.Printf("\nHealth:     ")
 		if status.Healthy {
-			fmt.Printf("OK\n")
+			colorSuccess.Printf("OK\n") //nolint:errcheck,gosec
 		} else {
-			fmt.Printf("UNHEALTHY\n")
+			colorError.Printf("UNHEALTHY\n") //nolint:errcheck,gosec
 			for _, issue := range status.Issues {
-				fmt.Printf("  - %s\n", issue)
+				fmt.Printf("  %s %s\n", colorError.Sprint("-"), issue)
 			}
 		}
 

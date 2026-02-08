@@ -22,10 +22,11 @@ const (
 //
 //nolint:govet // field alignment not critical for CLI output struct
 type Summary struct {
-	Volumes   VolumeSummary   `json:"volumes"   yaml:"volumes"`
-	Snapshots SnapshotSummary `json:"snapshots" yaml:"snapshots"`
-	Capacity  CapacitySummary `json:"capacity"  yaml:"capacity"`
-	Health    HealthSummary   `json:"health"    yaml:"health"`
+	Volumes      VolumeSummary   `json:"volumes"                yaml:"volumes"`
+	Snapshots    SnapshotSummary `json:"snapshots"              yaml:"snapshots"`
+	Capacity     CapacitySummary `json:"capacity"               yaml:"capacity"`
+	Health       HealthSummary   `json:"health"                 yaml:"health"`
+	HealthIssues []string        `json:"healthIssues,omitempty" yaml:"healthIssues,omitempty"`
 }
 
 // VolumeSummary contains volume statistics.
@@ -33,6 +34,7 @@ type VolumeSummary struct {
 	Total  int `json:"total"  yaml:"total"`
 	NFS    int `json:"nfs"    yaml:"nfs"`
 	NVMeOF int `json:"nvmeof" yaml:"nvmeof"`
+	ISCSI  int `json:"iscsi"  yaml:"iscsi"`
 	Clones int `json:"clones" yaml:"clones"`
 }
 
@@ -80,6 +82,7 @@ Examples:
 	return cmd
 }
 
+//nolint:dupl // Similar connect+query pattern but different data types
 func runSummary(ctx context.Context, url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) error {
 	// Get connection config
 	cfg, err := getConnectionConfig(ctx, url, apiKey, secretRef, skipTLSVerify)
@@ -87,15 +90,18 @@ func runSummary(ctx context.Context, url, apiKey, secretRef, outputFormat *strin
 		return err
 	}
 
-	// Connect to TrueNAS
+	// Show spinner while connecting and gathering data
+	spin := newSpinner("Connecting to TrueNAS...")
 	client, err := connectToTrueNAS(ctx, cfg)
 	if err != nil {
+		spin.stop()
 		return err
 	}
 	defer client.Close()
 
 	// Gather summary
 	summary, err := gatherSummary(ctx, client)
+	spin.stop()
 	if err != nil {
 		return fmt.Errorf("failed to gather summary: %w", err)
 	}
@@ -106,9 +112,10 @@ func runSummary(ctx context.Context, url, apiKey, secretRef, outputFormat *strin
 
 // summaryContext holds data needed for summary collection.
 type summaryContext struct {
-	client        tnsapi.ClientInterface
-	nfsShareMap   map[string]*tnsapi.NFSShare
-	nvmeSubsysMap map[string]*tnsapi.NVMeOFSubsystem
+	client         tnsapi.ClientInterface
+	nfsShareMap    map[string]*tnsapi.NFSShare
+	nvmeSubsysMap  map[string]*tnsapi.NVMeOFSubsystem
+	iscsiTargetMap map[string]*tnsapi.ISCSITarget
 }
 
 // gatherSummary collects all summary statistics.
@@ -142,9 +149,10 @@ func gatherSummary(ctx context.Context, client tnsapi.ClientInterface) (*Summary
 // buildSummaryContext creates lookup maps for NFS shares and NVMe subsystems.
 func buildSummaryContext(ctx context.Context, client tnsapi.ClientInterface) *summaryContext {
 	sc := &summaryContext{
-		client:        client,
-		nfsShareMap:   make(map[string]*tnsapi.NFSShare),
-		nvmeSubsysMap: make(map[string]*tnsapi.NVMeOFSubsystem),
+		client:         client,
+		nfsShareMap:    make(map[string]*tnsapi.NFSShare),
+		nvmeSubsysMap:  make(map[string]*tnsapi.NVMeOFSubsystem),
+		iscsiTargetMap: make(map[string]*tnsapi.ISCSITarget),
 	}
 
 	// Get all NFS shares for health checks (ignore errors - non-critical)
@@ -158,6 +166,12 @@ func buildSummaryContext(ctx context.Context, client tnsapi.ClientInterface) *su
 	for i := range nvmeSubsystems {
 		sc.nvmeSubsysMap[nvmeSubsystems[i].Name] = &nvmeSubsystems[i]
 		sc.nvmeSubsysMap[nvmeSubsystems[i].NQN] = &nvmeSubsystems[i]
+	}
+
+	// Get all iSCSI targets for health checks (ignore errors - non-critical)
+	iscsiTargets, _ := client.QueryISCSITargets(ctx, nil) //nolint:errcheck // non-critical for summary
+	for i := range iscsiTargets {
+		sc.iscsiTargetMap[iscsiTargets[i].Name] = &iscsiTargets[i]
 	}
 
 	return sc
@@ -204,6 +218,8 @@ func processVolume(ds *tnsapi.DatasetWithProperties, sc *summaryContext, summary
 		summary.Volumes.NFS++
 	case protocolNVMeOF:
 		summary.Volumes.NVMeOF++
+	case protocolISCSI:
+		summary.Volumes.ISCSI++
 	}
 
 	// Check if it's a clone
@@ -224,23 +240,32 @@ func processVolume(ds *tnsapi.DatasetWithProperties, sc *summaryContext, summary
 	}
 
 	// Check health
-	healthy := checkVolumeHealthForSummary(ds, protocol, sc)
-	if healthy {
+	issue := checkVolumeHealthForSummary(ds, protocol, sc)
+	if issue == "" {
 		summary.Health.HealthyVolumes++
 	} else {
 		summary.Health.UnhealthyVolumes++
+		volumeID := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+			volumeID = prop.Value
+		}
+		summary.HealthIssues = append(summary.HealthIssues,
+			fmt.Sprintf("%s (%s): %s", volumeID, protocol, issue))
 	}
 }
 
 // checkVolumeHealthForSummary checks if a volume is healthy based on protocol.
-func checkVolumeHealthForSummary(ds *tnsapi.DatasetWithProperties, protocol string, sc *summaryContext) bool {
+// Returns empty string if healthy, or a short issue description.
+func checkVolumeHealthForSummary(ds *tnsapi.DatasetWithProperties, protocol string, sc *summaryContext) string {
 	switch protocol {
 	case protocolNFS:
 		return checkNFSHealthForSummary(ds, sc.nfsShareMap)
 	case protocolNVMeOF:
 		return checkNVMeOFHealthForSummary(ds, sc.nvmeSubsysMap)
+	case protocolISCSI:
+		return checkISCSIHealthForSummary(ds, sc.iscsiTargetMap)
 	default:
-		return true // Unknown protocol - assume healthy
+		return "" // Unknown protocol - assume healthy
 	}
 }
 
@@ -291,7 +316,8 @@ func isManagedSnapshot(snap *tnsapi.Snapshot) bool {
 }
 
 // checkNFSHealthForSummary checks if NFS volume is healthy.
-func checkNFSHealthForSummary(ds *tnsapi.DatasetWithProperties, nfsShareMap map[string]*tnsapi.NFSShare) bool {
+// Returns empty string if healthy, or a short issue description.
+func checkNFSHealthForSummary(ds *tnsapi.DatasetWithProperties, nfsShareMap map[string]*tnsapi.NFSShare) string {
 	sharePath := ""
 	if prop, ok := ds.UserProperties[tnsapi.PropertyNFSSharePath]; ok {
 		sharePath = prop.Value
@@ -300,34 +326,76 @@ func checkNFSHealthForSummary(ds *tnsapi.DatasetWithProperties, nfsShareMap map[
 	}
 
 	if sharePath == "" {
-		return false
+		return "no NFS share path configured"
 	}
 
 	share, exists := nfsShareMap[sharePath]
 	if !exists {
-		return false
+		return "NFS share not found"
 	}
 
-	return share.Enabled
+	if !share.Enabled {
+		return "NFS share disabled"
+	}
+
+	return ""
 }
 
 // checkNVMeOFHealthForSummary checks if NVMe-oF volume is healthy.
-func checkNVMeOFHealthForSummary(ds *tnsapi.DatasetWithProperties, nvmeSubsysMap map[string]*tnsapi.NVMeOFSubsystem) bool {
+// Returns empty string if healthy, or a short issue description.
+// Note: we only check subsystem existence, not the "enabled" field — TrueNAS
+// NVMe-oF subsystems function regardless of the enabled flag.
+func checkNVMeOFHealthForSummary(ds *tnsapi.DatasetWithProperties, nvmeSubsysMap map[string]*tnsapi.NVMeOFSubsystem) string {
 	nqn := ""
 	if prop, ok := ds.UserProperties[tnsapi.PropertyNVMeSubsystemNQN]; ok {
 		nqn = prop.Value
 	}
 
 	if nqn == "" {
-		return false
+		return "no NVMe-oF subsystem NQN configured"
 	}
 
-	subsystem, exists := nvmeSubsysMap[nqn]
+	_, exists := nvmeSubsysMap[nqn]
 	if !exists {
-		return false
+		return "NVMe-oF subsystem not found"
 	}
 
-	return subsystem.Enabled
+	return ""
+}
+
+// checkISCSIHealthForSummary checks if iSCSI volume is healthy.
+// Returns empty string if healthy, or a short issue description.
+func checkISCSIHealthForSummary(ds *tnsapi.DatasetWithProperties, iscsiTargetMap map[string]*tnsapi.ISCSITarget) string {
+	iqn := ""
+	if prop, ok := ds.UserProperties[tnsapi.PropertyISCSIIQN]; ok {
+		iqn = prop.Value
+	}
+
+	if iqn == "" {
+		return "no iSCSI IQN configured"
+	}
+
+	// Look up by IQN — targets are keyed by name, but we stored by name
+	// Try to find a target whose name matches the dataset-based naming convention
+	targetName := ""
+	if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+		targetName = prop.Value
+	}
+
+	if targetName != "" {
+		if _, exists := iscsiTargetMap[targetName]; exists {
+			return ""
+		}
+	}
+
+	// Fallback: search all targets for matching name prefix
+	for name := range iscsiTargetMap {
+		if name == targetName {
+			return ""
+		}
+	}
+
+	return "iSCSI target not found"
 }
 
 // outputSummary outputs the summary in the specified format.
@@ -351,79 +419,83 @@ func outputSummary(summary *Summary, format string) error {
 	}
 }
 
-// boxWidth is the inner width of the summary box (between the borders).
-const boxWidth = 62
-
-// printBoxLine prints a line with box borders and proper padding.
-func printBoxLine(content string) {
-	// Calculate padding needed
-	padding := boxWidth - len(content)
-	if padding < 0 {
-		padding = 0
-		content = content[:boxWidth]
-	}
-	fmt.Printf("║ %s%*s ║\n", content, padding, "")
-}
-
-// outputSummaryTable outputs the summary in a nice table format.
+// outputSummaryTable outputs the summary in a clean format.
 func outputSummaryTable(summary *Summary) error {
-	fmt.Println("╔════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                        TNS-CSI Summary                         ║")
-	fmt.Println("╠════════════════════════════════════════════════════════════════╣")
+	colorHeader.Println("=== TNS-CSI Summary ===") //nolint:errcheck,gosec
+	fmt.Println()
 
 	// Volumes section
-	printBoxLine("VOLUMES")
-	printBoxLine(fmt.Sprintf("  Total: %-6d NFS: %-6d NVMe-oF: %-6d Clones: %d",
-		summary.Volumes.Total, summary.Volumes.NFS, summary.Volumes.NVMeOF, summary.Volumes.Clones))
-
-	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
+	colorHeader.Println("Volumes") //nolint:errcheck,gosec
+	volLine := fmt.Sprintf("  Total: %-5d", summary.Volumes.Total)
+	if summary.Volumes.NFS > 0 {
+		volLine += fmt.Sprintf(" %s: %-5d", colorProtocolNFS.Sprint("NFS"), summary.Volumes.NFS)
+	}
+	if summary.Volumes.NVMeOF > 0 {
+		volLine += fmt.Sprintf(" %s: %-5d", colorProtocolNVMe.Sprint("NVMe-oF"), summary.Volumes.NVMeOF)
+	}
+	if summary.Volumes.ISCSI > 0 {
+		volLine += fmt.Sprintf(" %s: %-5d", colorProtocolISCI.Sprint("iSCSI"), summary.Volumes.ISCSI)
+	}
+	if summary.Volumes.Clones > 0 {
+		volLine += fmt.Sprintf(" Clones: %d", summary.Volumes.Clones)
+	}
+	fmt.Println(volLine)
+	fmt.Println()
 
 	// Snapshots section
-	printBoxLine("SNAPSHOTS")
-	printBoxLine(fmt.Sprintf("  Total: %-6d Attached: %-6d Detached: %d",
-		summary.Snapshots.Total, summary.Snapshots.Attached, summary.Snapshots.Detached))
-
-	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
+	colorHeader.Println("Snapshots") //nolint:errcheck,gosec
+	fmt.Printf("  Total: %-6d Attached: %-6d Detached: %d\n",
+		summary.Snapshots.Total, summary.Snapshots.Attached, summary.Snapshots.Detached)
+	fmt.Println()
 
 	// Capacity section
-	printBoxLine("CAPACITY")
-
-	// Calculate usage percentage
+	colorHeader.Println("Capacity") //nolint:errcheck,gosec
 	usagePercent := 0.0
 	if summary.Capacity.ProvisionedBytes > 0 {
 		usagePercent = float64(summary.Capacity.UsedBytes) / float64(summary.Capacity.ProvisionedBytes) * 100
 	}
-	printBoxLine(fmt.Sprintf("  Provisioned: %-10s Used: %-10s (%.1f%%)",
-		summary.Capacity.ProvisionedHuman, summary.Capacity.UsedHuman, usagePercent))
-
-	fmt.Println("╠────────────────────────────────────────────────────────────────╣")
+	var percentStr string
+	switch {
+	case usagePercent >= 90:
+		percentStr = colorError.Sprintf("%.1f%%", usagePercent)
+	case usagePercent >= 70:
+		percentStr = colorWarning.Sprintf("%.1f%%", usagePercent)
+	default:
+		percentStr = colorSuccess.Sprintf("%.1f%%", usagePercent)
+	}
+	fmt.Printf("  Provisioned: %-10s Used: %-10s (%s)\n",
+		summary.Capacity.ProvisionedHuman, summary.Capacity.UsedHuman, percentStr)
+	fmt.Println()
 
 	// Health section
-	printBoxLine("HEALTH")
-
-	// Build health status with icons
-	healthIcon := iconOK
-	if summary.Health.UnhealthyVolumes > 0 {
-		healthIcon = iconError
-	} else if summary.Health.DegradedVolumes > 0 {
-		healthIcon = iconWarning
+	colorHeader.Println("Health") //nolint:errcheck,gosec
+	var healthIconStr string
+	switch {
+	case summary.Health.UnhealthyVolumes > 0:
+		healthIconStr = colorError.Sprint(iconError)
+	case summary.Health.DegradedVolumes > 0:
+		healthIconStr = colorWarning.Sprint(iconWarning)
+	default:
+		healthIconStr = colorSuccess.Sprint(iconOK)
 	}
-
-	healthLine := fmt.Sprintf("  %s Healthy: %d", healthIcon, summary.Health.HealthyVolumes)
+	healthLine := "  " + healthIconStr + " Healthy: " + colorSuccess.Sprintf("%d", summary.Health.HealthyVolumes)
 	if summary.Health.DegradedVolumes > 0 {
-		healthLine += fmt.Sprintf("  Degraded: %d", summary.Health.DegradedVolumes)
+		healthLine += "  Degraded: " + colorWarning.Sprintf("%d", summary.Health.DegradedVolumes)
 	}
 	if summary.Health.UnhealthyVolumes > 0 {
-		healthLine += fmt.Sprintf("  Unhealthy: %d", summary.Health.UnhealthyVolumes)
+		healthLine += "  Unhealthy: " + colorError.Sprintf("%d", summary.Health.UnhealthyVolumes)
 	}
-	printBoxLine(healthLine)
+	fmt.Println(healthLine)
 
-	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
-
-	// Show warning if there are unhealthy volumes
+	// Show details for unhealthy volumes
 	if summary.Health.UnhealthyVolumes > 0 {
 		fmt.Println()
-		fmt.Printf("⚠  %d volume(s) unhealthy. Run 'kubectl tns-csi health' for details.\n", summary.Health.UnhealthyVolumes)
+		colorWarning.Printf("⚠  %d volume(s) unhealthy:\n", summary.Health.UnhealthyVolumes) //nolint:errcheck,gosec
+		for _, issue := range summary.HealthIssues {
+			fmt.Printf("  %s %s\n", colorError.Sprint("-"), issue)
+		}
+		fmt.Println()
+		colorMuted.Println("Run 'kubectl tns-csi health' for full details.") //nolint:errcheck,gosec
 	}
 
 	return nil

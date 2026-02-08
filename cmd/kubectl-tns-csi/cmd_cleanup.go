@@ -9,9 +9,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -206,6 +206,7 @@ func runCleanup(ctx context.Context, url, apiKey, secretRef, outputFormat *strin
 	}
 
 	// Delete volumes
+	total := len(toDelete)
 	for i := range toDelete {
 		vol := &toDelete[i]
 		info := CleanupVolumeInfo{
@@ -215,22 +216,24 @@ func runCleanup(ctx context.Context, url, apiKey, secretRef, outputFormat *strin
 			Reason:   vol.Reason,
 		}
 
-		fmt.Printf("Deleting %s (%s)... ", vol.VolumeID, vol.Protocol)
+		fmt.Printf("Deleting volumes [%d/%d] %s (%s)... ", i+1, total, vol.VolumeID, protocolBadge(vol.Protocol))
 
 		err := deleteOrphanedVolume(ctx, client, vol)
 		if err != nil {
-			fmt.Printf("FAILED: %v\n", err)
+			colorError.Printf("FAILED: %v\n", err) //nolint:errcheck,gosec
 			info.Error = err.Error()
 			result.Failed = append(result.Failed, info)
 		} else {
-			fmt.Println("OK")
+			colorSuccess.Println("OK") //nolint:errcheck,gosec
 			result.Deleted = append(result.Deleted, info)
 		}
 	}
 
 	fmt.Println()
-	fmt.Printf("Deleted: %d, Failed: %d, Skipped: %d\n",
-		len(result.Deleted), len(result.Failed), len(result.Skipped))
+	fmt.Printf("Deleted: %s, Failed: %s, Skipped: %s\n",
+		colorSuccess.Sprintf("%d", len(result.Deleted)),
+		colorError.Sprintf("%d", len(result.Failed)),
+		colorWarning.Sprintf("%d", len(result.Skipped)))
 
 	return outputCleanupResult(result, *outputFormat)
 }
@@ -307,16 +310,14 @@ func deleteNVMeOFVolumeResources(ctx context.Context, client tnsapi.ClientInterf
 }
 
 // showCleanupPreview displays the volumes that will be deleted.
-//
-//nolint:errcheck // writing to tabwriter for stdout - errors not actionable
 func showCleanupPreview(volumes []OrphanedVolumeInfo) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "VOLUME_ID\tPROTOCOL\tDATASET\tREASON")
+	t := newStyledTable()
+	t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "DATASET", "REASON"})
 	for i := range volumes {
 		v := &volumes[i]
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", v.VolumeID, v.Protocol, v.Dataset, v.Reason)
+		t.AppendRow(table.Row{v.VolumeID, protocolBadge(v.Protocol), v.Dataset, colorWarning.Sprint(v.Reason)})
 	}
-	_ = w.Flush()
+	renderTable(t)
 }
 
 // outputCleanupResult outputs the cleanup result in the specified format.

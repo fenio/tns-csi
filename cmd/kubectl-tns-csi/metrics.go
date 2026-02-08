@@ -80,8 +80,11 @@ func fetchControllerMetrics(ctx context.Context) (*MetricsSummary, error) {
 		return nil, fmt.Errorf("failed to create Kubernetes client: %w", err)
 	}
 
+	// Discover which namespace the driver is running in
+	driverNamespace := discoverDriverNamespace(ctx)
+
 	// Find controller pod
-	pods, err := clientset.CoreV1().Pods(defaultDriverNamespace).List(ctx, metav1.ListOptions{
+	pods, err := clientset.CoreV1().Pods(driverNamespace).List(ctx, metav1.ListOptions{
 		LabelSelector: controllerLabelSelector,
 	})
 	if err != nil {
@@ -90,11 +93,11 @@ func fetchControllerMetrics(ctx context.Context) (*MetricsSummary, error) {
 
 	if len(pods.Items) == 0 {
 		// Try alternative label selector
-		pods, err = clientset.CoreV1().Pods(defaultDriverNamespace).List(ctx, metav1.ListOptions{
+		pods, err = clientset.CoreV1().Pods(driverNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: "app=tns-csi-controller",
 		})
 		if err != nil || len(pods.Items) == 0 {
-			return nil, fmt.Errorf("%w in namespace %s", errNoControllerPod, defaultDriverNamespace)
+			return nil, fmt.Errorf("%w in namespace %s", errNoControllerPod, driverNamespace)
 		}
 	}
 
@@ -111,7 +114,7 @@ func fetchControllerMetrics(ctx context.Context) (*MetricsSummary, error) {
 	}
 
 	// Fetch metrics via pod proxy
-	result := clientset.CoreV1().Pods(defaultDriverNamespace).ProxyGet("http", podName, metricsPort, metricsPath, nil)
+	result := clientset.CoreV1().Pods(driverNamespace).ProxyGet("http", podName, metricsPort, metricsPath, nil)
 	rawData, err := result.DoRaw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch metrics from pod %s: %w", podName, err)

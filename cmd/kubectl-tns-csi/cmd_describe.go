@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"github.com/spf13/cobra"
@@ -315,128 +315,86 @@ func outputVolumeDetails(details *VolumeDetails, format string) error {
 	}
 }
 
+// describeKV prints a key-value pair with dimmed key.
+func describeKV(key, value string) {
+	fmt.Printf("  %s  %s\n", colorMuted.Sprintf("%-18s", key+":"), value)
+}
+
 // outputVolumeDetailsTable outputs volume details in table/text format.
 func outputVolumeDetailsTable(details *VolumeDetails) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
 	// Header
-	fmt.Println("=== Volume Details ===")
+	colorHeader.Println("=== Volume Details ===") //nolint:errcheck,gosec
 	fmt.Println()
 
 	// Basic info
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Dataset:\t%s\n", details.Dataset)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Volume ID:\t%s\n", details.VolumeID)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Protocol:\t%s\n", details.Protocol)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Type:\t%s\n", details.Type)
+	describeKV("Dataset", details.Dataset)
+	describeKV("Volume ID", details.VolumeID)
+	describeKV("Protocol", protocolBadge(details.Protocol))
+	describeKV("Type", details.Type)
 	if details.MountPath != "" {
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Mount Path:\t%s\n", details.MountPath)
+		describeKV("Mount Path", details.MountPath)
 	}
-	//nolint:errcheck // flushing tabwriter for stdout
-	_ = w.Flush()
 	fmt.Println()
 
 	// Capacity
-	fmt.Println("=== Capacity ===")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Provisioned:\t%s (%d bytes)\n", details.CapacityHuman, details.CapacityBytes)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Used:\t%s (%d bytes)\n", details.UsedHuman, details.UsedBytes)
-	//nolint:errcheck // flushing tabwriter for stdout
-	_ = w.Flush()
+	colorHeader.Println("=== Capacity ===") //nolint:errcheck,gosec
+	describeKV("Provisioned", fmt.Sprintf("%s (%d bytes)", details.CapacityHuman, details.CapacityBytes))
+	describeKV("Used", fmt.Sprintf("%s (%d bytes)", details.UsedHuman, details.UsedBytes))
 	fmt.Println()
 
 	// Metadata
-	fmt.Println("=== Metadata ===")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Created At:\t%s\n", details.CreatedAt)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Delete Strategy:\t%s\n", details.DeleteStrategy)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintf(w, "Adoptable:\t%v\n", details.Adoptable)
-	//nolint:errcheck // flushing tabwriter for stdout
-	_ = w.Flush()
+	colorHeader.Println("=== Metadata ===") //nolint:errcheck,gosec
+	describeKV("Created At", details.CreatedAt)
+	describeKV("Delete Strategy", details.DeleteStrategy)
+	describeKV("Adoptable", strconv.FormatBool(details.Adoptable))
 	fmt.Println()
 
 	// Clone info (if this volume was created from a snapshot or volume)
 	if details.ContentSourceType != "" || details.CloneMode != "" {
-		fmt.Println("=== Clone Info ===")
-		w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		colorHeader.Println("=== Clone Info ===") //nolint:errcheck,gosec
 		if details.ContentSourceType != "" {
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "Source Type:\t%s\n", details.ContentSourceType)
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "Source ID:\t%s\n", details.ContentSourceID)
+			describeKV("Source Type", details.ContentSourceType)
+			describeKV("Source ID", details.ContentSourceID)
 		}
 		if details.CloneMode != "" {
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "Clone Mode:\t%s\n", details.CloneMode)
-			// Explain the dependency based on clone mode
+			describeKV("Clone Mode", details.CloneMode)
 			switch details.CloneMode {
 			case tnsapi.CloneModeCOW:
-				//nolint:errcheck // writing to tabwriter for stdout
-				_, _ = fmt.Fprintf(w, "Dependency:\tCLONE depends on SNAPSHOT (snapshot cannot be deleted)\n")
+				describeKV("Dependency", colorError.Sprint("CLONE depends on SNAPSHOT (snapshot cannot be deleted)"))
 				if details.OriginSnapshot != "" {
-					//nolint:errcheck // writing to tabwriter for stdout
-					_, _ = fmt.Fprintf(w, "Origin Snapshot:\t%s\n", details.OriginSnapshot)
+					describeKV("Origin Snapshot", details.OriginSnapshot)
 				}
 			case tnsapi.CloneModePromoted:
-				//nolint:errcheck // writing to tabwriter for stdout
-				_, _ = fmt.Fprintf(w, "Dependency:\tSNAPSHOT depends on CLONE (snapshot CAN be deleted)\n")
+				describeKV("Dependency", colorSuccess.Sprint("SNAPSHOT depends on CLONE (snapshot CAN be deleted)"))
 			case tnsapi.CloneModeDetached:
-				//nolint:errcheck // writing to tabwriter for stdout
-				_, _ = fmt.Fprintf(w, "Dependency:\tNone (fully independent copy via send/receive)\n")
+				describeKV("Dependency", colorSuccess.Sprint("None (fully independent copy via send/receive)"))
 			}
 		}
-		//nolint:errcheck // flushing tabwriter for stdout
-		_ = w.Flush()
 		fmt.Println()
 	}
 
 	// Protocol-specific details
 	if details.NFSShare != nil {
-		fmt.Println("=== NFS Share ===")
-		w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Share ID:\t%d\n", details.NFSShare.ID)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Path:\t%s\n", details.NFSShare.Path)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Hosts:\t%s\n", strings.Join(details.NFSShare.Hosts, ", "))
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Enabled:\t%v\n", details.NFSShare.Enabled)
-		//nolint:errcheck // flushing tabwriter for stdout
-		_ = w.Flush()
+		colorHeader.Println("=== NFS Share ===") //nolint:errcheck,gosec
+		describeKV("Share ID", strconv.Itoa(details.NFSShare.ID))
+		describeKV("Path", details.NFSShare.Path)
+		describeKV("Hosts", strings.Join(details.NFSShare.Hosts, ", "))
+		describeKV("Enabled", strconv.FormatBool(details.NFSShare.Enabled))
 		fmt.Println()
 	}
 
 	if details.NVMeOFSubsystem != nil {
-		fmt.Println("=== NVMe-oF Subsystem ===")
-		w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Subsystem ID:\t%d\n", details.NVMeOFSubsystem.ID)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Name:\t%s\n", details.NVMeOFSubsystem.Name)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "NQN:\t%s\n", details.NVMeOFSubsystem.NQN)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Serial:\t%s\n", details.NVMeOFSubsystem.Serial)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "Enabled:\t%v\n", details.NVMeOFSubsystem.Enabled)
-		//nolint:errcheck // flushing tabwriter for stdout
-		_ = w.Flush()
+		colorHeader.Println("=== NVMe-oF Subsystem ===") //nolint:errcheck,gosec
+		describeKV("Subsystem ID", strconv.Itoa(details.NVMeOFSubsystem.ID))
+		describeKV("Name", details.NVMeOFSubsystem.Name)
+		describeKV("NQN", details.NVMeOFSubsystem.NQN)
+		describeKV("Serial", details.NVMeOFSubsystem.Serial)
+		describeKV("Enabled", strconv.FormatBool(details.NVMeOFSubsystem.Enabled))
 		fmt.Println()
 	}
 
 	// All properties
-	fmt.Println("=== ZFS Properties ===")
-	w = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	colorHeader.Println("=== ZFS Properties ===") //nolint:errcheck,gosec
 
 	// Sort property keys for consistent output
 	keys := make([]string, 0, len(details.Properties))
@@ -446,11 +404,8 @@ func outputVolumeDetailsTable(details *VolumeDetails) error {
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "%s:\t%s\n", k, details.Properties[k])
+		describeKV(k, details.Properties[k])
 	}
-	//nolint:errcheck // flushing tabwriter for stdout
-	_ = w.Flush()
 
 	return nil
 }

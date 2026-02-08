@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -275,28 +275,19 @@ func outputUnmanagedVolumes(volumes []UnmanagedVolume, format string) error {
 		return enc.Encode(volumes)
 
 	case outputFormatTable, "":
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintln(w, "DATASET\tTYPE\tPROTOCOL\tSIZE\tMANAGED_BY")
+		t := newStyledTable()
+		t.AppendHeader(table.Row{"DATASET", "TYPE", "PROTOCOL", "SIZE", "MANAGED_BY"})
 
 		for i := range volumes {
 			v := &volumes[i]
-			managedBy := v.ManagedBy
-			if managedBy == "" {
-				managedBy = "-"
+			managedBy := colorMuted.Sprint("-")
+			if v.ManagedBy != "" {
+				managedBy = colorWarning.Sprint(v.ManagedBy)
 			}
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				v.Dataset,
-				strings.ToLower(v.Type),
-				v.Protocol,
-				v.Size,
-				managedBy,
-			)
+			t.AppendRow(table.Row{v.Dataset, strings.ToLower(v.Type), protocolBadge(v.Protocol), v.Size, managedBy})
 		}
 
-		//nolint:errcheck // flushing tabwriter for stdout
-		_ = w.Flush()
+		renderTable(t)
 
 		fmt.Printf("\nFound %d unmanaged volume(s)\n", len(volumes))
 		fmt.Println("Use 'kubectl tns-csi import <dataset>' to import a volume into tns-csi management")

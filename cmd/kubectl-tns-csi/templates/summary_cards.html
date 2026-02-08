@@ -5,6 +5,11 @@
         <div class="value">{{.TotalVolumes}}</div>
         <div class="subtitle">NFS: {{.NFSVolumes}} | NVMe-oF: {{.NVMeOFVolumes}} | iSCSI: {{.ISCSIVolumes}}</div>
     </div>
+    <div class="summary-card {{if gt .UnhealthyVolumes 0}}red{{else}}green{{end}}">
+        <h3>Health</h3>
+        <div class="value">{{if gt .UnhealthyVolumes 0}}{{.UnhealthyVolumes}} unhealthy{{else}}All healthy{{end}}</div>
+        <div class="subtitle">{{.HealthyVolumes}} healthy / {{.UnhealthyVolumes}} issues</div>
+    </div>
     <div class="summary-card green">
         <h3>Total Capacity</h3>
         <div class="value">{{.TotalCapacity}}</div>

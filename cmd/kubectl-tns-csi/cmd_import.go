@@ -409,9 +409,9 @@ func outputImportResult(result *ImportResult, format string) error {
 
 	case outputFormatTable, "":
 		if result.Success {
-			fmt.Printf("Successfully imported %s\n", result.Dataset)
+			printStepf(colorSuccess, iconOK, "Successfully imported %s", result.Dataset)
 			fmt.Printf("  Volume ID: %s\n", result.VolumeID)
-			fmt.Printf("  Protocol:  %s\n", result.Protocol)
+			fmt.Printf("  Protocol:  %s\n", protocolBadge(result.Protocol))
 			fmt.Printf("  Capacity:  %s\n", formatBytes(result.CapacityBytes))
 			if result.NFSSharePath != "" {
 				fmt.Printf("  NFS Share: %s (ID: %d)\n", result.NFSSharePath, result.NFSShareID)
@@ -421,7 +421,7 @@ func outputImportResult(result *ImportResult, format string) error {
 					result.ISCSIIQN, result.ISCSITargetID, result.ISCSIExtentID)
 			}
 		} else {
-			fmt.Printf("Failed to import %s: %s\n", result.Dataset, result.Message)
+			printStepf(colorError, iconError, "Failed to import %s: %s", result.Dataset, result.Message)
 		}
 		return nil
 

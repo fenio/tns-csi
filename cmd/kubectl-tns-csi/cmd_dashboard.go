@@ -38,6 +38,7 @@ type DashboardData struct {
 	Snapshots []SnapshotInfo    `json:"snapshots"`
 	Clones    []CloneInfo       `json:"clones"`
 	Unmanaged []UnmanagedVolume `json:"unmanaged"`
+	Version   string            `json:"version"`
 	Error     string            `json:"error,omitempty"`
 }
 
@@ -230,7 +231,7 @@ func (s *dashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	data := DashboardData{}
+	data := DashboardData{Version: version}
 	ctx := r.Context()
 
 	client, err := s.getClient(ctx)
@@ -239,6 +240,7 @@ func (s *dashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request
 	} else {
 		defer client.Close()
 		data = s.fetchAllData(ctx, client)
+		data.Version = version
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -285,10 +287,36 @@ func (s *dashboardServer) fetchAllData(ctx context.Context, client tnsapi.Client
 		}
 	}
 
+	// Run health checks and annotate volumes
+	annotateVolumesWithHealth(ctx, client, data.Volumes)
+
 	// Calculate summary
 	data.Summary = s.calculateSummary(data.Volumes, data.Snapshots, data.Clones)
 
 	return data
+}
+
+// annotateVolumesWithHealth runs health checks and annotates VolumeInfo slices with health status.
+func annotateVolumesWithHealth(ctx context.Context, client tnsapi.ClientInterface, volumes []VolumeInfo) {
+	healthReport, err := checkVolumeHealth(ctx, client)
+	if err != nil {
+		klog.Warningf("Failed to check volume health: %v", err)
+		return
+	}
+
+	healthMap := make(map[string]*VolumeHealth, len(healthReport.Volumes))
+	for i := range healthReport.Volumes {
+		healthMap[healthReport.Volumes[i].VolumeID] = &healthReport.Volumes[i]
+	}
+
+	for i := range volumes {
+		if h, ok := healthMap[volumes[i].VolumeID]; ok {
+			volumes[i].HealthStatus = string(h.Status)
+			if len(h.Issues) > 0 {
+				volumes[i].HealthIssue = h.Issues[0]
+			}
+		}
+	}
 }
 
 func (s *dashboardServer) calculateSummary(volumes []VolumeInfo, snapshots []SnapshotInfo, clones []CloneInfo) SummaryData {
@@ -309,8 +337,11 @@ func (s *dashboardServer) calculateSummary(volumes []VolumeInfo, snapshots []Sna
 			summary.ISCSIVolumes++
 		}
 		totalBytes += volumes[i].CapacityBytes
-		// For now, assume all volumes are healthy
-		summary.HealthyVolumes++
+		if volumes[i].HealthStatus != "" && volumes[i].HealthStatus != string(HealthStatusHealthy) {
+			summary.UnhealthyVolumes++
+		} else {
+			summary.HealthyVolumes++
+		}
 	}
 
 	summary.CapacityBytes = totalBytes
@@ -386,7 +417,6 @@ func (s *dashboardServer) handleAPISummary(w http.ResponseWriter, r *http.Reques
 	writeJSONResponse(w, data.Summary)
 }
 
-//nolint:dupl // Similar structure but different data types - clearer to keep separate
 func (s *dashboardServer) handlePartialVolumes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	client, err := s.getClient(ctx)
@@ -401,6 +431,9 @@ func (s *dashboardServer) handlePartialVolumes(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Annotate with health status
+	annotateVolumesWithHealth(ctx, client, volumes)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "volumes_table.html", volumes); err != nil {

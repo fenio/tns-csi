@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -94,14 +94,17 @@ func runHealth(ctx context.Context, url, apiKey, secretRef, outputFormat *string
 	}
 
 	// Connect to TrueNAS
+	spin := newSpinner("Checking volume health...")
 	client, err := connectToTrueNAS(ctx, cfg)
 	if err != nil {
+		spin.stop()
 		return err
 	}
 	defer client.Close()
 
 	// Check health of all volumes
 	report, err := checkVolumeHealth(ctx, client)
+	spin.stop()
 	if err != nil {
 		return fmt.Errorf("failed to check health: %w", err)
 	}
@@ -268,7 +271,10 @@ func checkNVMeOFHealth(ds *tnsapi.DatasetWithProperties, nvmeSubsysMap map[strin
 	}
 
 	// Check if subsystem exists (try both name and full NQN)
-	subsystem, exists := nvmeSubsysMap[nqn]
+	// Note: we only check existence, not the Enabled field — TrueNAS NVMe-oF
+	// subsystems function normally regardless of that flag, and the driver
+	// does not set it during creation.
+	_, exists := nvmeSubsysMap[nqn]
 	if !exists {
 		health.Issues = append(health.Issues, "NVMe-oF subsystem not found: "+nqn)
 		subsysOK := false
@@ -277,10 +283,6 @@ func checkNVMeOFHealth(ds *tnsapi.DatasetWithProperties, nvmeSubsysMap map[strin
 	}
 
 	subsysOK := true
-	if !subsystem.Enabled {
-		health.Issues = append(health.Issues, "NVMe-oF subsystem is disabled")
-		subsysOK = false
-	}
 	health.SubsysOK = &subsysOK
 }
 
@@ -321,11 +323,11 @@ func outputHealthReport(report *HealthReport, format string, showAll bool) error
 // outputHealthReportTable outputs the health report in table format.
 func outputHealthReportTable(report *HealthReport, showAll bool) error {
 	// Summary
-	fmt.Println("=== Health Summary ===")
+	colorHeader.Println("=== Health Summary ===") //nolint:errcheck,gosec
 	fmt.Printf("Total Volumes:    %d\n", report.Summary.TotalVolumes)
-	fmt.Printf("Healthy:          %d\n", report.Summary.HealthyVolumes)
-	fmt.Printf("Degraded:         %d\n", report.Summary.DegradedVolumes)
-	fmt.Printf("Unhealthy:        %d\n", report.Summary.UnhealthyVolumes)
+	fmt.Printf("Healthy:          %s\n", colorSuccess.Sprintf("%d", report.Summary.HealthyVolumes))
+	fmt.Printf("Degraded:         %s\n", colorWarning.Sprintf("%d", report.Summary.DegradedVolumes))
+	fmt.Printf("Unhealthy:        %s\n", colorError.Sprintf("%d", report.Summary.UnhealthyVolumes))
 	fmt.Println()
 
 	// Determine which volumes to show
@@ -338,35 +340,44 @@ func outputHealthReportTable(report *HealthReport, showAll bool) error {
 		if showAll {
 			fmt.Println("No volumes found.")
 		} else {
-			fmt.Println("All volumes are healthy!")
+			colorSuccess.Println("All volumes are healthy!") //nolint:errcheck,gosec
 		}
 		return nil
 	}
 
 	// Volume details
 	if showAll {
-		fmt.Println("=== All Volumes ===")
+		colorHeader.Println("=== All Volumes ===") //nolint:errcheck,gosec
 	} else {
-		fmt.Println("=== Volumes with Issues ===")
+		colorHeader.Println("=== Volumes with Issues ===") //nolint:errcheck,gosec
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	//nolint:errcheck // writing to tabwriter for stdout
-	_, _ = fmt.Fprintln(w, "VOLUME_ID\tPROTOCOL\tSTATUS\tISSUES")
+	t := newStyledTable()
+	t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "STATUS", "ISSUES"})
 
 	for i := range volumes {
 		v := &volumes[i]
-		issues := "-"
+		issues := colorMuted.Sprint("-")
 		if len(v.Issues) > 0 {
 			issues = v.Issues[0]
 			if len(v.Issues) > 1 {
 				issues = fmt.Sprintf("%s (+%d more)", issues, len(v.Issues)-1)
 			}
 		}
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			v.VolumeID, v.Protocol, v.Status, issues)
+		var statusStr string
+		switch v.Status {
+		case HealthStatusHealthy:
+			statusStr = colorSuccess.Sprint(v.Status)
+		case HealthStatusDegraded:
+			statusStr = colorWarning.Sprint(v.Status)
+		case HealthStatusUnhealthy:
+			statusStr = colorError.Sprint(v.Status)
+		default:
+			statusStr = string(v.Status)
+		}
+		t.AppendRow(table.Row{v.VolumeID, protocolBadge(v.Protocol), statusStr, issues})
 	}
 
-	return w.Flush()
+	renderTable(t)
+	return nil
 }

@@ -3,12 +3,12 @@
 <table>
     <thead>
         <tr>
-            <th>Name</th>
-            <th>Dataset</th>
-            <th>Type</th>
-            <th>Protocol</th>
-            <th>Size</th>
-            <th>Managed By</th>
+            <th class="sortable" onclick="sortTable(this)">Name</th>
+            <th class="sortable" onclick="sortTable(this)">Dataset</th>
+            <th class="sortable" onclick="sortTable(this)">Type</th>
+            <th class="sortable" onclick="sortTable(this)">Protocol</th>
+            <th class="sortable" onclick="sortTable(this)">Size</th>
+            <th class="sortable" onclick="sortTable(this)">Managed By</th>
         </tr>
     </thead>
     <tbody>
@@ -53,6 +53,7 @@
 {{else}}
 <div class="empty-state">
     No unmanaged volumes found
+    <div class="hint">Datasets in the pool that are not managed by any CSI driver will appear here</div>
 </div>
 {{end}}
 {{end}}

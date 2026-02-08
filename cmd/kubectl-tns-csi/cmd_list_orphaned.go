@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
@@ -238,20 +238,18 @@ func outputOrphanedVolumes(volumes []OrphanedVolumeInfo, format string) error {
 		return enc.Encode(volumes)
 
 	case outputFormatTable, "":
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintln(w, "DATASET\tVOLUME_ID\tPROTOCOL\tCAPACITY\tADOPTABLE\tREASON")
+		t := newStyledTable()
+		t.AppendHeader(table.Row{"DATASET", "VOLUME_ID", "PROTOCOL", "CAPACITY", "ADOPTABLE", "REASON"})
 		for i := range volumes {
 			v := &volumes[i]
 			adoptable := ""
 			if v.Adoptable {
-				adoptable = valueTrue
+				adoptable = colorSuccess.Sprint(valueTrue)
 			}
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				v.Dataset, v.VolumeID, v.Protocol, v.CapacityHuman, adoptable, v.Reason)
+			t.AppendRow(table.Row{v.Dataset, v.VolumeID, protocolBadge(v.Protocol), v.CapacityHuman, adoptable, colorWarning.Sprint(v.Reason)})
 		}
-		return w.Flush()
+		renderTable(t)
+		return nil
 
 	default:
 		return fmt.Errorf("%w: %s", errOrphanedUnknownOutputFormat, format)

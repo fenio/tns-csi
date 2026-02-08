@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -221,15 +221,17 @@ func outputSnapshots(snapshots []SnapshotInfo, format string) error {
 		return enc.Encode(snapshots)
 
 	case outputFormatTable, "":
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintln(w, "NAME\tSOURCE_VOLUME\tPROTOCOL\tTYPE\tSOURCE_DATASET")
+		t := newStyledTable()
+		t.AppendHeader(table.Row{"NAME", "SOURCE_VOLUME", "PROTOCOL", "TYPE", "SOURCE_DATASET"})
 		for _, s := range snapshots {
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				s.Name, s.SourceVolume, s.Protocol, s.Type, s.SourceDataset)
+			snapType := colorSuccess.Sprint(s.Type)
+			if s.Type == "detached" {
+				snapType = colorProtocolNFS.Sprint(s.Type)
+			}
+			t.AppendRow(table.Row{s.Name, s.SourceVolume, protocolBadge(s.Protocol), snapType, s.SourceDataset})
 		}
-		return w.Flush()
+		renderTable(t)
+		return nil
 
 	default:
 		return fmt.Errorf("%w: %s", errUnknownOutputFormat, format)

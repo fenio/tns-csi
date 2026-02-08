@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"github.com/spf13/cobra"
@@ -494,8 +493,9 @@ func getPVCEvents(ctx context.Context, pvcName, namespace string) []string {
 
 // getControllerLogs gets CSI controller logs filtered by volume ID.
 func getControllerLogs(ctx context.Context, volumeID string) []string {
-	cmd := exec.CommandContext(ctx, "kubectl", "logs",
-		"-n", "kube-system",
+	driverNamespace := discoverDriverNamespace(ctx)
+	cmd := exec.CommandContext(ctx, "kubectl", "logs", //nolint:gosec // driverNamespace comes from Kubernetes API, not user input
+		"-n", driverNamespace,
 		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
 		"--tail=200")
 	output, err := cmd.Output()
@@ -548,42 +548,44 @@ func outputTroubleshootResult(result *TroubleshootResult, format string) error {
 // outputTroubleshootResultTable outputs the troubleshoot result in table format.
 func outputTroubleshootResultTable(result *TroubleshootResult) error {
 	// Header
-	statusIcon := iconOK
+	var stIcon string
 	switch result.Status {
 	case statusError:
-		statusIcon = iconError
+		stIcon = colorError.Sprint(iconError)
 	case statusWarning:
-		statusIcon = iconWarning
+		stIcon = colorWarning.Sprint(iconWarning)
+	default:
+		stIcon = colorSuccess.Sprint(iconOK)
 	}
 
-	fmt.Printf("=== Troubleshoot: %s/%s ===\n", result.Namespace, result.PVCName)
-	fmt.Printf("Status: %s %s\n", statusIcon, result.Summary)
+	colorHeader.Printf("=== Troubleshoot: %s/%s ===\n", result.Namespace, result.PVCName) //nolint:errcheck,gosec
+	fmt.Printf("Status: %s %s\n", stIcon, result.Summary)
 	fmt.Println()
 
 	// Checks
-	fmt.Println("=== Checks ===")
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	colorHeader.Println("=== Checks ===") //nolint:errcheck,gosec
 	for i := range result.Checks {
 		check := &result.Checks[i]
-		icon := iconOK
+		var icon string
 		switch check.Status {
+		case statusOK:
+			icon = colorSuccess.Sprint(iconOK)
 		case statusError:
-			icon = iconError
+			icon = colorError.Sprint(iconError)
 		case statusWarning:
-			icon = iconWarning
+			icon = colorWarning.Sprint(iconWarning)
 		case statusSkipped:
-			icon = "-"
+			icon = colorMuted.Sprint("-")
+		default:
+			icon = colorMuted.Sprint("-")
 		}
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintf(w, "%s %s\t%s\n", icon, check.Name, check.Message)
+		fmt.Printf("  %s %-25s %s\n", icon, check.Name, check.Message)
 	}
-	//nolint:errcheck // flushing tabwriter for stdout
-	_ = w.Flush()
 	fmt.Println()
 
 	// Suggestions
 	if len(result.Suggestions) > 0 {
-		fmt.Println("=== Suggestions ===")
+		colorHeader.Println("=== Suggestions ===") //nolint:errcheck,gosec
 		for i, suggestion := range result.Suggestions {
 			fmt.Printf("%d. %s\n", i+1, suggestion)
 		}
@@ -592,7 +594,7 @@ func outputTroubleshootResultTable(result *TroubleshootResult) error {
 
 	// Events
 	if len(result.Events) > 0 {
-		fmt.Println("=== Recent Events ===")
+		colorHeader.Println("=== Recent Events ===") //nolint:errcheck,gosec
 		for _, event := range result.Events {
 			fmt.Println(event)
 		}
@@ -601,7 +603,7 @@ func outputTroubleshootResultTable(result *TroubleshootResult) error {
 
 	// Controller logs
 	if len(result.ControllerLogs) > 0 {
-		fmt.Println("=== Controller Logs ===")
+		colorHeader.Println("=== Controller Logs ===") //nolint:errcheck,gosec
 		var buf bytes.Buffer
 		for _, line := range result.ControllerLogs {
 			buf.WriteString(line)

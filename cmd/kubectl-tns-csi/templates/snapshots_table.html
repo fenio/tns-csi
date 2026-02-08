@@ -3,11 +3,11 @@
 <table>
     <thead>
         <tr>
-            <th>Snapshot Name</th>
-            <th>Source Volume</th>
-            <th>Protocol</th>
-            <th>Type</th>
-            <th>Source Dataset</th>
+            <th class="sortable" onclick="sortTable(this)">Snapshot Name</th>
+            <th class="sortable" onclick="sortTable(this)">Source Volume</th>
+            <th class="sortable" onclick="sortTable(this)">Protocol</th>
+            <th class="sortable" onclick="sortTable(this)">Type</th>
+            <th class="sortable" onclick="sortTable(this)">Source Dataset</th>
         </tr>
     </thead>
     <tbody>
@@ -41,6 +41,7 @@
 {{else}}
 <div class="empty-state">
     No snapshots found
+    <div class="hint">Create VolumeSnapshots using tns-csi VolumeSnapshotClass to see them here</div>
 </div>
 {{end}}
 {{end}}

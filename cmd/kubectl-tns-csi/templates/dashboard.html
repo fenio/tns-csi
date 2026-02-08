@@ -43,8 +43,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
             border-bottom: 1px solid var(--border-color);
         }
 
@@ -67,6 +67,38 @@
             font-weight: 500;
         }
 
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .auto-refresh-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+        }
+
+        .auto-refresh-group label {
+            color: var(--text-secondary);
+        }
+
+        .auto-refresh-group select {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+
+        .last-updated {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
         .refresh-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--border-color);
@@ -87,40 +119,49 @@
 
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-            margin-bottom: 30px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
         }
 
         .summary-card {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 20px;
+            padding: 12px 16px;
+            transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+            cursor: default;
+        }
+
+        .summary-card:hover {
+            transform: translateY(-1px);
+            border-color: var(--accent-blue);
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
         }
 
         .summary-card h3 {
             color: var(--text-secondary);
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             font-weight: 500;
-            margin-bottom: 8px;
+            margin-bottom: 4px;
         }
 
         .summary-card .value {
-            font-size: 2rem;
+            font-size: 1.5rem;
             font-weight: 600;
         }
 
         .summary-card .subtitle {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
-            margin-top: 4px;
+            margin-top: 2px;
         }
 
         .summary-card.blue .value { color: var(--accent-blue); }
         .summary-card.green .value { color: var(--accent-green); }
         .summary-card.yellow .value { color: var(--accent-yellow); }
         .summary-card.purple .value { color: var(--accent-purple); }
+        .summary-card.red .value { color: var(--accent-red); }
 
         .tabs {
             display: flex;
@@ -158,6 +199,7 @@
             border: 1px solid var(--border-color);
             border-radius: 8px;
             overflow: hidden;
+            position: relative;
         }
 
         .panel-header {
@@ -168,9 +210,57 @@
             border-bottom: 1px solid var(--border-color);
         }
 
+        .panel-header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
         .panel-title {
             font-size: 1rem;
             font-weight: 600;
+        }
+
+        .search-input {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            width: 220px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+
+        /* Panel loading overlay */
+        .panel-loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(15, 23, 42, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+
+        .htmx-request .panel-loading {
+            opacity: 1;
+            pointer-events: auto;
         }
 
         table {
@@ -191,6 +281,38 @@
             font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
+            user-select: none;
+        }
+
+        th.sortable {
+            cursor: pointer;
+            position: relative;
+            padding-right: 28px;
+        }
+
+        th.sortable:hover {
+            color: var(--text-primary);
+        }
+
+        th.sortable::after {
+            content: '\25B2\25BC';
+            position: absolute;
+            right: 10px;
+            font-size: 0.55rem;
+            color: var(--border-color);
+            letter-spacing: -2px;
+        }
+
+        th.sortable.sort-asc::after {
+            content: '\25B2';
+            color: var(--accent-blue);
+            font-size: 0.65rem;
+        }
+
+        th.sortable.sort-desc::after {
+            content: '\25BC';
+            color: var(--accent-blue);
+            font-size: 0.65rem;
         }
 
         tr:last-child td {
@@ -216,6 +338,9 @@
         .badge-promoted { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); }
         .badge-detached { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
         .badge-attached { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); }
+        .badge-healthy { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); }
+        .badge-unhealthy { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); }
+        .badge-degraded { background: rgba(234, 179, 8, 0.2); color: var(--accent-yellow); }
 
         .mono {
             font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
@@ -258,6 +383,12 @@
             padding: 40px;
             text-align: center;
             color: var(--text-secondary);
+        }
+
+        .empty-state .hint {
+            margin-top: 8px;
+            font-size: 0.8rem;
+            color: var(--border-color);
         }
 
         @keyframes spin {
@@ -402,8 +533,8 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 12px 20px;
-            margin-bottom: 20px;
+            padding: 10px 16px;
+            margin-bottom: 16px;
         }
 
         .status-loading {
@@ -454,6 +585,53 @@
             height: 20px;
             background: var(--border-color);
         }
+
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 200;
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 8px;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-red);
+            color: var(--text-primary);
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease-out;
+            max-width: 400px;
+        }
+
+        .toast.toast-error {
+            border-color: var(--accent-red);
+        }
+
+        .toast .toast-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            color: var(--accent-red);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes slideOut {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
+
+        .toast.removing {
+            animation: slideOut 0.3s ease-in forwards;
+        }
     </style>
 </head>
 <body>
@@ -461,15 +639,23 @@
         <header>
             <div class="logo">
                 <h1>TNS-CSI Dashboard</h1>
-                <span>v0.9.2</span>
+                <span>{{.Version}}</span>
             </div>
-            <button class="refresh-btn"
-                    hx-get="/partials/summary"
-                    hx-target="#summary-cards"
-                    hx-indicator=".htmx-indicator">
-                <span class="htmx-indicator"><span class="spinner"></span></span>
-                <span>Refresh</span>
-            </button>
+            <div class="header-controls">
+                <span id="last-updated" class="last-updated"></span>
+                <div class="auto-refresh-group">
+                    <label for="auto-refresh">Auto-refresh:</label>
+                    <select id="auto-refresh" onchange="setAutoRefresh(this.value)">
+                        <option value="0" selected>Off</option>
+                        <option value="10">10s</option>
+                        <option value="30">30s</option>
+                        <option value="60">60s</option>
+                    </select>
+                </div>
+                <button id="refresh-btn" class="refresh-btn" onclick="refreshAll()">
+                    Refresh
+                </button>
+            </div>
         </header>
 
         {{if .Error}}
@@ -509,66 +695,54 @@
 
         <div id="panel-volumes" class="panel">
             <div class="panel-header">
-                <span class="panel-title">Managed Volumes</span>
-                <button class="refresh-btn"
-                        hx-get="/partials/volumes"
-                        hx-target="#volumes-table"
-                        hx-indicator=".htmx-indicator">
-                    <span class="htmx-indicator"><span class="spinner"></span></span>
-                    Refresh
-                </button>
+                <div class="panel-header-left">
+                    <span class="panel-title">Managed Volumes</span>
+                    <input type="text" class="search-input" placeholder="Search volumes..." oninput="filterTable('volumes-table', this.value)">
+                </div>
             </div>
             <div id="volumes-table">
                 {{template "volumes_table.html" .Volumes}}
             </div>
+            <div class="panel-loading"><span class="spinner"></span></div>
         </div>
 
         <div id="panel-snapshots" class="panel hidden">
             <div class="panel-header">
-                <span class="panel-title">Snapshots</span>
-                <button class="refresh-btn"
-                        hx-get="/partials/snapshots"
-                        hx-target="#snapshots-table"
-                        hx-indicator=".htmx-indicator">
-                    <span class="htmx-indicator"><span class="spinner"></span></span>
-                    Refresh
-                </button>
+                <div class="panel-header-left">
+                    <span class="panel-title">Snapshots</span>
+                    <input type="text" class="search-input" placeholder="Search snapshots..." oninput="filterTable('snapshots-table', this.value)">
+                </div>
             </div>
             <div id="snapshots-table">
                 {{template "snapshots_table.html" .Snapshots}}
             </div>
+            <div class="panel-loading"><span class="spinner"></span></div>
         </div>
 
         <div id="panel-clones" class="panel hidden">
             <div class="panel-header">
-                <span class="panel-title">Cloned Volumes</span>
-                <button class="refresh-btn"
-                        hx-get="/partials/clones"
-                        hx-target="#clones-table"
-                        hx-indicator=".htmx-indicator">
-                    <span class="htmx-indicator"><span class="spinner"></span></span>
-                    Refresh
-                </button>
+                <div class="panel-header-left">
+                    <span class="panel-title">Cloned Volumes</span>
+                    <input type="text" class="search-input" placeholder="Search clones..." oninput="filterTable('clones-table', this.value)">
+                </div>
             </div>
             <div id="clones-table">
                 {{template "clones_table.html" .Clones}}
             </div>
+            <div class="panel-loading"><span class="spinner"></span></div>
         </div>
 
         <div id="panel-unmanaged" class="panel hidden">
             <div class="panel-header">
-                <span class="panel-title">Unmanaged Volumes</span>
-                <button class="refresh-btn"
-                        hx-get="/partials/unmanaged"
-                        hx-target="#unmanaged-table"
-                        hx-indicator=".htmx-indicator">
-                    <span class="htmx-indicator"><span class="spinner"></span></span>
-                    Refresh
-                </button>
+                <div class="panel-header-left">
+                    <span class="panel-title">Unmanaged Volumes</span>
+                    <input type="text" class="search-input" placeholder="Search unmanaged..." oninput="filterTable('unmanaged-table', this.value)">
+                </div>
             </div>
             <div id="unmanaged-table">
                 {{template "unmanaged_table.html" .Unmanaged}}
             </div>
+            <div class="panel-loading"><span class="spinner"></span></div>
         </div>
 
     </div>
@@ -586,26 +760,23 @@
         </div>
     </div>
 
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
     <script>
+        // --- Panel switching ---
         function showPanel(name, btn) {
-            // Hide all panels
             document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
-            // Show selected panel
             document.getElementById('panel-' + name).classList.remove('hidden');
-            // Update tab states
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             btn.classList.add('active');
         }
 
+        // --- Volume detail ---
         function showVolumeDetail(volumeId) {
-            // Show overlay and panel
             document.getElementById('detail-overlay').classList.add('active');
             document.getElementById('detail-panel-container').classList.add('active');
-
-            // Show loading state
             document.getElementById('detail-content').innerHTML = '<div class="detail-loading"><span class="spinner"></span><p>Loading...</p></div>';
-
-            // Fetch volume details
             htmx.ajax('GET', '/partials/volume-detail/' + encodeURIComponent(volumeId), {
                 target: '#detail-content',
                 swap: 'innerHTML'
@@ -617,11 +788,149 @@
             document.getElementById('detail-panel-container').classList.remove('active');
         }
 
-        // Close panel on Escape key
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                closeDetailPanel();
+            if (e.key === 'Escape') closeDetailPanel();
+        });
+
+        // --- Search/Filter ---
+        function filterTable(containerId, query) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            const tbody = container.querySelector('tbody');
+            if (!tbody) return;
+            const rows = tbody.querySelectorAll('tr');
+            const q = query.toLowerCase();
+            rows.forEach(function(row) {
+                var text = row.textContent.toLowerCase();
+                row.style.display = text.includes(q) ? '' : 'none';
+            });
+        }
+
+        // --- Column sorting ---
+        function sortTable(th) {
+            var table = th.closest('table');
+            var tbody = table.querySelector('tbody');
+            if (!tbody) return;
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            var colIdx = Array.from(th.parentNode.children).indexOf(th);
+
+            // Determine direction
+            var isAsc = th.classList.contains('sort-asc');
+            // Clear all sort classes
+            th.parentNode.querySelectorAll('th').forEach(function(h) {
+                h.classList.remove('sort-asc', 'sort-desc');
+            });
+            var dir = isAsc ? 'desc' : 'asc';
+            th.classList.add('sort-' + dir);
+
+            rows.sort(function(a, b) {
+                var aText = (a.children[colIdx] || {}).textContent || '';
+                var bText = (b.children[colIdx] || {}).textContent || '';
+                aText = aText.trim().toLowerCase();
+                bText = bText.trim().toLowerCase();
+                // Try numeric sort
+                var aNum = parseFloat(aText);
+                var bNum = parseFloat(bText);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return dir === 'asc' ? aNum - bNum : bNum - aNum;
+                }
+                if (dir === 'asc') {
+                    return aText.localeCompare(bText);
+                }
+                return bText.localeCompare(aText);
+            });
+
+            rows.forEach(function(row) { tbody.appendChild(row); });
+        }
+
+        // --- Auto-refresh ---
+        var autoRefreshTimer = null;
+
+        function setAutoRefresh(seconds) {
+            if (autoRefreshTimer) {
+                clearInterval(autoRefreshTimer);
+                autoRefreshTimer = null;
             }
+            var sec = parseInt(seconds, 10);
+            if (sec > 0) {
+                autoRefreshTimer = setInterval(refreshAll, sec * 1000);
+            }
+        }
+
+        var refreshing = false;
+        function refreshAll() {
+            if (refreshing) return;
+            refreshing = true;
+            var btn = document.getElementById('refresh-btn');
+            if (btn) btn.disabled = true;
+
+            // Determine active panel's partial URL
+            var panelUrl = '/partials/volumes';
+            var panelTarget = '#volumes-table';
+            var activePanel = document.querySelector('.panel:not(.hidden)');
+            if (activePanel) {
+                var tableEl = activePanel.querySelector('[id$="-table"]');
+                if (tableEl) {
+                    var name = tableEl.id.replace('-table', '');
+                    panelUrl = '/partials/' + name;
+                    panelTarget = '#' + tableEl.id;
+                }
+            }
+
+            // Chain requests sequentially to avoid overwhelming TrueNAS
+            htmx.ajax('GET', panelUrl, { target: panelTarget, swap: 'innerHTML' })
+                .then(function() {
+                    return htmx.ajax('GET', '/partials/summary', { target: '#summary-cards', swap: 'innerHTML' });
+                })
+                .then(function() {
+                    return htmx.ajax('GET', '/partials/metrics', { target: '#controller-status', swap: 'innerHTML' });
+                })
+                .then(function() {
+                    updateTimestamp();
+                })
+                .catch(function() {})
+                .then(function() {
+                    refreshing = false;
+                    if (btn) btn.disabled = false;
+                });
+        }
+
+        function updateTimestamp() {
+            var now = new Date();
+            var ts = now.toLocaleTimeString();
+            var el = document.getElementById('last-updated');
+            if (el) el.textContent = 'Last updated: ' + ts;
+        }
+
+        // Auto-refresh off by default
+        setAutoRefresh(0);
+        updateTimestamp();
+
+        // --- Toast notifications ---
+        function showToast(title, message) {
+            var container = document.getElementById('toast-container');
+            var toast = document.createElement('div');
+            toast.className = 'toast toast-error';
+            toast.innerHTML = '<div class="toast-title">' + title + '</div><div>' + message + '</div>';
+            container.appendChild(toast);
+            setTimeout(function() {
+                toast.classList.add('removing');
+                setTimeout(function() { toast.remove(); }, 300);
+            }, 5000);
+        }
+
+        // Listen for HTMX errors and show toasts
+        document.addEventListener('htmx:responseError', function(evt) {
+            showToast('Request Failed', 'Could not load data from server. Retrying on next refresh.');
+        });
+
+        document.addEventListener('htmx:sendError', function(evt) {
+            showToast('Connection Error', 'Could not reach the dashboard server.');
+        });
+
+        // Update timestamp after each successful HTMX swap
+        document.addEventListener('htmx:afterSwap', function(evt) {
+            updateTimestamp();
         });
     </script>
 </body>

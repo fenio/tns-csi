@@ -171,7 +171,8 @@ func connectToTrueNAS(_ context.Context, cfg *connectionConfig) (*TrueNASClient,
 }
 
 // autoDiscoverDriverSecret attempts to find the tns-csi driver secret automatically.
-// It searches in kube-system namespace for secrets with the driver labels.
+// It searches in the current kubectl context namespace first, then kube-system,
+// then all namespaces as a fallback.
 func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
 	// Build Kubernetes client
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -188,39 +189,120 @@ func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
 		return nil
 	}
 
-	// Search for secrets with tns-csi-driver labels
-	secrets, err := clientset.CoreV1().Secrets(defaultDriverNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: driverLabelSelector,
-	})
-	if err != nil || len(secrets.Items) == 0 {
-		// Try common secret name patterns as fallback
-		return tryCommonSecretNames(ctx, clientset)
+	// Determine which namespaces to search and in what order.
+	// Current context namespace first, then kube-system, then all namespaces.
+	contextNamespace, _, nsErr := kubeConfig.Namespace()
+	if nsErr != nil {
+		contextNamespace = ""
+	}
+	namespacesToSearch := buildNamespaceSearchOrder(contextNamespace)
+
+	// Search for secrets with tns-csi-driver labels in each namespace
+	for _, ns := range namespacesToSearch {
+		secrets, listErr := clientset.CoreV1().Secrets(ns).List(ctx, metav1.ListOptions{
+			LabelSelector: driverLabelSelector,
+		})
+		if listErr == nil && len(secrets.Items) > 0 {
+			return extractConfigFromSecretData(secrets.Items[0].Data)
+		}
 	}
 
-	// Use the first matching secret
-	secret := &secrets.Items[0]
-	return extractConfigFromSecretData(secret.Data)
+	// Label search failed — try common secret name patterns in each namespace
+	if cfg := tryCommonSecretNames(ctx, clientset, namespacesToSearch); cfg != nil {
+		return cfg
+	}
+
+	// Final fallback: search all namespaces by label
+	allSecrets, err := clientset.CoreV1().Secrets("").List(ctx, metav1.ListOptions{
+		LabelSelector: driverLabelSelector,
+	})
+	if err == nil && len(allSecrets.Items) > 0 {
+		return extractConfigFromSecretData(allSecrets.Items[0].Data)
+	}
+
+	return nil
 }
 
-// tryCommonSecretNames tries to find secrets with common naming patterns.
-func tryCommonSecretNames(ctx context.Context, clientset *kubernetes.Clientset) *connectionConfig {
+// buildNamespaceSearchOrder returns deduplicated namespaces to search, prioritizing
+// the current kubectl context namespace, then the default driver namespace.
+func buildNamespaceSearchOrder(contextNamespace string) []string {
+	namespaces := []string{}
+	seen := map[string]bool{}
+	for _, ns := range []string{contextNamespace, defaultDriverNamespace} {
+		if ns != "" && !seen[ns] {
+			namespaces = append(namespaces, ns)
+			seen[ns] = true
+		}
+	}
+	return namespaces
+}
+
+// tryCommonSecretNames tries to find secrets with common naming patterns
+// across the given namespaces.
+func tryCommonSecretNames(ctx context.Context, clientset *kubernetes.Clientset, namespaces []string) *connectionConfig {
 	commonNames := []string{
 		"tns-csi-driver-secret",
 		"tns-csi-secret",
 		"truenas-csi-secret",
 	}
 
-	for _, name := range commonNames {
-		secret, err := clientset.CoreV1().Secrets(defaultDriverNamespace).Get(ctx, name, metav1.GetOptions{})
-		if err == nil {
-			cfg := extractConfigFromSecretData(secret.Data)
-			if cfg != nil && cfg.URL != "" && cfg.APIKey != "" {
-				return cfg
+	for _, ns := range namespaces {
+		for _, name := range commonNames {
+			secret, err := clientset.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+			if err == nil {
+				cfg := extractConfigFromSecretData(secret.Data)
+				if cfg != nil && cfg.URL != "" && cfg.APIKey != "" {
+					return cfg
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// discoverDriverNamespace finds the namespace where the tns-csi controller is running.
+// It searches the current kubectl context namespace first, then kube-system,
+// then all namespaces. Returns defaultDriverNamespace if nothing is found.
+func discoverDriverNamespace(ctx context.Context) string {
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	configOverrides := &clientcmd.ConfigOverrides{}
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+
+	config, err := kubeConfig.ClientConfig()
+	if err != nil {
+		return defaultDriverNamespace
+	}
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return defaultDriverNamespace
+	}
+
+	contextNamespace, _, nsErr := kubeConfig.Namespace()
+	if nsErr != nil {
+		contextNamespace = ""
+	}
+
+	// Search candidate namespaces first
+	for _, ns := range buildNamespaceSearchOrder(contextNamespace) {
+		pods, listErr := clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+			LabelSelector: driverLabelSelector,
+		})
+		if listErr == nil && len(pods.Items) > 0 {
+			return ns
+		}
+	}
+
+	// All-namespace fallback
+	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		LabelSelector: driverLabelSelector,
+	})
+	if err == nil && len(pods.Items) > 0 {
+		return pods.Items[0].Namespace
+	}
+
+	return defaultDriverNamespace
 }
 
 // extractConfigFromSecretData extracts connection config from secret data.

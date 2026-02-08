@@ -3,11 +3,12 @@
 <table>
     <thead>
         <tr>
-            <th>Volume ID</th>
-            <th>Dataset</th>
-            <th>Protocol</th>
-            <th>Capacity</th>
-            <th>Adoptable</th>
+            <th class="sortable" onclick="sortTable(this)">Volume ID</th>
+            <th class="sortable" onclick="sortTable(this)">Dataset</th>
+            <th class="sortable" onclick="sortTable(this)">Protocol</th>
+            <th class="sortable" onclick="sortTable(this)">Capacity</th>
+            <th class="sortable" onclick="sortTable(this)">Health</th>
+            <th class="sortable" onclick="sortTable(this)">Adoptable</th>
         </tr>
     </thead>
     <tbody>
@@ -28,6 +29,17 @@
             </td>
             <td>{{.CapacityHuman}}</td>
             <td>
+                {{if eq .HealthStatus "Healthy"}}
+                <span class="badge badge-healthy">Healthy</span>
+                {{else if eq .HealthStatus "Unhealthy"}}
+                <span class="badge badge-unhealthy" title="{{.HealthIssue}}">Unhealthy</span>
+                {{else if eq .HealthStatus "Degraded"}}
+                <span class="badge badge-degraded" title="{{.HealthIssue}}">Degraded</span>
+                {{else}}
+                <span class="text-muted">-</span>
+                {{end}}
+            </td>
+            <td>
                 {{if .Adoptable}}
                 <span class="badge badge-promoted">Yes</span>
                 {{else}}
@@ -41,6 +53,7 @@
 {{else}}
 <div class="empty-state">
     No volumes found
+    <div class="hint">Volumes will appear here when provisioned through tns-csi StorageClasses</div>
 </div>
 {{end}}
 {{end}}

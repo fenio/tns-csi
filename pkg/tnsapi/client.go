@@ -231,8 +231,12 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 			continue
 		}
 
-		// Success!
-		klog.Infof("Successfully connected to TrueNAS on attempt %d/%d", attempt, maxAttempts)
+		// Success — only log at info level if retries were needed
+		if attempt > 1 {
+			klog.Infof("Successfully connected to TrueNAS on attempt %d/%d", attempt, maxAttempts)
+		} else {
+			klog.V(4).Infof("Successfully connected to TrueNAS")
+		}
 		return c, nil
 	}
 

@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"text/tabwriter"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -165,15 +165,24 @@ func outputClones(clones []CloneInfo, format string) error {
 			fmt.Println("No cloned volumes found.")
 			return nil
 		}
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		//nolint:errcheck // writing to tabwriter for stdout
-		_, _ = fmt.Fprintln(w, "VOLUME_ID\tPROTOCOL\tCLONE_MODE\tSOURCE_TYPE\tSOURCE_ID\tDEPENDENCY")
+		t := newStyledTable()
+		t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "CLONE_MODE", "SOURCE_TYPE", "SOURCE_ID", "DEPENDENCY"})
 		for i := range clones {
-			//nolint:errcheck // writing to tabwriter for stdout
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
-				clones[i].VolumeID, clones[i].Protocol, clones[i].CloneMode, clones[i].SourceType, truncateString(clones[i].SourceID, 30), clones[i].DependencyNote)
+			var modeStr string
+			switch clones[i].CloneMode {
+			case tnsapi.CloneModeCOW:
+				modeStr = colorError.Sprint("cow")
+			case tnsapi.CloneModePromoted:
+				modeStr = colorSuccess.Sprint("promoted")
+			case tnsapi.CloneModeDetached:
+				modeStr = colorProtocolNFS.Sprint("detached")
+			default:
+				modeStr = clones[i].CloneMode
+			}
+			t.AppendRow(table.Row{clones[i].VolumeID, protocolBadge(clones[i].Protocol), modeStr, clones[i].SourceType, truncateString(clones[i].SourceID, 30), colorMuted.Sprint(clones[i].DependencyNote)})
 		}
-		return w.Flush()
+		renderTable(t)
+		return nil
 
 	default:
 		return fmt.Errorf("%w: %s", errUnknownOutputFormat, format)

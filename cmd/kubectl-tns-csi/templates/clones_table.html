@@ -3,12 +3,12 @@
 <table>
     <thead>
         <tr>
-            <th>Volume ID</th>
-            <th>Protocol</th>
-            <th>Clone Mode</th>
-            <th>Source Type</th>
-            <th>Source ID</th>
-            <th>Dependency</th>
+            <th class="sortable" onclick="sortTable(this)">Volume ID</th>
+            <th class="sortable" onclick="sortTable(this)">Protocol</th>
+            <th class="sortable" onclick="sortTable(this)">Clone Mode</th>
+            <th class="sortable" onclick="sortTable(this)">Source Type</th>
+            <th class="sortable" onclick="sortTable(this)">Source ID</th>
+            <th class="sortable" onclick="sortTable(this)">Dependency</th>
         </tr>
     </thead>
     <tbody>
@@ -47,6 +47,7 @@
 {{else}}
 <div class="empty-state">
     No cloned volumes found
+    <div class="hint">Clones are created when provisioning volumes from snapshots or other volumes</div>
 </div>
 {{end}}
 {{end}}

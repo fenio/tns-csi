@@ -41,7 +41,7 @@ See detailed comparisons:
 
 ## Dashboard
 
-<img width="1380" height="914" alt="image" src="https://github.com/user-attachments/assets/269cbf0e-cde8-4f66-95ca-f9a4abcfca48" />
+<img width="1380" height="914" alt="image" src="https://github.com/user-attachments/assets/5d2ce624-2031-442d-8f6f-5422bce9bab7" />
 
 ### Protocol Selection Guide
 

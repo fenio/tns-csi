@@ -42,6 +42,7 @@ type MockAPIClientForSnapshots struct {
 	QueryPoolFunc                  func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
 	FindDatasetByCSIVolumeNameFunc func(ctx context.Context, poolDatasetPrefix, volumeName string) (*tnsapi.DatasetWithProperties, error)
 	FindDatasetsByPropertyFunc     func(ctx context.Context, poolDatasetPrefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error)
+	GetDatasetWithPropertiesFunc   func(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -290,6 +291,13 @@ func (m *MockAPIClientForSnapshots) WaitForJob(ctx context.Context, jobID int, p
 func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
 	// Mock implementation - always succeed
 	return nil
+}
+
+func (m *MockAPIClientForSnapshots) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {
+	if m.GetDatasetWithPropertiesFunc != nil {
+		return m.GetDatasetWithPropertiesFunc(ctx, datasetID)
+	}
+	return nil, nil //nolint:nilnil // Default: not found
 }
 
 func (m *MockAPIClientForSnapshots) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {

@@ -30,6 +30,7 @@ type ClientInterface interface {
 	ClearDatasetProperties(ctx context.Context, datasetID string, propertyNames []string) error
 
 	// Dataset lookup by ZFS user properties (for volume recovery and orphan detection)
+	GetDatasetWithProperties(ctx context.Context, datasetID string) (*DatasetWithProperties, error)
 	FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error)
 	FindManagedDatasets(ctx context.Context, prefix string) ([]DatasetWithProperties, error)
 	FindDatasetByCSIVolumeName(ctx context.Context, prefix, csiVolumeName string) (*DatasetWithProperties, error)

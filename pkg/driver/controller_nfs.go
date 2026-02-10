@@ -281,8 +281,8 @@ func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 		NFSShareID:  nfsShare.ID,
 	}
 
-	// Volume ID is now just the volume name (CSI spec compliant, max 128 bytes)
-	volumeID := volumeName
+	// Volume ID is the full dataset path for O(1) lookups (e.g., "pool/parent/pvc-xxx")
+	volumeID := dataset.ID
 
 	// Build volume context with all necessary metadata
 	volumeContext := buildVolumeContext(meta)
@@ -560,11 +560,15 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 			}
 
 			// Verify volume name matches
-			if volumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok && volumeName != meta.Name {
-				klog.Errorf("Dataset %s volume name mismatch: property=%s, requested=%s", meta.DatasetID, volumeName, meta.Name)
-				timer.ObserveError()
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"Dataset %s volume name mismatch (stored=%s, requested=%s)", meta.DatasetID, volumeName, meta.Name)
+			// For dataset-path volume IDs (e.g., "tank/pvc-xxx"), the stored property is just the PVC name ("pvc-xxx")
+			if volumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
+				nameMatches := volumeName == meta.Name || (isDatasetPathVolumeID(meta.Name) && strings.HasSuffix(meta.Name, "/"+volumeName))
+				if !nameMatches {
+					klog.Errorf("Dataset %s volume name mismatch: property=%s, requested=%s", meta.DatasetID, volumeName, meta.Name)
+					timer.ObserveError()
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"Dataset %s volume name mismatch (stored=%s, requested=%s)", meta.DatasetID, volumeName, meta.Name)
+				}
 			}
 
 			// Verify share ID matches (if stored)
@@ -731,8 +735,8 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		NFSShareID:  nfsShare.ID,
 	}
 
-	// Volume ID is just the volume name (CSI spec compliant)
-	volumeID := volumeName
+	// Volume ID is the full dataset path for O(1) lookups
+	volumeID := dataset.ID
 
 	// Construct volume context with metadata for node plugin
 	// CRITICAL: Add clonedFromSnapshot flag to prevent reformatting of cloned volumes
@@ -861,7 +865,7 @@ func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateV
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      volumeName,
+			VolumeId:      dataset.ID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: volumeContext,
 		},

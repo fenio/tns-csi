@@ -160,8 +160,8 @@ func buildISCSIVolumeResponse(volumeName, server, targetIQN string, zvol *tnsapi
 		ISCSIIQN:      targetIQN,
 	}
 
-	// Volume ID is just the volume name (CSI spec compliant, max 128 bytes)
-	volumeID := volumeName
+	// Volume ID is the full dataset path for O(1) lookups (e.g., "pool/parent/pvc-xxx")
+	volumeID := zvol.ID
 
 	// Build volume context with all necessary metadata
 	volumeContext := buildVolumeContext(meta)
@@ -849,7 +849,7 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      volumeName,
+			VolumeId:      zvol.ID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: buildVolumeContext(meta),
 			ContentSource: &csi.VolumeContentSource{
@@ -1049,7 +1049,7 @@ func (s *ControllerService) adoptISCSIVolume(ctx context.Context, req *csi.Creat
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      volumeName,
+			VolumeId:      dataset.ID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: volumeContext,
 		},

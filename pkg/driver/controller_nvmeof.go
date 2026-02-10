@@ -262,8 +262,8 @@ func buildNVMeOFVolumeResponse(volumeName, server, nqn string, zvol *tnsapi.Data
 		NVMeOFNQN:         nqn, // Use the NQN from TrueNAS (subsystem.NQN), not what we requested
 	}
 
-	// Volume ID is just the volume name (CSI spec compliant, max 128 bytes)
-	volumeID := volumeName
+	// Volume ID is the full dataset path for O(1) lookups (e.g., "pool/parent/pvc-xxx")
+	volumeID := zvol.ID
 
 	// Build volume context with all necessary metadata
 	volumeContext := buildVolumeContext(meta)
@@ -656,10 +656,14 @@ func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *Vol
 	}
 
 	// Verify volume name matches
-	if storedVolumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok && storedVolumeName != meta.Name {
-		return "", status.Errorf(codes.FailedPrecondition,
-			"Volume name mismatch: ZVOL %s belongs to volume '%s', not '%s' (possible ID reuse)",
-			meta.DatasetID, storedVolumeName, meta.Name)
+	// For dataset-path volume IDs (e.g., "tank/pvc-xxx"), the stored property is just the PVC name ("pvc-xxx")
+	if storedVolumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
+		nameMatches := storedVolumeName == meta.Name || (isDatasetPathVolumeID(meta.Name) && strings.HasSuffix(meta.Name, "/"+storedVolumeName))
+		if !nameMatches {
+			return "", status.Errorf(codes.FailedPrecondition,
+				"Volume name mismatch: ZVOL %s belongs to volume '%s', not '%s' (possible ID reuse)",
+				meta.DatasetID, storedVolumeName, meta.Name)
+		}
 	}
 
 	// Use stored IDs if available (more reliable than metadata after TrueNAS restart)
@@ -1112,8 +1116,8 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		NVMeOFNQN:         subsystem.NQN, // Use full NQN from TrueNAS (subnqn), not short name
 	}
 
-	// Volume ID is just the volume name (CSI spec compliant)
-	volumeID := volumeName
+	// Volume ID is the full dataset path for O(1) lookups
+	volumeID := zvol.ID
 
 	// Construct volume context with metadata for node plugin
 	volumeContext := buildVolumeContext(meta)
@@ -1289,7 +1293,7 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
-			VolumeId:      volumeName,
+			VolumeId:      dataset.ID,
 			CapacityBytes: requestedCapacity,
 			VolumeContext: volumeContext,
 		},

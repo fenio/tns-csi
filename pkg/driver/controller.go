@@ -174,11 +174,49 @@ func NewControllerService(apiClient tnsapi.ClientInterface, nodeRegistry *NodeRe
 	}
 }
 
+// isDatasetPathVolumeID returns true if the volume ID is a full dataset path (new format).
+// New-format IDs contain "/" (e.g., "pool/parent/pvc-xxx"), while legacy IDs are plain names ("pvc-xxx").
+func isDatasetPathVolumeID(volumeID string) bool {
+	return strings.Contains(volumeID, "/")
+}
+
 // lookupVolumeByCSIName finds a volume by its CSI volume name using ZFS properties.
 // This is the preferred method for volume discovery as it uses the source of truth (ZFS properties).
+// For new-format volume IDs (containing "/"), uses O(1) direct dataset lookup.
+// For legacy volume IDs (plain names), falls back to O(n) property scan.
 // Returns nil, nil if volume not found; returns error only on API failures.
 func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatasetPrefix, volumeName string) (*VolumeMetadata, error) {
 	klog.V(4).Infof("Looking up volume by CSI name: %s (prefix: %s)", volumeName, poolDatasetPrefix)
+
+	// New-format volume IDs are the full dataset path — use O(1) direct lookup
+	if isDatasetPathVolumeID(volumeName) {
+		return s.lookupVolumeByDatasetPath(ctx, volumeName)
+	}
+
+	// Legacy volume IDs are plain names — use O(n) property scan
+	return s.lookupVolumeByPropertyScan(ctx, poolDatasetPrefix, volumeName)
+}
+
+// lookupVolumeByDatasetPath looks up a volume by its full dataset path (O(1) lookup).
+// This is used for new-format volume IDs where the volume ID IS the dataset path.
+func (s *ControllerService) lookupVolumeByDatasetPath(ctx context.Context, datasetPath string) (*VolumeMetadata, error) {
+	klog.V(4).Infof("Looking up volume by dataset path (O(1)): %s", datasetPath)
+
+	dataset, err := s.apiClient.GetDatasetWithProperties(ctx, datasetPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dataset %s: %w", datasetPath, err)
+	}
+	if dataset == nil {
+		klog.V(4).Infof("Dataset not found: %s", datasetPath)
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
+	}
+
+	return extractVolumeMetadata(datasetPath, dataset)
+}
+
+// lookupVolumeByPropertyScan finds a volume by scanning datasets for matching CSI volume name property (O(n) legacy).
+func (s *ControllerService) lookupVolumeByPropertyScan(ctx context.Context, poolDatasetPrefix, volumeName string) (*VolumeMetadata, error) {
+	klog.V(4).Infof("Looking up volume by property scan (O(n) legacy): %s (prefix: %s)", volumeName, poolDatasetPrefix)
 
 	dataset, err := s.apiClient.FindDatasetByCSIVolumeName(ctx, poolDatasetPrefix, volumeName)
 	if err != nil {
@@ -189,7 +227,13 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
 	}
 
-	// Extract metadata from ZFS properties
+	return extractVolumeMetadata(volumeName, dataset)
+}
+
+// extractVolumeMetadata builds VolumeMetadata from a DatasetWithProperties.
+// Verifies ownership and extracts all protocol-specific metadata from ZFS properties.
+// Returns nil, nil if the dataset is not managed by tns-csi.
+func extractVolumeMetadata(volumeID string, dataset *tnsapi.DatasetWithProperties) (*VolumeMetadata, error) {
 	props := dataset.UserProperties
 	if props == nil {
 		klog.Warningf("Dataset %s has no user properties, may not be managed by tns-csi", dataset.ID)
@@ -204,7 +248,7 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 
 	// Build VolumeMetadata from properties
 	meta := &VolumeMetadata{
-		Name:        volumeName,
+		Name:        volumeID,
 		DatasetID:   dataset.ID,
 		DatasetName: dataset.Name,
 	}
@@ -237,7 +281,7 @@ func (s *ControllerService) lookupVolumeByCSIName(ctx context.Context, poolDatas
 		meta.ISCSIIQN = iscsiIQN.Value
 	}
 
-	klog.V(4).Infof("Found volume: %s (dataset=%s, protocol=%s)", volumeName, dataset.ID, meta.Protocol)
+	klog.V(4).Infof("Found volume: %s (dataset=%s, protocol=%s)", volumeID, dataset.ID, meta.Protocol)
 	return meta, nil
 }
 
@@ -565,8 +609,8 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		return nil, ErrVolumeNotFound
 	}
 
-	// Volume ID is now just the volume name (CSI spec compliant)
-	volumeID := req.GetName()
+	// Volume ID is the full dataset path for O(1) lookups
+	volumeID := expectedDatasetName
 
 	// Return capacity from request if specified, otherwise use a default
 	capacity := reqCapacity
@@ -719,7 +763,12 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	}
 
 	// Build expected dataset name for source volume
-	sourceDatasetName := fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+	var sourceDatasetName string
+	if isDatasetPathVolumeID(sourceVolumeID) {
+		sourceDatasetName = sourceVolumeID
+	} else {
+		sourceDatasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+	}
 
 	// Verify source volume exists
 	sourceDataset, err := s.apiClient.Dataset(ctx, sourceDatasetName)
@@ -932,28 +981,35 @@ func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 	volumeID := req.GetVolumeId()
 	klog.V(4).Infof("ValidateVolumeCapabilities: validating volume %s", volumeID)
 
-	// Check if volume exists by searching for it in TrueNAS
+	// Check if volume exists by querying TrueNAS
 	volumeExists := false
 
-	// Check NFS volumes
-	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
-	if err == nil {
-		for _, share := range shares {
-			if strings.HasSuffix(share.Path, "/"+volumeID) {
-				volumeExists = true
-				break
-			}
+	if isDatasetPathVolumeID(volumeID) {
+		// New format: volume ID is the dataset path, query directly (O(1))
+		dataset, err := s.apiClient.GetDatasetWithProperties(ctx, volumeID)
+		if err == nil && dataset != nil {
+			volumeExists = true
 		}
-	}
-
-	// Check NVMe-oF volumes if not found as NFS
-	if !volumeExists {
-		namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+	} else {
+		// Legacy format: plain volume name, search by shares/namespaces
+		shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
 		if err == nil {
-			for _, ns := range namespaces {
-				if strings.Contains(ns.GetDevice(), volumeID) {
+			for _, share := range shares {
+				if strings.HasSuffix(share.Path, "/"+volumeID) {
 					volumeExists = true
 					break
+				}
+			}
+		}
+
+		if !volumeExists {
+			namespaces, err := s.apiClient.QueryAllNVMeOFNamespaces(ctx)
+			if err == nil {
+				for _, ns := range namespaces {
+					if strings.Contains(ns.GetDevice(), volumeID) {
+						volumeExists = true
+						break
+					}
 				}
 			}
 		}
@@ -1134,10 +1190,8 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 
 // buildVolumeEntry constructs a ListVolumesResponse_Entry from dataset and metadata.
 func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta VolumeMetadata) *csi.ListVolumesResponse_Entry {
-	// Volume ID is just the volume name (CSI spec compliant)
-	// Extract volume name from dataset name (last path component)
-	parts := strings.Split(dataset.Name, "/")
-	volumeID := parts[len(parts)-1]
+	// Volume ID is the full dataset path for O(1) lookups
+	volumeID := dataset.ID
 
 	// Determine capacity from dataset
 	var capacityBytes int64

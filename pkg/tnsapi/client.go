@@ -1924,6 +1924,39 @@ type UserProperty struct {
 	Source string `json:"source,omitempty"`
 }
 
+// GetDatasetWithProperties queries a single dataset by exact ID and returns it with all user properties.
+// This is the O(1) lookup primitive for volumes whose ID is the full dataset path (e.g., "pool/parent/pvc-xxx").
+// Returns nil, nil if the dataset is not found.
+func (c *Client) GetDatasetWithProperties(ctx context.Context, datasetID string) (*DatasetWithProperties, error) {
+	klog.V(4).Infof("GetDatasetWithProperties: querying dataset %s", datasetID)
+
+	var result []DatasetWithProperties
+	queryOpts := map[string]interface{}{
+		"extra": map[string]interface{}{
+			"flat":              true,
+			"retrieve_children": false,
+			"user_properties":   true,
+		},
+	}
+	err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", datasetID},
+		},
+		queryOpts,
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query dataset %s with properties: %w", datasetID, err)
+	}
+
+	if len(result) == 0 {
+		klog.V(4).Infof("GetDatasetWithProperties: dataset %s not found", datasetID)
+		return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil result
+	}
+
+	klog.V(4).Infof("GetDatasetWithProperties: found dataset %s", datasetID)
+	return &result[0], nil
+}
+
 // GetDatasetProperties retrieves ZFS user properties from a dataset.
 // Returns a map of property name to value for the requested properties.
 // Properties that don't exist will not be included in the returned map.
@@ -2258,7 +2291,9 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
 		"extra": map[string]interface{}{
-			"user_properties": true,
+			"flat":              true,
+			"retrieve_children": false,
+			"user_properties":   true,
 		},
 	}
 

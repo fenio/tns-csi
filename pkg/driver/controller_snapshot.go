@@ -284,9 +284,12 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 		}
 
 		// Fallback to name-based lookup if property lookup didn't find the volume
-		// (backward compatibility with volumes created before properties were set)
 		if datasetName == "" {
-			datasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+			if isDatasetPathVolumeID(sourceVolumeID) {
+				datasetName = sourceVolumeID
+			} else {
+				datasetName = fmt.Sprintf("%s/%s", parentDataset, sourceVolumeID)
+			}
 			klog.V(4).Infof("Using name-based dataset path for volume %s: %s", sourceVolumeID, datasetName)
 		}
 	} else {
@@ -1012,21 +1015,35 @@ func (s *ControllerService) listDetachedSnapshotByID(ctx context.Context, req *c
 func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	sourceVolumeID := req.GetSourceVolumeId()
 
-	// With plain volume IDs, we need to look up the volume in TrueNAS
-	// Try to find the dataset name by searching shares/namespaces/extents
-	result := s.discoverVolumeBySearching(ctx, sourceVolumeID)
-
-	if result == nil {
-		// If we can't find the volume, return empty list
-		klog.V(4).Infof("Source volume %q not found in TrueNAS - returning empty list", sourceVolumeID)
-		return &csi.ListSnapshotsResponse{
-			Entries: []*csi.ListSnapshotsResponse_Entry{},
-		}, nil
+	// Determine dataset name and protocol for the source volume
+	var datasetName string
+	var protocol string
+	if isDatasetPathVolumeID(sourceVolumeID) {
+		// New format: volume ID is the dataset path, use directly (O(1))
+		datasetName = sourceVolumeID
+		// Look up protocol from dataset properties
+		dataset, err := s.apiClient.GetDatasetWithProperties(ctx, sourceVolumeID)
+		if err == nil && dataset != nil {
+			if prop, ok := dataset.UserProperties[tnsapi.PropertyProtocol]; ok {
+				protocol = prop.Value
+			}
+		}
+	} else {
+		// Legacy format: plain volume name, search by shares/namespaces/extents
+		result := s.discoverVolumeBySearching(ctx, sourceVolumeID)
+		if result == nil {
+			klog.V(4).Infof("Source volume %q not found in TrueNAS - returning empty list", sourceVolumeID)
+			return &csi.ListSnapshotsResponse{
+				Entries: []*csi.ListSnapshotsResponse_Entry{},
+			}, nil
+		}
+		datasetName = result.datasetName
+		protocol = result.protocol
 	}
 
 	// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", result.datasetName},
+		[]interface{}{"dataset", "=", datasetName},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
@@ -1070,7 +1087,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 			SnapshotName: snapshot.ID,
 			SourceVolume: req.GetSourceVolumeId(),
 			DatasetName:  snapshot.Dataset,
-			Protocol:     result.protocol,
+			Protocol:     protocol,
 			CreatedAt:    time.Now().Unix(),
 		}
 

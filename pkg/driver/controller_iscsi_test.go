@@ -312,8 +312,8 @@ func TestCreateISCSIVolume(t *testing.T) {
 					t.Error("Expected volume to be non-nil")
 					return
 				}
-				if resp.Volume.VolumeId != "existing-volume" {
-					t.Errorf("Expected volume ID 'existing-volume', got %s", resp.Volume.VolumeId)
+				if resp.Volume.VolumeId != "tank/csi/existing-volume" {
+					t.Errorf("Expected volume ID 'tank/csi/existing-volume', got %s", resp.Volume.VolumeId)
 				}
 			},
 		},
@@ -789,9 +789,9 @@ func TestBuildISCSIVolumeResponse(t *testing.T) {
 		t.Fatal("Expected response and volume to be non-nil")
 	}
 
-	// Check volume ID
-	if resp.Volume.VolumeId != volumeName {
-		t.Errorf("Expected volume ID %q, got %q", volumeName, resp.Volume.VolumeId)
+	// Check volume ID - should be the full dataset path (zvol.ID)
+	if resp.Volume.VolumeId != zvol.ID {
+		t.Errorf("Expected volume ID %q, got %q", zvol.ID, resp.Volume.VolumeId)
 	}
 
 	// Check capacity

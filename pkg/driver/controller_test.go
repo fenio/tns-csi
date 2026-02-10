@@ -238,6 +238,10 @@ func (m *mockAPIClient) RunOnetimeReplicationAndWait(ctx context.Context, params
 	return nil // Stub implementation
 }
 
+func (m *mockAPIClient) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {
+	return nil, nil //nolint:nilnil // Stub implementation - returns "not found"
+}
+
 func (m *mockAPIClient) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {
 	return nil, nil // Stub implementation - returns empty result
 }
@@ -2508,8 +2512,8 @@ func TestCheckAndAdoptVolume_AdoptableVolumeFound(t *testing.T) {
 		t.Fatal("checkAndAdoptVolume() expected non-nil response")
 		return // Unreachable, but makes control flow explicit for staticcheck
 	}
-	if resp.Volume.VolumeId != "pvc-adoptable" {
-		t.Errorf("Expected volume ID 'pvc-adoptable', got '%s'", resp.Volume.VolumeId)
+	if resp.Volume.VolumeId != "tank/csi/pvc-adoptable" {
+		t.Errorf("Expected volume ID 'tank/csi/pvc-adoptable', got '%s'", resp.Volume.VolumeId)
 	}
 }
 

@@ -213,11 +213,12 @@ func (m *MockClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCre
 		return nil, fmt.Errorf("dataset %s: %w", params.Name, ErrDatasetExists)
 	}
 
-	datasetID := fmt.Sprintf("dataset-%d", m.nextDatasetID)
+	// Use the dataset name as the ID, matching real TrueNAS API behavior
+	// where Dataset.ID is the full ZFS path (e.g., "tank/parent/pvc-xxx")
 	m.nextDatasetID++
 
 	m.datasets[params.Name] = mockDataset{
-		ID:         datasetID,
+		ID:         params.Name,
 		Name:       params.Name,
 		Type:       params.Type,
 		Used:       map[string]any{"parsed": float64(0)},
@@ -226,7 +227,7 @@ func (m *MockClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCre
 	}
 
 	return &tnsapi.Dataset{
-		ID:         datasetID,
+		ID:         params.Name,
 		Name:       params.Name,
 		Type:       params.Type,
 		Used:       map[string]any{"parsed": float64(0)},
@@ -423,6 +424,38 @@ func (m *MockClient) GetDatasetProperties(ctx context.Context, datasetID string,
 	return nil, fmt.Errorf("dataset %s: %w", datasetID, ErrDatasetNotFound)
 }
 
+// GetDatasetWithProperties queries a single dataset by exact ID with all user properties.
+func (m *MockClient) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {
+	m.logCall("GetDatasetWithProperties", datasetID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, ds := range m.datasets {
+		if ds.ID == datasetID || ds.Name == datasetID {
+			userProps := make(map[string]tnsapi.UserProperty)
+			for k, v := range ds.UserProperties {
+				userProps[k] = tnsapi.UserProperty{Value: v}
+			}
+			result := &tnsapi.DatasetWithProperties{
+				Dataset: tnsapi.Dataset{
+					ID:         ds.ID,
+					Name:       ds.Name,
+					Type:       ds.Type,
+					Used:       ds.Used,
+					Available:  ds.Available,
+					Mountpoint: ds.Mountpoint,
+					Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+				},
+				UserProperties: userProps,
+			}
+			return result, nil
+		}
+	}
+
+	return nil, nil //nolint:nilnil // Not found
+}
+
 // GetAllDatasetProperties mocks pool.dataset.query to get all user properties.
 func (m *MockClient) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
 	m.logCall("GetAllDatasetProperties", datasetID)
@@ -593,18 +626,19 @@ func (m *MockClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreatePar
 		return nil, fmt.Errorf("ZVOL %s: %w", params.Name, ErrDatasetExists)
 	}
 
-	datasetID := fmt.Sprintf("zvol-%d", m.nextDatasetID)
+	// Use the ZVOL name as the ID, matching real TrueNAS API behavior
+	// where Dataset.ID is the full ZFS path (e.g., "tank/parent/pvc-xxx")
 	m.nextDatasetID++
 
 	m.datasets[params.Name] = mockDataset{
-		ID:      datasetID,
+		ID:      params.Name,
 		Name:    params.Name,
 		Type:    "VOLUME",
 		Volsize: params.Volsize,
 	}
 
 	return &tnsapi.Dataset{
-		ID:      datasetID,
+		ID:      params.Name,
 		Name:    params.Name,
 		Type:    "VOLUME",
 		Volsize: map[string]interface{}{"parsed": float64(params.Volsize)},
@@ -930,12 +964,11 @@ func (m *MockClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnaps
 		return nil, fmt.Errorf("snapshot %s: %w", params.Snapshot, ErrSnapshotNotFound)
 	}
 
-	// Create cloned dataset
-	datasetID := fmt.Sprintf("dataset-%d", m.nextDatasetID)
+	// Create cloned dataset - use name as ID, matching real TrueNAS API behavior
 	m.nextDatasetID++
 
 	m.datasets[params.Dataset] = mockDataset{
-		ID:         datasetID,
+		ID:         params.Dataset,
 		Name:       params.Dataset,
 		Type:       "FILESYSTEM",
 		Used:       map[string]any{"parsed": float64(0)},
@@ -944,7 +977,7 @@ func (m *MockClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnaps
 	}
 
 	return &tnsapi.Dataset{
-		ID:         datasetID,
+		ID:         params.Dataset,
 		Name:       params.Dataset,
 		Type:       "FILESYSTEM",
 		Used:       map[string]any{"parsed": float64(0)},

@@ -106,6 +106,24 @@ jobs:
         run: |
           helm package charts/tns-csi-driver -d .helm-releases
 
+      - name: Render plain manifest for Kustomize users
+        run: |
+          helm template tns-csi charts/tns-csi-driver \
+            --namespace kube-system \
+            --set truenas.url="wss://TRUENAS_IP/api/current" \
+            --set truenas.apiKey="REPLACE_WITH_API_KEY" \
+            --set storageClasses.nfs.enabled=true \
+            --set storageClasses.nfs.server="TRUENAS_IP" \
+            --set storageClasses.nfs.pool="tank" \
+            --set storageClasses.nvmeof.enabled=true \
+            --set storageClasses.nvmeof.server="TRUENAS_IP" \
+            --set storageClasses.nvmeof.pool="tank" \
+            --set storageClasses.iscsi.enabled=true \
+            --set storageClasses.iscsi.server="TRUENAS_IP" \
+            --set storageClasses.iscsi.pool="tank" \
+            --set snapshots.enabled=true \
+            > .helm-releases/tns-csi-driver-${{ steps.version.outputs.version }}.yaml
+
       - name: Push Helm chart to Docker Hub (OCI)
         run: |
           VERSION=${{ steps.version.outputs.version }}
@@ -152,6 +170,9 @@ jobs:
           helm install tns-csi oci://ghcr.io/${{ github.repository_owner }}/charts/tns-csi-driver --version ${VERSION#v}
           \`\`\`
 
+          ### Using Kustomize
+          Download the plain manifest from this release (\`tns-csi-driver-${VERSION}.yaml\`) and use it as a Kustomize base. Replace \`TRUENAS_IP\` and \`REPLACE_WITH_API_KEY\` placeholders with your values, and remove any storage classes you don't need.
+
           For detailed installation instructions, see the [README](https://github.com/${{ github.repository }}/blob/${VERSION}/README.md).
           EOF
 
@@ -163,6 +184,7 @@ jobs:
           prerelease: false
           files: |
             .helm-releases/*.tgz
+            .helm-releases/*.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

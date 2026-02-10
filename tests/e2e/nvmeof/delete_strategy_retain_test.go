@@ -3,6 +3,7 @@ package nvmeof_test
 import (
 	"context"
 	"fmt"
+	"path"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -82,8 +83,8 @@ var _ = Describe("NVMe-oF Delete Strategy Retain", func() {
 
 		// Volume handle is the full dataset path (e.g., pool/parent/pvc-xxx)
 		zvolPath := volumeHandle
-		// NVMe-oF subsystem NQN format: nqn.2137.csi.tns:<volume-name>
-		subsystemNQN := "nqn.2137.csi.tns:" + volumeHandle
+		// NVMe-oF subsystem NQN uses the plain volume name (last path component), not the full dataset path
+		subsystemNQN := "nqn.2137.csi.tns:" + path.Base(volumeHandle)
 		GinkgoWriter.Printf("Volume handle: %s\n", volumeHandle)
 		GinkgoWriter.Printf("Expected ZVOL path on TrueNAS: %s\n", zvolPath)
 		GinkgoWriter.Printf("Expected NVMe-oF subsystem NQN: %s\n", subsystemNQN)

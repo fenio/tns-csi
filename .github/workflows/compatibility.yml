@@ -1,0 +1,108 @@
+name: Upgrade Compatibility
+
+on:
+  # Run after integration tests pass
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types:
+      - completed
+  # Manual trigger
+  workflow_dispatch:
+
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
+# Share concurrency group with integration tests to avoid TrueNAS conflicts
+concurrency:
+  group: integration-tests
+  cancel-in-progress: false
+
+jobs:
+  upgrade-compat:
+    name: Upgrade Compatibility
+    runs-on: new
+    timeout-minutes: 30
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+
+      - uses: ./.github/actions/setup-snapshots
+
+      - name: Determine previous release
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREV_VERSION=$(gh release list --exclude-drafts --exclude-pre-releases --json tagName --jq '.[].tagName' | grep '^v' | head -1)
+          if [[ -z "$PREV_VERSION" ]]; then
+            echo "No previous release found, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          PREV_CHART_VERSION=${PREV_VERSION#v}
+          echo "version=$PREV_VERSION" >> $GITHUB_OUTPUT
+          echo "chart_version=$PREV_CHART_VERSION" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+          echo "Previous release: $PREV_VERSION (chart: $PREV_CHART_VERSION)"
+
+      - name: Compute image tag
+        id: tag
+        if: steps.prev.outputs.skip != 'true'
+        env:
+          WORKFLOW_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            REF_NAME="$WORKFLOW_HEAD_BRANCH"
+            if [ "$WORKFLOW_EVENT" = "push" ] && [[ "$WORKFLOW_HEAD_BRANCH" == v* ]]; then
+              REF_TYPE="tag"
+            else
+              REF_TYPE="branch"
+            fi
+          else
+            REF_NAME="${{ github.ref_name }}"
+            REF_TYPE="${{ github.ref_type }}"
+          fi
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            TAG="${REF_NAME#v}"
+          elif [ "$REF_NAME" = "main" ]; then
+            TAG="latest"
+          else
+            TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $TAG"
+
+      - name: Run upgrade compatibility test
+        if: steps.prev.outputs.skip != 'true'
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          PREV_CHART_VERSION: ${{ steps.prev.outputs.chart_version }}
+          PREV_VERSION: ${{ steps.prev.outputs.version }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: ./tests/integration/test-upgrade-compat.sh
+
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: upgrade-compat-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7

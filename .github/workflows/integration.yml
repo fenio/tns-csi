@@ -1,4 +1,4 @@
-name: Integration Tests 
+name: Integration Tests
 
 on:
   # Run after CI or Release workflow completes
@@ -49,6 +49,11 @@ on:
           - volume-stress
           - error-handling
           - encryption
+      pr:
+        description: 'PR number to test (builds image from PR code, leave empty for normal run)'
+        required: false
+        default: ''
+        type: string
 
 # Restrict permissions to minimum required
 permissions:
@@ -110,6 +115,40 @@ jobs:
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
+      # PR mode: checkout PR code and build image locally
+      - name: Checkout PR code
+        if: inputs.pr != ''
+        uses: actions/checkout@v6
+        with:
+          ref: refs/pull/${{ inputs.pr }}/merge
+
+      - name: Set up Docker Buildx
+        if: inputs.pr != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build PR image
+        if: inputs.pr != ''
+        run: |
+          PR_TAG="pr-${{ inputs.pr }}"
+          IMAGE="ghcr.io/fenio/tns-csi:${PR_TAG}"
+          echo "=== Building image from PR #${{ inputs.pr }} ==="
+          docker buildx build \
+            --load \
+            --build-arg VERSION="0.0.0-${PR_TAG}" \
+            --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "${IMAGE}" .
+          docker save "${IMAGE}" -o /tmp/tns-csi-pr-image.tar
+          echo "Image saved to /tmp/tns-csi-pr-image.tar"
+
+      - name: Upload PR image artifact
+        if: inputs.pr != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp/tns-csi-pr-image.tar
+          retention-days: 1
+
       - name: Compute image tag from ref
         id: tag
         env:
@@ -119,6 +158,14 @@ jobs:
           WORKFLOW_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
         run: |
+          # PR mode: use the PR-specific tag
+          if [[ -n "${{ inputs.pr }}" ]]; then
+            TAG="pr-${{ inputs.pr }}"
+            echo "Using PR image tag: $TAG"
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           # For workflow_run events, get ref from the triggering workflow
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             REF_NAME="$WORKFLOW_HEAD_BRANCH"
@@ -134,9 +181,9 @@ jobs:
             REF_NAME="${{ github.ref_name }}"
             REF_TYPE="${{ github.ref_type }}"
           fi
-          
+
           echo "REF_NAME: $REF_NAME, REF_TYPE: $REF_TYPE"
-          
+
           if [ "$REF_TYPE" = "tag" ]; then
             # For tags like v0.5.0, strip the 'v' prefix to match Docker image tags
             # Release workflow uses semver pattern which produces tags like 0.5.0 (without v)
@@ -164,6 +211,8 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -171,6 +220,18 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run NFS E2E Tests
@@ -202,6 +263,8 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -209,6 +272,18 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run NVMe-oF E2E Tests
@@ -240,6 +315,8 @@ jobs:
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -247,6 +324,18 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run iSCSI E2E Tests
@@ -277,6 +366,8 @@ jobs:
       !cancelled() && needs.compute-tag.result == 'success'
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -284,6 +375,18 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run Shared E2E Tests
@@ -330,7 +433,7 @@ jobs:
               'iSCSI E2E': '${{ needs.ginkgo-e2e-iscsi.result }}',
               'Shared E2E': '${{ needs.ginkgo-e2e-shared.result }}',
             };
-            
+
             const getIcon = (result) => {
               switch(result) {
                 case 'success': return '✅';
@@ -340,7 +443,7 @@ jobs:
                 default: return '⚪';
               }
             };
-            
+
             let passed = 0, failed = 0, skipped = 0;
             for (const result of Object.values(e2eResults)) {
               if (result === 'success') passed++;
@@ -348,9 +451,9 @@ jobs:
               else if (result === 'skipped') skipped++;
             }
             const total = Object.keys(e2eResults).length;
-            
+
             let summary = `# Integration Test Results\n\n`;
-            
+
             // Overall status banner
             if (failed > 0) {
               summary += `> ### ${failed} test(s) failed\n\n`;
@@ -359,12 +462,12 @@ jobs:
             } else {
               summary += `> ### ${passed}/${passed + failed} tests passed (${skipped} skipped)\n\n`;
             }
-            
+
             // Quick stats
             summary += `| Passed | Failed | Skipped | Total |\n`;
             summary += `|:------:|:------:|:-------:|:-----:|\n`;
             summary += `| ${passed} | ${failed} | ${skipped} | ${total} |\n\n`;
-            
+
             // E2E Tests
             summary += `## E2E Tests\n\n`;
             summary += `| Test Suite | Status |\n`;
@@ -373,10 +476,10 @@ jobs:
               summary += `| ${test} | ${getIcon(result)} |\n`;
             }
             summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for NFS, NVMe-oF, and iSCSI._\n`;
-            
+
             // Write to job summary
             await core.summary.addRaw(summary).write();
-            
+
             // Fail if any test failed
             if (failed > 0) {
               core.setFailed(`${failed} test(s) failed`);

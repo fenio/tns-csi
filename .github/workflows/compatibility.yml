@@ -1,0 +1,93 @@
+name: Upgrade Compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: 'Version to upgrade FROM (e.g., "v0.9.3" or "latest" for most recent release)'
+        required: false
+        default: 'latest'
+        type: string
+      to_version:
+        description: 'Image tag to upgrade TO (e.g., "latest", "v0.9.4", "0.9.4")'
+        required: false
+        default: 'latest'
+        type: string
+
+# Restrict permissions to minimum required
+permissions:
+  contents: read
+
+# Share concurrency group with integration tests to avoid TrueNAS conflicts
+concurrency:
+  group: integration-tests
+  cancel-in-progress: false
+
+jobs:
+  upgrade-compat:
+    name: "Upgrade: ${{ inputs.from_version }} → ${{ inputs.to_version }}"
+    runs-on: new
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+
+      - uses: ./.github/actions/setup-snapshots
+
+      - name: Resolve versions
+        id: versions
+        run: |
+          FROM_INPUT="${{ inputs.from_version }}"
+
+          if [[ "$FROM_INPUT" == "latest" || -z "$FROM_INPUT" ]]; then
+            FROM_TAG=$(curl -sf \
+              -H "Authorization: token ${{ github.token }}" \
+              "https://api.github.com/repos/${{ github.repository }}/releases?per_page=10" \
+              | jq -r '[.[] | select(.draft == false and .prerelease == false) | .tag_name] | map(select(startswith("v"))) | .[0] // empty')
+            if [[ -z "$FROM_TAG" ]]; then
+              echo "::error::No published release found"
+              exit 1
+            fi
+            echo "Resolved 'latest' → ${FROM_TAG}"
+          else
+            FROM_TAG="$FROM_INPUT"
+          fi
+
+          # Chart version is tag without 'v' prefix
+          FROM_CHART="${FROM_TAG#v}"
+          echo "from_tag=$FROM_TAG" >> $GITHUB_OUTPUT
+          echo "from_chart=$FROM_CHART" >> $GITHUB_OUTPUT
+
+          TO_TAG="${{ inputs.to_version }}"
+          if [[ -z "$TO_TAG" ]]; then
+            TO_TAG="latest"
+          fi
+          echo "to_tag=$TO_TAG" >> $GITHUB_OUTPUT
+
+          echo "Upgrade path: ${FROM_TAG} (chart ${FROM_CHART}) → image tag ${TO_TAG}"
+
+      - name: Run upgrade compatibility test
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ steps.versions.outputs.to_tag }}
+          PREV_CHART_VERSION: ${{ steps.versions.outputs.from_chart }}
+          PREV_VERSION: ${{ steps.versions.outputs.from_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        run: ./tests/integration/test-upgrade-compat.sh
+
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: upgrade-compat-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7

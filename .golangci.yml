@@ -132,6 +132,10 @@ linters:
         - name: var-naming
           severity: warning
           disabled: false
+          arguments:
+            - []
+            - []
+            - - skipPackageNameCollisionWithGoStd: true
         - name: package-comments
           severity: warning
           disabled: false

@@ -26,7 +26,7 @@ Each build includes:
 | Version | Semantic version from git tag | `v0.9.2` |
 | Git Commit | Short SHA of the commit | `abc1234` |
 | Build Date | UTC timestamp of build | `2025-12-21T10:30:00Z` |
-| Go Version | Go compiler version | `go1.25.7` |
+| Go Version | Go compiler version | `go1.26.0` |
 | Platform | OS and architecture | `linux/amd64` |
 
 ## Checking the Version
@@ -42,7 +42,7 @@ Output:
 tns.csi.io version: v0.9.2
   Git commit: abc1234
   Build date: 2025-12-21T10:30:00Z
-  Go version: go1.25.7
+  Go version: go1.26.0
   Platform:   linux/amd64
 ```
 
@@ -64,7 +64,7 @@ Response:
   "version": "v0.9.2",
   "gitCommit": "abc1234",
   "buildDate": "2025-12-21T10:30:00Z",
-  "goVersion": "go1.25.7",
+  "goVersion": "go1.26.0",
   "platform": "linux/amd64"
 }
 ```

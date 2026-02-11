@@ -124,12 +124,13 @@ jobs:
 
       - name: Build PR image
         if: inputs.pr != ''
+        env:
+          DOCKER_BUILDKIT: '1'
         run: |
           PR_TAG="pr-${{ inputs.pr }}"
           IMAGE="ghcr.io/fenio/tns-csi:${PR_TAG}"
           echo "=== Building image from PR #${{ inputs.pr }} ==="
-          docker buildx build \
-            --load \
+          docker build \
             --build-arg VERSION="0.0.0-${PR_TAG}" \
             --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
             --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

@@ -286,9 +286,9 @@ func (c *Client) connect() error {
 		return fmt.Errorf("failed to dial: %w", err)
 	}
 
-	// Set read limit to 1MB to handle large TrueNAS responses (e.g., dataset lists)
+	// Set read limit to 3MB to handle large TrueNAS responses (e.g., dataset lists with 50+ volumes)
 	// Default is 32KB which is too small for production workloads
-	conn.SetReadLimit(1024 * 1024)
+	conn.SetReadLimit(3 * 1024 * 1024)
 
 	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
 	// We still run our own ping loop for connection health monitoring and metrics.

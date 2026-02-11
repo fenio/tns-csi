@@ -40,6 +40,49 @@ phase() {
     echo ""
 }
 
+# Print driver version details from running pods
+print_driver_info() {
+    local label=$1
+    echo ""
+    echo -e "${CYAN}  ┌─ ${label} Driver Info ──────────────────${NC}"
+
+    # Image reference
+    local image
+    image=$(kubectl get pods -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -o jsonpath='{.items[0].spec.containers[?(@.name=="tns-csi-driver")].image}' 2>/dev/null || echo "unknown")
+    echo -e "${CYAN}  │${NC} Image:   ${image}"
+
+    # Image ID (includes digest after pull)
+    local image_id
+    image_id=$(kubectl get pods -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="tns-csi-driver")].imageID}' 2>/dev/null || echo "unknown")
+    echo -e "${CYAN}  │${NC} ImageID: ${image_id}"
+
+    # Version/commit/date from driver startup log
+    local version_line
+    version_line=$(kubectl logs -n kube-system \
+        -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
+        -c tns-csi-plugin --tail=50 2>/dev/null \
+        | grep -m1 "Starting TNS CSI Driver" || echo "")
+    if [[ -n "$version_line" ]]; then
+        # Extract just the version info: "v0.9.3 (commit: abc1234, built: 2026-01-15T...)"
+        local version_info
+        version_info="${version_line##*Starting TNS CSI Driver }"
+        echo -e "${CYAN}  │${NC} Driver:  ${version_info}"
+    fi
+
+    # Helm chart version
+    local chart_version
+    chart_version=$(helm list -n kube-system -f tns-csi -o json 2>/dev/null \
+        | jq -r '.[0] | "\(.chart) (app: \(.app_version))"' 2>/dev/null || echo "unknown")
+    echo -e "${CYAN}  │${NC} Chart:   ${chart_version}"
+
+    echo -e "${CYAN}  └────────────────────────────────────────${NC}"
+    echo ""
+}
+
 # ─────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────
@@ -191,9 +234,8 @@ kubectl wait --for=condition=Ready pod \
     -l app.kubernetes.io/name=tns-csi-driver \
     -n kube-system --timeout=120s
 
-OLD_IMAGE=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
-    -o jsonpath='{.items[0].spec.containers[?(@.name=="tns-csi-driver")].image}' 2>/dev/null || echo "unknown")
-pass "Previous release deployed (image: ${OLD_IMAGE})"
+pass "Previous release deployed"
+print_driver_info "Old"
 
 # --- NFS volume with old driver ---
 info "Creating NFS volume with old driver..."
@@ -324,9 +366,8 @@ kubectl rollout status deployment/tns-csi-controller -n kube-system --timeout=12
 info "Waiting for node daemonset rollout..."
 kubectl rollout status daemonset/tns-csi-node -n kube-system --timeout=120s
 
-NEW_IMAGE=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
-    -o jsonpath='{.items[0].spec.containers[?(@.name=="tns-csi-driver")].image}' 2>/dev/null || echo "unknown")
-pass "Driver upgraded (image: ${NEW_IMAGE})"
+pass "Driver upgraded"
+print_driver_info "New"
 
 record_phase "Upgrade driver" "PASS"
 

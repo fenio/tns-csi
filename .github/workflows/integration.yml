@@ -141,6 +141,14 @@ jobs:
           docker save "${IMAGE}" -o /tmp/tns-csi-pr-image.tar
           echo "Image saved to /tmp/tns-csi-pr-image.tar"
 
+      - name: Upload PR image artifact
+        if: inputs.pr != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp/tns-csi-pr-image.tar
+          retention-days: 1
+
       - name: Compute image tag from ref
         id: tag
         env:
@@ -212,6 +220,12 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp
       - name: Import PR image into k3s
         if: inputs.pr != ''
         run: |
@@ -258,6 +272,12 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp
       - name: Import PR image into k3s
         if: inputs.pr != ''
         run: |
@@ -304,6 +324,12 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp
       - name: Import PR image into k3s
         if: inputs.pr != ''
         run: |
@@ -349,6 +375,12 @@ jobs:
         with:
           k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
       - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp
       - name: Import PR image into k3s
         if: inputs.pr != ''
         run: |

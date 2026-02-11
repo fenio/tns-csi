@@ -222,7 +222,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
@@ -274,7 +274,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
@@ -326,7 +326,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
@@ -377,7 +377,7 @@ jobs:
       - uses: ./.github/actions/setup-snapshots
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp

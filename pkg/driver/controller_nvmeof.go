@@ -24,7 +24,7 @@ const (
 	// NQN prefix for CSI-managed subsystems.
 	// Format: nqn.2137.csi.tns:<volume-name>
 	// Each volume gets its own subsystem with NSID=1 (independent subsystem architecture).
-	nqnPrefix = "nqn.2137.csi.tns"
+	defaultNQNPrefix = "nqn.2137.csi.tns"
 )
 
 // Common deletion errors.
@@ -71,8 +71,9 @@ type zfsZvolProperties struct {
 }
 
 // generateNQN creates a unique NQN for a volume's dedicated subsystem.
+// UUID is important as pvc names are not guaranteed to be unique across clusters.
 // Format: nqn.2137.csi.tns:<volume-name>.
-func generateNQN(volumeName string) string {
+func generateNQN(nqnPrefix, volumeName string) string {
 	return fmt.Sprintf("%s:%s", nqnPrefix, volumeName)
 }
 
@@ -162,7 +163,11 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 	zvolName := fmt.Sprintf("%s/%s", parentDataset, volumeName)
 
 	// Generate unique NQN for this volume's dedicated subsystem
-	subsystemNQN := generateNQN(volumeName)
+	nqnPrefix := params["subsystemNQN"]
+	if nqnPrefix == "" {
+		nqnPrefix = defaultNQNPrefix
+	}
+	subsystemNQN := generateNQN(nqnPrefix, volumeName)
 
 	// Parse optional port ID from StorageClass parameters
 	var portID int
@@ -484,6 +489,7 @@ func (s *ControllerService) createSubsystemForVolume(ctx context.Context, params
 
 	subsystem, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
 		Name:         params.subsystemNQN,
+		Subnqn:       params.subsystemNQN,
 		AllowAnyHost: true, // Allow any initiator to connect
 	})
 	if err != nil {
@@ -969,6 +975,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	volumeName := req.GetName()
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "clone")
+	params := req.GetParameters()
 
 	// Validate that the dataset is a ZVOL (type=VOLUME), not a filesystem
 	// This can happen if detached snapshot was created incorrectly
@@ -987,11 +994,14 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	}
 
 	// Generate NQN for the cloned volume's dedicated subsystem
-	subsystemNQN := generateNQN(volumeName)
+	nqnPrefix := params["subsystemNQN"]
+	if nqnPrefix == "" {
+		nqnPrefix = defaultNQNPrefix
+	}
+	subsystemNQN := generateNQN(nqnPrefix, volumeName)
 	klog.Infof("Generated NQN for cloned volume: %s", subsystemNQN)
 
 	// Parse optional port ID from StorageClass parameters
-	params := req.GetParameters()
 	var portID int
 	if portIDStr := params["portID"]; portIDStr != "" {
 		var err error
@@ -1006,6 +1016,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	klog.Infof("Creating dedicated NVMe-oF subsystem for clone: %s", subsystemNQN)
 	subsystem, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
 		Name:         subsystemNQN,
+		Subnqn:       subsystemNQN,
 		AllowAnyHost: true,
 	})
 	if err != nil {
@@ -1203,11 +1214,16 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 
 	// If no subsystem found, create new one
 	if subsystem == nil {
-		subsystemNQN := generateNQN(volumeName)
+		nqnPrefix := params["subsystemNQN"]
+		if nqnPrefix == "" {
+			nqnPrefix = defaultNQNPrefix
+		}
+		subsystemNQN := generateNQN(nqnPrefix, volumeName)
 		klog.Infof("Creating new subsystem for adopted volume: %s", subsystemNQN)
 
 		newSubsys, err := s.apiClient.CreateNVMeOFSubsystem(ctx, tnsapi.NVMeOFSubsystemCreateParams{
 			Name:         subsystemNQN,
+			Subnqn:       subsystemNQN,
 			AllowAnyHost: true,
 		})
 		if err != nil {

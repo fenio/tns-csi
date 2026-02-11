@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -1091,29 +1092,28 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 }
 
 func TestGenerateNQN(t *testing.T) {
-	tests := []struct {
-		volumeName string
-		expected   string
-	}{
-		{
-			volumeName: "pvc-12345",
-			expected:   "nqn.2137.csi.tns:pvc-12345",
-		},
-		{
-			volumeName: "my-volume",
-			expected:   "nqn.2137.csi.tns:my-volume",
-		},
-		{
-			volumeName: "test-nvmeof-volume",
-			expected:   "nqn.2137.csi.tns:test-nvmeof-volume",
-		},
+	tests := []string{
+		"pvc-12345",
+		"my-volume",
+		"test-nvmeof-volume",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.volumeName, func(t *testing.T) {
-			result := generateNQN(tt.volumeName)
-			if result != tt.expected {
-				t.Errorf("generateNQN(%s) = %s, want %s", tt.volumeName, result, tt.expected)
+	for _, volumeName := range tests {
+		t.Run(volumeName, func(t *testing.T) {
+			result := generateNQN(defaultNQNPrefix, volumeName)
+
+			parts := strings.Split(result, ":")
+			if len(parts) != 2 {
+				t.Fatalf("generateNQN(%s) = %s, expected 2 colon-separated parts", volumeName, result)
+			}
+
+			expectedPrefix := defaultNQNPrefix + ":"
+			if !strings.HasPrefix(result, expectedPrefix) {
+				t.Fatalf("generateNQN(%s) = %s, expected prefix %s", volumeName, result, expectedPrefix)
+			}
+
+			if parts[1] != volumeName {
+				t.Fatalf("generateNQN(%s) = %s, expected suffix volume name %s", volumeName, result, volumeName)
 			}
 		})
 	}

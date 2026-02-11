@@ -1136,6 +1136,7 @@ func (c *Client) CreateZvol(ctx context.Context, params ZvolCreateParams) (*Data
 // NVMeOFSubsystemCreateParams represents parameters for NVMe-oF subsystem creation.
 type NVMeOFSubsystemCreateParams struct {
 	Name         string `json:"name"`
+	Subnqn       string `json:"subnqn"`
 	AllowAnyHost bool   `json:"allow_any_host"` // Allow any host to connect
 }
 

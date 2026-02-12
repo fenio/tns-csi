@@ -350,11 +350,19 @@ func (s *ControllerService) lookupSnapshotByCSIName(ctx context.Context, poolDat
 //   - The snapshot moves from the source to the promoted clone.
 //   - The original source volume becomes a dependent of the promoted snapshot.
 //   - Without deleting the snapshot first, neither the clone nor the source can be deleted.
+//
+// Uses a 30-second timeout as a safety net — this is best-effort cleanup, not critical path.
+// Uses QuerySnapshotIDs with select: ["id"] to minimize response size (avoids "message too big"
+// errors when datasets have many snapshots with large property sets).
 func (s *ControllerService) deleteDatasetSnapshots(ctx context.Context, datasetID string) {
 	klog.V(4).Infof("Checking for snapshots on dataset %s before deletion", datasetID)
 
-	// Query all snapshots on this dataset
-	snapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+	// Use a short timeout — this is best-effort cleanup, not critical path
+	snapCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	// Query only snapshot IDs (not full objects) to minimize response size
+	snapIDs, err := s.apiClient.QuerySnapshotIDs(snapCtx, []interface{}{
 		[]interface{}{"dataset", "=", datasetID},
 	})
 	if err != nil {
@@ -362,19 +370,19 @@ func (s *ControllerService) deleteDatasetSnapshots(ctx context.Context, datasetI
 		return // Don't fail deletion if we can't query snapshots
 	}
 
-	if len(snapshots) == 0 {
+	if len(snapIDs) == 0 {
 		klog.V(4).Infof("No snapshots found on dataset %s", datasetID)
 		return
 	}
 
-	klog.Infof("Found %d snapshots on dataset %s, deleting them first", len(snapshots), datasetID)
+	klog.Infof("Found %d snapshots on dataset %s, deleting them first", len(snapIDs), datasetID)
 
-	for _, snap := range snapshots {
-		klog.V(4).Infof("Deleting snapshot %s (defer=true to handle dependent clones)", snap.ID)
-		if err := s.apiClient.DeleteSnapshot(ctx, snap.ID); err != nil {
+	for _, snapID := range snapIDs {
+		klog.V(4).Infof("Deleting snapshot %s (defer=true to handle dependent clones)", snapID)
+		if err := s.apiClient.DeleteSnapshot(snapCtx, snapID); err != nil {
 			// Log warning but continue - the snapshot might already be deleted or
 			// have dependents that will be handled by defer=true
-			klog.Warningf("Failed to delete snapshot %s: %v (continuing)", snap.ID, err)
+			klog.Warningf("Failed to delete snapshot %s: %v (continuing)", snapID, err)
 		}
 	}
 }

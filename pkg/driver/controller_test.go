@@ -166,6 +166,10 @@ func (m *mockAPIClient) QuerySnapshots(ctx context.Context, filters []interface{
 	return nil, nil
 }
 
+func (m *mockAPIClient) QuerySnapshotIDs(ctx context.Context, filters []interface{}) ([]string, error) {
+	return nil, nil
+}
+
 func (m *mockAPIClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error) {
 	return nil, errNotImplemented
 }

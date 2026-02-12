@@ -903,6 +903,25 @@ func (m *MockClient) QuerySnapshots(ctx context.Context, filters []any) ([]tnsap
 	return result, nil
 }
 
+// QuerySnapshotIDs mocks zfs.snapshot.query with select: ["id"].
+// Returns only snapshot IDs to minimize response size.
+func (m *MockClient) QuerySnapshotIDs(ctx context.Context, filters []any) ([]string, error) {
+	m.logCall("QuerySnapshotIDs", filters)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var ids []string
+	for _, snap := range m.snapshots {
+		if !matchesSnapshotFilters(snap, filters) {
+			continue
+		}
+		ids = append(ids, snap.ID)
+	}
+
+	return ids, nil
+}
+
 // matchesSnapshotFilters checks if a snapshot matches the provided filters.
 //
 //nolint:goconst // Filter field names are used locally in mock filter functions.

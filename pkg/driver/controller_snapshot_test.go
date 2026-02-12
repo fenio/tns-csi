@@ -66,6 +66,10 @@ func (m *MockAPIClientForSnapshots) QuerySnapshots(ctx context.Context, filters 
 	return nil, errors.New("QuerySnapshotsFunc not implemented")
 }
 
+func (m *MockAPIClientForSnapshots) QuerySnapshotIDs(ctx context.Context, filters []interface{}) ([]string, error) {
+	return nil, nil
+}
+
 func (m *MockAPIClientForSnapshots) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnapshotParams) (*tnsapi.Dataset, error) {
 	if m.CloneSnapshotFunc != nil {
 		return m.CloneSnapshotFunc(ctx, params)

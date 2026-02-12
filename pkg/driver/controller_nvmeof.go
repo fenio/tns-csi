@@ -928,6 +928,9 @@ func (s *ControllerService) verifyNamespaceDeletion(ctx context.Context, meta *V
 }
 
 // deleteZVOL deletes a ZVOL dataset with retry logic for busy resources.
+// Uses a try-first approach: attempts direct deletion (which handles the common case where
+// recursive=true succeeds), then falls back to snapshot cleanup + retry if the direct
+// attempt fails. This avoids the expensive snapshot query in the common case.
 func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata) error {
 	if meta.DatasetID == "" {
 		klog.Infof("deleteZVOL: DatasetID is empty, skipping deletion")
@@ -936,29 +939,33 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 
 	klog.Infof("deleteZVOL: Starting deletion of ZVOL %s for volume %s", meta.DatasetID, meta.Name)
 
-	// Delete any snapshots on the ZVOL first (handles promoted clone cleanup)
-	// This is necessary because after ZFS clone promotion, snapshots may have dependent
-	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
+	// Try direct deletion first (common case: no dependent snapshots)
+	firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+	if firstErr == nil || isNotFoundError(firstErr) {
+		klog.Infof("deleteZVOL: Successfully deleted ZVOL %s", meta.DatasetID)
+		return nil
+	}
+
+	// First attempt failed — clean up snapshots and retry
+	klog.Infof("deleteZVOL: Direct deletion failed for %s: %v — cleaning up snapshots before retry",
+		meta.DatasetID, firstErr)
 	s.deleteDatasetSnapshots(ctx, meta.DatasetID)
 
 	retryConfig := retry.DeletionConfig("delete-zvol")
 	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
 		if deleteErr != nil && isNotFoundError(deleteErr) {
-			// ZVOL already deleted - not an error (idempotency)
-			klog.V(4).Infof("ZVOL %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 			return nil
 		}
 		return deleteErr
 	})
 
 	if err != nil {
-		// All retries exhausted or non-retryable error
 		klog.Errorf("deleteZVOL: Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 		return status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 	}
 
-	klog.Infof("deleteZVOL: Successfully deleted ZVOL %s for volume %s", meta.DatasetID, meta.Name)
+	klog.Infof("deleteZVOL: Successfully deleted ZVOL %s after snapshot cleanup", meta.DatasetID)
 	return nil
 }
 

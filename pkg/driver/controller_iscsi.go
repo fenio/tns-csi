@@ -9,6 +9,7 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/metrics"
+	"github.com/fenio/tns-csi/pkg/retry"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -520,6 +521,8 @@ func (s *ControllerService) createISCSITargetExtent(ctx context.Context, targetI
 }
 
 // deleteISCSIVolume deletes an iSCSI volume and all associated resources.
+//
+//nolint:dupl // Intentionally similar ZVOL deletion pattern as NFS/NVMe-oF
 func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, "delete")
 	klog.Infof("Deleting iSCSI volume: %s (Dataset: %s, Target: %d, Extent: %d)",
@@ -576,24 +579,29 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 		}
 	}
 
-	// Step 4: Delete any snapshots on the ZVOL first (handles promoted clone cleanup)
-	// This is necessary because after ZFS clone promotion, snapshots may have dependent
-	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
+	// Step 4: Delete ZVOL (try direct first, snapshot cleanup on failure)
 	if meta.DatasetID != "" {
-		s.deleteDatasetSnapshots(ctx, meta.DatasetID)
-	}
+		firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+		if firstErr != nil && !isNotFoundError(firstErr) {
+			klog.Infof("Direct deletion failed for %s: %v — cleaning up snapshots before retry",
+				meta.DatasetID, firstErr)
+			s.deleteDatasetSnapshots(ctx, meta.DatasetID)
 
-	// Step 5: Delete ZVOL
-	if meta.DatasetID != "" {
-		if err := s.apiClient.DeleteDataset(ctx, meta.DatasetID); err != nil {
-			if !isNotFoundError(err) {
+			retryConfig := retry.DeletionConfig("delete-iscsi-zvol")
+			err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
+				deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+				if deleteErr != nil && isNotFoundError(deleteErr) {
+					return nil
+				}
+				return deleteErr
+			})
+
+			if err != nil {
 				timer.ObserveError()
 				return nil, status.Errorf(codes.Internal, "Failed to delete ZVOL %s: %v", meta.DatasetID, err)
 			}
-			klog.V(4).Infof("ZVOL already deleted: %s", meta.DatasetID)
-		} else {
-			klog.V(4).Infof("Deleted ZVOL: %s", meta.DatasetID)
 		}
+		klog.V(4).Infof("Deleted ZVOL: %s", meta.DatasetID)
 	}
 
 	// Clear volume capacity metric

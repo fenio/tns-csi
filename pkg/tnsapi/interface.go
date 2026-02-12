@@ -87,6 +87,7 @@ type ClientInterface interface {
 	CreateSnapshot(ctx context.Context, params SnapshotCreateParams) (*Snapshot, error)
 	DeleteSnapshot(ctx context.Context, snapshotID string) error
 	QuerySnapshots(ctx context.Context, filters []interface{}) ([]Snapshot, error)
+	QuerySnapshotIDs(ctx context.Context, filters []interface{}) ([]string, error)
 	CloneSnapshot(ctx context.Context, params CloneSnapshotParams) (*Dataset, error)
 
 	// Dataset promotion (for detached clones)

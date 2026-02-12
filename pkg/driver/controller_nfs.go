@@ -523,6 +523,8 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 // deleteNFSVolume deletes an NFS volume with ownership verification.
 // Dataset deletion is retried for busy resource errors.
 // If deleteStrategy is "retain", the volume is kept but CSI returns success.
+//
+//nolint:dupl // Intentionally similar dataset deletion pattern as iSCSI
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
@@ -623,34 +625,31 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		}
 	}
 
-	// Step 2: Delete any snapshots on the dataset first (handles promoted clone cleanup)
-	// This is necessary because after ZFS clone promotion, snapshots may have dependent
-	// clones that prevent deletion. Deleting with defer=true allows ZFS to clean up properly.
-	if meta.DatasetID != "" {
-		s.deleteDatasetSnapshots(ctx, meta.DatasetID)
-	}
-
-	// Step 3: Delete ZFS dataset with retry logic for busy resources
+	// Step 2: Delete dataset (try direct first, snapshot cleanup on failure)
 	if meta.DatasetID == "" {
 		klog.V(4).Infof("No dataset ID provided, skipping dataset deletion")
 	} else {
-		klog.V(4).Infof("Deleting dataset: %s (with retry for busy resources)", meta.DatasetID)
+		klog.V(4).Infof("Deleting dataset: %s", meta.DatasetID)
 
-		retryConfig := retry.DeletionConfig("delete-nfs-dataset")
-		err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
-			deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-			if deleteErr != nil && isNotFoundError(deleteErr) {
-				// Dataset already deleted - not an error (idempotency)
-				klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
-				return nil
+		firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+		if firstErr != nil && !isNotFoundError(firstErr) {
+			klog.Infof("Direct deletion failed for %s: %v — cleaning up snapshots before retry",
+				meta.DatasetID, firstErr)
+			s.deleteDatasetSnapshots(ctx, meta.DatasetID)
+
+			retryConfig := retry.DeletionConfig("delete-nfs-dataset")
+			err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
+				deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
+				if deleteErr != nil && isNotFoundError(deleteErr) {
+					return nil
+				}
+				return deleteErr
+			})
+
+			if err != nil {
+				timer.ObserveError()
+				return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
 			}
-			return deleteErr
-		})
-
-		if err != nil {
-			// All retries exhausted or non-retryable error
-			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Failed to delete dataset %s: %v", meta.DatasetID, err)
 		}
 		klog.V(4).Infof("Successfully deleted dataset %s", meta.DatasetID)
 	}

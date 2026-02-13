@@ -43,6 +43,8 @@ type MockAPIClientForSnapshots struct {
 	FindDatasetByCSIVolumeNameFunc func(ctx context.Context, poolDatasetPrefix, volumeName string) (*tnsapi.DatasetWithProperties, error)
 	FindDatasetsByPropertyFunc     func(ctx context.Context, poolDatasetPrefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error)
 	GetDatasetWithPropertiesFunc   func(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error)
+	QueryISCSITargetsFunc          func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITarget, error)
+	QueryISCSIExtentsFunc          func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSIExtent, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -360,7 +362,10 @@ func (m *MockAPIClientForSnapshots) DeleteISCSITarget(_ context.Context, _ int, 
 	return nil
 }
 
-func (m *MockAPIClientForSnapshots) QueryISCSITargets(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITarget, error) {
+func (m *MockAPIClientForSnapshots) QueryISCSITargets(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITarget, error) {
+	if m.QueryISCSITargetsFunc != nil {
+		return m.QueryISCSITargetsFunc(ctx, filters)
+	}
 	return []tnsapi.ISCSITarget{}, nil
 }
 
@@ -383,7 +388,10 @@ func (m *MockAPIClientForSnapshots) DeleteISCSIExtent(_ context.Context, _ int, 
 	return nil
 }
 
-func (m *MockAPIClientForSnapshots) QueryISCSIExtents(_ context.Context, _ []interface{}) ([]tnsapi.ISCSIExtent, error) {
+func (m *MockAPIClientForSnapshots) QueryISCSIExtents(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSIExtent, error) {
+	if m.QueryISCSIExtentsFunc != nil {
+		return m.QueryISCSIExtentsFunc(ctx, filters)
+	}
 	return []tnsapi.ISCSIExtent{}, nil
 }
 

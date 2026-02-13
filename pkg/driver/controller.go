@@ -1021,6 +1021,18 @@ func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 				}
 			}
 		}
+
+		if !volumeExists {
+			extents, err := s.apiClient.QueryISCSIExtents(ctx, nil)
+			if err == nil {
+				for _, extent := range extents {
+					if strings.Contains(extent.Disk, volumeID) {
+						volumeExists = true
+						break
+					}
+				}
+			}
+		}
 	}
 
 	if !volumeExists {
@@ -1039,7 +1051,7 @@ func (s *ControllerService) ValidateVolumeCapabilities(ctx context.Context, req 
 func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	klog.V(4).Infof("ListVolumes called with request: %+v", req)
 
-	// Collect all CSI-managed volumes (both NFS and NVMe-oF)
+	// Collect all CSI-managed volumes (NFS, NVMe-oF, and iSCSI)
 	var entries []*csi.ListVolumesResponse_Entry
 
 	// Query NFS volumes
@@ -1057,6 +1069,14 @@ func (s *ControllerService) ListVolumes(ctx context.Context, req *csi.ListVolume
 		return nil, status.Errorf(codes.Internal, "failed to list NVMe-oF volumes: %v", err)
 	}
 	entries = append(entries, nvmeofEntries...)
+
+	// Query iSCSI volumes
+	iscsiEntries, err := s.listISCSIVolumes(ctx)
+	if err != nil {
+		klog.Errorf("Failed to list iSCSI volumes: %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to list iSCSI volumes: %v", err)
+	}
+	entries = append(entries, iscsiEntries...)
 
 	// Handle pagination
 	maxEntries := int(req.GetMaxEntries())
@@ -1196,6 +1216,52 @@ func (s *ControllerService) listNVMeOFVolumes(ctx context.Context) ([]*csi.ListV
 	return entries, nil
 }
 
+// listISCSIVolumes lists all iSCSI CSI volumes.
+func (s *ControllerService) listISCSIVolumes(ctx context.Context) ([]*csi.ListVolumesResponse_Entry, error) {
+	klog.V(5).Info("Listing iSCSI volumes")
+
+	// Query all iSCSI extents - they indicate CSI-managed iSCSI volumes
+	extents, err := s.apiClient.QueryISCSIExtents(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query iSCSI extents: %w", err)
+	}
+
+	var entries []*csi.ListVolumesResponse_Entry
+	for _, extent := range extents {
+		// Each extent's Disk field has format "zvol/<dataset_path>"
+		if !strings.HasPrefix(extent.Disk, "zvol/") {
+			klog.V(5).Infof("Skipping iSCSI extent %d with non-ZVOL disk: %s", extent.ID, extent.Disk)
+			continue
+		}
+
+		datasetPath := strings.TrimPrefix(extent.Disk, "zvol/")
+		datasets, err := s.apiClient.QueryAllDatasets(ctx, datasetPath)
+		if err != nil || len(datasets) == 0 {
+			klog.V(5).Infof("Skipping iSCSI extent %d with no matching ZVOL: %s", extent.ID, datasetPath)
+			continue
+		}
+
+		zvol := datasets[0]
+
+		// Build volume metadata
+		meta := VolumeMetadata{
+			Name:          zvol.Name,
+			Protocol:      ProtocolISCSI,
+			DatasetID:     zvol.ID,
+			DatasetName:   zvol.Name,
+			ISCSIExtentID: extent.ID,
+		}
+
+		entry := s.buildVolumeEntry(zvol, meta)
+		if entry != nil {
+			entries = append(entries, entry)
+		}
+	}
+
+	klog.V(5).Infof("Found %d iSCSI volumes", len(entries))
+	return entries, nil
+}
+
 // buildVolumeEntry constructs a ListVolumesResponse_Entry from dataset and metadata.
 func (s *ControllerService) buildVolumeEntry(dataset tnsapi.Dataset, meta VolumeMetadata) *csi.ListVolumesResponse_Entry {
 	// Volume ID is the full dataset path for O(1) lookups
@@ -1300,6 +1366,11 @@ func IsVolumeAdoptable(props map[string]tnsapi.UserProperty) bool {
 		if _, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; !ok {
 			return false
 		}
+	case tnsapi.ProtocolISCSI:
+		// iSCSI requires IQN
+		if _, ok := props[tnsapi.PropertyISCSIIQN]; !ok {
+			return false
+		}
 	default:
 		// Unknown protocol - don't adopt
 		return false
@@ -1344,6 +1415,15 @@ func GetAdoptionInfo(props map[string]tnsapi.UserProperty) map[string]string {
 	}
 	if v, ok := props[tnsapi.PropertyNVMeSubsystemNQN]; ok {
 		info["nvmeofNQN"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyISCSIIQN]; ok {
+		info["iscsiIQN"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyISCSITargetID]; ok {
+		info["iscsiTargetID"] = v.Value
+	}
+	if v, ok := props[tnsapi.PropertyISCSIExtentID]; ok {
+		info["iscsiExtentID"] = v.Value
 	}
 
 	return info

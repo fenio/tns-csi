@@ -1,0 +1,129 @@
+name: Scale Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      noise_datasets:
+        description: 'Number of noise filesystem datasets to create'
+        required: false
+        default: '30'
+        type: string
+      noise_zvols:
+        description: 'Number of noise zvols to create'
+        required: false
+        default: '10'
+        type: string
+      pr:
+        description: 'PR number to test (builds image from PR code, leave empty for main)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# Only one scale test at a time
+concurrency:
+  group: scale-tests
+  cancel-in-progress: false
+
+jobs:
+  compute-tag:
+    name: Compute Image Tag
+    runs-on: new
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Checkout PR code
+        if: inputs.pr != ''
+        uses: actions/checkout@v6
+        with:
+          ref: refs/pull/${{ inputs.pr }}/merge
+
+      - name: Set up Docker Buildx
+        if: inputs.pr != ''
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build PR image
+        if: inputs.pr != ''
+        run: |
+          PR_TAG="pr-${{ inputs.pr }}"
+          IMAGE="ghcr.io/fenio/tns-csi:${PR_TAG}"
+          echo "=== Building image from PR #${{ inputs.pr }} ==="
+          docker buildx build \
+            --load \
+            --build-arg VERSION="0.0.0-${PR_TAG}" \
+            --build-arg GIT_COMMIT="$(git rev-parse --short HEAD)" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t "${IMAGE}" .
+          docker save "${IMAGE}" -o /tmp/tns-csi-pr-image.tar
+
+      - name: Upload PR image artifact
+        if: inputs.pr != ''
+        uses: actions/upload-artifact@v6
+        with:
+          name: pr-image
+          path: /tmp/tns-csi-pr-image.tar
+          retention-days: 1
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.pr }}" ]]; then
+            echo "tag=pr-${{ inputs.pr }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+  scale-test:
+    name: "Scale: CSI with Non-CSI Noise"
+    runs-on: new
+    timeout-minutes: 40
+    needs: compute-tag
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run Scale E2E Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          NOISE_DATASET_COUNT: ${{ inputs.noise_datasets }}
+          NOISE_ZVOL_COUNT: ${{ inputs.noise_zvols }}
+        run: |
+          echo "=== Scale E2E Tests ==="
+          echo "Noise datasets: $NOISE_DATASET_COUNT"
+          echo "Noise zvols: $NOISE_ZVOL_COUNT"
+          echo ""
+          ginkgo -v --timeout=35m ./tests/e2e/scale/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-scale-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7

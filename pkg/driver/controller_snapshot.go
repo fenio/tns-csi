@@ -825,34 +825,34 @@ func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *m
 
 // resolveZFSSnapshotName resolves the full ZFS snapshot name (dataset@snapname) from metadata.
 // For legacy format, SnapshotName already contains the full path.
-// For compact format, we need to look up the volume to get the dataset path.
+// For compact format with new-style volume IDs (containing "/"), we construct the name directly.
+// For compact format with old-style volume IDs (plain PVC name), we use a filtered query.
 func (s *ControllerService) resolveZFSSnapshotName(ctx context.Context, meta *SnapshotMetadata) (string, error) {
 	// If SnapshotName already contains "@", it's the full ZFS path (legacy format)
 	if strings.Contains(meta.SnapshotName, "@") {
 		return meta.SnapshotName, nil
 	}
 
-	// Compact format: SnapshotName is just the snapshot name, need to find dataset
 	snapshotName := meta.SnapshotName
 	volumeID := meta.SourceVolume
 
-	// Query TrueNAS to find snapshots matching this name
-	// We search for snapshots ending with @{snapshotName}
-	snapshots, err := s.apiClient.QuerySnapshots(ctx, nil)
+	// New format: volumeID is full dataset path (contains "/") → construct directly, no query needed
+	if strings.Contains(volumeID, "/") {
+		return volumeID + "@" + snapshotName, nil
+	}
+
+	// Old format: volumeID is plain PVC name → use filtered query by snapshot name
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{"name", "=", snapshotName},
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to query snapshots: %w", err)
 	}
 
-	// Look for a snapshot that matches our criteria:
-	// 1. Ends with @{snapshotName}
-	// 2. Dataset path contains the volumeID
 	for _, snap := range snapshots {
-		// ZFS snapshot ID format: dataset@snapname
 		if !strings.HasSuffix(snap.ID, "@"+snapshotName) {
 			continue
 		}
-
-		// Check if the dataset contains our volume ID
 		datasetPath := strings.TrimSuffix(snap.ID, "@"+snapshotName)
 		if strings.Contains(datasetPath, volumeID) {
 			return snap.ID, nil
@@ -1120,19 +1120,56 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 }
 
 // listAllSnapshots handles listing all snapshots (no filters).
+// Only lists snapshots on CSI-managed datasets to avoid fetching all snapshots globally,
+// which can cause buffer overflow and timeouts on systems with many non-CSI datasets.
 func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
-	// Query all snapshots
-	snapshots, err := s.apiClient.QuerySnapshots(ctx, nil)
+	// Find all CSI-managed datasets first (small, filtered query)
+	datasets, err := s.apiClient.FindDatasetsByProperty(ctx, "", tnsapi.PropertyManagedBy, tnsapi.ManagedByValue)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to query snapshots: %v", err)
+		return nil, status.Errorf(codes.Internal, "Failed to query managed datasets: %v", err)
 	}
 
-	klog.V(4).Infof("Found %d total snapshots", len(snapshots))
+	// Build metadata map and collect snapshots per managed dataset
+	type datasetMeta struct {
+		volumeID string
+		protocol string
+	}
+	managedMeta := make(map[string]datasetMeta, len(datasets))
+	for _, ds := range datasets {
+		// Skip detached snapshots (they're datasets, not volumes with snapshots)
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == VolumeContextValueTrue {
+			continue
+		}
+		volumeID := ds.ID
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok && prop.Value != "" {
+			volumeID = prop.Value
+		}
+		protocol := ProtocolNFS
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok && prop.Value != "" {
+			protocol = prop.Value
+		}
+		managedMeta[ds.ID] = datasetMeta{volumeID: volumeID, protocol: protocol}
+	}
+
+	// Query snapshots per managed dataset (each query is small and filtered)
+	var allSnapshots []tnsapi.Snapshot
+	for datasetID := range managedMeta {
+		snaps, queryErr := s.apiClient.QuerySnapshots(ctx, []interface{}{
+			[]interface{}{"dataset", "=", datasetID},
+		})
+		if queryErr != nil {
+			klog.Warningf("Failed to query snapshots for dataset %s: %v", datasetID, queryErr)
+			continue
+		}
+		allSnapshots = append(allSnapshots, snaps...)
+	}
+
+	klog.V(4).Infof("Found %d total snapshots across %d managed datasets", len(allSnapshots), len(managedMeta))
 
 	// Handle pagination
 	maxEntries := int(req.GetMaxEntries())
 	if maxEntries <= 0 {
-		maxEntries = len(snapshots)
+		maxEntries = len(allSnapshots)
 	}
 
 	startIndex := 0
@@ -1141,7 +1178,7 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 		if err != nil {
 			return nil, status.Errorf(codes.Aborted, "Invalid starting token: %v", err)
 		}
-		if startIndex < 0 || startIndex >= len(snapshots) {
+		if startIndex < 0 || startIndex >= len(allSnapshots) {
 			return &csi.ListSnapshotsResponse{
 				Entries: []*csi.ListSnapshotsResponse_Entry{},
 			}, nil
@@ -1149,19 +1186,27 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 	}
 
 	endIndex := startIndex + maxEntries
-	if endIndex > len(snapshots) {
-		endIndex = len(snapshots)
+	if endIndex > len(allSnapshots) {
+		endIndex = len(allSnapshots)
 	}
 
-	// Convert to CSI format
-	// Note: We try to infer protocol and source volume from ZFS dataset info
+	// Convert to CSI format using metadata from managed datasets
 	entries := make([]*csi.ListSnapshotsResponse_Entry, 0, endIndex-startIndex)
 	for i := startIndex; i < endIndex; i++ {
-		snapshot := snapshots[i]
+		snapshot := allSnapshots[i]
 
-		// Extract snapshot name and infer metadata from ZFS path
-		// ZFS snapshot ID format: dataset@snapname or zvol/dataset@snapname
-		snapshotMeta := s.inferSnapshotMetadataFromZFS(snapshot)
+		meta, ok := managedMeta[snapshot.Dataset]
+		if !ok {
+			continue
+		}
+
+		snapshotMeta := SnapshotMetadata{
+			SnapshotName: snapshot.Name,
+			SourceVolume: meta.volumeID,
+			DatasetName:  snapshot.Dataset,
+			Protocol:     meta.protocol,
+			CreatedAt:    time.Now().Unix(),
+		}
 
 		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 		if encodeErr != nil {
@@ -1172,7 +1217,7 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 		entry := &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SnapshotId:     snapshotID,
-				SourceVolumeId: snapshotMeta.SourceVolume,
+				SourceVolumeId: meta.volumeID,
 				CreationTime:   timestamppb.New(time.Unix(snapshotMeta.CreatedAt, 0)),
 				ReadyToUse:     true,
 			},
@@ -1181,7 +1226,7 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 	}
 
 	var nextToken string
-	if endIndex < len(snapshots) {
+	if endIndex < len(allSnapshots) {
 		nextToken = encodeSnapshotToken(endIndex)
 	}
 
@@ -1189,42 +1234,6 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 		Entries:   entries,
 		NextToken: nextToken,
 	}, nil
-}
-
-// inferSnapshotMetadataFromZFS infers snapshot metadata from ZFS snapshot info.
-// This is used when listing all snapshots where we don't have explicit metadata.
-func (s *ControllerService) inferSnapshotMetadataFromZFS(snapshot tnsapi.Snapshot) SnapshotMetadata {
-	// ZFS snapshot ID format: dataset@snapname
-	// For zvols: pool/path/to/volume@snapname
-	// For filesystems: pool/path/to/dataset@snapname
-	datasetName := snapshot.Dataset
-
-	// Infer protocol from dataset path
-	// NVMe-oF volumes are typically zvols (visible in /dev/zvol/...)
-	// NFS volumes are filesystems
-	// Without querying TrueNAS, we assume NFS as the default
-	protocol := ProtocolNFS
-
-	// Extract volume ID from dataset name (last component)
-	// Format: pool/parent/volumeID -> volumeID
-	volumeID := datasetName
-	if idx := strings.LastIndex(datasetName, "/"); idx != -1 {
-		volumeID = datasetName[idx+1:]
-	}
-
-	// Extract snapshot name from full snapshot ID
-	snapshotName := ""
-	if idx := strings.LastIndex(snapshot.ID, "@"); idx != -1 {
-		snapshotName = snapshot.ID[idx+1:]
-	}
-
-	return SnapshotMetadata{
-		SnapshotName: snapshotName,
-		SourceVolume: volumeID,
-		DatasetName:  datasetName,
-		Protocol:     protocol,
-		CreatedAt:    time.Now().Unix(),
-	}
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.

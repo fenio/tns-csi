@@ -664,19 +664,27 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 		{
 			name: "volume exists and healthy",
 			meta: &VolumeMetadata{
-				Name:        "healthy-volume",
-				Protocol:    ProtocolISCSI,
-				DatasetID:   "tank/csi/healthy-volume",
-				DatasetName: "tank/csi/healthy-volume",
+				Name:          "healthy-volume",
+				Protocol:      ProtocolISCSI,
+				DatasetID:     "tank/csi/healthy-volume",
+				DatasetName:   "tank/csi/healthy-volume",
+				ISCSITargetID: 10,
+				ISCSIExtentID: 20,
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetDatasetFunc = func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
-					return &tnsapi.Dataset{
-						ID:      datasetID,
-						Name:    datasetID,
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{{
+						ID:      prefix,
+						Name:    prefix,
 						Type:    "VOLUME",
-						Volsize: map[string]interface{}{"parsed": float64(5 * 1024 * 1024 * 1024)}, // 5GB
-					}, nil
+						Volsize: map[string]interface{}{"parsed": float64(5 * 1024 * 1024 * 1024)},
+					}}, nil
+				}
+				m.QueryISCSITargetsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITarget, error) {
+					return []tnsapi.ISCSITarget{{ID: 10, Name: "healthy-volume"}}, nil
+				}
+				m.QueryISCSIExtentsFunc = func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSIExtent, error) {
+					return []tnsapi.ISCSIExtent{{ID: 20, Name: "healthy-volume", Enabled: true, Disk: "zvol/tank/csi/healthy-volume"}}, nil
 				}
 			},
 			wantErr: false,
@@ -696,6 +704,12 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				if resp.Status.VolumeCondition.Abnormal {
 					t.Error("Expected volume to be healthy (not abnormal)")
 				}
+				// Verify VolumeContext is now populated
+				if resp.Volume.VolumeContext == nil {
+					t.Error("Expected volume context to be non-nil")
+				} else if resp.Volume.VolumeContext[VolumeContextKeyProtocol] != ProtocolISCSI {
+					t.Errorf("Expected protocol 'iscsi', got %q", resp.Volume.VolumeContext[VolumeContextKeyProtocol])
+				}
 			},
 		},
 		{
@@ -707,8 +721,8 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				DatasetName: "tank/csi/missing-volume",
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
-				m.GetDatasetFunc = func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
-					return nil, errors.New("not found: [ENOENT]")
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return nil, nil
 				}
 			},
 			wantErr: false, // Returns abnormal status, not error

@@ -127,27 +127,26 @@ func findAttachedSnapshots(ctx context.Context, client tnsapi.ClientInterface) (
 		}
 	}
 
-	// Query all snapshots
-	allSnapshots, err := client.QuerySnapshots(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-
+	// Query snapshots per managed dataset (avoids fetching all snapshots globally,
+	// which can cause buffer overflow on systems with many non-CSI datasets)
 	var snapshots []SnapshotInfo
-	for _, snap := range allSnapshots {
-		// Check if this snapshot belongs to a managed dataset
-		meta, ok := managedDatasets[snap.Dataset]
-		if !ok {
-			continue
+	for datasetID, meta := range managedDatasets {
+		datasetSnaps, queryErr := client.QuerySnapshots(ctx, []interface{}{
+			[]interface{}{"dataset", "=", datasetID},
+		})
+		if queryErr != nil {
+			return nil, fmt.Errorf("failed to query snapshots for dataset %s: %w", datasetID, queryErr)
 		}
 
-		snapshots = append(snapshots, SnapshotInfo{
-			Name:          snap.Name,
-			SourceVolume:  meta.volumeID,
-			SourceDataset: snap.Dataset,
-			Protocol:      meta.protocol,
-			Type:          "attached",
-		})
+		for _, snap := range datasetSnaps {
+			snapshots = append(snapshots, SnapshotInfo{
+				Name:          snap.Name,
+				SourceVolume:  meta.volumeID,
+				SourceDataset: snap.Dataset,
+				Protocol:      meta.protocol,
+				Type:          "attached",
+			})
+		}
 	}
 
 	return snapshots, nil

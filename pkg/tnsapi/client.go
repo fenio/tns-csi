@@ -1652,6 +1652,32 @@ func (c *Client) QuerySnapshots(ctx context.Context, filters []interface{}) ([]S
 	return result, nil
 }
 
+// QuerySnapshotIDs is a lightweight version of QuerySnapshots that only returns snapshot IDs.
+// It uses select: ["id"] to minimize response size, which is critical when datasets have
+// many snapshots with large property sets (e.g., after migration from democratic-csi).
+func (c *Client) QuerySnapshotIDs(ctx context.Context, filters []interface{}) ([]string, error) {
+	klog.V(4).Infof("Querying snapshot IDs with filters: %+v", filters)
+
+	queryOpts := map[string]interface{}{
+		"select": []string{"id"},
+	}
+	var result []struct {
+		ID string `json:"id"`
+	}
+	err := c.Call(ctx, "zfs.snapshot.query", []interface{}{filters, queryOpts}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query snapshot IDs: %w", err)
+	}
+
+	ids := make([]string, len(result))
+	for i, s := range result {
+		ids[i] = s.ID
+	}
+
+	klog.V(4).Infof("Found %d snapshot IDs", len(ids))
+	return ids, nil
+}
+
 // CloneSnapshotParams represents parameters for cloning a snapshot.
 type CloneSnapshotParams struct {
 	Snapshot string `json:"snapshot"`    // Source snapshot ID (dataset@snapshot)

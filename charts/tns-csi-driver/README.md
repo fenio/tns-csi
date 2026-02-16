@@ -193,6 +193,7 @@ Each GitHub release includes a pre-rendered manifest (`tns-csi-driver-<version>.
 | `nameTemplate` | Go template for volume names (e.g., `{{ .PVCNamespace }}-{{ .PVCName }}`) | (auto) |
 | `namePrefix` | Prefix to prepend to volume name | `""` |
 | `nameSuffix` | Suffix to append to volume name | `""` |
+| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
 | `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
 | `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
 | `encryption` | Enable ZFS native encryption | `"false"` |
@@ -239,6 +240,7 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 | `nameTemplate` | Go template for volume names | (auto) |
 | `namePrefix` | Prefix to prepend to volume name | `""` |
 | `nameSuffix` | Suffix to append to volume name | `""` |
+| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
 | `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
 | `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
 | `encryption` | Enable ZFS native encryption | `"false"` |
@@ -277,6 +279,7 @@ The driver automatically creates a dedicated NVMe-oF subsystem per volume. No sh
 | `nameTemplate` | Go template for volume names | (auto) |
 | `namePrefix` | Prefix to prepend to volume name | `""` |
 | `nameSuffix` | Suffix to append to volume name | `""` |
+| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
 | `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
 | `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
 | `encryption` | Enable ZFS native encryption | `"false"` |

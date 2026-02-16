@@ -879,6 +879,7 @@ See [kubectl Plugin Documentation](KUBECTL-PLUGIN.md) for full details on adopti
 | `nameTemplate` | Go template for full name | `{{ .PVCNamespace }}-{{ .PVCName }}` |
 | `namePrefix` | Simple prefix | `prod-` |
 | `nameSuffix` | Simple suffix | `-data` |
+| `commentTemplate` | Go template for dataset comment (visible in TrueNAS UI) | `{{ .PVCNamespace }}/{{ .PVCName }}` |
 
 **Note**: `nameTemplate` takes precedence over `namePrefix`/`nameSuffix` if both are specified.
 
@@ -907,6 +908,25 @@ reclaimPolicy: Delete
 ```
 
 With this StorageClass, a PVC named `postgres-data` in namespace `production` would create a dataset named `tank/production-postgres-data` instead of `tank/pvc-abc123-def456-789...`.
+
+**Example with Comment Template:**
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: truenas-nfs-commented
+provisioner: tns.csi.io
+parameters:
+  protocol: nfs
+  pool: tank
+  server: truenas.local
+  # Dataset comment visible in TrueNAS UI
+  commentTemplate: "{{ .PVCNamespace }}/{{ .PVCName }}"
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+```
+
+With this StorageClass, datasets will have a comment like `production/postgres-data` visible in the TrueNAS web UI, making it easy to identify which PVC a dataset belongs to. Unlike volume names, comments are free-form text — no sanitization or length limits are applied.
 
 **Example with Simple Prefix/Suffix:**
 ```yaml

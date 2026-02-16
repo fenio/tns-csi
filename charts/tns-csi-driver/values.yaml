@@ -261,6 +261,12 @@ storageClasses:
     #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
     #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
     #
+    # Dataset Comment Templating:
+    #   commentTemplate: Go template for dataset comments visible in TrueNAS UI
+    #     Uses the same variables as nameTemplate: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}/{{ .PVCName }}" shows "production/myapp-data" in TrueNAS
+    #     Comments are free-form text (no sanitization or length limits)
+    #
     # Volume Adoption (for cluster migration):
     #   markAdoptable: "true" or "false"
     #     - When "true", newly created volumes are marked as adoptable
@@ -332,6 +338,12 @@ storageClasses:
     #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
     #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
     #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
+    #
+    # Dataset Comment Templating:
+    #   commentTemplate: Go template for dataset comments visible in TrueNAS UI
+    #     Uses the same variables as nameTemplate: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}/{{ .PVCName }}" shows "production/myapp-data" in TrueNAS
+    #     Comments are free-form text (no sanitization or length limits)
     #
     # Volume Adoption (for cluster migration):
     #   markAdoptable: "true" or "false"
@@ -407,6 +419,12 @@ storageClasses:
     #   namePrefix: Simple prefix to prepend to volume name (e.g., "prod-")
     #   nameSuffix: Simple suffix to append to volume name (e.g., "-data")
     #     Note: nameTemplate takes precedence over namePrefix/nameSuffix if both are specified
+    #
+    # Dataset Comment Templating:
+    #   commentTemplate: Go template for dataset comments visible in TrueNAS UI
+    #     Uses the same variables as nameTemplate: .PVCName, .PVCNamespace, .PVName
+    #     Example: "{{ .PVCNamespace }}/{{ .PVCName }}" shows "production/myapp-data" in TrueNAS
+    #     Comments are free-form text (no sanitization or length limits)
     #
     # Volume Adoption (for cluster migration):
     #   markAdoptable: "true" or "false"

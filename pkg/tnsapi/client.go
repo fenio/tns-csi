@@ -2124,35 +2124,24 @@ func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) 
 	return props, nil
 }
 
-// InheritDatasetProperty removes (inherits) a ZFS user property from a dataset.
-// This effectively deletes the property by setting it to inherit from the parent.
+// InheritDatasetProperty removes a ZFS user property from a dataset.
+// Uses the documented pool.dataset.update API with user_properties_update and remove flag.
 func (c *Client) InheritDatasetProperty(ctx context.Context, datasetID, propertyName string) error {
-	klog.V(4).Infof("Inheriting (removing) user property %s from dataset: %s", propertyName, datasetID)
+	klog.V(4).Infof("Removing user property %s from dataset: %s", propertyName, datasetID)
 
-	// TrueNAS doesn't have a direct "inherit" API for user properties.
-	// To remove a user property, we set it with source="INHERIT" or use pool.dataset.inherit
-	// Try the inherit method first
-	err := c.Call(ctx, "pool.dataset.inherit", []interface{}{
-		datasetID,
-		propertyName,
-		false, // recursive
-	}, nil)
-	if err != nil {
-		// If inherit fails, try setting to empty value (which effectively clears it)
-		klog.V(4).Infof("Inherit method failed, trying to clear property: %v", err)
-		clearProps := map[string]interface{}{
-			"user_properties": map[string]interface{}{
-				propertyName: map[string]string{"value": ""},
-			},
-		}
-		var result Dataset
-		err2 := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, clearProps}, &result)
-		if err2 != nil {
-			return fmt.Errorf("failed to clear user property %s on dataset %s: %w (inherit also failed: %w)", propertyName, datasetID, err2, err)
-		}
+	params := map[string]interface{}{
+		"user_properties_update": []map[string]interface{}{
+			{"key": propertyName, "remove": true},
+		},
 	}
 
-	klog.V(4).Infof("Successfully inherited (removed) user property %s from dataset: %s", propertyName, datasetID)
+	var result Dataset
+	err := c.Call(ctx, "pool.dataset.update", []interface{}{datasetID, params}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to remove user property %s on dataset %s: %w", propertyName, datasetID, err)
+	}
+
+	klog.V(4).Infof("Successfully removed user property %s from dataset: %s", propertyName, datasetID)
 	return nil
 }
 
@@ -2779,14 +2768,14 @@ func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([
 func (c *Client) ReloadISCSIService(ctx context.Context) error {
 	klog.V(4).Info("Reloading iSCSI service to apply configuration changes")
 
-	// service.reload reloads the service configuration without full restart.
+	// service.control(verb, service, options) is the documented API for managing services.
 	// For iSCSI, the service name is "iscsitarget" on TrueNAS Scale.
 	var result bool
-	err := c.Call(ctx, "service.reload", []interface{}{"iscsitarget"}, &result)
+	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "iscsitarget"}, &result)
 	if err != nil {
 		// If reload fails, try restart as fallback
 		klog.V(4).Infof("Service reload failed (%v), trying restart", err)
-		err = c.Call(ctx, "service.restart", []interface{}{"iscsitarget"}, &result)
+		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "iscsitarget"}, &result)
 		if err != nil {
 			return fmt.Errorf("failed to reload/restart iSCSI service: %w", err)
 		}

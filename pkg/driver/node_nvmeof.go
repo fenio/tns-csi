@@ -43,12 +43,12 @@ var defaultNVMeOFMountOptions = []string{"noatime"}
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
 // With independent subsystems per volume, NSID is always 1.
 type nvmeOFConnectionParams struct {
-	nqn         string
-	server      string
-	transport   string
-	port        string
-	nrIOQueues  string // optional: --nr-io-queues flag value
-	queueSize   string // optional: --queue-size flag value
+	nqn        string
+	server     string
+	transport  string
+	port       string
+	nrIOQueues string // optional: --nr-io-queues flag value
+	queueSize  string // optional: --queue-size flag value
 }
 
 // stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.

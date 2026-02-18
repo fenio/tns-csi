@@ -173,6 +173,9 @@ linters:
     gosec:
       excludes:
         - G404  # Use of weak random number generator (we don't use for crypto)
+        - G204  # Subprocess launched with variable - expected for CSI driver (nvme, mount, blkid, etc.)
+        - G117  # Exported struct field matches secret pattern - APIKey is a config field, not a secret in code
+        - G703  # Path traversal via taint analysis - false positive on socket file removal
       
     gocritic:
       enabled-tags:

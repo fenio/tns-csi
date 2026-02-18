@@ -1191,9 +1191,9 @@ func TestCreateNVMeOFVolumeQueueParams(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
 		extraParams   map[string]string
 		checkResponse func(*testing.T, *csi.CreateVolumeResponse)
+		name          string
 	}{
 		{
 			name: "queue params propagated to volumeContext",

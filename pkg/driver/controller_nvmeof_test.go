@@ -1090,6 +1090,201 @@ func TestSetupNVMeOFVolumeFromClone(t *testing.T) {
 	}
 }
 
+func TestInjectQueueParams(t *testing.T) {
+	tests := []struct {
+		name        string
+		nrIOQueues  string
+		queueSize   string
+		wantQueues  string
+		wantSize    string
+		wantPresent bool
+	}{
+		{
+			name:        "both params set",
+			nrIOQueues:  "16",
+			queueSize:   "1024",
+			wantQueues:  "16",
+			wantSize:    "1024",
+			wantPresent: true,
+		},
+		{
+			name:        "only nr-io-queues set",
+			nrIOQueues:  "8",
+			queueSize:   "",
+			wantQueues:  "8",
+			wantSize:    "",
+			wantPresent: true,
+		},
+		{
+			name:        "only queue-size set",
+			nrIOQueues:  "",
+			queueSize:   "512",
+			wantQueues:  "",
+			wantSize:    "512",
+			wantPresent: true,
+		},
+		{
+			name:        "neither param set - no keys injected",
+			nrIOQueues:  "",
+			queueSize:   "",
+			wantQueues:  "",
+			wantSize:    "",
+			wantPresent: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vc := map[string]string{}
+			injectQueueParams(vc, tt.nrIOQueues, tt.queueSize)
+
+			if tt.nrIOQueues != "" {
+				if got := vc["nvmeof.nr-io-queues"]; got != tt.wantQueues {
+					t.Errorf("nvmeof.nr-io-queues = %q, want %q", got, tt.wantQueues)
+				}
+			} else {
+				if _, ok := vc["nvmeof.nr-io-queues"]; ok {
+					t.Error("nvmeof.nr-io-queues should not be present when nrIOQueues is empty")
+				}
+			}
+
+			if tt.queueSize != "" {
+				if got := vc["nvmeof.queue-size"]; got != tt.wantSize {
+					t.Errorf("nvmeof.queue-size = %q, want %q", got, tt.wantSize)
+				}
+			} else {
+				if _, ok := vc["nvmeof.queue-size"]; ok {
+					t.Error("nvmeof.queue-size should not be present when queueSize is empty")
+				}
+			}
+		})
+	}
+}
+
+func TestCreateNVMeOFVolumeQueueParams(t *testing.T) {
+	ctx := context.Background()
+
+	commonMockSetup := func(m *MockAPIClientForSnapshots) {
+		m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+			return []tnsapi.Dataset{}, nil
+		}
+		m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+			return &tnsapi.Dataset{
+				ID:   "tank/nvme/test-volume",
+				Name: "tank/nvme/test-volume",
+				Type: "VOLUME",
+			}, nil
+		}
+		m.CreateNVMeOFSubsystemFunc = func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error) {
+			return &tnsapi.NVMeOFSubsystem{ID: 100, Name: params.Name, NQN: params.Name}, nil
+		}
+		m.QueryNVMeOFPortsFunc = func(ctx context.Context) ([]tnsapi.NVMeOFPort, error) {
+			return []tnsapi.NVMeOFPort{{ID: 1}}, nil
+		}
+		m.AddSubsystemToPortFunc = func(ctx context.Context, subsystemID, portID int) error {
+			return nil
+		}
+		m.CreateNVMeOFNamespaceFunc = func(ctx context.Context, params tnsapi.NVMeOFNamespaceCreateParams) (*tnsapi.NVMeOFNamespace, error) {
+			return &tnsapi.NVMeOFNamespace{ID: 200, NSID: 1}, nil
+		}
+		// SetDatasetProperties is handled by the embedded mock (always returns nil)
+	}
+
+	tests := []struct {
+		name          string
+		extraParams   map[string]string
+		checkResponse func(*testing.T, *csi.CreateVolumeResponse)
+	}{
+		{
+			name: "queue params propagated to volumeContext",
+			extraParams: map[string]string{
+				"nvmeof.nr-io-queues": "16",
+				"nvmeof.queue-size":   "1024",
+			},
+			checkResponse: func(t *testing.T, resp *csi.CreateVolumeResponse) {
+				t.Helper()
+				if got := resp.Volume.VolumeContext["nvmeof.nr-io-queues"]; got != "16" {
+					t.Errorf("nvmeof.nr-io-queues = %q, want \"16\"", got)
+				}
+				if got := resp.Volume.VolumeContext["nvmeof.queue-size"]; got != "1024" {
+					t.Errorf("nvmeof.queue-size = %q, want \"1024\"", got)
+				}
+			},
+		},
+		{
+			name:        "no queue params - keys absent from volumeContext",
+			extraParams: map[string]string{},
+			checkResponse: func(t *testing.T, resp *csi.CreateVolumeResponse) {
+				t.Helper()
+				if _, ok := resp.Volume.VolumeContext["nvmeof.nr-io-queues"]; ok {
+					t.Error("nvmeof.nr-io-queues should be absent when not specified")
+				}
+				if _, ok := resp.Volume.VolumeContext["nvmeof.queue-size"]; ok {
+					t.Error("nvmeof.queue-size should be absent when not specified")
+				}
+			},
+		},
+		{
+			name: "only nr-io-queues specified",
+			extraParams: map[string]string{
+				"nvmeof.nr-io-queues": "8",
+			},
+			checkResponse: func(t *testing.T, resp *csi.CreateVolumeResponse) {
+				t.Helper()
+				if got := resp.Volume.VolumeContext["nvmeof.nr-io-queues"]; got != "8" {
+					t.Errorf("nvmeof.nr-io-queues = %q, want \"8\"", got)
+				}
+				if _, ok := resp.Volume.VolumeContext["nvmeof.queue-size"]; ok {
+					t.Error("nvmeof.queue-size should be absent when not specified")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &MockAPIClientForSnapshots{}
+			commonMockSetup(mockClient)
+
+			params := map[string]string{
+				"protocol":      "nvmeof",
+				"pool":          "tank",
+				"server":        "192.168.1.100",
+				"parentDataset": "tank/nvme",
+			}
+			for k, v := range tt.extraParams {
+				params[k] = v
+			}
+
+			req := &csi.CreateVolumeRequest{
+				Name: "test-volume",
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Block{
+							Block: &csi.VolumeCapability_BlockVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+						},
+					},
+				},
+				Parameters:    params,
+				CapacityRange: &csi.CapacityRange{RequiredBytes: 5 * 1024 * 1024 * 1024},
+			}
+
+			controller := NewControllerService(mockClient, NewNodeRegistry())
+			resp, err := controller.createNVMeOFVolume(ctx, req)
+			if err != nil {
+				t.Fatalf("createNVMeOFVolume() unexpected error: %v", err)
+			}
+			if resp.Volume == nil {
+				t.Fatal("Expected non-nil volume in response")
+			}
+			tt.checkResponse(t, resp)
+		})
+	}
+}
+
 func TestGenerateNQN(t *testing.T) {
 	tests := []struct {
 		volumeName string

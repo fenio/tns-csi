@@ -43,10 +43,12 @@ var defaultNVMeOFMountOptions = []string{"noatime"}
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
 // With independent subsystems per volume, NSID is always 1.
 type nvmeOFConnectionParams struct {
-	nqn       string
-	server    string
-	transport string
-	port      string
+	nqn         string
+	server      string
+	transport   string
+	port        string
+	nrIOQueues  string // optional: --nr-io-queues flag value
+	queueSize   string // optional: --queue-size flag value
 }
 
 // stageNVMeOFVolume stages an NVMe-oF volume by connecting to the target.
@@ -305,10 +307,12 @@ func (s *NodeService) connectAndStageDevice(ctx context.Context, params *nvmeOFC
 // With independent subsystems, nsid is not required (always 1).
 func (s *NodeService) validateNVMeOFParams(volumeContext map[string]string) (*nvmeOFConnectionParams, error) {
 	params := &nvmeOFConnectionParams{
-		nqn:       volumeContext["nqn"],
-		server:    volumeContext["server"],
-		transport: volumeContext["transport"],
-		port:      volumeContext["port"],
+		nqn:        volumeContext["nqn"],
+		server:     volumeContext["server"],
+		transport:  volumeContext["transport"],
+		port:       volumeContext["port"],
+		nrIOQueues: volumeContext["nvmeof.nr-io-queues"],
+		queueSize:  volumeContext["nvmeof.queue-size"],
 	}
 
 	if params.nqn == "" || params.server == "" {
@@ -382,9 +386,10 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 	// --reconnect-delay=2: Wait 2 seconds before reconnecting after connection loss
 	// --ctrl-loss-tmo=60: Keep retrying for 60 seconds before giving up
 	// --keep-alive-tmo=5: Send keepalive every 5 seconds to detect dead connections
-	// --nr-io-queues=4: Use 4 I/O queues for better concurrency under load
-	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
-	connectCmd := exec.CommandContext(connectCtx, "nvme", "connect",
+	// --nr-io-queues: Number of I/O queues (default 4; configurable via StorageClass)
+	// --queue-size: Queue depth per I/O queue (kernel default 127; configurable via StorageClass)
+	connectArgs := []string{
+		"connect",
 		"-t", params.transport,
 		"-n", params.nqn,
 		"-a", params.server,
@@ -392,8 +397,22 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 		"--reconnect-delay=2",
 		"--ctrl-loss-tmo=60",
 		"--keep-alive-tmo=5",
-		"--nr-io-queues=4",
-	)
+	}
+
+	if params.nrIOQueues != "" {
+		connectArgs = append(connectArgs, "--nr-io-queues="+params.nrIOQueues)
+		klog.V(4).Infof("Using custom nr-io-queues=%s for NVMe-oF connection", params.nrIOQueues)
+	} else {
+		connectArgs = append(connectArgs, "--nr-io-queues=4") // default
+	}
+
+	if params.queueSize != "" {
+		connectArgs = append(connectArgs, "--queue-size="+params.queueSize)
+		klog.V(4).Infof("Using custom queue-size=%s for NVMe-oF connection", params.queueSize)
+	}
+
+	//nolint:gosec // nvme connect with volume context variables is expected for CSI driver
+	connectCmd := exec.CommandContext(connectCtx, "nvme", connectArgs...)
 	output, err := connectCmd.CombinedOutput()
 	if err != nil {
 		// Check if already connected (this is success, not an error)

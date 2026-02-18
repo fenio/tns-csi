@@ -962,3 +962,84 @@ func TestExtractNVMeOFOptionKey(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateNVMeOFParamsQueueParams(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil)
+
+	tests := []struct {
+		name           string
+		volumeContext  map[string]string
+		wantNrIOQueues string
+		wantQueueSize  string
+		wantErr        bool
+	}{
+		{
+			name: "queue params parsed from volumeContext",
+			volumeContext: map[string]string{
+				"nqn":                 "nqn.2137.csi.tns:test-vol",
+				"server":              "192.168.1.100",
+				"nvmeof.nr-io-queues": "16",
+				"nvmeof.queue-size":   "1024",
+			},
+			wantNrIOQueues: "16",
+			wantQueueSize:  "1024",
+		},
+		{
+			name: "only nr-io-queues specified",
+			volumeContext: map[string]string{
+				"nqn":                 "nqn.2137.csi.tns:test-vol",
+				"server":              "192.168.1.100",
+				"nvmeof.nr-io-queues": "8",
+			},
+			wantNrIOQueues: "8",
+			wantQueueSize:  "",
+		},
+		{
+			name: "only queue-size specified",
+			volumeContext: map[string]string{
+				"nqn":               "nqn.2137.csi.tns:test-vol",
+				"server":            "192.168.1.100",
+				"nvmeof.queue-size": "512",
+			},
+			wantNrIOQueues: "",
+			wantQueueSize:  "512",
+		},
+		{
+			name: "no queue params - defaults apply",
+			volumeContext: map[string]string{
+				"nqn":    "nqn.2137.csi.tns:test-vol",
+				"server": "192.168.1.100",
+			},
+			wantNrIOQueues: "",
+			wantQueueSize:  "",
+		},
+		{
+			name: "missing nqn returns error",
+			volumeContext: map[string]string{
+				"server": "192.168.1.100",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params, err := service.validateNVMeOFParams(tt.volumeContext)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error but got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("validateNVMeOFParams() unexpected error: %v", err)
+			}
+			if params.nrIOQueues != tt.wantNrIOQueues {
+				t.Errorf("nrIOQueues = %q, want %q", params.nrIOQueues, tt.wantNrIOQueues)
+			}
+			if params.queueSize != tt.wantQueueSize {
+				t.Errorf("queueSize = %q, want %q", params.queueSize, tt.wantQueueSize)
+			}
+		})
+	}
+}

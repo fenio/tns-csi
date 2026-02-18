@@ -58,6 +58,9 @@ type nvmeofVolumeParams struct {
 	pvcName      string
 	pvcNamespace string
 	storageClass string
+	// Queue tuning parameters for nvme connect (passed through to node via volumeContext)
+	nrIOQueues string // nvmeof.nr-io-queues StorageClass parameter
+	queueSize  string // nvmeof.queue-size StorageClass parameter
 }
 
 // zfsZvolProperties holds ZFS properties for ZVOL creation.
@@ -219,6 +222,8 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		pvcName:           pvcName,
 		pvcNamespace:      pvcNamespace,
 		storageClass:      storageClass,
+		nrIOQueues:        params["nvmeof.nr-io-queues"],
+		queueSize:         params["nvmeof.queue-size"],
 	}, nil
 }
 
@@ -253,6 +258,18 @@ func (s *ControllerService) findExistingNVMeOFNamespace(ctx context.Context, dev
 	}
 
 	return nil, nil //nolint:nilnil // nil, nil indicates "not found" - callers check for nil namespace
+}
+
+// injectQueueParams adds optional NVMe-oF queue tuning parameters into the volume context.
+// These are passed from StorageClass parameters to the node plugin via volumeContext so the
+// node can apply --nr-io-queues and --queue-size when running nvme connect.
+func injectQueueParams(volumeContext map[string]string, nrIOQueues, queueSize string) {
+	if nrIOQueues != "" {
+		volumeContext["nvmeof.nr-io-queues"] = nrIOQueues
+	}
+	if queueSize != "" {
+		volumeContext["nvmeof.queue-size"] = queueSize
+	}
 }
 
 // buildNVMeOFVolumeResponse builds the CreateVolumeResponse for an NVMe-oF volume.
@@ -338,6 +355,7 @@ func (s *ControllerService) handleExistingNVMeOFVolume(ctx context.Context, para
 
 		// Use subsystem.NQN (what TrueNAS actually has) not params.subsystemNQN (what we would request)
 		resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, subsystem.NQN, existingZvol, subsystem, namespace, existingCapacity)
+		injectQueueParams(resp.Volume.VolumeContext, params.nrIOQueues, params.queueSize)
 		timer.ObserveSuccess()
 		return resp, true, nil
 	}
@@ -481,6 +499,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 	// Use subsystem.NQN (what TrueNAS actually created) not params.subsystemNQN (what we requested)
 	// TrueNAS may assign a different NQN prefix than what we requested
 	resp := buildNVMeOFVolumeResponse(params.volumeName, params.server, subsystem.NQN, zvol, subsystem, namespace, params.requestedCapacity)
+	injectQueueParams(resp.Volume.VolumeContext, params.nrIOQueues, params.queueSize)
 
 	klog.Infof("Created NVMe-oF volume: %s (subsystem: %s, NSID: 1)", params.volumeName, subsystem.NQN)
 	timer.ObserveSuccess()
@@ -1145,6 +1164,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	// CRITICAL: Mark this volume as cloned from snapshot in VolumeContext
 	// This signals to the node that the volume has existing data and should NEVER be formatted
 	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
+	injectQueueParams(volumeContext, params["nvmeof.nr-io-queues"], params["nvmeof.queue-size"])
 
 	klog.Infof("Created NVMe-oF volume from snapshot: %s (subsystem: %s, NSID: 1)", volumeName, subsystem.NQN)
 
@@ -1303,6 +1323,7 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 	volumeContext := buildVolumeContext(meta)
 	volumeContext[VolumeContextKeyNSID] = "1"
 	volumeContext[VolumeContextKeyExpectedCapacity] = strconv.FormatInt(requestedCapacity, 10)
+	injectQueueParams(volumeContext, params["nvmeof.nr-io-queues"], params["nvmeof.queue-size"])
 
 	// Record volume capacity metric
 	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolNVMeOF, requestedCapacity)

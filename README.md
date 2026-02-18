@@ -2,6 +2,7 @@
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Go Version](https://img.shields.io/badge/Go-1.26.0-00ADD8?logo=go)](https://go.dev/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/fenio/tns-csi)](https://goreportcard.com/report/github.com/fenio/tns-csi)
 [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml)
 [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml)
 [![Distro Compatibility](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/distro-compatibility.yml)

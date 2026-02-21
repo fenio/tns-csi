@@ -183,22 +183,22 @@ Each GitHub release includes a pre-rendered manifest (`tns-csi-driver-<version>.
 | `storageClasses.nfs.volumeBindingMode` | Binding mode | `Immediate` |
 | `storageClasses.nfs.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nfs.mountOptions` | NFS mount options (merged with defaults) | `[]` |
-| `storageClasses.nfs.parameters` | Additional StorageClass parameters | `{}` |
+| `storageClasses.nfs.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
+| `storageClasses.nfs.nameTemplate` | Go template for volume names (e.g., `{{ .PVCNamespace }}-{{ .PVCName }}`) | `""` |
+| `storageClasses.nfs.namePrefix` | Prefix to prepend to volume name | `""` |
+| `storageClasses.nfs.nameSuffix` | Suffix to append to volume name | `""` |
+| `storageClasses.nfs.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
+| `storageClasses.nfs.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
+| `storageClasses.nfs.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
+| `storageClasses.nfs.encryption` | Enable ZFS native encryption | `""` |
+| `storageClasses.nfs.encryptionAlgorithm` | Encryption algorithm | `""` |
+| `storageClasses.nfs.encryptionGenerateKey` | Auto-generate encryption key | `""` |
+| `storageClasses.nfs.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
 
 **Additional NFS Parameters (via `parameters` map):**
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `delete` |
-| `nameTemplate` | Go template for volume names (e.g., `{{ .PVCNamespace }}-{{ .PVCName }}`) | (auto) |
-| `namePrefix` | Prefix to prepend to volume name | `""` |
-| `nameSuffix` | Suffix to append to volume name | `""` |
-| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
-| `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
-| `encryption` | Enable ZFS native encryption | `"false"` |
-| `encryptionAlgorithm` | Encryption algorithm | `"AES-256-GCM"` |
-| `encryptionGenerateKey` | Auto-generate encryption key | `"false"` |
 | `zfs.compression` | ZFS compression algorithm (e.g., `lz4`, `zstd`, `off`) | (inherited) |
 | `zfs.dedup` | ZFS deduplication | (inherited) |
 | `zfs.atime` | Access time updates | (inherited) |
@@ -229,23 +229,23 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 | `storageClasses.nvmeof.volumeBindingMode` | Binding mode | `Immediate` |
 | `storageClasses.nvmeof.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.nvmeof.mountOptions` | Filesystem mount options (merged with defaults) | `[]` |
-| `storageClasses.nvmeof.parameters` | Additional StorageClass parameters | `{}` |
+| `storageClasses.nvmeof.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
+| `storageClasses.nvmeof.nameTemplate` | Go template for volume names | `""` |
+| `storageClasses.nvmeof.namePrefix` | Prefix to prepend to volume name | `""` |
+| `storageClasses.nvmeof.nameSuffix` | Suffix to append to volume name | `""` |
+| `storageClasses.nvmeof.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
+| `storageClasses.nvmeof.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
+| `storageClasses.nvmeof.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
+| `storageClasses.nvmeof.encryption` | Enable ZFS native encryption | `""` |
+| `storageClasses.nvmeof.encryptionAlgorithm` | Encryption algorithm | `""` |
+| `storageClasses.nvmeof.encryptionGenerateKey` | Auto-generate encryption key | `""` |
+| `storageClasses.nvmeof.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
 
 **Additional NVMe-oF Parameters (via `parameters` map):**
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `delete` |
 | `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | (auto) |
-| `nameTemplate` | Go template for volume names | (auto) |
-| `namePrefix` | Prefix to prepend to volume name | `""` |
-| `nameSuffix` | Suffix to append to volume name | `""` |
-| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
-| `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
-| `encryption` | Enable ZFS native encryption | `"false"` |
-| `encryptionAlgorithm` | Encryption algorithm | `"AES-256-GCM"` |
-| `encryptionGenerateKey` | Auto-generate encryption key | `"false"` |
 | `zfs.compression` | ZFS compression algorithm | (inherited) |
 | `zfs.dedup` | ZFS deduplication | (inherited) |
 | `zfs.sync` | Sync writes | (inherited) |
@@ -269,22 +269,22 @@ The driver automatically creates a dedicated NVMe-oF subsystem per volume. No sh
 | `storageClasses.iscsi.volumeBindingMode` | Binding mode | `Immediate` |
 | `storageClasses.iscsi.allowVolumeExpansion` | Enable volume expansion | `true` |
 | `storageClasses.iscsi.mountOptions` | Filesystem mount options (merged with defaults) | `[]` |
-| `storageClasses.iscsi.parameters` | Additional StorageClass parameters | `{}` |
+| `storageClasses.iscsi.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
+| `storageClasses.iscsi.nameTemplate` | Go template for volume names | `""` |
+| `storageClasses.iscsi.namePrefix` | Prefix to prepend to volume name | `""` |
+| `storageClasses.iscsi.nameSuffix` | Suffix to append to volume name | `""` |
+| `storageClasses.iscsi.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
+| `storageClasses.iscsi.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
+| `storageClasses.iscsi.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
+| `storageClasses.iscsi.encryption` | Enable ZFS native encryption | `""` |
+| `storageClasses.iscsi.encryptionAlgorithm` | Encryption algorithm | `""` |
+| `storageClasses.iscsi.encryptionGenerateKey` | Auto-generate encryption key | `""` |
+| `storageClasses.iscsi.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
 
 **Additional iSCSI Parameters (via `parameters` map):**
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `delete` |
-| `nameTemplate` | Go template for volume names | (auto) |
-| `namePrefix` | Prefix to prepend to volume name | `""` |
-| `nameSuffix` | Suffix to append to volume name | `""` |
-| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `markAdoptable` | Mark new volumes as adoptable for cluster migration | `"false"` |
-| `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `"false"` |
-| `encryption` | Enable ZFS native encryption | `"false"` |
-| `encryptionAlgorithm` | Encryption algorithm | `"AES-256-GCM"` |
-| `encryptionGenerateKey` | Auto-generate encryption key | `"false"` |
 | `zfs.compression` | ZFS compression algorithm | (inherited) |
 | `zfs.dedup` | ZFS deduplication | (inherited) |
 | `zfs.sync` | Sync writes | (inherited) |
@@ -401,9 +401,8 @@ To use ZFS native encryption, set the encryption parameters in your StorageClass
 ```yaml
 storageClasses:
   nfs:
-    parameters:
-      encryption: "true"
-      encryptionGenerateKey: "true"  # TrueNAS manages the key
+    encryption: "true"
+    encryptionGenerateKey: "true"  # TrueNAS manages the key
 ```
 
 For passphrase-based encryption, create a Secret and reference it:
@@ -411,8 +410,8 @@ For passphrase-based encryption, create a Secret and reference it:
 ```yaml
 storageClasses:
   nfs:
+    encryption: "true"
     parameters:
-      encryption: "true"
       csi.storage.k8s.io/provisioner-secret-name: my-encryption-secret
       csi.storage.k8s.io/provisioner-secret-namespace: kube-system
 ```

@@ -21,6 +21,36 @@ parameters:
   {{- if $sc.parentDataset }}
   parentDataset: {{ $sc.parentDataset | quote }}
   {{- end }}
+  {{- if $sc.deleteStrategy }}
+  deleteStrategy: {{ $sc.deleteStrategy | quote }}
+  {{- end }}
+  {{- if $sc.nameTemplate }}
+  nameTemplate: {{ $sc.nameTemplate | quote }}
+  {{- end }}
+  {{- if $sc.namePrefix }}
+  namePrefix: {{ $sc.namePrefix | quote }}
+  {{- end }}
+  {{- if $sc.nameSuffix }}
+  nameSuffix: {{ $sc.nameSuffix | quote }}
+  {{- end }}
+  {{- if $sc.commentTemplate }}
+  commentTemplate: {{ $sc.commentTemplate | quote }}
+  {{- end }}
+  {{- if $sc.markAdoptable }}
+  markAdoptable: {{ $sc.markAdoptable | quote }}
+  {{- end }}
+  {{- if $sc.adoptExisting }}
+  adoptExisting: {{ $sc.adoptExisting | quote }}
+  {{- end }}
+  {{- if $sc.encryption }}
+  encryption: {{ $sc.encryption | quote }}
+  {{- end }}
+  {{- if $sc.encryptionAlgorithm }}
+  encryptionAlgorithm: {{ $sc.encryptionAlgorithm | quote }}
+  {{- end }}
+  {{- if $sc.encryptionGenerateKey }}
+  encryptionGenerateKey: {{ $sc.encryptionGenerateKey | quote }}
+  {{- end }}
   {{- if eq $name "nvmeof" }}
   transport: {{ $sc.transport | default "tcp" | quote }}
   port: {{ $sc.port | default "4420" | quote }}

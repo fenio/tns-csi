@@ -112,15 +112,21 @@ jobs:
             --namespace kube-system \
             --set truenas.url="wss://TRUENAS_IP/api/current" \
             --set truenas.apiKey="REPLACE_WITH_API_KEY" \
-            --set storageClasses.nfs.enabled=true \
-            --set storageClasses.nfs.server="TRUENAS_IP" \
-            --set storageClasses.nfs.pool="tank" \
-            --set storageClasses.nvmeof.enabled=true \
-            --set storageClasses.nvmeof.server="TRUENAS_IP" \
-            --set storageClasses.nvmeof.pool="tank" \
-            --set storageClasses.iscsi.enabled=true \
-            --set storageClasses.iscsi.server="TRUENAS_IP" \
-            --set storageClasses.iscsi.pool="tank" \
+            --set storageClasses[0].name=tns-csi-nfs \
+            --set storageClasses[0].enabled=true \
+            --set storageClasses[0].protocol=nfs \
+            --set storageClasses[0].server="TRUENAS_IP" \
+            --set storageClasses[0].pool="tank" \
+            --set storageClasses[1].name=tns-csi-nvmeof \
+            --set storageClasses[1].enabled=true \
+            --set storageClasses[1].protocol=nvmeof \
+            --set storageClasses[1].server="TRUENAS_IP" \
+            --set storageClasses[1].pool="tank" \
+            --set storageClasses[2].name=tns-csi-iscsi \
+            --set storageClasses[2].enabled=true \
+            --set storageClasses[2].protocol=iscsi \
+            --set storageClasses[2].server="TRUENAS_IP" \
+            --set storageClasses[2].pool="tank" \
             --set snapshots.enabled=true \
             > .helm-releases/tns-csi-driver-${{ steps.version.outputs.version }}.yaml
 

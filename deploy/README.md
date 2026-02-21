@@ -13,7 +13,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --namespace kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name=tns-csi-nfs \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nfs \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 Or using GitHub Container Registry:
@@ -24,7 +28,11 @@ helm install tns-csi oci://ghcr.io/fenio/charts/tns-csi-driver \
   --namespace kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name=tns-csi-nfs \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nfs \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 ### Version Pinning
@@ -53,10 +61,16 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set truenas.skipTLSVerify=true \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nfs.pool="tank" \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name=tns-csi-nfs \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nfs \
+  --set storageClasses[0].pool="tank" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP" \
+  --set storageClasses[1].name=tns-csi-nvmeof \
+  --set storageClasses[1].enabled=true \
+  --set storageClasses[1].protocol=nvmeof \
+  --set storageClasses[1].pool="tank" \
+  --set storageClasses[1].server="YOUR-TRUENAS-IP"
 ```
 
 ### Upgrading

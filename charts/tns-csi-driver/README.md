@@ -40,9 +40,8 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 Replace:
@@ -58,9 +57,8 @@ If you've cloned the repository, you can install from the local chart:
 helm install tns-csi ./charts/tns-csi-driver -n kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 ### Installation with Values File
@@ -75,9 +73,9 @@ truenas:
   apiKey: "1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 storageClasses:
-  nfs:
+  - name: truenas-nfs
     enabled: true
-    name: truenas-nfs
+    protocol: nfs
     pool: "tank"
     server: "YOUR-TRUENAS-IP"
     # Optional: specify parent dataset (must exist on TrueNAS)
@@ -86,12 +84,6 @@ storageClasses:
       - hard
       - nfsvers=4.1
       - noatime
-
-  nvmeof:
-    enabled: false
-
-  iscsi:
-    enabled: false
 ```
 
 Install with:
@@ -119,9 +111,8 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 #### NVMe-oF (Block storage, requires kernel modules)
@@ -132,9 +123,9 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP"
+  --set storageClasses[1].enabled=true \
+  --set storageClasses[1].pool="YOUR-POOL-NAME" \
+  --set storageClasses[1].server="YOUR-TRUENAS-IP"
 ```
 
 The driver automatically creates a dedicated NVMe-oF subsystem for each volume. No pre-configured subsystem is needed — only a port must be configured in TrueNAS (Shares > NVMe-oF Targets > Ports).
@@ -147,9 +138,9 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
-  --set storageClasses.iscsi.enabled=true \
-  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
-  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+  --set storageClasses[2].enabled=true \
+  --set storageClasses[2].pool="YOUR-POOL-NAME" \
+  --set storageClasses[2].server="YOUR-TRUENAS-IP"
 ```
 
 The driver automatically creates a dedicated iSCSI target for each volume. Only an iSCSI portal must be configured in TrueNAS (Shares > iSCSI).
@@ -169,41 +160,63 @@ Each GitHub release includes a pre-rendered manifest (`tns-csi-driver-<version>.
 | `truenas.existingSecret` | Name of existing Secret with `url` and `api-key` keys | `""` |
 | `truenas.skipTLSVerify` | Skip TLS certificate verification | `false` |
 
-### Storage Class Configuration - NFS
+### Storage Class Configuration
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `storageClasses.nfs.enabled` | Enable NFS storage class | `true` |
-| `storageClasses.nfs.name` | Storage class name | `tns-csi-nfs` |
-| `storageClasses.nfs.pool` | ZFS pool name on TrueNAS | `"storage"` |
-| `storageClasses.nfs.server` | TrueNAS server IP for NFS mounts | `""` (required) |
-| `storageClasses.nfs.parentDataset` | Parent dataset (optional, must exist) | `""` |
-| `storageClasses.nfs.isDefault` | Set as default storage class | `false` |
-| `storageClasses.nfs.reclaimPolicy` | Reclaim policy (Delete/Retain) | `Delete` |
-| `storageClasses.nfs.volumeBindingMode` | Binding mode | `Immediate` |
-| `storageClasses.nfs.allowVolumeExpansion` | Enable volume expansion | `true` |
-| `storageClasses.nfs.mountOptions` | NFS mount options (merged with defaults) | `[]` |
-| `storageClasses.nfs.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
-| `storageClasses.nfs.nameTemplate` | Go template for volume names (e.g., `{{ .PVCNamespace }}-{{ .PVCName }}`) | `""` |
-| `storageClasses.nfs.namePrefix` | Prefix to prepend to volume name | `""` |
-| `storageClasses.nfs.nameSuffix` | Suffix to append to volume name | `""` |
-| `storageClasses.nfs.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `storageClasses.nfs.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
-| `storageClasses.nfs.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
-| `storageClasses.nfs.encryption` | Enable ZFS native encryption | `""` |
-| `storageClasses.nfs.encryptionAlgorithm` | Encryption algorithm | `""` |
-| `storageClasses.nfs.encryptionGenerateKey` | Auto-generate encryption key | `""` |
-| `storageClasses.nfs.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
+`storageClasses` is a list. Each entry creates a Kubernetes StorageClass. You can have multiple entries with the same protocol (e.g., two NFS classes with different reclaim policies). The default values file includes three entries (NFS enabled, NVMe-oF and iSCSI disabled). Add more entries to the list as needed.
 
-**Additional NFS Parameters (via `parameters` map):**
+**Common Fields (all protocols):**
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `zfs.compression` | ZFS compression algorithm (e.g., `lz4`, `zstd`, `off`) | (inherited) |
-| `zfs.dedup` | ZFS deduplication | (inherited) |
-| `zfs.atime` | Access time updates | (inherited) |
-| `zfs.sync` | Sync writes | (inherited) |
-| `zfs.recordsize` | ZFS record size | (inherited) |
+| Field | Description | Default |
+|-------|-------------|---------|
+| `name` | StorageClass name (required) | — |
+| `protocol` | Protocol: `nfs`, `nvmeof`, or `iscsi` (required) | — |
+| `enabled` | Create this StorageClass | `true` |
+| `pool` | ZFS pool name on TrueNAS (required) | `"storage"` |
+| `server` | TrueNAS server IP/hostname (required) | `""` |
+| `parentDataset` | Parent dataset (optional, must exist) | `""` |
+| `isDefault` | Set as default storage class | `false` |
+| `reclaimPolicy` | Reclaim policy (Delete/Retain) | `Delete` |
+| `volumeBindingMode` | Binding mode | `Immediate` |
+| `allowVolumeExpansion` | Enable volume expansion | `true` |
+| `mountOptions` | Mount options (merged with driver defaults) | `[]` |
+| `deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
+| `nameTemplate` | Go template for volume names | `""` |
+| `namePrefix` | Prefix to prepend to volume name | `""` |
+| `nameSuffix` | Suffix to append to volume name | `""` |
+| `commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
+| `markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
+| `adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
+| `encryption` | Enable ZFS native encryption | `""` |
+| `encryptionAlgorithm` | Encryption algorithm | `""` |
+| `encryptionGenerateKey` | Auto-generate encryption key | `""` |
+| `parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
+
+**NVMe-oF-specific Fields:**
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `transport` | Transport protocol (tcp/rdma) | `tcp` |
+| `port` | NVMe-oF port | `4420` |
+| `fsType` | Filesystem type (ext4/xfs) | `ext4` |
+
+**iSCSI-specific Fields:**
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `port` | iSCSI port | `3260` |
+| `fsType` | Filesystem type (ext4/xfs) | `ext4` |
+
+**Additional Parameters (via `parameters` map):**
+
+| Parameter | Description | Protocols |
+|-----------|-------------|-----------|
+| `zfs.compression` | ZFS compression algorithm (e.g., `lz4`, `zstd`, `off`) | all |
+| `zfs.dedup` | ZFS deduplication | all |
+| `zfs.atime` | Access time updates | nfs |
+| `zfs.sync` | Sync writes | all |
+| `zfs.recordsize` | ZFS record size | nfs |
+| `zfs.volblocksize` | ZVOL block size (e.g., `16K`, `64K`) | nvmeof, iscsi |
+| `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | nvmeof |
 
 See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentation.
 
@@ -212,85 +225,25 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 - The full path would be `pool/parentDataset` (e.g., `tank/k8s-volumes`)
 - If empty or omitted, volumes will be created directly in the pool
 
-### Storage Class Configuration - NVMe-oF
+#### Multiple Storage Classes per Protocol
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `storageClasses.nvmeof.enabled` | Enable NVMe-oF storage class | `false` |
-| `storageClasses.nvmeof.name` | Storage class name | `tns-csi-nvmeof` |
-| `storageClasses.nvmeof.pool` | ZFS pool name on TrueNAS | `"storage"` |
-| `storageClasses.nvmeof.server` | TrueNAS server IP | `""` (required) |
-| `storageClasses.nvmeof.parentDataset` | Parent dataset (optional) | `""` |
-| `storageClasses.nvmeof.transport` | Transport protocol (tcp/rdma) | `tcp` |
-| `storageClasses.nvmeof.port` | NVMe-oF port | `4420` |
-| `storageClasses.nvmeof.fsType` | Filesystem type (ext4/xfs) | `ext4` |
-| `storageClasses.nvmeof.isDefault` | Set as default storage class | `false` |
-| `storageClasses.nvmeof.reclaimPolicy` | Reclaim policy | `Delete` |
-| `storageClasses.nvmeof.volumeBindingMode` | Binding mode | `Immediate` |
-| `storageClasses.nvmeof.allowVolumeExpansion` | Enable volume expansion | `true` |
-| `storageClasses.nvmeof.mountOptions` | Filesystem mount options (merged with defaults) | `[]` |
-| `storageClasses.nvmeof.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
-| `storageClasses.nvmeof.nameTemplate` | Go template for volume names | `""` |
-| `storageClasses.nvmeof.namePrefix` | Prefix to prepend to volume name | `""` |
-| `storageClasses.nvmeof.nameSuffix` | Suffix to append to volume name | `""` |
-| `storageClasses.nvmeof.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `storageClasses.nvmeof.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
-| `storageClasses.nvmeof.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
-| `storageClasses.nvmeof.encryption` | Enable ZFS native encryption | `""` |
-| `storageClasses.nvmeof.encryptionAlgorithm` | Encryption algorithm | `""` |
-| `storageClasses.nvmeof.encryptionGenerateKey` | Auto-generate encryption key | `""` |
-| `storageClasses.nvmeof.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
+To create multiple classes of the same protocol (e.g., Delete + Retain NFS classes), add more entries to the list:
 
-**Additional NVMe-oF Parameters (via `parameters` map):**
+```yaml
+storageClasses:
+  - name: tns-csi-nfs
+    protocol: nfs
+    pool: "tank"
+    server: "10.0.0.1"
+    reclaimPolicy: Delete
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | (auto) |
-| `zfs.compression` | ZFS compression algorithm | (inherited) |
-| `zfs.dedup` | ZFS deduplication | (inherited) |
-| `zfs.sync` | Sync writes | (inherited) |
-| `zfs.volblocksize` | ZVOL block size | (inherited) |
-
-The driver automatically creates a dedicated NVMe-oF subsystem per volume. No shared subsystem configuration is needed.
-
-### Storage Class Configuration - iSCSI
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `storageClasses.iscsi.enabled` | Enable iSCSI storage class | `false` |
-| `storageClasses.iscsi.name` | Storage class name | `tns-csi-iscsi` |
-| `storageClasses.iscsi.pool` | ZFS pool name on TrueNAS | `"storage"` |
-| `storageClasses.iscsi.server` | TrueNAS server IP | `""` (required) |
-| `storageClasses.iscsi.parentDataset` | Parent dataset (optional) | `""` |
-| `storageClasses.iscsi.port` | iSCSI port | `3260` |
-| `storageClasses.iscsi.fsType` | Filesystem type (ext4/xfs) | `ext4` |
-| `storageClasses.iscsi.isDefault` | Set as default storage class | `false` |
-| `storageClasses.iscsi.reclaimPolicy` | Reclaim policy | `Delete` |
-| `storageClasses.iscsi.volumeBindingMode` | Binding mode | `Immediate` |
-| `storageClasses.iscsi.allowVolumeExpansion` | Enable volume expansion | `true` |
-| `storageClasses.iscsi.mountOptions` | Filesystem mount options (merged with defaults) | `[]` |
-| `storageClasses.iscsi.deleteStrategy` | Volume deletion behavior: `delete` or `retain` | `""` |
-| `storageClasses.iscsi.nameTemplate` | Go template for volume names | `""` |
-| `storageClasses.iscsi.namePrefix` | Prefix to prepend to volume name | `""` |
-| `storageClasses.iscsi.nameSuffix` | Suffix to append to volume name | `""` |
-| `storageClasses.iscsi.commentTemplate` | Go template for dataset comment visible in TrueNAS UI | `""` |
-| `storageClasses.iscsi.markAdoptable` | Mark new volumes as adoptable for cluster migration | `""` |
-| `storageClasses.iscsi.adoptExisting` | Adopt existing TrueNAS volumes matching PVC name | `""` |
-| `storageClasses.iscsi.encryption` | Enable ZFS native encryption | `""` |
-| `storageClasses.iscsi.encryptionAlgorithm` | Encryption algorithm | `""` |
-| `storageClasses.iscsi.encryptionGenerateKey` | Auto-generate encryption key | `""` |
-| `storageClasses.iscsi.parameters` | Additional StorageClass parameters (ZFS properties, etc.) | `{}` |
-
-**Additional iSCSI Parameters (via `parameters` map):**
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `zfs.compression` | ZFS compression algorithm | (inherited) |
-| `zfs.dedup` | ZFS deduplication | (inherited) |
-| `zfs.sync` | Sync writes | (inherited) |
-| `zfs.volblocksize` | ZVOL block size | (inherited) |
-
-The driver automatically creates a dedicated iSCSI target per volume. Only an iSCSI portal must be configured in TrueNAS.
+  - name: tns-csi-nfs-retain
+    protocol: nfs
+    pool: "tank"
+    server: "10.0.0.1"
+    reclaimPolicy: Retain
+    deleteStrategy: retain
+```
 
 ### Snapshot Configuration
 
@@ -400,7 +353,10 @@ To use ZFS native encryption, set the encryption parameters in your StorageClass
 
 ```yaml
 storageClasses:
-  nfs:
+  - name: tns-csi-nfs
+    protocol: nfs
+    pool: "tank"
+    server: "10.0.0.1"
     encryption: "true"
     encryptionGenerateKey: "true"  # TrueNAS manages the key
 ```
@@ -409,7 +365,10 @@ For passphrase-based encryption, create a Secret and reference it:
 
 ```yaml
 storageClasses:
-  nfs:
+  - name: tns-csi-nfs
+    protocol: nfs
+    pool: "tank"
+    server: "10.0.0.1"
     encryption: "true"
     parameters:
       csi.storage.k8s.io/provisioner-secret-name: my-encryption-secret
@@ -433,6 +392,72 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --namespace kube-system \
   --values my-values.yaml
 ```
+
+### Migrating to v0.10.0 (from v0.9.x)
+
+v0.10.0 changes `storageClasses` from a **map** (keyed by protocol) to a **list**. This enables multiple StorageClasses per protocol but requires updating your values file before upgrading.
+
+**This change does not affect existing volumes, snapshots, or data.** Only the Helm values format changed — the CSI driver code is unchanged. As long as your StorageClass names stay the same, all existing PVCs and PVs continue working.
+
+#### Step 1: Update your values file
+
+Convert each map entry to a list item by adding `- ` prefix and an explicit `protocol` field:
+
+**Before (v0.9.x):**
+
+```yaml
+storageClasses:
+  nfs:
+    enabled: true
+    name: tns-csi-nfs
+    pool: "tank"
+    server: "10.0.0.1"
+    reclaimPolicy: Delete
+  nvmeof:
+    enabled: false
+  iscsi:
+    enabled: false
+```
+
+**After (v0.10.0):**
+
+```yaml
+storageClasses:
+  - name: tns-csi-nfs
+    enabled: true
+    protocol: nfs
+    pool: "tank"
+    server: "10.0.0.1"
+    reclaimPolicy: Delete
+```
+
+Key differences:
+- Each entry is a list item (starts with `- `)
+- `protocol` is now an explicit field (was the map key before)
+- Disabled protocols can simply be omitted instead of set to `enabled: false`
+- All other fields (`pool`, `server`, `reclaimPolicy`, `mountOptions`, `parameters`, etc.) stay exactly the same
+
+#### Step 2: Update `--set` flags (if used instead of a values file)
+
+If you use `--set` flags instead of a values file, update them to use array indexing:
+
+| Before | After |
+|--------|-------|
+| `--set storageClasses.nfs.enabled=true` | `--set storageClasses[0].enabled=true` |
+| `--set storageClasses.nfs.pool=tank` | `--set storageClasses[0].pool=tank` |
+| `--set storageClasses.nfs.server=10.0.0.1` | `--set storageClasses[0].server=10.0.0.1` |
+| | `--set storageClasses[0].protocol=nfs` (new, required) |
+| | `--set storageClasses[0].name=tns-csi-nfs` (new, required) |
+
+#### Step 3: Upgrade
+
+```bash
+helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --namespace kube-system \
+  --values my-values.yaml
+```
+
+**Important:** Do not use `--reuse-values` for this upgrade — the old map-format values are incompatible with the new chart and will cause template errors. Pass your updated values file explicitly.
 
 ## Uninstalling
 

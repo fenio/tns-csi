@@ -135,11 +135,18 @@ Validate required TrueNAS configuration
     {{- fail "\n\nCONFIGURATION ERROR: truenas.apiKey is required.\nCreate an API key in TrueNAS UI: Settings > API Keys\nExample: --set truenas.apiKey=\"1-xxxxxxxxxx\"" }}
   {{- end }}
 {{- end }}
-{{- if and .Values.storageClasses.nfs.enabled (not .Values.storageClasses.nfs.server) }}
-  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nfs.server is required when NFS is enabled.\nExample: --set storageClasses.nfs.server=\"YOUR-TRUENAS-IP\"" }}
+{{- range .Values.storageClasses }}
+{{- if .enabled }}
+{{- if and (eq .protocol "nfs") (not .server) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: server is required for NFS storage class %q.\nExample: --set 'storageClasses[0].server=YOUR-TRUENAS-IP'" .name) }}
 {{- end }}
-{{- if and .Values.storageClasses.nvmeof.enabled (not .Values.storageClasses.nvmeof.server) }}
-  {{- fail "\n\nCONFIGURATION ERROR: storageClasses.nvmeof.server is required when NVMe-oF is enabled.\nExample: --set storageClasses.nvmeof.server=\"YOUR-TRUENAS-IP\"" }}
+{{- if and (eq .protocol "nvmeof") (not .server) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: server is required for NVMe-oF storage class %q.\nExample: --set 'storageClasses[1].server=YOUR-TRUENAS-IP'" .name) }}
+{{- end }}
+{{- if and (eq .protocol "iscsi") (not .server) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: server is required for iSCSI storage class %q." .name) }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}
 
@@ -160,3 +167,89 @@ This allows users to either:
 {{- "latest" }}
 {{- end }}
 {{- end }}
+
+{{/*
+Render a StorageClass resource.
+Accepts a dict with keys: protocol, sc (storage class config), root (root context).
+*/}}
+{{- define "tns-csi-driver.storageclass" -}}
+{{- $protocol := .protocol -}}
+{{- $sc := .sc -}}
+{{- $ := .root -}}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ $sc.name }}
+  labels:
+    {{- include "tns-csi-driver.labels" $ | nindent 4 }}
+  {{- if $sc.isDefault }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+  {{- end }}
+provisioner: {{ include "tns-csi-driver.driverName" $ }}
+parameters:
+  protocol: {{ $protocol | quote }}
+  pool: {{ $sc.pool | quote }}
+  {{- if $sc.server }}
+  server: {{ $sc.server | quote }}
+  {{- end }}
+  {{- if $sc.parentDataset }}
+  parentDataset: {{ $sc.parentDataset | quote }}
+  {{- end }}
+  {{- if $sc.deleteStrategy }}
+  deleteStrategy: {{ $sc.deleteStrategy | quote }}
+  {{- end }}
+  {{- if $sc.nameTemplate }}
+  nameTemplate: {{ $sc.nameTemplate | quote }}
+  {{- end }}
+  {{- if $sc.namePrefix }}
+  namePrefix: {{ $sc.namePrefix | quote }}
+  {{- end }}
+  {{- if $sc.nameSuffix }}
+  nameSuffix: {{ $sc.nameSuffix | quote }}
+  {{- end }}
+  {{- if $sc.commentTemplate }}
+  commentTemplate: {{ $sc.commentTemplate | quote }}
+  {{- end }}
+  {{- if $sc.markAdoptable }}
+  markAdoptable: {{ $sc.markAdoptable | quote }}
+  {{- end }}
+  {{- if $sc.adoptExisting }}
+  adoptExisting: {{ $sc.adoptExisting | quote }}
+  {{- end }}
+  {{- if $sc.encryption }}
+  encryption: {{ $sc.encryption | quote }}
+  {{- end }}
+  {{- if $sc.encryptionAlgorithm }}
+  encryptionAlgorithm: {{ $sc.encryptionAlgorithm | quote }}
+  {{- end }}
+  {{- if $sc.encryptionGenerateKey }}
+  encryptionGenerateKey: {{ $sc.encryptionGenerateKey | quote }}
+  {{- end }}
+  {{- if eq $protocol "nvmeof" }}
+  transport: {{ $sc.transport | default "tcp" | quote }}
+  port: {{ $sc.port | default "4420" | quote }}
+  {{- if $sc.fsType }}
+  csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if eq $protocol "iscsi" }}
+  port: {{ $sc.port | default "3260" | quote }}
+  {{- if $sc.fsType }}
+  csi.storage.k8s.io/fstype: {{ $sc.fsType | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if $sc.parameters }}
+  {{- range $key, $value := $sc.parameters }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
+allowVolumeExpansion: {{ $sc.allowVolumeExpansion | default true }}
+reclaimPolicy: {{ $sc.reclaimPolicy | default "Delete" }}
+volumeBindingMode: {{ $sc.volumeBindingMode | default "Immediate" }}
+{{- if $sc.mountOptions }}
+mountOptions:
+  {{- toYaml $sc.mountOptions | nindent 2 }}
+{{- end }}
+{{ end }}

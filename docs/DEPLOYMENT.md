@@ -247,9 +247,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-nfs" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nfs" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **For NVMe-oF:**
@@ -260,10 +262,12 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nvmeof.subsystemNQN="nqn.2005-03.org.truenas:csi"
+  --set storageClasses[0].name="tns-csi-nvmeof" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nvmeof" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP" \
+  --set storageClasses[0].subsystemNQN="nqn.2005-03.org.truenas:csi"
 ```
 
 **Note:** Replace `nqn.2005-03.org.truenas:csi` with the actual subsystem NQN you configured in Step 1.4 (line 99).
@@ -276,9 +280,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.iscsi.enabled=true \
-  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
-  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-iscsi" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="iscsi" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **Note:** iSCSI requires a portal and initiator group to be pre-configured. See Step 1.5 for setup instructions.

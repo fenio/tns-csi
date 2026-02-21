@@ -1,78 +1,39 @@
 {{- if and .Values.snapshots.enabled .Values.snapshots.volumeSnapshotClass.create }}
-{{- if .Values.storageClasses.nfs.enabled }}
+{{- range .Values.storageClasses }}
+{{- if .enabled }}
 ---
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
 metadata:
-  name: {{ .Values.storageClasses.nfs.name }}-snapshot
+  name: {{ .name }}-snapshot
   labels:
-    {{- include "tns-csi-driver.labels" . | nindent 4 }}
-  {{- with .Values.customAnnotations }}
+    {{- include "tns-csi-driver.labels" $ | nindent 4 }}
+  {{- with $.Values.customAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-driver: {{ .Values.csiDriverName }}
-deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
-{{- end }}
-
-{{- if .Values.storageClasses.nvmeof.enabled }}
+driver: {{ $.Values.csiDriverName }}
+deletionPolicy: {{ $.Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+{{- if $.Values.snapshots.detached.enabled }}
 ---
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
 metadata:
-  name: {{ .Values.storageClasses.nvmeof.name }}-snapshot
+  name: {{ .name }}-snapshot-detached
   labels:
-    {{- include "tns-csi-driver.labels" . | nindent 4 }}
-  {{- with .Values.customAnnotations }}
+    {{- include "tns-csi-driver.labels" $ | nindent 4 }}
+  {{- with $.Values.customAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-driver: {{ .Values.csiDriverName }}
-deletionPolicy: {{ .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
-{{- end }}
-
-{{- /* Detached snapshot classes - create independent copies that survive source volume deletion */}}
-{{- if .Values.snapshots.detached.enabled }}
-{{- if .Values.storageClasses.nfs.enabled }}
----
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshotClass
-metadata:
-  name: {{ .Values.storageClasses.nfs.name }}-snapshot-detached
-  labels:
-    {{- include "tns-csi-driver.labels" . | nindent 4 }}
-  {{- with .Values.customAnnotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-driver: {{ .Values.csiDriverName }}
-deletionPolicy: {{ .Values.snapshots.detached.deletionPolicy | default .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
+driver: {{ $.Values.csiDriverName }}
+deletionPolicy: {{ $.Values.snapshots.detached.deletionPolicy | default $.Values.snapshots.volumeSnapshotClass.deletionPolicy }}
 parameters:
   detachedSnapshots: "true"
-  {{- if .Values.snapshots.detached.parentDataset }}
-  detachedSnapshotsParentDataset: {{ .Values.snapshots.detached.parentDataset | quote }}
+  {{- if $.Values.snapshots.detached.parentDataset }}
+  detachedSnapshotsParentDataset: {{ $.Values.snapshots.detached.parentDataset | quote }}
   {{- end }}
 {{- end }}
-
-{{- if .Values.storageClasses.nvmeof.enabled }}
----
-apiVersion: snapshot.storage.k8s.io/v1
-kind: VolumeSnapshotClass
-metadata:
-  name: {{ .Values.storageClasses.nvmeof.name }}-snapshot-detached
-  labels:
-    {{- include "tns-csi-driver.labels" . | nindent 4 }}
-  {{- with .Values.customAnnotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
-driver: {{ .Values.csiDriverName }}
-deletionPolicy: {{ .Values.snapshots.detached.deletionPolicy | default .Values.snapshots.volumeSnapshotClass.deletionPolicy }}
-parameters:
-  detachedSnapshots: "true"
-  {{- if .Values.snapshots.detached.parentDataset }}
-  detachedSnapshotsParentDataset: {{ .Values.snapshots.detached.parentDataset | quote }}
-  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

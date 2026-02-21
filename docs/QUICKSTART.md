@@ -25,9 +25,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-nfs" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nfs" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **Replace these values:**
@@ -44,7 +46,7 @@ That's it! The driver is now installed and ready to use.
 kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
 
 # Check storage class created
-kubectl get storageclass truenas-nfs
+kubectl get storageclass tns-csi-nfs
 
 # View controller logs
 kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
@@ -59,9 +61,11 @@ helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-nfs" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nfs" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 For more Helm configuration options, see the [Helm Chart README](../charts/tns-csi-driver/README.md).
@@ -286,9 +290,9 @@ truenas:
   apiKey: "1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 storageClasses:
-  nfs:
+  - name: tns-csi-nfs
     enabled: true
-    name: truenas-nfs
+    protocol: nfs
     pool: "tank"
     server: "YOUR-TRUENAS-IP"
     # Optional: specify parent dataset (must exist on TrueNAS)
@@ -327,10 +331,12 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP" \
-  --set "storageClasses.nfs.parameters.deleteStrategy=retain"
+  --set storageClasses[0].name="tns-csi-nfs" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nfs" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP" \
+  --set "storageClasses[0].parameters.deleteStrategy=retain"
 ```
 
 ### Volume Expansion
@@ -355,10 +361,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nvmeof.subsystemNQN="nqn.2025-01.com.truenas:csi"
+  --set storageClasses[0].name="tns-csi-nvmeof" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nvmeof" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **Requirements:**

@@ -101,9 +101,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.iscsi.enabled=true \
-  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
-  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-iscsi" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="iscsi" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **Replace these values:**
@@ -257,10 +259,12 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --namespace kube-system \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.iscsi.enabled=true \
-  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
-  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP" \
-  --set "storageClasses.iscsi.parameters.deleteStrategy=retain"
+  --set storageClasses[0].name="tns-csi-iscsi" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="iscsi" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP" \
+  --set "storageClasses[0].parameters.deleteStrategy=retain"
 ```
 
 ### Encryption

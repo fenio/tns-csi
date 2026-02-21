@@ -149,9 +149,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name=tns-csi-nfs \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nfs \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **NVMe-oF Example:**
@@ -162,11 +164,13 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nvmeof.server="YOUR-TRUENAS-IP" \
-  --set storageClasses.nvmeof.transport=tcp \
-  --set storageClasses.nvmeof.port=4420
+  --set storageClasses[0].name=tns-csi-nvmeof \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nvmeof \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP" \
+  --set storageClasses[0].transport=tcp \
+  --set storageClasses[0].port=4420
 ```
 
 **Note:** NVMe-oF requires a TCP port to be pre-configured in TrueNAS (Shares > NVMe-oF Targets > Ports). Subsystems are automatically created per volume.
@@ -179,9 +183,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.iscsi.enabled=true \
-  --set storageClasses.iscsi.pool="YOUR-POOL-NAME" \
-  --set storageClasses.iscsi.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name=tns-csi-iscsi \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=iscsi \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 ```
 
 **Note:** iSCSI requires the iSCSI service to be enabled in TrueNAS (System > Services). Targets and extents are automatically created per volume.

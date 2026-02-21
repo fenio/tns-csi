@@ -183,9 +183,11 @@ helm install tns-csi ./charts/tns-csi-driver \
   --namespace kube-system \
   --set truenas.host=YOUR-TRUENAS-IP \
   --set truenas.apiKey=<your-api-key> \
-  --set storageClasses.nvmeof.enabled=true \
-  --set storageClasses.nvmeof.pool=<your-pool-name> \
-  --set storageClasses.nvmeof.server=YOUR-TRUENAS-IP
+  --set storageClasses[0].name=tns-csi-nvmeof \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol=nvmeof \
+  --set storageClasses[0].pool=<your-pool-name> \
+  --set storageClasses[0].server=YOUR-TRUENAS-IP
 ```
 
 ### Test NVMe-oF Volume

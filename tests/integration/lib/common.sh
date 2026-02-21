@@ -408,32 +408,31 @@ deploy_driver() {
     case "${protocol}" in
         nfs)
             base_args+=(
-                --set storageClasses.nfs.enabled=true
-                --set storageClasses.nfs.name=tns-csi-nfs
-                --set storageClasses.nfs.pool="${TRUENAS_POOL}"
-                --set storageClasses.nfs.server="${TRUENAS_HOST}"
-                --set storageClasses.nvmeof.enabled=false
+                --set storageClasses[0].name=tns-csi-nfs
+                --set storageClasses[0].enabled=true
+                --set storageClasses[0].protocol=nfs
+                --set storageClasses[0].pool="${TRUENAS_POOL}"
+                --set storageClasses[0].server="${TRUENAS_HOST}"
             )
             ;;
         nvmeof)
             base_args+=(
-                --set storageClasses.nfs.enabled=false
-                --set storageClasses.nvmeof.enabled=true
-                --set storageClasses.nvmeof.name=tns-csi-nvmeof
-                --set storageClasses.nvmeof.pool="${TRUENAS_POOL}"
-                --set storageClasses.nvmeof.server="${TRUENAS_HOST}"
-                --set storageClasses.nvmeof.transport=tcp
-                --set storageClasses.nvmeof.port=4420
+                --set storageClasses[0].name=tns-csi-nvmeof
+                --set storageClasses[0].enabled=true
+                --set storageClasses[0].protocol=nvmeof
+                --set storageClasses[0].pool="${TRUENAS_POOL}"
+                --set storageClasses[0].server="${TRUENAS_HOST}"
+                --set storageClasses[0].transport=tcp
+                --set storageClasses[0].port=4420
             )
             ;;
         iscsi)
             base_args+=(
-                --set storageClasses.nfs.enabled=false
-                --set storageClasses.nvmeof.enabled=false
-                --set storageClasses.iscsi.enabled=true
-                --set storageClasses.iscsi.name=tns-csi-iscsi
-                --set storageClasses.iscsi.pool="${TRUENAS_POOL}"
-                --set storageClasses.iscsi.server="${TRUENAS_HOST}"
+                --set storageClasses[0].name=tns-csi-iscsi
+                --set storageClasses[0].enabled=true
+                --set storageClasses[0].protocol=iscsi
+                --set storageClasses[0].pool="${TRUENAS_POOL}"
+                --set storageClasses[0].server="${TRUENAS_HOST}"
             )
             ;;
         *)

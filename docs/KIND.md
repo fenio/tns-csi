@@ -43,9 +43,11 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
-  --set storageClasses.nfs.enabled=true \
-  --set storageClasses.nfs.pool="YOUR-POOL-NAME" \
-  --set storageClasses.nfs.server="YOUR-TRUENAS-IP"
+  --set storageClasses[0].name="tns-csi-nfs" \
+  --set storageClasses[0].enabled=true \
+  --set storageClasses[0].protocol="nfs" \
+  --set storageClasses[0].pool="YOUR-POOL-NAME" \
+  --set storageClasses[0].server="YOUR-TRUENAS-IP"
 
 # Verify deployment
 kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver

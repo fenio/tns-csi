@@ -218,11 +218,14 @@ sidecars:
         memory: 200Mi
 
 # Storage class configuration
+# Each entry creates a Kubernetes StorageClass. You can have multiple classes
+# per protocol (e.g., two NFS classes with different reclaim policies).
+# Required fields per entry: name, protocol (nfs/nvmeof/iscsi), pool
 storageClasses:
   # NFS storage class
-  nfs:
+  - name: tns-csi-nfs
     enabled: true
-    name: tns-csi-nfs
+    protocol: nfs
     # Set as default storage class
     isDefault: false
     # Storage pool name on TrueNAS
@@ -297,9 +300,9 @@ storageClasses:
   # IMPORTANT: Before enabling, ensure you have configured an NVMe-oF port
   # in TrueNAS (Shares > NVMe-oF Targets > Ports). The CSI driver automatically
   # creates a dedicated subsystem for each volume - no pre-configured subsystem needed.
-  nvmeof:
+  - name: tns-csi-nvmeof
     enabled: false
-    name: tns-csi-nvmeof
+    protocol: nvmeof
     isDefault: false
     # Storage pool name on TrueNAS
     pool: "storage"
@@ -371,9 +374,9 @@ storageClasses:
   # IMPORTANT: Before enabling, ensure you have configured an iSCSI portal
   # in TrueNAS (Shares > iSCSI). The CSI driver automatically creates a
   # dedicated target for each volume - no pre-configured target needed.
-  iscsi:
+  - name: tns-csi-iscsi
     enabled: false
-    name: tns-csi-iscsi
+    protocol: iscsi
     isDefault: false
     # Storage pool name on TrueNAS
     pool: "storage"
@@ -437,6 +440,15 @@ storageClasses:
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
     #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
     parameters: {}
+
+  # To add more storage classes, simply add more entries to this list:
+  # - name: tns-csi-nfs-retain
+  #   enabled: true
+  #   protocol: nfs
+  #   pool: "tank"
+  #   server: "10.0.0.1"
+  #   reclaimPolicy: Retain
+  #   deleteStrategy: retain
 
 # Snapshot support
 snapshots:

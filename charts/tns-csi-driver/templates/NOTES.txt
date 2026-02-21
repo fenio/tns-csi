@@ -17,17 +17,17 @@ To verify the installation:
    kubectl get storageclass
 
 Storage Classes Created:
-{{- range $name, $sc := .Values.storageClasses }}
-{{- if $sc.enabled }}
-  - {{ $sc.name }} ({{ $name }})
+{{- range .Values.storageClasses }}
+{{- if .enabled }}
+  - {{ .name }} ({{ .protocol }})
 {{- end }}
 {{- end }}
 
 To create a test PersistentVolumeClaim:
 {{- $firstSC := "" }}
-{{- range $name, $sc := .Values.storageClasses }}
-{{- if and $sc.enabled (eq $firstSC "") }}
-{{- $firstSC = $sc.name }}
+{{- range .Values.storageClasses }}
+{{- if and .enabled (eq $firstSC "") }}
+{{- $firstSC = .name }}
 {{- end }}
 {{- end }}
 

@@ -220,13 +220,16 @@ helm install tns-csi "${OCI_CHART_REPO}" \
     --set truenas.apiKey="${TRUENAS_API_KEY}" \
     --set truenas.skipTLSVerify=true \
     --set node.kubeletPath="${KUBELET_PATH}" \
-    --set storageClasses.nfs.enabled=true \
-    --set storageClasses.nfs.pool="${TRUENAS_POOL}" \
-    --set storageClasses.nfs.server="${TRUENAS_HOST}" \
-    --set storageClasses.nvmeof.enabled=false \
-    --set storageClasses.iscsi.enabled=true \
-    --set storageClasses.iscsi.pool="${TRUENAS_POOL}" \
-    --set storageClasses.iscsi.server="${TRUENAS_HOST}" \
+    --set storageClasses[0].name=tns-csi-nfs \
+    --set storageClasses[0].enabled=true \
+    --set storageClasses[0].protocol=nfs \
+    --set storageClasses[0].pool="${TRUENAS_POOL}" \
+    --set storageClasses[0].server="${TRUENAS_HOST}" \
+    --set storageClasses[1].name=tns-csi-iscsi \
+    --set storageClasses[1].enabled=true \
+    --set storageClasses[1].protocol=iscsi \
+    --set storageClasses[1].pool="${TRUENAS_POOL}" \
+    --set storageClasses[1].server="${TRUENAS_HOST}" \
     --wait --timeout 5m
 
 info "Waiting for driver pods to be ready..."

@@ -27,8 +27,9 @@ var (
 	apiKey        = flag.String("api-key", "", "Storage system API key")
 	metricsAddr   = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
 	skipTLSVerify = flag.Bool("skip-tls-verify", false, "Skip TLS certificate verification (for self-signed certificates)")
-	showVersion   = flag.Bool("show-version", false, "Show version and exit")
-	debug         = flag.Bool("debug", false, "Enable debug logging (equivalent to -v=4)")
+	showVersion               = flag.Bool("show-version", false, "Show version and exit")
+	debug                     = flag.Bool("debug", false, "Enable debug logging (equivalent to -v=4)")
+	maxConcurrentNVMeConnects = flag.Int("max-concurrent-nvme-connects", 5, "Maximum number of concurrent NVMe-oF connect operations per node (limits kernel NVMe subsystem lock contention)")
 )
 
 func main() {
@@ -71,14 +72,15 @@ func main() {
 	klog.V(4).Infof("Node ID: %s", *nodeID)
 
 	drv, err := driver.NewDriver(driver.Config{
-		DriverName:    *driverName,
-		Version:       version,
-		NodeID:        *nodeID,
-		Endpoint:      *endpoint,
-		APIURL:        *apiURL,
-		APIKey:        *apiKey,
-		MetricsAddr:   *metricsAddr,
-		SkipTLSVerify: *skipTLSVerify,
+		DriverName:                *driverName,
+		Version:                   version,
+		NodeID:                    *nodeID,
+		Endpoint:                  *endpoint,
+		APIURL:                    *apiURL,
+		APIKey:                    *apiKey,
+		MetricsAddr:               *metricsAddr,
+		SkipTLSVerify:             *skipTLSVerify,
+		MaxConcurrentNVMeConnects: *maxConcurrentNVMeConnects,
 	})
 	if err != nil {
 		klog.Fatalf("Failed to create driver: %v", err)

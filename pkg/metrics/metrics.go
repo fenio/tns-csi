@@ -177,6 +177,23 @@ var (
 		},
 	)
 
+	// NVMe-oF connect concurrency metrics.
+	nvmeConnectConcurrent = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "nvme_connect_concurrent",
+			Help:      "Number of NVMe-oF connect operations currently in progress",
+		},
+	)
+
+	nvmeConnectWaiting = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "nvme_connect_waiting",
+			Help:      "Number of NVMe-oF connect operations waiting for the semaphore",
+		},
+	)
+
 	// Volume capacity metrics.
 	volumeCapacityBytes = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -238,6 +255,18 @@ func SetVolumeCapacity(volumeID, protocol string, bytes int64) {
 func DeleteVolumeCapacity(volumeID, protocol string) {
 	volumeCapacityBytes.DeleteLabelValues(volumeID, protocol)
 }
+
+// NVMeConnectWaiting increments the waiting gauge.
+func NVMeConnectWaiting() { nvmeConnectWaiting.Inc() }
+
+// NVMeConnectDoneWaiting decrements the waiting gauge.
+func NVMeConnectDoneWaiting() { nvmeConnectWaiting.Dec() }
+
+// NVMeConnectStart increments the concurrent gauge.
+func NVMeConnectStart() { nvmeConnectConcurrent.Inc() }
+
+// NVMeConnectDone decrements the concurrent gauge.
+func NVMeConnectDone() { nvmeConnectConcurrent.Dec() }
 
 // OperationTimer helps time operations and record metrics automatically.
 type OperationTimer struct {

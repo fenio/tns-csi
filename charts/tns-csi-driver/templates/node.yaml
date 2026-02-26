@@ -55,6 +55,7 @@ spec:
             {{- if .Values.truenas.skipTLSVerify }}
             - "--skip-tls-verify"
             {{- end }}
+            - "--max-concurrent-nvme-connects={{ .Values.node.maxConcurrentNVMeConnects | default 5 }}"
           env:
             - name: NODE_ID
               valueFrom:

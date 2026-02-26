@@ -144,6 +144,11 @@ node:
   # Affinity for node pods
   affinity: {}
   
+  # Maximum concurrent NVMe-oF connect operations per node.
+  # Limits contention on the kernel's NVMe subsystem registration lock.
+  # Recommended: 3-5. Set to 0 for unlimited (not recommended with >10 volumes per node).
+  maxConcurrentNVMeConnects: 5
+
   # Update strategy for DaemonSet
   updateStrategy:
     type: RollingUpdate

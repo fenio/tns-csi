@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/mount"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -77,6 +78,27 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	if checkErr := s.checkNVMeCLI(ctx); checkErr != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "nvme-cli not available: %v", checkErr)
 	}
+
+	// Acquire semaphore to limit concurrent NVMe-oF connect operations.
+	// This prevents overwhelming the kernel's NVMe subsystem registration lock
+	// when many volumes are being staged simultaneously.
+	klog.V(4).Infof("Waiting for NVMe-oF connect semaphore (capacity: %d) for NQN: %s", cap(s.nvmeConnectSem), params.nqn)
+	metrics.NVMeConnectWaiting()
+	select {
+	case s.nvmeConnectSem <- struct{}{}:
+		metrics.NVMeConnectDoneWaiting()
+		metrics.NVMeConnectStart()
+		defer func() {
+			<-s.nvmeConnectSem
+			metrics.NVMeConnectDone()
+		}()
+	case <-ctx.Done():
+		metrics.NVMeConnectDoneWaiting()
+		return nil, status.Errorf(codes.DeadlineExceeded,
+			"timed out waiting for NVMe-oF connect semaphore (max concurrent: %d): %v",
+			cap(s.nvmeConnectSem), ctx.Err())
+	}
+	klog.V(4).Infof("Acquired NVMe-oF connect semaphore for NQN: %s", params.nqn)
 
 	// Connect to NVMe-oF target and stage device
 	return s.connectAndStageDevice(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext, datasetName)

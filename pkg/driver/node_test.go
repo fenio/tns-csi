@@ -26,7 +26,7 @@ func TestNewNodeService(t *testing.T) {
 	mockClient := &mockAPIClient{}
 	nodeID := "test-node-123"
 
-	service := NewNodeService(nodeID, mockClient, true, registry)
+	service := NewNodeService(nodeID, mockClient, true, registry, false)
 
 	// Use require pattern - fail immediately if nil.
 	requireNotNilNode(t, service, "NewNodeService returned nil")
@@ -43,7 +43,7 @@ func TestNewNodeService(t *testing.T) {
 }
 
 func TestNodeGetCapabilities(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 
 	resp, err := service.NodeGetCapabilities(context.Background(), nil)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestNodeGetInfo(t *testing.T) {
 	t.Run("with registry", func(t *testing.T) {
 		registry := NewNodeRegistry()
 		nodeID := "test-node-456"
-		service := NewNodeService(nodeID, nil, true, registry)
+		service := NewNodeService(nodeID, nil, true, registry, false)
 
 		resp, err := service.NodeGetInfo(context.Background(), nil)
 		if err != nil {
@@ -104,7 +104,7 @@ func TestNodeGetInfo(t *testing.T) {
 
 	t.Run("without registry", func(t *testing.T) {
 		nodeID := "test-node-789"
-		service := NewNodeService(nodeID, nil, true, nil)
+		service := NewNodeService(nodeID, nil, true, nil, false)
 
 		resp, err := service.NodeGetInfo(context.Background(), nil)
 		if err != nil {
@@ -118,7 +118,7 @@ func TestNodeGetInfo(t *testing.T) {
 }
 
 func TestNodeStageVolume_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -210,7 +210,7 @@ func TestNodeStageVolume_Validation(t *testing.T) {
 }
 
 func TestNodeUnstageVolume_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -265,7 +265,7 @@ func TestNodeUnstageVolume_Validation(t *testing.T) {
 }
 
 func TestNodePublishVolume_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -358,7 +358,7 @@ func TestNodePublishVolume_Validation(t *testing.T) {
 }
 
 func TestNodeUnpublishVolume_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -425,7 +425,7 @@ func TestNodeUnpublishVolume_TestMode(t *testing.T) {
 		t.Fatalf("Failed to create target path: %v", mkdirErr)
 	}
 
-	service := NewNodeService("test-node", nil, true, nil) // testMode=true
+	service := NewNodeService("test-node", nil, true, nil, false) // testMode=true
 	ctx := context.Background()
 
 	resp, err := service.NodeUnpublishVolume(ctx, &csi.NodeUnpublishVolumeRequest{
@@ -447,7 +447,7 @@ func TestNodeUnpublishVolume_TestMode(t *testing.T) {
 }
 
 func TestNodeGetVolumeStats_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -518,7 +518,7 @@ func TestNodeGetVolumeStats_TestMode(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	service := NewNodeService("test-node", nil, true, nil) // testMode=true
+	service := NewNodeService("test-node", nil, true, nil, false) // testMode=true
 	ctx := context.Background()
 
 	resp, err := service.NodeGetVolumeStats(ctx, &csi.NodeGetVolumeStatsRequest{
@@ -561,7 +561,7 @@ func TestNodeGetVolumeStats_TestMode(t *testing.T) {
 }
 
 func TestNodeExpandVolume_Validation(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 	ctx := context.Background()
 
 	//nolint:govet // Field alignment not critical for test structs
@@ -632,7 +632,7 @@ func TestNodeExpandVolume_TestMode(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	service := NewNodeService("test-node", nil, true, nil) // testMode=true
+	service := NewNodeService("test-node", nil, true, nil, false) // testMode=true
 	ctx := context.Background()
 
 	requestedBytes := int64(5 * 1024 * 1024 * 1024) // 5GB
@@ -964,7 +964,7 @@ func TestExtractNVMeOFOptionKey(t *testing.T) {
 }
 
 func TestValidateNVMeOFParamsQueueParams(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil)
+	service := NewNodeService("test-node", nil, true, nil, false)
 
 	tests := []struct {
 		name           string

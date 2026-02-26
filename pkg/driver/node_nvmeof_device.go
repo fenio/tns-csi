@@ -19,13 +19,17 @@ import (
 // This handles transient failures when TrueNAS has just created a new subsystem
 // (e.g., for snapshot-restored volumes) but it's not yet fully ready for connections.
 func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFConnectionParams) error {
-	// Discover the NVMe-oF target
-	klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", params.server, params.port)
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
-	defer discoverCancel()
-	discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", params.transport, "-a", params.server, "-s", params.port)
-	if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
-		klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
+	if s.enableDiscovery {
+		// Discover the NVMe-oF target
+		klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", params.server, params.port)
+		discoverCtx, discoverCancel := context.WithTimeout(ctx, 15*time.Second)
+		defer discoverCancel()
+		discoverCmd := exec.CommandContext(discoverCtx, "nvme", "discover", "-t", params.transport, "-a", params.server, "-s", params.port)
+		if output, discoverErr := discoverCmd.CombinedOutput(); discoverErr != nil {
+			klog.Warningf("NVMe discover failed (this may be OK if target is already known): %v, output: %s", discoverErr, string(output))
+		}
+	} else {
+		klog.V(4).Infof("Skipping NVMe discover for %s (all connection params known from volume context)", params.nqn)
 	}
 
 	// Connect to the NVMe-oF target with retry logic

@@ -35,19 +35,21 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient    tnsapi.ClientInterface
-	nodeRegistry *NodeRegistry
-	nodeID       string
-	testMode     bool // Test mode flag to skip actual mounts
+	apiClient       tnsapi.ClientInterface
+	nodeRegistry    *NodeRegistry
+	nodeID          string
+	testMode        bool // Test mode flag to skip actual mounts
+	enableDiscovery bool // Run nvme discover before nvme connect
 }
 
 // NewNodeService creates a new node service.
-func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bool, nodeRegistry *NodeRegistry) *NodeService {
+func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bool, nodeRegistry *NodeRegistry, enableDiscovery bool) *NodeService {
 	return &NodeService{
-		nodeID:       nodeID,
-		apiClient:    apiClient,
-		testMode:     testMode,
-		nodeRegistry: nodeRegistry,
+		nodeID:          nodeID,
+		apiClient:       apiClient,
+		testMode:        testMode,
+		nodeRegistry:    nodeRegistry,
+		enableDiscovery: enableDiscovery,
 	}
 }
 

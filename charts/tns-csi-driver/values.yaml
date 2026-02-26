@@ -144,6 +144,12 @@ node:
   # Affinity for node pods
   affinity: {}
   
+  # NVMe-oF optimization settings
+  # Skip redundant nvme discover before nvme connect.
+  # All connection params (NQN, server, port, transport) are already known from volume context.
+  # Enable only if you need discovery for multi-path or dynamic target topologies.
+  enableNVMeDiscovery: false
+
   # Update strategy for DaemonSet
   updateStrategy:
     type: RollingUpdate

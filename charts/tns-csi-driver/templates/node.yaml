@@ -55,6 +55,9 @@ spec:
             {{- if .Values.truenas.skipTLSVerify }}
             - "--skip-tls-verify"
             {{- end }}
+            {{- if .Values.node.enableNVMeDiscovery }}
+            - "--enable-nvme-discovery"
+            {{- end }}
           env:
             - name: NODE_ID
               valueFrom:

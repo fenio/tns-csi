@@ -617,7 +617,12 @@ kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
    - Verify subsystem exists: `sudo nvme list-subsys`
    - Check /sys/class/nvme for device entries
 
-7. **iSCSI connection failures**
+7. **NVMe-oF volumes timing out with many concurrent mounts**
+   - Symptom: `signal: killed` in node plugin logs when staging many NVMe-oF volumes simultaneously
+   - Cause: Too many concurrent `nvme connect` processes overwhelming the kernel's NVMe subsystem registration lock
+   - Fix: The driver limits concurrency to 5 by default (`node.maxConcurrentNVMeConnects`). Lower this value if you still see timeouts, or increase it if mounts are too slow on fast hardware
+
+8. **iSCSI connection failures**
    - Verify open-iscsi is installed: `iscsiadm --version`
    - Check iscsid service is running: `systemctl status iscsid`
    - Verify iSCSI service is enabled on TrueNAS
@@ -625,7 +630,7 @@ kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
    - Test discovery: `sudo iscsiadm -m discovery -t sendtargets -p YOUR-TRUENAS-IP:3260`
    - Check node plugin logs for detailed error messages
 
-8. **iSCSI device not appearing**
+9. **iSCSI device not appearing**
    - Wait a few seconds for device discovery
    - Check dmesg for SCSI errors: `sudo dmesg | grep -i scsi`
    - List active sessions: `sudo iscsiadm -m session`

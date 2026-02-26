@@ -38,6 +38,15 @@ Protocol-specific volume operations (NFS, NVMe-oF, and iSCSI):
   - Capacity of provisioned volumes in bytes
   - Labels: `volume_id`, `protocol`
 
+### NVMe-oF Connect Concurrency Metrics
+
+- **`tns_csi_nvme_connect_concurrent`** (gauge)
+  - Number of NVMe-oF connect operations currently in progress
+
+- **`tns_csi_nvme_connect_waiting`** (gauge)
+  - Number of NVMe-oF connect operations waiting for the semaphore
+  - Non-zero values indicate the concurrency limit is actively throttling connections
+
 ### WebSocket Connection Metrics
 
 Metrics for the TrueNAS API WebSocket connection:

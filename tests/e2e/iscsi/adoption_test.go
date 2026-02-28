@@ -214,9 +214,13 @@ var _ = Describe("iSCSI Volume Adoption", func() {
 		err = f.K8s.WaitForPodDeleted(ctx, adoptedPodName, deleteTimeout)
 		Expect(err).NotTo(HaveOccurred())
 
-		// TrueNAS resources (iSCSI target, extent, ZVOL) are cleaned up
-		// by the framework's PVC cleanup, which triggers CSI DeleteVolume.
-		// The adopting StorageClass has no deleteStrategy=retain, so CSI performs full cleanup.
+		// The adopted PVC cleanup (via RegisterPVCCleanup) triggers CSI DeleteVolume
+		// which cleans up the NEW iSCSI target/extent and ZVOL. However, the ORIGINAL
+		// retained ZVOL (zvolPath) is left behind because adoption creates a new
+		// dataset path. Clean up the original retained ZVOL explicitly.
+		By("Cleaning up original retained ZVOL from TrueNAS")
+		err = f.TrueNAS.DeleteDataset(ctx, zvolPath)
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete original retained ZVOL")
 	})
 
 	It("should mark a volume as adoptable when markAdoptable=true", func() {

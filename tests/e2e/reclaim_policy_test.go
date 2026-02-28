@@ -3,11 +3,13 @@ package e2e
 
 import (
 	"context"
+	"path"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 
 	"github.com/fenio/tns-csi/tests/e2e/framework"
 )
@@ -222,9 +224,52 @@ var _ = Describe("Reclaim Policy", func() {
 				GinkgoWriter.Printf("[%s] Retain reclaim policy verified - PV retained in %s state\n", proto.name, pv.Status.Phase)
 			}
 
+			By("Getting volume handle before cleaning up retained PV")
+			volumeHandle, handleErr := f.K8s.GetVolumeHandle(ctx, pvName)
+			Expect(handleErr).NotTo(HaveOccurred(), "Failed to get volume handle")
+
 			By("Cleaning up retained PV")
 			err = f.K8s.DeletePV(ctx, pvName)
 			Expect(err).NotTo(HaveOccurred(), "Failed to delete retained PV")
+
+			By("Cleaning up retained TrueNAS resources")
+			if f.TrueNAS != nil && volumeHandle != "" {
+				cleanupRetainedTrueNASResources(ctx, f.TrueNAS, proto.id, volumeHandle)
+			}
 		})
 	}
 })
+
+// cleanupRetainedTrueNASResources removes TrueNAS backend resources that are left behind
+// when a volume uses Retain reclaim policy (K8s PV deletion does not trigger CSI DeleteVolume).
+func cleanupRetainedTrueNASResources(ctx context.Context, truenas *framework.TrueNASVerifier, protocol, volumeHandle string) {
+	switch protocol {
+	case "nfs":
+		sharePath := "/mnt/" + volumeHandle
+		if err := truenas.DeleteNFSShare(ctx, sharePath); err != nil {
+			klog.Warningf("Failed to cleanup retained NFS share %s: %v", sharePath, err)
+		}
+		if err := truenas.DeleteDataset(ctx, volumeHandle); err != nil {
+			klog.Warningf("Failed to cleanup retained NFS dataset %s: %v", volumeHandle, err)
+		}
+	case "nvmeof":
+		subsystemNQN := "nqn.2137.csi.tns:" + path.Base(volumeHandle)
+		if err := truenas.DeleteNVMeOFSubsystem(ctx, subsystemNQN); err != nil {
+			klog.Warningf("Failed to cleanup retained NVMe-oF subsystem %s: %v", subsystemNQN, err)
+		}
+		if err := truenas.DeleteDataset(ctx, volumeHandle); err != nil {
+			klog.Warningf("Failed to cleanup retained ZVOL %s: %v", volumeHandle, err)
+		}
+	case "iscsi":
+		targetName := path.Base(volumeHandle)
+		if err := truenas.DeleteISCSITarget(ctx, targetName); err != nil {
+			klog.Warningf("Failed to cleanup retained iSCSI target %s: %v", targetName, err)
+		}
+		if err := truenas.DeleteISCSIExtent(ctx, targetName); err != nil {
+			klog.Warningf("Failed to cleanup retained iSCSI extent %s: %v", targetName, err)
+		}
+		if err := truenas.DeleteDataset(ctx, volumeHandle); err != nil {
+			klog.Warningf("Failed to cleanup retained ZVOL %s: %v", volumeHandle, err)
+		}
+	}
+}

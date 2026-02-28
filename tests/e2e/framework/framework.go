@@ -30,13 +30,14 @@ func sanitizeError(err error) string {
 // suiteState holds suite-level state for Helm deployment.
 // This allows us to deploy Helm once per suite instead of per test.
 type suiteState struct {
-	helm         *HelmDeployer
-	config       *Config
-	truenas      *TrueNASVerifier
-	truenasError error
-	protocol     string
-	mu           sync.Mutex
-	deployed     bool
+	truenasError   error
+	helm           *HelmDeployer
+	config         *Config
+	truenas        *TrueNASVerifier
+	beforeSnapshot *ResourceSnapshot
+	protocol       string
+	mu             sync.Mutex
+	deployed       bool
 }
 
 var suite = &suiteState{}
@@ -189,6 +190,15 @@ func SetupSuite(protocol string) error {
 		suite.truenas = truenas
 	}
 
+	// Take "before" resource snapshot for leak detection
+	if suite.truenas != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		snap := suite.truenas.SnapshotResources(ctx, config.TrueNASPool)
+		cancel()
+		suite.beforeSnapshot = snap
+		LogSnapshot("Before suite (pre-existing)", snap)
+	}
+
 	suite.deployed = true
 	suite.protocol = protocol
 
@@ -202,6 +212,15 @@ func TeardownSuite() {
 	suite.mu.Lock()
 	defer suite.mu.Unlock()
 
+	// Take "after" resource snapshot and diff against "before" for leak detection
+	if suite.truenas != nil && suite.beforeSnapshot != nil && suite.config != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		afterSnap := suite.truenas.SnapshotResources(ctx, suite.config.TrueNASPool)
+		cancel()
+		LogSnapshot("After suite", afterSnap)
+		LogResourceDiff(suite.beforeSnapshot, afterSnap)
+	}
+
 	if suite.truenas != nil {
 		suite.truenas.Close()
 		suite.truenas = nil
@@ -214,6 +233,7 @@ func TeardownSuite() {
 
 	suite.deployed = false
 	suite.protocol = ""
+	suite.beforeSnapshot = nil
 	klog.Infof("Suite teardown complete")
 }
 

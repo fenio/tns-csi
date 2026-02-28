@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/onsi/ginkgo/v2"
 
 	"github.com/fenio/tns-csi/pkg/retry"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -440,6 +443,197 @@ func (v *TrueNASVerifier) IsDatasetClone(ctx context.Context, datasetPath string
 		return false, "", err
 	}
 	return origin != "", origin, nil
+}
+
+// ResourceSnapshot holds a point-in-time inventory of CSI-related TrueNAS resources.
+// Used for before/after comparison to detect resource leaks from test runs.
+type ResourceSnapshot struct {
+	Datasets     map[string]datasetInfo // dataset path -> info
+	NFSShares    map[string]bool        // share path -> exists
+	NVMeSubsNQNs map[string]bool        // subsystem NQN -> exists
+	ISCSITargets map[string]bool        // target name -> exists
+	ISCSIExtents map[string]bool        // extent name -> exists
+}
+
+type datasetInfo struct {
+	Protocol  string
+	CreatedAt string
+}
+
+// SnapshotResources queries all CSI-related resource types and returns a point-in-time snapshot.
+// Errors are logged but non-fatal — an incomplete snapshot is better than failing the suite.
+func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix string) *ResourceSnapshot {
+	snap := &ResourceSnapshot{
+		Datasets:     make(map[string]datasetInfo),
+		NFSShares:    make(map[string]bool),
+		NVMeSubsNQNs: make(map[string]bool),
+		ISCSITargets: make(map[string]bool),
+		ISCSIExtents: make(map[string]bool),
+	}
+
+	// Managed datasets
+	datasets, err := v.client.FindManagedDatasets(ctx, poolPrefix)
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query managed datasets: %v", err)
+	} else {
+		for _, ds := range datasets {
+			info := datasetInfo{}
+			if props := ds.UserProperties; props != nil {
+				if p, ok := props[tnsapi.PropertyProtocol]; ok {
+					info.Protocol = p.Value
+				}
+				if p, ok := props[tnsapi.PropertyCreatedAt]; ok {
+					info.CreatedAt = p.Value
+				}
+			}
+			snap.Datasets[ds.ID] = info
+		}
+	}
+
+	// NFS shares — filter to shares under the pool mount path
+	shares, err := v.client.QueryAllNFSShares(ctx, "")
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query NFS shares: %v", err)
+	} else {
+		mountPrefix := "/mnt/" + poolPrefix
+		for _, s := range shares {
+			if strings.HasPrefix(s.Path, mountPrefix) {
+				snap.NFSShares[s.Path] = true
+			}
+		}
+	}
+
+	// NVMe-oF subsystems — filter to CSI-created ones (NQN contains "tns-csi" or "pvc-")
+	subsystems, err := v.client.ListAllNVMeOFSubsystems(ctx)
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query NVMe-oF subsystems: %v", err)
+	} else {
+		for _, sub := range subsystems {
+			nqn := sub.NQN
+			if nqn == "" {
+				nqn = sub.Name
+			}
+			if isCSIResource(nqn) {
+				snap.NVMeSubsNQNs[nqn] = true
+			}
+		}
+	}
+
+	// iSCSI targets — filter to CSI-created ones
+	targets, err := v.client.QueryISCSITargets(ctx, nil)
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query iSCSI targets: %v", err)
+	} else {
+		for _, t := range targets {
+			if isCSIResource(t.Name) {
+				snap.ISCSITargets[t.Name] = true
+			}
+		}
+	}
+
+	// iSCSI extents — filter to CSI-created ones
+	extents, err := v.client.QueryISCSIExtents(ctx, nil)
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query iSCSI extents: %v", err)
+	} else {
+		for _, e := range extents {
+			if isCSIResource(e.Name) {
+				snap.ISCSIExtents[e.Name] = true
+			}
+		}
+	}
+
+	return snap
+}
+
+// isCSIResource returns true if the resource name looks like it was created by the CSI driver.
+func isCSIResource(name string) bool {
+	return strings.Contains(name, "pvc-") || strings.Contains(name, "csi-") || strings.Contains(name, "tns-csi")
+}
+
+// LogResourceDiff compares two snapshots and logs any resources present in "after" but not in "before" (leaks).
+func LogResourceDiff(before, after *ResourceSnapshot) {
+	var leaks []string
+
+	// Datasets
+	for path, info := range after.Datasets {
+		if _, existed := before.Datasets[path]; !existed {
+			detail := "LEAKED dataset: " + path
+			if info.Protocol != "" {
+				detail += " (protocol: " + info.Protocol
+				if info.CreatedAt != "" {
+					detail += ", created: " + info.CreatedAt
+				}
+				detail += ")"
+			}
+			leaks = append(leaks, detail)
+		}
+	}
+
+	// NFS shares
+	for path := range after.NFSShares {
+		if !before.NFSShares[path] {
+			leaks = append(leaks, "LEAKED NFS share: "+path)
+		}
+	}
+
+	// NVMe-oF subsystems
+	for nqn := range after.NVMeSubsNQNs {
+		if !before.NVMeSubsNQNs[nqn] {
+			leaks = append(leaks, "LEAKED NVMe-oF subsystem: "+nqn)
+		}
+	}
+
+	// iSCSI targets
+	for name := range after.ISCSITargets {
+		if !before.ISCSITargets[name] {
+			leaks = append(leaks, "LEAKED iSCSI target: "+name)
+		}
+	}
+
+	// iSCSI extents
+	for name := range after.ISCSIExtents {
+		if !before.ISCSIExtents[name] {
+			leaks = append(leaks, "LEAKED iSCSI extent: "+name)
+		}
+	}
+
+	ginkgo.GinkgoWriter.Printf("\n=== TrueNAS Resource Leak Report ===\n")
+	if len(leaks) == 0 {
+		ginkgo.GinkgoWriter.Printf("No resource leaks detected.\n")
+	} else {
+		for _, leak := range leaks {
+			ginkgo.GinkgoWriter.Printf("%s\n", leak)
+		}
+		ginkgo.GinkgoWriter.Printf("=== %d resource(s) leaked ===\n", len(leaks))
+	}
+	ginkgo.GinkgoWriter.Printf("\n")
+}
+
+// LogSnapshot logs the contents of a resource snapshot for debugging.
+func LogSnapshot(label string, snap *ResourceSnapshot) {
+	ginkgo.GinkgoWriter.Printf("\n--- Resource Snapshot: %s ---\n", label)
+	ginkgo.GinkgoWriter.Printf("  Managed datasets: %d\n", len(snap.Datasets))
+	for path, info := range snap.Datasets {
+		ginkgo.GinkgoWriter.Printf("    %s (protocol: %s)\n", path, info.Protocol)
+	}
+	ginkgo.GinkgoWriter.Printf("  NFS shares: %d\n", len(snap.NFSShares))
+	for path := range snap.NFSShares {
+		ginkgo.GinkgoWriter.Printf("    %s\n", path)
+	}
+	ginkgo.GinkgoWriter.Printf("  NVMe-oF subsystems: %d\n", len(snap.NVMeSubsNQNs))
+	for nqn := range snap.NVMeSubsNQNs {
+		ginkgo.GinkgoWriter.Printf("    %s\n", nqn)
+	}
+	ginkgo.GinkgoWriter.Printf("  iSCSI targets: %d\n", len(snap.ISCSITargets))
+	for name := range snap.ISCSITargets {
+		ginkgo.GinkgoWriter.Printf("    %s\n", name)
+	}
+	ginkgo.GinkgoWriter.Printf("  iSCSI extents: %d\n", len(snap.ISCSIExtents))
+	for name := range snap.ISCSIExtents {
+		ginkgo.GinkgoWriter.Printf("    %s\n", name)
+	}
+	ginkgo.GinkgoWriter.Printf("---\n\n")
 }
 
 // GetDatasetProperty retrieves a specific ZFS user property from a dataset.

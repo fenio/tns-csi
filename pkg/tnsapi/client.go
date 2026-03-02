@@ -1218,28 +1218,53 @@ func (c *Client) QueryAllSMBShares(ctx context.Context, pathFilter string) ([]SM
 
 // Filesystem API methods
 
-// SetFilesystemPermissions sets POSIX permissions on a filesystem path using filesystem.setperm.
-// This is a job-based API call; the client waits for job completion.
-// Note: stripacl is NOT used because TrueNAS SMB requires NFSv4 ACLs to serve shares.
-func (c *Client) SetFilesystemPermissions(ctx context.Context, path, mode string) error {
-	klog.V(5).Infof("Setting filesystem permissions on %s to mode %s", path, mode)
+// SetFilesystemACL sets NFSv4 ACLs on a dataset to allow full access for all users.
+// TrueNAS creates datasets with restricted NFSv4 ACLs by default (root-only).
+// SMB volumes need everyone@ FULL_CONTROL so any authenticated SMB user can read/write.
+// This uses filesystem.setacl (not filesystem.setperm) to preserve NFSv4 ACL type,
+// which is required for TrueNAS to serve SMB shares.
+func (c *Client) SetFilesystemACL(ctx context.Context, path string) error {
+	klog.V(5).Infof("Setting NFSv4 ACL on %s for SMB access", path)
+
+	dacl := []map[string]interface{}{
+		{
+			"tag":   "owner@",
+			"id":    -1,
+			"type":  "ALLOW",
+			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
+			"flags": map[string]string{"BASIC": "INHERIT"},
+		},
+		{
+			"tag":   "group@",
+			"id":    -1,
+			"type":  "ALLOW",
+			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
+			"flags": map[string]string{"BASIC": "INHERIT"},
+		},
+		{
+			"tag":   "everyone@",
+			"id":    -1,
+			"type":  "ALLOW",
+			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
+			"flags": map[string]string{"BASIC": "INHERIT"},
+		},
+	}
 
 	params := map[string]interface{}{
 		"path": path,
-		"mode": mode,
+		"dacl": dacl,
 	}
 
 	var jobID int
-	if err := c.Call(ctx, "filesystem.setperm", []interface{}{params}, &jobID); err != nil {
-		return fmt.Errorf("filesystem.setperm failed for %s: %w", path, err)
+	if err := c.Call(ctx, "filesystem.setacl", []interface{}{params}, &jobID); err != nil {
+		return fmt.Errorf("filesystem.setacl failed for %s: %w", path, err)
 	}
 
-	// filesystem.setperm is a job — wait for completion
 	if err := c.WaitForJob(ctx, jobID, 1*time.Second); err != nil {
-		return fmt.Errorf("filesystem.setperm job failed for %s: %w", path, err)
+		return fmt.Errorf("filesystem.setacl job failed for %s: %w", path, err)
 	}
 
-	klog.V(5).Infof("Set filesystem permissions on %s to mode %s", path, mode)
+	klog.V(5).Infof("Set NFSv4 ACL on %s for SMB access", path)
 	return nil
 }
 

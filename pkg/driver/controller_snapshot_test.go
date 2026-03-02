@@ -159,7 +159,7 @@ func (m *MockAPIClientForSnapshots) QueryAllSMBShares(ctx context.Context, pathP
 	return nil, errors.New("QueryAllSMBSharesFunc not implemented")
 }
 
-func (m *MockAPIClientForSnapshots) SetFilesystemPermissions(ctx context.Context, path, mode string) error {
+func (m *MockAPIClientForSnapshots) SetFilesystemACL(ctx context.Context, path string) error {
 	return nil
 }
 

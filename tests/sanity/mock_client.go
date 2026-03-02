@@ -752,8 +752,8 @@ func (m *MockClient) QueryAllSMBShares(ctx context.Context, pathPrefix string) (
 	return result, nil
 }
 
-// SetFilesystemPermissions mocks filesystem.setperm.
-func (m *MockClient) SetFilesystemPermissions(ctx context.Context, path, mode string) error {
+// SetFilesystemACL mocks filesystem.setacl.
+func (m *MockClient) SetFilesystemACL(ctx context.Context, path string) error {
 	return nil
 }
 

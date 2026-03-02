@@ -245,6 +245,14 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 		return nil, err
 	}
 
+	// Set NFSv4 ACLs to allow full access for authenticated SMB users.
+	// TrueNAS defaults to root-only NFSv4 ACLs on new datasets.
+	if dataset.Mountpoint != "" {
+		if aclErr := s.apiClient.SetFilesystemACL(ctx, dataset.Mountpoint); aclErr != nil {
+			klog.Warningf("Failed to set ACL on %s: %v (SMB writes may fail)", dataset.Mountpoint, aclErr)
+		}
+	}
+
 	smbShare, err := s.createSMBShareForDataset(ctx, dataset, params, timer)
 	if err != nil {
 		return nil, err
@@ -367,6 +375,13 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 	klog.V(4).Infof("Setting up SMB share for cloned dataset: %s (cloneMode: %s)", dataset.Name, info.Mode)
 
 	volumeName := req.GetName()
+
+	// Set NFSv4 ACLs on cloned dataset for SMB access (same as new volumes)
+	if dataset.Mountpoint != "" {
+		if aclErr := s.apiClient.SetFilesystemACL(ctx, dataset.Mountpoint); aclErr != nil {
+			klog.Warningf("Failed to set ACL on cloned dataset %s: %v (SMB writes may fail)", dataset.Mountpoint, aclErr)
+		}
+	}
 
 	smbShare, err := s.apiClient.CreateSMBShare(ctx, tnsapi.SMBShareCreateParams{
 		Name:    volumeName,

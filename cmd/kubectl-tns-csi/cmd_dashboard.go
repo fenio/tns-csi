@@ -50,6 +50,7 @@ type SummaryData struct {
 	NFSVolumes       int    `json:"nfsVolumes"`
 	NVMeOFVolumes    int    `json:"nvmeofVolumes"`
 	ISCSIVolumes     int    `json:"iscsiVolumes"`
+	SMBVolumes       int    `json:"smbVolumes"`
 	TotalSnapshots   int    `json:"totalSnapshots"`
 	TotalClones      int    `json:"totalClones"`
 	TotalCapacity    string `json:"totalCapacity"`
@@ -345,6 +346,8 @@ func (s *dashboardServer) calculateSummary(volumes []VolumeInfo, snapshots []Sna
 			summary.NVMeOFVolumes++
 		case protocolISCSI:
 			summary.ISCSIVolumes++
+		case protocolSMB:
+			summary.SMBVolumes++
 		}
 		totalBytes += volumes[i].CapacityBytes
 		if volumes[i].HealthStatus != "" && volumes[i].HealthStatus != string(HealthStatusHealthy) {

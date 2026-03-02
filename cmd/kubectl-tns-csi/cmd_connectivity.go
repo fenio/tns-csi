@@ -107,6 +107,7 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 		nfsCount := 0
 		nvmeCount := 0
 		iscsiCount := 0
+		smbCount := 0
 		for i := range volumes {
 			switch volumes[i].Protocol {
 			case "nfs":
@@ -115,6 +116,8 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 				nvmeCount++
 			case "iscsi":
 				iscsiCount++
+			case "smb":
+				smbCount++
 			}
 		}
 		if nfsCount > 0 {
@@ -125,6 +128,9 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 		}
 		if iscsiCount > 0 {
 			fmt.Printf("    %s: %d\n", colorProtocolISCI.Sprint("iSCSI"), iscsiCount)
+		}
+		if smbCount > 0 {
+			fmt.Printf("    %s: %d\n", colorProtocolSMB.Sprint("SMB"), smbCount)
 		}
 		printStepf(colorSuccess, iconOK, "Volume count: OK")
 	}

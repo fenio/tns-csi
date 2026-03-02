@@ -47,6 +47,7 @@ const (
 	VolumeContextKeyISCSIIQN          = "iscsiIQN"
 	VolumeContextKeyISCSITargetID     = "iscsiTargetID"
 	VolumeContextKeyISCSIExtentID     = "iscsiExtentID"
+	VolumeContextKeySMBShareID        = "smbShareID"
 	VolumeContextKeyExpectedCapacity  = "expectedCapacity"
 	VolumeContextKeyClonedFromSnap    = "clonedFromSnapshot"
 	VolumeContextValueTrue            = "true"
@@ -118,6 +119,7 @@ type VolumeMetadata struct {
 	NVMeOFNamespaceID int
 	ISCSITargetID     int
 	ISCSIExtentID     int
+	SMBShareID        int
 }
 
 // buildVolumeContext creates a VolumeContext map from VolumeMetadata.
@@ -163,6 +165,10 @@ func buildVolumeContext(meta VolumeMetadata) map[string]string {
 		if meta.ISCSIExtentID != 0 {
 			ctx[VolumeContextKeyISCSIExtentID] = strconv.Itoa(meta.ISCSIExtentID)
 		}
+	case ProtocolSMB:
+		if meta.SMBShareID != 0 {
+			ctx[VolumeContextKeySMBShareID] = strconv.Itoa(meta.SMBShareID)
+		}
 	}
 
 	return ctx
@@ -180,6 +186,9 @@ func getProtocolFromVolumeContext(ctx map[string]string) string {
 	}
 	if ctx[VolumeContextKeyISCSIIQN] != "" || ctx[VolumeContextKeyISCSITargetID] != "" {
 		return ProtocolISCSI
+	}
+	if ctx[VolumeContextKeySMBShareID] != "" {
+		return ProtocolSMB
 	}
 	if ctx[VolumeContextKeyShare] != "" || ctx[VolumeContextKeyNFSShareID] != "" {
 		return ProtocolNFS
@@ -576,8 +585,10 @@ func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi
 		return s.createNVMeOFVolume(ctx, req)
 	case ProtocolISCSI:
 		return s.createISCSIVolume(ctx, req)
+	case ProtocolSMB:
+		return s.createSMBVolume(ctx, req)
 	default:
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi)", protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi, smb)", protocol)
 	}
 }
 
@@ -640,6 +651,17 @@ func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.Cr
 		// For iSCSI, we would need to query targets and extents
 		// This is a placeholder for future implementation
 		klog.Warningf("iSCSI idempotency check not fully implemented")
+		volumeMeta = VolumeMetadata{
+			Name:        req.GetName(),
+			Protocol:    protocol,
+			DatasetID:   existingDataset.ID,
+			DatasetName: expectedDatasetName,
+		}
+
+	case ProtocolSMB:
+		// For SMB, we would need to query shares
+		// This is a placeholder for future implementation
+		klog.Warningf("SMB idempotency check not fully implemented")
 		volumeMeta = VolumeMetadata{
 			Name:        req.GetName(),
 			Protocol:    protocol,
@@ -929,6 +951,8 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 		return s.deleteNVMeOFVolume(ctx, volumeMeta)
 	case ProtocolISCSI:
 		return s.deleteISCSIVolume(ctx, volumeMeta)
+	case ProtocolSMB:
+		return s.deleteSMBVolume(ctx, volumeMeta)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
@@ -1266,6 +1290,11 @@ func IsVolumeAdoptable(props map[string]tnsapi.UserProperty) bool {
 		if _, ok := props[tnsapi.PropertyISCSIIQN]; !ok {
 			return false
 		}
+	case tnsapi.ProtocolSMB:
+		// SMB requires share name
+		if _, ok := props[tnsapi.PropertySMBShareName]; !ok {
+			return false
+		}
 	default:
 		// Unknown protocol - don't adopt
 		return false
@@ -1428,6 +1457,13 @@ func (s *ControllerService) checkAndAdoptVolume(ctx context.Context, req *csi.Cr
 		}
 		return resp, true, nil
 
+	case ProtocolSMB:
+		resp, err := s.adoptSMBVolume(ctx, req, dataset, params)
+		if err != nil {
+			return nil, true, err
+		}
+		return resp, true, nil
+
 	default:
 		return nil, true, status.Errorf(codes.InvalidArgument,
 			"Unsupported protocol for adoption: %s", protocol)
@@ -1439,8 +1475,8 @@ func (s *ControllerService) expandAdoptedVolume(ctx context.Context, dataset *tn
 	updateParams := tnsapi.DatasetUpdateParams{}
 
 	switch protocol {
-	case ProtocolNFS:
-		// NFS uses quota
+	case ProtocolNFS, ProtocolSMB:
+		// NFS and SMB use quota (both are FILESYSTEM datasets)
 		updateParams.Quota = &newCapacityBytes
 	case ProtocolNVMeOF, ProtocolISCSI:
 		// NVMe-oF and iSCSI use volsize (both are ZVOLs)
@@ -1614,6 +1650,9 @@ func (s *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	case ProtocolISCSI:
 		klog.Infof("Expanding iSCSI volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
 		return s.expandISCSIVolume(ctx, volumeMeta, requiredBytes)
+	case ProtocolSMB:
+		klog.Infof("Expanding SMB volume %s with dataset %s to %d bytes", volumeID, volumeMeta.DatasetName, requiredBytes)
+		return s.expandSMBVolume(ctx, volumeMeta, requiredBytes)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}
@@ -1652,6 +1691,8 @@ func (s *ControllerService) ControllerGetVolume(ctx context.Context, req *csi.Co
 		return s.getNVMeOFVolumeInfo(ctx, volumeMeta)
 	case ProtocolISCSI:
 		return s.getISCSIVolumeInfo(ctx, volumeMeta)
+	case ProtocolSMB:
+		return s.getSMBVolumeInfo(ctx, volumeMeta)
 	default:
 		return nil, status.Errorf(codes.Internal, "Unknown protocol %s for volume %s", volumeMeta.Protocol, volumeID)
 	}

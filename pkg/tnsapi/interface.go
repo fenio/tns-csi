@@ -42,6 +42,13 @@ type ClientInterface interface {
 	QueryNFSShareByID(ctx context.Context, shareID int) (*NFSShare, error)
 	QueryAllNFSShares(ctx context.Context, pathPrefix string) ([]NFSShare, error)
 
+	// SMB share operations
+	CreateSMBShare(ctx context.Context, params SMBShareCreateParams) (*SMBShare, error)
+	DeleteSMBShare(ctx context.Context, shareID int) error
+	QuerySMBShare(ctx context.Context, path string) ([]SMBShare, error)
+	QuerySMBShareByID(ctx context.Context, shareID int) (*SMBShare, error)
+	QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]SMBShare, error)
+
 	// ZVOL operations
 	CreateZvol(ctx context.Context, params ZvolCreateParams) (*Dataset, error)
 

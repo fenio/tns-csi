@@ -29,6 +29,10 @@ type Config struct {
 	// Kubernetes settings
 	Kubeconfig string
 
+	// SMB credentials (optional - tests skip if empty)
+	SMBUsername string
+	SMBPassword string
+
 	// Test settings
 	Timeout time.Duration
 	Verbose bool // Enable verbose test output (E2E_VERBOSE=true)
@@ -43,6 +47,8 @@ func NewConfig() (*Config, error) {
 		CSIImageRepo:  getEnvOrDefault("CSI_IMAGE_REPO", "ghcr.io/fenio/tns-csi"),
 		CSIImageTag:   getEnvOrDefault("CSI_IMAGE_TAG", "latest"),
 		Kubeconfig:    getEnvOrDefault("KUBECONFIG", defaultKubeconfig()),
+		SMBUsername:   os.Getenv("SMB_USERNAME"),
+		SMBPassword:   os.Getenv("SMB_PASSWORD"),
 		Timeout:       parseDurationOrDefault(os.Getenv("TEST_TIMEOUT"), 5*time.Minute),
 		Verbose:       os.Getenv("E2E_VERBOSE") == "true",
 	}

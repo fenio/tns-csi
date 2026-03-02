@@ -104,6 +104,33 @@ func (k *KubernetesClient) DeleteNamespace(ctx context.Context, timeout time.Dur
 	})
 }
 
+// CreateSecret creates an Opaque Secret in the specified namespace.
+func (k *KubernetesClient) CreateSecret(ctx context.Context, namespace, name string, data map[string]string) error {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: data,
+	}
+
+	_, err := k.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create secret %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+// DeleteSecret deletes a Secret from the specified namespace.
+func (k *KubernetesClient) DeleteSecret(ctx context.Context, namespace, name string) error {
+	err := k.clientset.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete secret %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
 // PVCOptions configures a PVC creation.
 type PVCOptions struct {
 	Name             string

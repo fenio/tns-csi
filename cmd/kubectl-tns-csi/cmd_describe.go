@@ -19,6 +19,7 @@ import (
 var (
 	errNoSharePath    = errors.New("no share path found in properties")
 	errNoNFSShare     = errors.New("no NFS share found")
+	errNoSMBShare     = errors.New("no SMB share found")
 	errNoSubsystemNQN = errors.New("no subsystem NQN found in properties")
 )
 
@@ -27,6 +28,7 @@ const (
 	protocolNFS    = "nfs"
 	protocolNVMeOF = "nvmeof"
 	protocolISCSI  = "iscsi"
+	protocolSMB    = "smb"
 )
 
 // VolumeDetails contains detailed information about a volume.
@@ -69,6 +71,9 @@ type VolumeDetails struct {
 	// NVMe-oF-specific (only if protocol is NVMe-oF)
 	NVMeOFSubsystem *NVMeOFSubsystemDetails `json:"nvmeofSubsystem,omitempty" yaml:"nvmeofSubsystem,omitempty"`
 
+	// SMB-specific (only if protocol is SMB)
+	SMBShare *SMBShareDetails `json:"smbShare,omitempty" yaml:"smbShare,omitempty"`
+
 	// All ZFS properties
 	Properties map[string]string `json:"properties" yaml:"properties"`
 }
@@ -91,6 +96,16 @@ type NVMeOFSubsystemDetails struct {
 	Name    string `json:"name"    yaml:"name"`
 	NQN     string `json:"nqn"     yaml:"nqn"`
 	Serial  string `json:"serial"  yaml:"serial"`
+	Enabled bool   `json:"enabled" yaml:"enabled"`
+}
+
+// SMBShareDetails contains SMB share information.
+//
+//nolint:govet // field alignment not critical for CLI output struct
+type SMBShareDetails struct {
+	ID      int    `json:"id"      yaml:"id"`
+	Name    string `json:"name"    yaml:"name"`
+	Path    string `json:"path"    yaml:"path"`
 	Enabled bool   `json:"enabled" yaml:"enabled"`
 }
 
@@ -154,6 +169,8 @@ func runDescribe(ctx context.Context, volumeRef string, url, apiKey, secretRef, 
 }
 
 // getVolumeDetails retrieves detailed information about a volume.
+//
+//nolint:gocyclo // complexity from protocol and property extraction is acceptable
 func getVolumeDetails(ctx context.Context, client tnsapi.ClientInterface, volumeRef string) (*VolumeDetails, error) {
 	var dataset *tnsapi.DatasetWithProperties
 
@@ -240,6 +257,10 @@ func getVolumeDetails(ctx context.Context, client tnsapi.ClientInterface, volume
 		if subsysDetails, err := getNVMeOFSubsystemDetails(ctx, client, dataset); err == nil {
 			details.NVMeOFSubsystem = subsysDetails
 		}
+	case protocolSMB:
+		if smbDetails, err := getSMBShareDetails(ctx, client, dataset); err == nil {
+			details.SMBShare = smbDetails
+		}
 	}
 
 	return details, nil
@@ -302,6 +323,48 @@ func getNVMeOFSubsystemDetails(ctx context.Context, client tnsapi.ClientInterfac
 		NQN:     subsystem.NQN,
 		Serial:  subsystem.Serial,
 		Enabled: subsystem.Enabled,
+	}, nil
+}
+
+// getSMBShareDetails retrieves SMB share details for a dataset.
+func getSMBShareDetails(ctx context.Context, client tnsapi.ClientInterface, dataset *tnsapi.DatasetWithProperties) (*SMBShareDetails, error) {
+	// Get share ID from properties
+	if prop, ok := dataset.UserProperties[tnsapi.PropertySMBShareID]; ok && prop.Value != "" {
+		shareID, err := strconv.Atoi(prop.Value)
+		if err == nil && shareID > 0 {
+			share, err := client.QuerySMBShareByID(ctx, shareID)
+			if err != nil {
+				return nil, err
+			}
+			return &SMBShareDetails{
+				ID:      share.ID,
+				Name:    share.Name,
+				Path:    share.Path,
+				Enabled: share.Enabled,
+			}, nil
+		}
+	}
+
+	// Fallback: query by path
+	sharePath := ""
+	if dataset.Mountpoint != "" {
+		sharePath = dataset.Mountpoint
+	}
+	if sharePath == "" {
+		return nil, errNoSharePath
+	}
+
+	shares, err := client.QuerySMBShare(ctx, sharePath)
+	if err != nil || len(shares) == 0 {
+		return nil, fmt.Errorf("%w for path %s", errNoSMBShare, sharePath)
+	}
+
+	share := shares[0]
+	return &SMBShareDetails{
+		ID:      share.ID,
+		Name:    share.Name,
+		Path:    share.Path,
+		Enabled: share.Enabled,
 	}, nil
 }
 
@@ -419,6 +482,15 @@ func outputVolumeDetailsTable(details *VolumeDetails) error {
 		describeKV("NQN", details.NVMeOFSubsystem.NQN)
 		describeKV("Serial", details.NVMeOFSubsystem.Serial)
 		describeKV("Enabled", strconv.FormatBool(details.NVMeOFSubsystem.Enabled))
+		fmt.Println()
+	}
+
+	if details.SMBShare != nil {
+		colorHeader.Println("=== SMB Share ===") //nolint:errcheck,gosec
+		describeKV("Share ID", strconv.Itoa(details.SMBShare.ID))
+		describeKV("Name", details.SMBShare.Name)
+		describeKV("Path", details.SMBShare.Path)
+		describeKV("Enabled", strconv.FormatBool(details.SMBShare.Enabled))
 		fmt.Println()
 	}
 

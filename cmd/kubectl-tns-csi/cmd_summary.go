@@ -35,6 +35,7 @@ type VolumeSummary struct {
 	NFS    int `json:"nfs"    yaml:"nfs"`
 	NVMeOF int `json:"nvmeof" yaml:"nvmeof"`
 	ISCSI  int `json:"iscsi"  yaml:"iscsi"`
+	SMB    int `json:"smb"    yaml:"smb"`
 	Clones int `json:"clones" yaml:"clones"`
 }
 
@@ -115,6 +116,7 @@ type summaryContext struct {
 	nfsShareMap    map[string]*tnsapi.NFSShare
 	nvmeSubsysMap  map[string]*tnsapi.NVMeOFSubsystem
 	iscsiTargetMap map[string]*tnsapi.ISCSITarget
+	smbShareMap    map[string]*tnsapi.SMBShare
 }
 
 // gatherSummary collects all summary statistics.
@@ -152,6 +154,7 @@ func buildSummaryContext(ctx context.Context, client tnsapi.ClientInterface) *su
 		nfsShareMap:    make(map[string]*tnsapi.NFSShare),
 		nvmeSubsysMap:  make(map[string]*tnsapi.NVMeOFSubsystem),
 		iscsiTargetMap: make(map[string]*tnsapi.ISCSITarget),
+		smbShareMap:    make(map[string]*tnsapi.SMBShare),
 	}
 
 	// Get all NFS shares for health checks (ignore errors - non-critical)
@@ -171,6 +174,12 @@ func buildSummaryContext(ctx context.Context, client tnsapi.ClientInterface) *su
 	iscsiTargets, _ := client.QueryISCSITargets(ctx, nil) //nolint:errcheck // non-critical for summary
 	for i := range iscsiTargets {
 		sc.iscsiTargetMap[iscsiTargets[i].Name] = &iscsiTargets[i]
+	}
+
+	// Get all SMB shares for health checks (ignore errors - non-critical)
+	smbShares, _ := client.QueryAllSMBShares(ctx, "") //nolint:errcheck // non-critical for summary
+	for i := range smbShares {
+		sc.smbShareMap[smbShares[i].Path] = &smbShares[i]
 	}
 
 	return sc
@@ -219,6 +228,8 @@ func processVolume(ds *tnsapi.DatasetWithProperties, sc *summaryContext, summary
 		summary.Volumes.NVMeOF++
 	case protocolISCSI:
 		summary.Volumes.ISCSI++
+	case protocolSMB:
+		summary.Volumes.SMB++
 	}
 
 	// Check if it's a clone
@@ -263,6 +274,8 @@ func checkVolumeHealthForSummary(ds *tnsapi.DatasetWithProperties, protocol stri
 		return checkNVMeOFHealthForSummary(ds, sc.nvmeSubsysMap)
 	case protocolISCSI:
 		return checkISCSIHealthForSummary(ds, sc.iscsiTargetMap)
+	case protocolSMB:
+		return checkSMBHealthForSummary(ds, sc.smbShareMap)
 	default:
 		return "" // Unknown protocol - assume healthy
 	}
@@ -397,6 +410,30 @@ func checkISCSIHealthForSummary(ds *tnsapi.DatasetWithProperties, iscsiTargetMap
 	return "iSCSI target not found"
 }
 
+// checkSMBHealthForSummary checks if SMB volume is healthy.
+// Returns empty string if healthy, or a short issue description.
+func checkSMBHealthForSummary(ds *tnsapi.DatasetWithProperties, smbShareMap map[string]*tnsapi.SMBShare) string {
+	sharePath := ""
+	if ds.Mountpoint != "" {
+		sharePath = ds.Mountpoint
+	}
+
+	if sharePath == "" {
+		return "no SMB share path configured"
+	}
+
+	share, exists := smbShareMap[sharePath]
+	if !exists {
+		return "SMB share not found"
+	}
+
+	if !share.Enabled {
+		return "SMB share disabled"
+	}
+
+	return ""
+}
+
 // outputSummary outputs the summary in the specified format.
 func outputSummary(summary *Summary, format string) error {
 	switch format {
@@ -434,6 +471,9 @@ func outputSummaryTable(summary *Summary) error {
 	}
 	if summary.Volumes.ISCSI > 0 {
 		volLine += fmt.Sprintf(" %s: %-5d", colorProtocolISCI.Sprint("iSCSI"), summary.Volumes.ISCSI)
+	}
+	if summary.Volumes.SMB > 0 {
+		volLine += fmt.Sprintf(" %s: %-5d", colorProtocolSMB.Sprint("SMB"), summary.Volumes.SMB)
 	}
 	if summary.Volumes.Clones > 0 {
 		volLine += fmt.Sprintf(" Clones: %d", summary.Volumes.Clones)

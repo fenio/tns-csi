@@ -179,7 +179,7 @@ func decodeCompactSnapshotID(snapshotID string) (*SnapshotMetadata, error) {
 	remainder := snapshotID[colonIdx+1:]
 
 	// Validate protocol
-	if protocol != ProtocolNFS && protocol != ProtocolNVMeOF && protocol != ProtocolISCSI {
+	if protocol != ProtocolNFS && protocol != ProtocolNVMeOF && protocol != ProtocolISCSI && protocol != ProtocolSMB {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidProtocol, protocol)
 	}
 
@@ -553,7 +553,7 @@ func (s *ControllerService) discoverVolumeBySearching(ctx context.Context, volum
 		return &volumeDiscoveryResult{datasetName: meta.DatasetName, protocol: meta.Protocol}
 	}
 
-	// Fallback for unmigrated volumes: search NFS shares, NVMe-oF namespaces, iSCSI extents
+	// Fallback for unmigrated volumes: search NFS shares, SMB shares, NVMe-oF namespaces, iSCSI extents
 	shares, err := s.apiClient.QueryAllNFSShares(ctx, volumeID)
 	if err == nil && len(shares) > 0 {
 		for _, share := range shares {
@@ -562,6 +562,19 @@ func (s *ControllerService) discoverVolumeBySearching(ctx context.Context, volum
 				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					return &volumeDiscoveryResult{datasetName: datasets[0].Name, protocol: ProtocolNFS}
+				}
+			}
+		}
+	}
+
+	smbShares, err := s.apiClient.QueryAllSMBShares(ctx, volumeID)
+	if err == nil && len(smbShares) > 0 {
+		for _, share := range smbShares {
+			if strings.HasSuffix(share.Path, "/"+volumeID) {
+				datasetID := mountpointToDatasetID(share.Path)
+				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
+				if dsErr == nil && len(datasets) > 0 {
+					return &volumeDiscoveryResult{datasetName: datasets[0].Name, protocol: ProtocolSMB}
 				}
 			}
 		}

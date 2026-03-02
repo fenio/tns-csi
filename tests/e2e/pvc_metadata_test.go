@@ -3,6 +3,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,6 +64,16 @@ var _ = Describe("PVC Metadata", func() {
 			accessMode:   corev1.ReadWriteOnce,
 			podTimeout:   6 * time.Minute,
 		},
+	}
+
+	if os.Getenv("SMB_USERNAME") != "" {
+		protocols = append(protocols, protocolConfig{
+			name:         "SMB",
+			id:           "smb",
+			storageClass: "tns-csi-smb",
+			accessMode:   corev1.ReadWriteMany,
+			podTimeout:   2 * time.Minute,
+		})
 	}
 
 	for _, proto := range protocols {

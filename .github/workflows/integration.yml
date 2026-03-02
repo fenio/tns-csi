@@ -21,6 +21,7 @@ on:
           - nfs
           - nvmeof
           - iscsi
+          - smb
       test:
         description: 'Specific test to run (leave empty for all tests of selected protocol)'
         required: false
@@ -357,6 +358,60 @@ jobs:
           path: /tmp/test-logs/
           retention-days: 7
 
+  ginkgo-e2e-smb:
+    name: "E2E: SMB"
+    runs-on: new
+    timeout-minutes: 60
+    needs: compute-tag
+    if: |
+      !cancelled() && needs.compute-tag.result == 'success' &&
+      (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'smb' || github.event.inputs.protocol == '')
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: fenio/setup-k3s@v5
+        with:
+          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
+      - uses: ./.github/actions/setup-snapshots
+      - name: Download PR image artifact
+        if: inputs.pr != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: pr-image
+          path: /tmp
+      - name: Import PR image into k3s
+        if: inputs.pr != ''
+        run: |
+          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
+          echo "Imported PR image into k3s containerd"
+          sudo k3s crictl images | grep tns-csi || true
+      - name: Install Ginkgo
+        run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Run SMB E2E Tests
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
+          SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
+        run: |
+          echo "=== Running SMB E2E Tests ==="
+          # Run only SMB-specific tests from the smb/ directory
+          ginkgo -v --timeout=55m --flake-attempts=2 ./tests/e2e/smb/...
+      - name: Upload diagnostic logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: e2e-smb-diagnostics
+          path: /tmp/test-logs/
+          retention-days: 7
+
   ginkgo-e2e-shared:
     name: "E2E: Shared"
     runs-on: new
@@ -396,6 +451,8 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
+          SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
           echo "=== Running Shared E2E Tests ==="
           # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
@@ -413,14 +470,14 @@ jobs:
   # Summary
   # ==========================================
   # Note: All integration tests have been migrated to Ginkgo E2E tests.
-  # - Protocol-specific tests: tests/e2e/nfs/ and tests/e2e/nvmeof/
-  # - Shared tests (both protocols): tests/e2e/*.go (snapshot_restore, stress, name_templating, etc.)
+  # - Protocol-specific tests: tests/e2e/nfs/, tests/e2e/nvmeof/, tests/e2e/iscsi/, tests/e2e/smb/
+  # - Shared tests (all protocols): tests/e2e/*.go (snapshot_restore, stress, name_templating, etc.)
 
   test-summary:
     name: "Test Summary"
     runs-on: new
     timeout-minutes: 5
-    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-iscsi, ginkgo-e2e-shared]
+    needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-iscsi, ginkgo-e2e-smb, ginkgo-e2e-shared]
     if: always()
     steps:
       - name: Generate Test Summary
@@ -431,6 +488,7 @@ jobs:
               'NFS E2E': '${{ needs.ginkgo-e2e-nfs.result }}',
               'NVMe-oF E2E': '${{ needs.ginkgo-e2e-nvmeof.result }}',
               'iSCSI E2E': '${{ needs.ginkgo-e2e-iscsi.result }}',
+              'SMB E2E': '${{ needs.ginkgo-e2e-smb.result }}',
               'Shared E2E': '${{ needs.ginkgo-e2e-shared.result }}',
             };
 
@@ -475,7 +533,7 @@ jobs:
             for (const [test, result] of Object.entries(e2eResults)) {
               summary += `| ${test} | ${getIcon(result)} |\n`;
             }
-            summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for NFS, NVMe-oF, and iSCSI._\n`;
+            summary += `\n_Note: Shared E2E includes Snapshot Restore, Volume Stress, and Snapshot Stress tests for NFS, NVMe-oF, iSCSI, and SMB._\n`;
 
             // Write to job summary
             await core.summary.addRaw(summary).write();

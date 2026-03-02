@@ -22,6 +22,7 @@ const (
 	ProtocolNFS    = "nfs"
 	ProtocolNVMeOF = "nvmeof"
 	ProtocolISCSI  = "iscsi"
+	ProtocolSMB    = "smb"
 )
 
 // Filesystem type constants.
@@ -117,9 +118,18 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		timer.ObserveSuccess()
 		return resp, nil
 
+	case ProtocolSMB:
+		resp, err := s.stageSMBVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
+
 	default:
 		timer.ObserveError()
-		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi)", protocol)
+		return nil, status.Errorf(codes.InvalidArgument, "Unsupported protocol: %s (supported: nfs, nvmeof, iscsi, smb)", protocol)
 	}
 }
 
@@ -168,6 +178,16 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 			VolumeContextKeyISCSIIQN: "iqn.2024-01.io.truenas.csi:" + volumeID,
 		}
 		resp, err := s.unstageISCSIVolume(ctx, req, volumeContext)
+		if err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
+		timer.ObserveSuccess()
+		return resp, nil
+
+	case ProtocolSMB:
+		klog.V(4).Infof("Unstaging SMB volume %s from %s", volumeID, stagingTargetPath)
+		resp, err := s.unstageSMBVolume(ctx, req)
 		if err != nil {
 			timer.ObserveError()
 			return nil, err
@@ -225,6 +245,11 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 	// NFS mounts will show "nfs" or "nfs4" as filesystem type
 	if strings.HasPrefix(fsType, "nfs") {
 		return ProtocolNFS
+	}
+
+	// SMB/CIFS mounts will show "cifs" or "smb3" as filesystem type
+	if fsType == "cifs" || strings.HasPrefix(fsType, "smb") {
+		return ProtocolSMB
 	}
 
 	// For block device mounts, try to determine if it's NVMe-oF or iSCSI
@@ -330,6 +355,15 @@ func (s *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 	switch protocol {
 	case ProtocolNFS:
 		resp, respErr := s.publishNFSVolume(ctx, req)
+		if respErr != nil {
+			timer.ObserveError()
+			return nil, respErr
+		}
+		timer.ObserveSuccess()
+		return resp, nil
+
+	case ProtocolSMB:
+		resp, respErr := s.publishSMBVolume(ctx, req)
 		if respErr != nil {
 			timer.ObserveError()
 			return nil, respErr
@@ -581,9 +615,9 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volumeID, protocol, volumePath)
 
-	// For NFS volumes, no node-side expansion is needed
-	if protocol == ProtocolNFS {
-		klog.Info("NFS volume expansion handled by controller, no node-side action needed")
+	// For NFS and SMB volumes, no node-side expansion is needed
+	if protocol == ProtocolNFS || protocol == ProtocolSMB {
+		klog.Infof("%s volume expansion handled by controller, no node-side action needed", strings.ToUpper(protocol))
 		return &csi.NodeExpandVolumeResponse{
 			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
 		}, nil

@@ -137,8 +137,8 @@ Validate required TrueNAS configuration
 {{- end }}
 {{- range .Values.storageClasses }}
 {{- if .enabled }}
-{{- if not (mustHas .protocol (list "nfs" "nvmeof" "iscsi")) }}
-  {{- fail (printf "\n\nCONFIGURATION ERROR: storageClasses entry %q: protocol must be one of: nfs, nvmeof, iscsi (got %q)" .name .protocol) }}
+{{- if not (mustHas .protocol (list "nfs" "nvmeof" "iscsi" "smb")) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: storageClasses entry %q: protocol must be one of: nfs, nvmeof, iscsi, smb (got %q)" .name .protocol) }}
 {{- end }}
 {{- if not .pool }}
   {{- fail (printf "\n\nCONFIGURATION ERROR: storageClasses entry %q: pool is required.\nExample: --set 'storageClasses[0].pool=tank'" .name) }}
@@ -151,6 +151,9 @@ Validate required TrueNAS configuration
 {{- end }}
 {{- if and (eq .protocol "iscsi") (not .server) }}
   {{- fail (printf "\n\nCONFIGURATION ERROR: server is required for iSCSI storage class %q." .name) }}
+{{- end }}
+{{- if and (eq .protocol "smb") (not .server) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: server is required for SMB storage class %q.\nExample: --set 'storageClasses[0].server=YOUR-TRUENAS-IP'" .name) }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -244,6 +247,12 @@ parameters:
   {{- if eq $protocol "iscsi" }}
   port: {{ $sc.port | default "3260" | quote }}
   csi.storage.k8s.io/fstype: {{ $sc.fsType | default "ext4" | quote }}
+  {{- end }}
+  {{- if and (eq $protocol "smb") $sc.smbCredentialsSecret }}
+  {{- if $sc.smbCredentialsSecret.name }}
+  csi.storage.k8s.io/node-stage-secret-name: {{ $sc.smbCredentialsSecret.name | quote }}
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ $sc.smbCredentialsSecret.namespace | default $.Release.Namespace | quote }}
+  {{- end }}
   {{- end }}
   {{- if $sc.parameters }}
   {{- range $key, $value := $sc.parameters }}

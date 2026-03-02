@@ -599,6 +599,8 @@ func (s *ControllerService) setupVolumeFromClone(ctx context.Context, req *csi.C
 		return s.setupNVMeOFVolumeFromCloneWithValidation(ctx, req, clonedDataset, server, subsystemNQN, info)
 	case ProtocolISCSI:
 		return s.setupISCSIVolumeFromClone(ctx, req, clonedDataset, server, info)
+	case ProtocolSMB:
+		return s.setupSMBVolumeFromClone(ctx, req, clonedDataset, server, info)
 	default:
 		return s.handleUnknownProtocol(ctx, clonedDataset, protocol)
 	}

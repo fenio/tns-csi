@@ -135,6 +135,25 @@ func SetupSuite(protocol string) error {
 	}
 	klog.Infof("Pre-flight: TrueNAS is reachable")
 
+	// Create SMB credentials secret before Helm deploy (StorageClass references it)
+	if (protocol == protocolSMB || protocol == protocolAll || protocol == protocolBoth) && config.SMBUsername != "" {
+		klog.Infof("Creating SMB credentials secret in %s", helmNamespace)
+		k8s, k8sErr := NewKubernetesClient(config.Kubeconfig, helmNamespace)
+		if k8sErr != nil {
+			return fmt.Errorf("failed to create k8s client for SMB secret: %w", k8sErr)
+		}
+		secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		secretErr := k8s.CreateSecret(secretCtx, helmNamespace, "tns-csi-smb-creds", map[string]string{
+			"username": config.SMBUsername,
+			"password": config.SMBPassword,
+		})
+		secretCancel()
+		if secretErr != nil {
+			return fmt.Errorf("failed to create SMB credentials secret: %w", secretErr)
+		}
+		klog.Infof("SMB credentials secret created")
+	}
+
 	// Create Helm deployer
 	suite.helm = NewHelmDeployer(config)
 
@@ -243,6 +262,20 @@ func TeardownSuite() {
 		suite.truenas = nil
 	}
 
+	// Clean up SMB credentials secret if it was created
+	if (suite.protocol == protocolSMB || suite.protocol == protocolAll || suite.protocol == protocolBoth) && suite.config != nil && suite.config.SMBUsername != "" {
+		k8s, k8sErr := NewKubernetesClient(suite.config.Kubeconfig, helmNamespace)
+		if k8sErr == nil {
+			secretCtx, secretCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if delErr := k8s.DeleteSecret(secretCtx, helmNamespace, "tns-csi-smb-creds"); delErr != nil {
+				klog.Warningf("Failed to cleanup SMB credentials secret: %v", delErr)
+			} else {
+				klog.Infof("Cleaned up SMB credentials secret")
+			}
+			secretCancel()
+		}
+	}
+
 	// Note: We don't undeploy the Helm chart here because:
 	// 1. It's useful for debugging if tests fail
 	// 2. The next suite will just upgrade it anyway
@@ -310,7 +343,7 @@ func (f *Framework) Setup(protocol string) error {
 
 	// Use suite-level Helm deployer if available, otherwise create one
 	suite.mu.Lock()
-	if suite.deployed && (suite.protocol == protocol || suite.protocol == "both" || suite.protocol == "all") {
+	if suite.deployed && (suite.protocol == protocol || suite.protocol == protocolBoth || suite.protocol == protocolAll) {
 		// Suite already deployed with compatible protocol
 		f.Helm = suite.helm
 		f.TrueNAS = suite.truenas

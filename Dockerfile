@@ -42,6 +42,7 @@ RUN apk add --no-cache \
     eudev \
     nvme-cli \
     open-iscsi \
+    cifs-utils \
     || [ $? -eq 4 ]
 
 # Copy the driver binary

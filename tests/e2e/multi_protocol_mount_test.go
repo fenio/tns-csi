@@ -3,6 +3,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -32,8 +33,9 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		}
 	})
 
-	It("should mount NFS, NVMe-oF, and iSCSI volumes in a single POD", func() {
+	It("should mount NFS, NVMe-oF, iSCSI, and optionally SMB volumes in a single POD", func() {
 		ctx := context.Background()
+		smbEnabled := os.Getenv("SMB_USERNAME") != ""
 
 		By("Creating an NFS PVC")
 		pvcNFS, err := f.K8s.CreatePVC(ctx, framework.PVCOptions{
@@ -75,8 +77,24 @@ var _ = Describe("Multi-Protocol Mount", func() {
 			return f.K8s.DeletePVC(context.Background(), pvcISCSI.Name)
 		})
 
-		By("Creating a POD with all three volumes mounted")
-		pod, err := createMultiMountPod(ctx, f, "multi-mount-pod", pvcNFS.Name, pvcNVMe.Name, pvcISCSI.Name)
+		smbPVCName := ""
+		if smbEnabled {
+			By("Creating an SMB PVC")
+			pvcSMB, smbErr := f.K8s.CreatePVC(ctx, framework.PVCOptions{
+				Name:             "multi-mount-smb",
+				StorageClassName: "tns-csi-smb",
+				Size:             "1Gi",
+				AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			})
+			Expect(smbErr).NotTo(HaveOccurred(), "Failed to create SMB PVC")
+			f.Cleanup.Add(func() error {
+				return f.K8s.DeletePVC(context.Background(), pvcSMB.Name)
+			})
+			smbPVCName = pvcSMB.Name
+		}
+
+		By("Creating a POD with all volumes mounted")
+		pod, err := createMultiMountPod(ctx, f, "multi-mount-pod", pvcNFS.Name, pvcNVMe.Name, pvcISCSI.Name, smbPVCName)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create multi-mount POD")
 		f.Cleanup.Add(func() error {
 			return f.K8s.DeletePod(context.Background(), pod.Name)
@@ -100,6 +118,12 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(pvcISCSI.Status.Phase).To(Equal(corev1.ClaimBound), "iSCSI PVC should be bound")
 
+		if smbEnabled {
+			pvcSMB, smbErr := f.K8s.GetPVC(ctx, smbPVCName)
+			Expect(smbErr).NotTo(HaveOccurred())
+			Expect(pvcSMB.Status.Phase).To(Equal(corev1.ClaimBound), "SMB PVC should be bound")
+		}
+
 		By("Writing test data to NFS volume")
 		_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "echo 'NFS test data' > /data-nfs/test.txt"})
 		Expect(err).NotTo(HaveOccurred(), "Failed to write to NFS volume")
@@ -111,6 +135,12 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		By("Writing test data to iSCSI volume")
 		_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "echo 'iSCSI test data' > /data-iscsi/test.txt && sync"})
 		Expect(err).NotTo(HaveOccurred(), "Failed to write to iSCSI volume")
+
+		if smbEnabled {
+			By("Writing test data to SMB volume")
+			_, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "echo 'SMB test data' > /data-smb/test.txt && sync"})
+			Expect(err).NotTo(HaveOccurred(), "Failed to write to SMB volume")
+		}
 
 		By("Reading and verifying NFS data")
 		nfsData, err := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data-nfs/test.txt"})
@@ -126,6 +156,13 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		iscsiData, err := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data-iscsi/test.txt"})
 		Expect(err).NotTo(HaveOccurred(), "Failed to read from iSCSI volume")
 		Expect(iscsiData).To(ContainSubstring("iSCSI test data"), "iSCSI data mismatch")
+
+		if smbEnabled {
+			By("Reading and verifying SMB data")
+			smbData, smbErr := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data-smb/test.txt"})
+			Expect(smbErr).NotTo(HaveOccurred(), "Failed to read from SMB volume")
+			Expect(smbData).To(ContainSubstring("SMB test data"), "SMB data mismatch")
+		}
 
 		By("Verifying volume isolation - NFS file should not exist on block volumes")
 		exists, err := f.K8s.FileExistsInPod(ctx, pod.Name, "/data-nvmeof/test.txt.nfs")
@@ -153,17 +190,85 @@ var _ = Describe("Multi-Protocol Mount", func() {
 		// iSCSI volumes are formatted with ext4 by default
 		Expect(mountOutput).To(ContainSubstring("ext4"), "Expected ext4 filesystem on iSCSI volume")
 
+		if smbEnabled {
+			By("Verifying SMB filesystem type")
+			mountOutput, err = f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "mount | grep /data-smb"})
+			Expect(err).NotTo(HaveOccurred(), "Failed to check SMB mount")
+			Expect(mountOutput).To(ContainSubstring("cifs"), "Expected CIFS filesystem type for SMB volume")
+		}
+
 		if f.Verbose() {
 			GinkgoWriter.Printf("Multi-protocol mount test completed successfully\n")
 			GinkgoWriter.Printf("  - NFS volume mounted and verified\n")
 			GinkgoWriter.Printf("  - NVMe-oF volume mounted and verified\n")
 			GinkgoWriter.Printf("  - iSCSI volume mounted and verified\n")
+			if smbEnabled {
+				GinkgoWriter.Printf("  - SMB volume mounted and verified\n")
+			}
 		}
 	})
 })
 
-// createMultiMountPod creates a pod with NFS, NVMe-oF, and iSCSI volumes mounted.
-func createMultiMountPod(ctx context.Context, f *framework.Framework, name, nfsPVCName, nvmeofPVCName, iscsiPVCName string) (*corev1.Pod, error) {
+// createMultiMountPod creates a pod with NFS, NVMe-oF, iSCSI, and optionally SMB volumes mounted.
+// Pass an empty smbPVCName to skip SMB.
+func createMultiMountPod(ctx context.Context, f *framework.Framework, name, nfsPVCName, nvmeofPVCName, iscsiPVCName, smbPVCName string) (*corev1.Pod, error) {
+	volumeMounts := []corev1.VolumeMount{
+		{
+			Name:      "nfs-volume",
+			MountPath: "/data-nfs",
+		},
+		{
+			Name:      "nvmeof-volume",
+			MountPath: "/data-nvmeof",
+		},
+		{
+			Name:      "iscsi-volume",
+			MountPath: "/data-iscsi",
+		},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "nfs-volume",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: nfsPVCName,
+				},
+			},
+		},
+		{
+			Name: "nvmeof-volume",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: nvmeofPVCName,
+				},
+			},
+		},
+		{
+			Name: "iscsi-volume",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: iscsiPVCName,
+				},
+			},
+		},
+	}
+
+	if smbPVCName != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "smb-volume",
+			MountPath: "/data-smb",
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "smb-volume",
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: smbPVCName,
+				},
+			},
+		})
+	}
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -172,51 +277,13 @@ func createMultiMountPod(ctx context.Context, f *framework.Framework, name, nfsP
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:    "test",
-					Image:   "public.ecr.aws/docker/library/busybox:latest",
-					Command: []string{"sleep", "3600"},
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "nfs-volume",
-							MountPath: "/data-nfs",
-						},
-						{
-							Name:      "nvmeof-volume",
-							MountPath: "/data-nvmeof",
-						},
-						{
-							Name:      "iscsi-volume",
-							MountPath: "/data-iscsi",
-						},
-					},
+					Name:         "test",
+					Image:        "public.ecr.aws/docker/library/busybox:latest",
+					Command:      []string{"sleep", "3600"},
+					VolumeMounts: volumeMounts,
 				},
 			},
-			Volumes: []corev1.Volume{
-				{
-					Name: "nfs-volume",
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: nfsPVCName,
-						},
-					},
-				},
-				{
-					Name: "nvmeof-volume",
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: nvmeofPVCName,
-						},
-					},
-				},
-				{
-					Name: "iscsi-volume",
-					VolumeSource: corev1.VolumeSource{
-						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-							ClaimName: iscsiPVCName,
-						},
-					},
-				},
-			},
+			Volumes:       volumes,
 			RestartPolicy: corev1.RestartPolicyNever,
 		},
 	}

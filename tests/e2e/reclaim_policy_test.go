@@ -3,6 +3,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"path"
 	"time"
 
@@ -67,6 +68,16 @@ var _ = Describe("Reclaim Policy", func() {
 		},
 	}
 
+	if os.Getenv("SMB_USERNAME") != "" {
+		protocols = append(protocols, protocolConfig{
+			name:         "SMB",
+			id:           "smb",
+			storageClass: "tns-csi-smb",
+			accessMode:   corev1.ReadWriteMany,
+			podTimeout:   2 * time.Minute,
+		})
+	}
+
 	for _, proto := range protocols {
 		It("should delete PV when PVC with Delete policy is removed ["+proto.name+"]", func() {
 			ctx := context.Background()
@@ -78,7 +89,7 @@ var _ = Describe("Reclaim Policy", func() {
 				"pool":     f.Config.TrueNASPool,
 				"server":   f.Config.TrueNASHost,
 			}
-			if proto.id != "nfs" {
+			if proto.id != "nfs" && proto.id != "smb" {
 				params["fsType"] = "ext4"
 			}
 			err := f.K8s.CreateStorageClassWithReclaimPolicy(ctx, scName, "tns.csi.io", params, corev1.PersistentVolumeReclaimDelete)
@@ -154,7 +165,7 @@ var _ = Describe("Reclaim Policy", func() {
 				"pool":     f.Config.TrueNASPool,
 				"server":   f.Config.TrueNASHost,
 			}
-			if proto.id != "nfs" {
+			if proto.id != "nfs" && proto.id != "smb" {
 				params["fsType"] = "ext4"
 			}
 			err := f.K8s.CreateStorageClassWithReclaimPolicy(ctx, scName, "tns.csi.io", params, corev1.PersistentVolumeReclaimRetain)
@@ -278,6 +289,14 @@ func cleanupRetainedTrueNASResources(ctx context.Context, truenas *framework.Tru
 		}
 		if err := truenas.DeleteDataset(ctx, volumeHandle); err != nil {
 			klog.Warningf("Failed to cleanup retained ZVOL %s: %v", volumeHandle, err)
+		}
+	case "smb":
+		sharePath := "/mnt/" + volumeHandle
+		if err := truenas.DeleteSMBShare(ctx, sharePath); err != nil {
+			klog.Warningf("Failed to cleanup retained SMB share %s: %v", sharePath, err)
+		}
+		if err := truenas.DeleteDataset(ctx, volumeHandle); err != nil {
+			klog.Warningf("Failed to cleanup retained SMB dataset %s: %v", volumeHandle, err)
 		}
 	}
 }

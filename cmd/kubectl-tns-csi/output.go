@@ -18,6 +18,7 @@ var (
 	colorProtocolNFS  = color.New(color.FgBlue)
 	colorProtocolNVMe = color.New(color.FgMagenta)
 	colorProtocolISCI = color.New(color.FgYellow)
+	colorProtocolSMB  = color.New(color.FgCyan)
 )
 
 // protocolBadge returns a colored protocol name.
@@ -29,6 +30,8 @@ func protocolBadge(protocol string) string {
 		return colorProtocolNVMe.Sprint("NVMe-oF")
 	case protocolISCSI:
 		return colorProtocolISCI.Sprint("iSCSI")
+	case protocolSMB:
+		return colorProtocolSMB.Sprint("SMB")
 	default:
 		if protocol == "" {
 			return colorMuted.Sprint("-")

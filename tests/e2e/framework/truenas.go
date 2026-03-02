@@ -321,6 +321,28 @@ func (v *TrueNASVerifier) DeleteNFSShare(ctx context.Context, path string) error
 	)
 }
 
+// SMBShareExists checks if an SMB share exists for the given path.
+func (v *TrueNASVerifier) SMBShareExists(ctx context.Context, path string) (bool, error) {
+	var shares []map[string]any
+	filter := []any{[]any{"path", "=", path}}
+	if err := v.client.Call(ctx, "sharing.smb.query", []any{filter}, &shares); err != nil {
+		return false, fmt.Errorf("failed to query SMB shares: %w", err)
+	}
+	return len(shares) > 0, nil
+}
+
+// DeleteSMBShare deletes an SMB share from TrueNAS.
+func (v *TrueNASVerifier) DeleteSMBShare(ctx context.Context, path string) error {
+	return v.deleteResourceByFilter(
+		ctx,
+		"sharing.smb.query",
+		"sharing.smb.delete",
+		"path",
+		path,
+		"SMB share for path "+path,
+	)
+}
+
 // ISCSITargetExists checks if an iSCSI target exists with the given name.
 func (v *TrueNASVerifier) ISCSITargetExists(ctx context.Context, targetName string) (bool, error) {
 	var targets []map[string]any
@@ -450,6 +472,7 @@ func (v *TrueNASVerifier) IsDatasetClone(ctx context.Context, datasetPath string
 type ResourceSnapshot struct {
 	Datasets     map[string]datasetInfo // dataset path -> info
 	NFSShares    map[string]bool        // share path -> exists
+	SMBShares    map[string]bool        // share path -> exists
 	NVMeSubsNQNs map[string]bool        // subsystem NQN -> exists
 	ISCSITargets map[string]bool        // target name -> exists
 	ISCSIExtents map[string]bool        // extent name -> exists
@@ -466,6 +489,7 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 	snap := &ResourceSnapshot{
 		Datasets:     make(map[string]datasetInfo),
 		NFSShares:    make(map[string]bool),
+		SMBShares:    make(map[string]bool),
 		NVMeSubsNQNs: make(map[string]bool),
 		ISCSITargets: make(map[string]bool),
 		ISCSIExtents: make(map[string]bool),
@@ -499,6 +523,19 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 		for _, s := range shares {
 			if strings.HasPrefix(s.Path, mountPrefix) {
 				snap.NFSShares[s.Path] = true
+			}
+		}
+	}
+
+	// SMB shares — filter to shares under the pool mount path
+	smbShares, err := v.client.QueryAllSMBShares(ctx, "")
+	if err != nil {
+		klog.Warningf("Resource snapshot: failed to query SMB shares: %v", err)
+	} else {
+		smbMountPrefix := "/mnt/" + poolPrefix
+		for _, s := range smbShares {
+			if strings.HasPrefix(s.Path, smbMountPrefix) {
+				snap.SMBShares[s.Path] = true
 			}
 		}
 	}
@@ -577,6 +614,13 @@ func LogResourceDiff(before, after *ResourceSnapshot) {
 		}
 	}
 
+	// SMB shares
+	for path := range after.SMBShares {
+		if !before.SMBShares[path] {
+			leaks = append(leaks, "LEAKED SMB share: "+path)
+		}
+	}
+
 	// NVMe-oF subsystems
 	for nqn := range after.NVMeSubsNQNs {
 		if !before.NVMeSubsNQNs[nqn] {
@@ -619,6 +663,10 @@ func LogSnapshot(label string, snap *ResourceSnapshot) {
 	}
 	ginkgo.GinkgoWriter.Printf("  NFS shares: %d\n", len(snap.NFSShares))
 	for path := range snap.NFSShares {
+		ginkgo.GinkgoWriter.Printf("    %s\n", path)
+	}
+	ginkgo.GinkgoWriter.Printf("  SMB shares: %d\n", len(snap.SMBShares))
+	for path := range snap.SMBShares {
 		ginkgo.GinkgoWriter.Printf("    %s\n", path)
 	}
 	ginkgo.GinkgoWriter.Printf("  NVMe-oF subsystems: %d\n", len(snap.NVMeSubsNQNs))

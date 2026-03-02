@@ -106,6 +106,26 @@ func (m *mockAPIClient) QueryNFSShare(ctx context.Context, path string) ([]tnsap
 	return nil, nil
 }
 
+func (m *mockAPIClient) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockAPIClient) DeleteSMBShare(ctx context.Context, shareID int) error {
+	return nil
+}
+
+func (m *mockAPIClient) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
+	return nil, nil
+}
+
+func (m *mockAPIClient) QuerySMBShareByID(_ context.Context, _ int) (*tnsapi.SMBShare, error) {
+	return nil, nil //nolint:nilnil // nil means "not found"
+}
+
+func (m *mockAPIClient) QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]tnsapi.SMBShare, error) {
+	return nil, nil
+}
+
 func (m *mockAPIClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 	return nil, errNotImplemented
 }

@@ -38,10 +38,18 @@ async function testDashboard() {
           html_url: 'https://github.com/fenio/tns-csi/actions/runs/126'
         },
         {
-          name: 'E2E: Shared',
-          conclusion: 'failure',
+          name: 'E2E: SMB',
+          conclusion: 'success',
           started_at: '2024-01-01T12:00:00Z',
           completed_at: '2024-01-01T12:30:00Z',
+          run_id: 127,
+          html_url: 'https://github.com/fenio/tns-csi/actions/runs/127'
+        },
+        {
+          name: 'E2E: Shared',
+          conclusion: 'failure',
+          started_at: '2024-01-01T12:30:00Z',
+          completed_at: '2024-01-01T13:00:00Z',
           run_id: 125,
           html_url: 'https://github.com/fenio/tns-csi/actions/runs/125'
         }
@@ -57,6 +65,7 @@ async function testDashboard() {
       console.log(`  - NFS tests: ${results.byProtocol.nfs.total}`);
       console.log(`  - NVMe-oF tests: ${results.byProtocol.nvmeof.total}`);
       console.log(`  - iSCSI tests: ${results.byProtocol.iscsi.total}`);
+      console.log(`  - SMB tests: ${results.byProtocol.smb.total}`);
       console.log(`  - HTML length: ${html.length} characters`);
 
       return true;

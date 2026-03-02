@@ -15,6 +15,9 @@ import (
 const (
 	helmReleaseName = "tns-csi-driver"
 	helmNamespace   = "kube-system"
+	protocolSMB     = "smb"
+	protocolAll     = "all"
+	protocolBoth    = "both"
 )
 
 // ErrUnknownProtocol is returned when an unknown protocol is specified.
@@ -102,7 +105,21 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
 			"--set", "storageClasses[0].port=3260",
 		)
-	case "both", "all":
+	case protocolSMB:
+		args = append(args,
+			"--set", "storageClasses[0].name=tns-csi-smb",
+			"--set", "storageClasses[0].enabled=true",
+			"--set", "storageClasses[0].protocol=smb",
+			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
+			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
+		)
+		if h.config.SMBUsername != "" {
+			args = append(args,
+				"--set", "storageClasses[0].smbCredentialsSecret.name=tns-csi-smb-creds",
+				"--set", "storageClasses[0].smbCredentialsSecret.namespace="+helmNamespace,
+			)
+		}
+	case protocolBoth, protocolAll:
 		args = append(args,
 			"--set", "storageClasses[0].name=tns-csi-nfs",
 			"--set", "storageClasses[0].enabled=true",
@@ -123,6 +140,17 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			"--set", "storageClasses[2].server="+h.config.TrueNASHost,
 			"--set", "storageClasses[2].port=3260",
 		)
+		if h.config.SMBUsername != "" {
+			args = append(args,
+				"--set", "storageClasses[3].name=tns-csi-smb",
+				"--set", "storageClasses[3].enabled=true",
+				"--set", "storageClasses[3].protocol=smb",
+				"--set", "storageClasses[3].pool="+h.config.TrueNASPool,
+				"--set", "storageClasses[3].server="+h.config.TrueNASHost,
+				"--set", "storageClasses[3].smbCredentialsSecret.name=tns-csi-smb-creds",
+				"--set", "storageClasses[3].smbCredentialsSecret.namespace="+helmNamespace,
+			)
+		}
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownProtocol, protocol)
 	}

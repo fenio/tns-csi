@@ -26,14 +26,15 @@ const (
 //
 //nolint:govet // field alignment not critical for CLI output struct
 type VolumeHealth struct {
-	VolumeID  string       `json:"volumeId"           yaml:"volumeId"`
-	Dataset   string       `json:"dataset"            yaml:"dataset"`
-	Protocol  string       `json:"protocol"           yaml:"protocol"`
-	Status    HealthStatus `json:"status"             yaml:"status"`
-	Issues    []string     `json:"issues"             yaml:"issues"`
-	ShareOK   *bool        `json:"shareOk,omitempty"  yaml:"shareOk,omitempty"`  // NFS: share exists and enabled
-	SubsysOK  *bool        `json:"subsysOk,omitempty" yaml:"subsysOk,omitempty"` // NVMe-oF: subsystem exists and enabled
-	DatasetOK bool         `json:"datasetOk"          yaml:"datasetOk"`          // Dataset exists
+	VolumeID   string       `json:"volumeId"             yaml:"volumeId"`
+	Dataset    string       `json:"dataset"              yaml:"dataset"`
+	Protocol   string       `json:"protocol"             yaml:"protocol"`
+	Status     HealthStatus `json:"status"               yaml:"status"`
+	Issues     []string     `json:"issues"               yaml:"issues"`
+	ShareOK    *bool        `json:"shareOk,omitempty"    yaml:"shareOk,omitempty"`    // NFS: share exists and enabled
+	SubsysOK   *bool        `json:"subsysOk,omitempty"   yaml:"subsysOk,omitempty"`   // NVMe-oF: subsystem exists and enabled
+	SMBShareOK *bool        `json:"smbShareOk,omitempty" yaml:"smbShareOk,omitempty"` // SMB: share exists and enabled
+	DatasetOK  bool         `json:"datasetOk"            yaml:"datasetOk"`            // Dataset exists
 }
 
 // HealthReport contains the overall health report.
@@ -145,6 +146,17 @@ func checkVolumeHealth(ctx context.Context, client tnsapi.ClientInterface) (*Hea
 		nvmeSubsysMap[nvmeSubsystems[i].NQN] = &nvmeSubsystems[i]
 	}
 
+	// Get all SMB shares for quick lookup
+	smbShares, err := client.QueryAllSMBShares(ctx, "")
+	if err != nil {
+		// Non-fatal
+		smbShares = nil
+	}
+	smbShareMap := make(map[string]*tnsapi.SMBShare)
+	for i := range smbShares {
+		smbShareMap[smbShares[i].Path] = &smbShares[i]
+	}
+
 	report := &HealthReport{
 		Volumes:  make([]VolumeHealth, 0),
 		Problems: make([]VolumeHealth, 0),
@@ -186,6 +198,8 @@ func checkVolumeHealth(ctx context.Context, client tnsapi.ClientInterface) (*Hea
 			checkNFSHealth(ds, nfsShareMap, &health)
 		case protocolNVMeOF:
 			checkNVMeOFHealth(ds, nvmeSubsysMap, &health)
+		case protocolSMB:
+			checkSMBHealth(ds, smbShareMap, &health)
 		}
 
 		// Determine overall status
@@ -284,6 +298,38 @@ func checkNVMeOFHealth(ds *tnsapi.DatasetWithProperties, nvmeSubsysMap map[strin
 
 	subsysOK := true
 	health.SubsysOK = &subsysOK
+}
+
+// checkSMBHealth checks SMB-specific health for a volume.
+func checkSMBHealth(ds *tnsapi.DatasetWithProperties, smbShareMap map[string]*tnsapi.SMBShare, health *VolumeHealth) {
+	// Get expected share path
+	sharePath := ""
+	if ds.Mountpoint != "" {
+		sharePath = ds.Mountpoint
+	}
+
+	if sharePath == "" {
+		health.Issues = append(health.Issues, "SMB share path not found")
+		smbOK := false
+		health.SMBShareOK = &smbOK
+		return
+	}
+
+	// Check if share exists
+	share, exists := smbShareMap[sharePath]
+	if !exists {
+		health.Issues = append(health.Issues, "SMB share not found for path "+sharePath)
+		smbOK := false
+		health.SMBShareOK = &smbOK
+		return
+	}
+
+	smbOK := true
+	if !share.Enabled {
+		health.Issues = append(health.Issues, "SMB share is disabled")
+		smbOK = false
+	}
+	health.SMBShareOK = &smbOK
 }
 
 // outputHealthReport outputs the health report in the specified format.

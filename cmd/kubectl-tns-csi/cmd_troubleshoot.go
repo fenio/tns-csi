@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -247,6 +248,8 @@ func runTroubleshoot(ctx context.Context, pvcName, namespace string, url, apiKey
 		checkNFSResourcesForTroubleshoot(ctx, client, dataset, result)
 	case protocolNVMeOF:
 		checkNVMeOFResourcesForTroubleshoot(ctx, client, dataset, result)
+	case protocolSMB:
+		checkSMBResourcesForTroubleshoot(ctx, client, dataset, result)
 	default:
 		result.Checks = append(result.Checks, TroubleshootCheck{
 			Name:    "Protocol Check",
@@ -408,6 +411,82 @@ func checkNVMeOFResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clie
 		Name:    "NVMe-oF Subsystem",
 		Status:  statusOK,
 		Message: fmt.Sprintf("NVMe-oF subsystem found and enabled (ID: %d, NQN: %s)", subsystem.ID, subsystem.NQN),
+	})
+}
+
+// checkSMBResourcesForTroubleshoot checks SMB-specific resources on TrueNAS.
+func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientInterface, dataset *tnsapi.DatasetWithProperties, result *TroubleshootResult) {
+	// Try share ID from properties first
+	if prop, ok := dataset.UserProperties[tnsapi.PropertySMBShareID]; ok && prop.Value != "" {
+		shareID, err := strconv.Atoi(prop.Value)
+		if err == nil && shareID > 0 {
+			share, err := client.QuerySMBShareByID(ctx, shareID)
+			if err != nil || share == nil {
+				result.Checks = append(result.Checks, TroubleshootCheck{
+					Name:    "SMB Share",
+					Status:  statusError,
+					Message: fmt.Sprintf("SMB share not found (ID: %d)", shareID),
+				})
+				result.Suggestions = append(result.Suggestions, "The SMB share may have been deleted - recreate it or delete/recreate the PVC")
+				return
+			}
+
+			if !share.Enabled {
+				result.Checks = append(result.Checks, TroubleshootCheck{
+					Name:    "SMB Share",
+					Status:  statusError,
+					Message: "SMB share exists but is disabled",
+				})
+				result.Suggestions = append(result.Suggestions, "Enable the SMB share in TrueNAS UI or via API")
+				return
+			}
+
+			result.Checks = append(result.Checks, TroubleshootCheck{
+				Name:    "SMB Share",
+				Status:  statusOK,
+				Message: fmt.Sprintf("SMB share found and enabled (ID: %d, Name: %s)", share.ID, share.Name),
+			})
+			return
+		}
+	}
+
+	// Fallback: query by mountpoint path
+	sharePath := dataset.Mountpoint
+	if sharePath == "" {
+		result.Checks = append(result.Checks, TroubleshootCheck{
+			Name:    "SMB Share",
+			Status:  statusWarning,
+			Message: "No share path found in volume properties",
+		})
+		return
+	}
+
+	shares, err := client.QuerySMBShare(ctx, sharePath)
+	if err != nil || len(shares) == 0 {
+		result.Checks = append(result.Checks, TroubleshootCheck{
+			Name:    "SMB Share",
+			Status:  statusError,
+			Message: "SMB share not found for path " + sharePath,
+		})
+		result.Suggestions = append(result.Suggestions, "The SMB share may have been deleted - recreate it or delete/recreate the PVC")
+		return
+	}
+
+	share := shares[0]
+	if !share.Enabled {
+		result.Checks = append(result.Checks, TroubleshootCheck{
+			Name:    "SMB Share",
+			Status:  statusError,
+			Message: "SMB share exists but is disabled",
+		})
+		result.Suggestions = append(result.Suggestions, "Enable the SMB share in TrueNAS UI or via API")
+		return
+	}
+
+	result.Checks = append(result.Checks, TroubleshootCheck{
+		Name:    "SMB Share",
+		Status:  statusOK,
+		Message: fmt.Sprintf("SMB share found and enabled (ID: %d, Name: %s)", share.ID, share.Name),
 	})
 }
 

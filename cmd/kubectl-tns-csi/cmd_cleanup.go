@@ -257,6 +257,8 @@ func deleteOrphanedVolume(ctx context.Context, client tnsapi.ClientInterface, vo
 		return deleteNFSVolumeResources(ctx, client, ds)
 	case protocolNVMeOF:
 		return deleteNVMeOFVolumeResources(ctx, client, ds)
+	case protocolSMB:
+		return deleteSMBVolumeResources(ctx, client, ds)
 	default:
 		// Unknown protocol - just try to delete the dataset
 		return client.DeleteDataset(ctx, ds.ID)
@@ -306,6 +308,24 @@ func deleteNVMeOFVolumeResources(ctx context.Context, client tnsapi.ClientInterf
 	}
 
 	// Delete the zvol
+	return client.DeleteDataset(ctx, ds.ID)
+}
+
+// deleteSMBVolumeResources deletes SMB share and dataset.
+func deleteSMBVolumeResources(ctx context.Context, client tnsapi.ClientInterface, ds *tnsapi.DatasetWithProperties) error {
+	// Get SMB share ID from properties
+	if prop, ok := ds.UserProperties[tnsapi.PropertySMBShareID]; ok && prop.Value != "" {
+		shareID, err := strconv.Atoi(prop.Value)
+		if err == nil && shareID > 0 {
+			// Delete SMB share first
+			if err := client.DeleteSMBShare(ctx, shareID); err != nil {
+				// Log but continue - share may already be deleted
+				fmt.Printf("(warning: failed to delete SMB share %d: %v) ", shareID, err)
+			}
+		}
+	}
+
+	// Delete the dataset
 	return client.DeleteDataset(ctx, ds.ID)
 }
 

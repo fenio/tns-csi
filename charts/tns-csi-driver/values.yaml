@@ -465,6 +465,54 @@ storageClasses:
     #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
     parameters: {}
 
+  # SMB/CIFS storage class (requires cifs-utils on nodes)
+  # IMPORTANT: SMB requires authentication. Create a Kubernetes Secret with keys:
+  #   username, password, and optionally domain, then reference it below.
+  - name: tns-csi-smb
+    enabled: false
+    protocol: smb
+    isDefault: false
+    # Storage pool name on TrueNAS
+    pool: "storage"
+    # TrueNAS server IP/hostname for SMB shares
+    server: ""
+    # Optional: Parent dataset
+    parentDataset: ""
+    reclaimPolicy: Delete
+    volumeBindingMode: Immediate
+    allowVolumeExpansion: true
+    # Mount options for SMB volumes
+    # These are merged with driver defaults (vers=3.0 on Linux)
+    # User-specified options override defaults if there's a conflict
+    # Example: ["seal", "cache=strict"]
+    mountOptions: []
+    # Delete strategy: "delete" or "retain"
+    deleteStrategy: ""
+    # Volume Name Templating:
+    nameTemplate: ""
+    namePrefix: ""
+    nameSuffix: ""
+    # Dataset Comment Templating:
+    commentTemplate: ""
+    # Volume Adoption (for cluster migration):
+    markAdoptable: ""
+    adoptExisting: ""
+    # Encryption (ZFS native encryption):
+    encryption: ""
+    encryptionAlgorithm: ""
+    encryptionGenerateKey: ""
+    # SMB Credentials Secret:
+    #   Kubernetes Secret containing SMB authentication credentials.
+    #   The secret should have keys: username, password, domain (optional).
+    #   The kubelet uses nodeStageSecretRef to pass these to the CSI driver.
+    smbCredentialsSecret:
+      # Name of the Kubernetes Secret
+      name: ""
+      # Namespace of the Secret (defaults to release namespace)
+      namespace: ""
+    # Additional parameters
+    parameters: {}
+
   # To add more storage classes, simply add more entries to this list:
   # - name: tns-csi-nfs-retain
   #   enabled: true

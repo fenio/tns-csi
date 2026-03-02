@@ -26,6 +26,8 @@ var (
 	ErrSubsystemNotFound = errors.New("subsystem not found")
 	// ErrISCSITargetNotFound indicates an iSCSI target was not found.
 	ErrISCSITargetNotFound = errors.New("iSCSI target not found")
+	// ErrSMBShareNotFound indicates an SMB share was not found.
+	ErrSMBShareNotFound = errors.New("SMB share not found")
 	// ErrISCSIExtentNotFound indicates an iSCSI extent was not found.
 	ErrISCSIExtentNotFound = errors.New("iSCSI extent not found")
 	// ErrISCSITargetExtentNotFound indicates an iSCSI target-extent was not found.
@@ -43,6 +45,7 @@ type MockClient struct {
 	iscsiTargets       map[int]mockISCSITarget
 	iscsiExtents       map[int]mockISCSIExtent
 	iscsiTargetExtents map[int]mockISCSITargetExtent
+	smbShares          map[int]*mockSMBShare
 	callLog            []string
 	nextDatasetID      int
 	nextShareID        int
@@ -53,6 +56,7 @@ type MockClient struct {
 	nextISCSITargetID  int
 	nextISCSIExtentID  int
 	nextISCSITEID      int // target-extent ID
+	nextSMBShareID     int
 	mu                 sync.Mutex
 }
 
@@ -70,6 +74,14 @@ type mockDataset struct {
 }
 
 type mockNFSShare struct {
+	Path    string
+	Comment string
+	ID      int
+	Enabled bool
+}
+
+type mockSMBShare struct {
+	Name    string
 	Path    string
 	Comment string
 	ID      int
@@ -144,6 +156,7 @@ func NewMockClient() *MockClient {
 		iscsiTargets:       make(map[int]mockISCSITarget),
 		iscsiExtents:       make(map[int]mockISCSIExtent),
 		iscsiTargetExtents: make(map[int]mockISCSITargetExtent),
+		smbShares:          make(map[int]*mockSMBShare),
 		nextDatasetID:      1,
 		nextShareID:        1,
 		nextTargetID:       1,
@@ -633,6 +646,109 @@ func (m *MockClient) QueryAllNFSShares(ctx context.Context, pathPrefix string) (
 		}
 	}
 
+	return result, nil
+}
+
+// CreateSMBShare mocks sharing.smb.create.
+func (m *MockClient) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	m.logCall("CreateSMBShare", params.Name, params.Path)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nextSMBShareID++
+	share := &tnsapi.SMBShare{
+		ID:      m.nextSMBShareID,
+		Name:    params.Name,
+		Path:    params.Path,
+		Comment: params.Comment,
+		Enabled: params.Enabled,
+	}
+
+	m.smbShares[share.ID] = &mockSMBShare{
+		ID:      share.ID,
+		Name:    share.Name,
+		Path:    share.Path,
+		Comment: share.Comment,
+		Enabled: share.Enabled,
+	}
+
+	return share, nil
+}
+
+// DeleteSMBShare mocks sharing.smb.delete.
+func (m *MockClient) DeleteSMBShare(ctx context.Context, shareID int) error {
+	m.logCall("DeleteSMBShare", shareID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.smbShares[shareID]; !ok {
+		return fmt.Errorf("SMB share %d: %w", shareID, ErrSMBShareNotFound)
+	}
+	delete(m.smbShares, shareID)
+	return nil
+}
+
+// QuerySMBShare mocks sharing.smb.query by path.
+func (m *MockClient) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
+	m.logCall("QuerySMBShare", path)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var result []tnsapi.SMBShare
+	for _, share := range m.smbShares {
+		if share.Path == path {
+			result = append(result, tnsapi.SMBShare{
+				ID:      share.ID,
+				Name:    share.Name,
+				Path:    share.Path,
+				Comment: share.Comment,
+				Enabled: share.Enabled,
+			})
+		}
+	}
+	return result, nil
+}
+
+// QuerySMBShareByID mocks sharing.smb.query by ID.
+func (m *MockClient) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {
+	m.logCall("QuerySMBShareByID", shareID)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	share, ok := m.smbShares[shareID]
+	if !ok {
+		return nil, nil //nolint:nilnil // nil means "not found"
+	}
+	return &tnsapi.SMBShare{
+		ID:      share.ID,
+		Name:    share.Name,
+		Path:    share.Path,
+		Comment: share.Comment,
+		Enabled: share.Enabled,
+	}, nil
+}
+
+// QueryAllSMBShares mocks sharing.smb.query for all shares.
+func (m *MockClient) QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]tnsapi.SMBShare, error) {
+	m.logCall("QueryAllSMBShares", pathPrefix)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	result := make([]tnsapi.SMBShare, 0, len(m.smbShares))
+	for _, share := range m.smbShares {
+		result = append(result, tnsapi.SMBShare{
+			ID:      share.ID,
+			Name:    share.Name,
+			Path:    share.Path,
+			Comment: share.Comment,
+			Enabled: share.Enabled,
+		})
+	}
 	return result, nil
 }
 

@@ -15,13 +15,14 @@ import (
 
 // Static errors for import command.
 var (
-	errInvalidProtocol     = errors.New("invalid protocol: must be 'nfs', 'nvmeof', or 'iscsi'")
+	errInvalidProtocol     = errors.New("invalid protocol: must be 'nfs', 'nvmeof', 'iscsi', or 'smb'")
 	errAlreadyManaged      = errors.New("dataset is already managed by tns-csi")
 	errNoNFSShareForImport = errors.New("no NFS share found, use --create-share to create one")
 	errPoolOrParentMissing = errors.New("either --pool or --parent must be specified")
 	errISCSIRequiresZvol   = errors.New("iSCSI requires a zvol")
 	errNoISCSIExtent       = errors.New("no iSCSI extent found for zvol")
 	errNoISCSITargetAssoc  = errors.New("no target association found for extent")
+	errNoSMBShareForPath   = errors.New("no SMB share found for path")
 )
 
 // ImportResult contains the result of the import operation.
@@ -36,6 +37,8 @@ type ImportResult struct {
 	ISCSITargetID int               `json:"iscsiTargetId,omitempty" yaml:"iscsiTargetId,omitempty"`
 	ISCSIExtentID int               `json:"iscsiExtentId,omitempty" yaml:"iscsiExtentId,omitempty"`
 	ISCSIIQN      string            `json:"iscsiIqn,omitempty"      yaml:"iscsiIqn,omitempty"`
+	SMBShareID    int               `json:"smbShareId,omitempty"    yaml:"smbShareId,omitempty"`
+	SMBShareName  string            `json:"smbShareName,omitempty"  yaml:"smbShareName,omitempty"`
 	CapacityBytes int64             `json:"capacityBytes"           yaml:"capacityBytes"`
 	Properties    map[string]string `json:"properties"              yaml:"properties"`
 	Success       bool              `json:"success"                 yaml:"success"`
@@ -105,12 +108,12 @@ Examples:
 	return cmd
 }
 
-//nolint:gocyclo // complexity from protocol switch handling is acceptable
+//nolint:gocyclo,gocognit // complexity from protocol switch handling is acceptable
 func runImport(ctx context.Context, url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool,
 	datasetPath, protocol, volumeID string, createShare bool, storageClass string, dryRun bool) error {
 
 	// Validate protocol
-	if protocol != protocolNFS && protocol != protocolNVMeOF && protocol != protocolISCSI {
+	if protocol != protocolNFS && protocol != protocolNVMeOF && protocol != protocolISCSI && protocol != protocolSMB {
 		return fmt.Errorf("%w: %s", errInvalidProtocol, protocol)
 	}
 
@@ -217,6 +220,23 @@ func runImport(ctx context.Context, url, apiKey, secretRef, outputFormat *string
 		}
 		if iqn, ok := iscsiProps[tnsapi.PropertyISCSIIQN]; ok {
 			result.ISCSIIQN = iqn
+		}
+
+	case protocolSMB:
+		smbProps, smbErr := handleSMBImport(ctx, client, dataset, dryRun)
+		if smbErr != nil {
+			return fmt.Errorf("SMB setup failed: %w", smbErr)
+		}
+		for k, v := range smbProps {
+			if k == "_smb_share_id" {
+				//nolint:errcheck // ignore parse errors for internal metadata
+				result.SMBShareID, _ = strconv.Atoi(v)
+			} else {
+				props[k] = v
+			}
+		}
+		if name, ok := smbProps[tnsapi.PropertySMBShareName]; ok {
+			result.SMBShareName = name
 		}
 	}
 
@@ -336,6 +356,34 @@ func handleISCSIImport(ctx context.Context, client tnsapi.ClientInterface, datas
 	return props, nil
 }
 
+func handleSMBImport(ctx context.Context, client tnsapi.ClientInterface, dataset *tnsapi.Dataset, dryRun bool) (map[string]string, error) {
+	props := make(map[string]string)
+
+	// Check for existing SMB share by path
+	shares, err := client.QuerySMBShare(ctx, dataset.Mountpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SMB shares: %w", err)
+	}
+
+	if len(shares) == 0 {
+		return nil, fmt.Errorf("%w: %s", errNoSMBShareForPath, dataset.Mountpoint)
+	}
+
+	share := shares[0]
+
+	if dryRun {
+		fmt.Printf("DRY RUN - Found SMB share: %s (ID: %d)\n", share.Name, share.ID)
+		return props, nil
+	}
+
+	props[tnsapi.PropertySMBShareName] = share.Name
+	props[tnsapi.PropertySMBShareID] = strconv.Itoa(share.ID)
+	props["_smb_share_id"] = strconv.Itoa(share.ID)
+
+	fmt.Printf("Found SMB share: %s (ID: %d)\n", share.Name, share.ID)
+	return props, nil
+}
+
 func handleNFSImport(ctx context.Context, client tnsapi.ClientInterface, dataset *tnsapi.Dataset, createShare, dryRun bool) (map[string]string, error) {
 	props := make(map[string]string)
 
@@ -419,6 +467,9 @@ func outputImportResult(result *ImportResult, format string) error {
 			if result.ISCSIIQN != "" {
 				fmt.Printf("  iSCSI IQN: %s (Target ID: %d, Extent ID: %d)\n",
 					result.ISCSIIQN, result.ISCSITargetID, result.ISCSIExtentID)
+			}
+			if result.SMBShareName != "" {
+				fmt.Printf("  SMB Share: %s (ID: %d)\n", result.SMBShareName, result.SMBShareID)
 			}
 		} else {
 			printStepf(colorError, iconError, "Failed to import %s: %s", result.Dataset, result.Message)

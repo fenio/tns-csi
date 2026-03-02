@@ -265,6 +265,28 @@ func (m *mockClient) QueryAllNFSShares(ctx context.Context, pathPrefix string) (
 	return nil, errNotImplemented
 }
 
+// SMB share operations.
+
+func (m *mockClient) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockClient) DeleteSMBShare(ctx context.Context, shareID int) error {
+	return errNotImplemented
+}
+
+func (m *mockClient) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockClient) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockClient) QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]tnsapi.SMBShare, error) {
+	return nil, errNotImplemented
+}
+
 // ZVOL operations.
 
 func (m *mockClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {

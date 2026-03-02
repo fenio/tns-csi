@@ -68,6 +68,8 @@ func (s *NodeService) checkVolumeHealth(ctx context.Context, volumePath, _ strin
 		return s.checkNVMeOFHealth(ctx, volumePath)
 	case ProtocolISCSI:
 		return s.checkISCSIHealth(ctx, volumePath)
+	case ProtocolSMB:
+		return s.checkSMBHealth(ctx, volumePath)
 	default:
 		// Unknown protocol - just check if path is accessible
 		return checkBasicHealth(volumePath)
@@ -86,6 +88,11 @@ func (s *NodeService) detectProtocolFromVolumePath(ctx context.Context, volumePa
 	// NFS mounts show "nfs" or "nfs4"
 	if strings.HasPrefix(fsType, "nfs") {
 		return ProtocolNFS
+	}
+
+	// SMB/CIFS mounts show "cifs" or "smb3"
+	if fsType == "cifs" || strings.HasPrefix(fsType, "smb") {
+		return ProtocolSMB
 	}
 
 	// For block device mounts, determine if NVMe-oF or iSCSI
@@ -181,6 +188,33 @@ func (s *NodeService) checkISCSIHealth(ctx context.Context, volumePath string) V
 		// Don't fail health check if we can't read session state
 	} else if sessionState != "LOGGED_IN" {
 		return Unhealthy(fmt.Sprintf("iSCSI session state is %q (expected: LOGGED_IN)", sessionState))
+	}
+
+	return Healthy()
+}
+
+// checkSMBHealth checks the health of an SMB/CIFS mounted volume.
+func (s *NodeService) checkSMBHealth(ctx context.Context, volumePath string) VolumeHealth {
+	// Check 1: Verify the path exists and is accessible
+	if _, err := os.Stat(volumePath); err != nil {
+		if os.IsNotExist(err) {
+			return Unhealthy("SMB mount path does not exist")
+		}
+		return Unhealthy(fmt.Sprintf("SMB mount path not accessible: %v", err))
+	}
+
+	// Check 2: Verify it's still mounted
+	mounted, err := isMountedWithTimeout(ctx, volumePath, 5*time.Second)
+	if err != nil {
+		return Unhealthy(fmt.Sprintf("Failed to check SMB mount status: %v", err))
+	}
+	if !mounted {
+		return Unhealthy("SMB volume is not mounted")
+	}
+
+	// Check 3: Try to read the directory (detects unresponsive mounts)
+	if err := checkDirectoryReadable(ctx, volumePath); err != nil {
+		return Unhealthy(fmt.Sprintf("SMB mount not readable: %v", err))
 	}
 
 	return Healthy()

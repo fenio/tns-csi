@@ -14,6 +14,7 @@ on:
           - nfs
           - nvmeof
           - iscsi
+          - smb
           - shared
 
 # Restrict permissions to minimum required
@@ -219,6 +220,8 @@ jobs:
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
+          SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
           echo "=== Running Shared Encryption E2E Tests ==="
           # Run shared encryption tests (both protocols)

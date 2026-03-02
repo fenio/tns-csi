@@ -102,25 +102,27 @@ function updateStatusCounters(counters, status, isSkipped) {
  * @returns {boolean} - True if this is a test job
  */
 function isTestJob(jobName) {
-  // Test jobs follow patterns: "E2E: *", "NFS: *", "NVMe-oF: *", "iSCSI: *", "Shared: *"
-  // The Ginkgo-based tests use "E2E: NFS", "E2E: NVMe-oF", "E2E: iSCSI", "E2E: Shared" naming
+  // Test jobs follow patterns: "E2E: *", "NFS: *", "NVMe-oF: *", "iSCSI: *", "SMB: *", "Shared: *"
+  // The Ginkgo-based tests use "E2E: NFS", "E2E: NVMe-oF", "E2E: iSCSI", "E2E: SMB", "E2E: Shared" naming
   return jobName.startsWith('E2E:') ||
          jobName.startsWith('NFS:') ||
          jobName.startsWith('NVMe-oF:') ||
          jobName.startsWith('iSCSI:') ||
+         jobName.startsWith('SMB:') ||
          jobName.startsWith('Shared:');
 }
 
 /**
  * Parses the protocol from a job name.
  * @param {string} jobName - The job name
- * @returns {string|null} - 'nfs', 'nvmeof', or null if not found
+ * @returns {string|null} - 'nfs', 'nvmeof', 'iscsi', 'smb', or null if not found
  */
 function parseProtocolFromJobName(jobName) {
   // Handle both old format ("NFS: Basic") and new Ginkgo format ("E2E: NFS")
   if (jobName.startsWith('NFS:') || jobName.includes('NFS')) return 'nfs';
   if (jobName.startsWith('NVMe-oF:') || jobName.includes('NVMe-oF') || jobName.includes('NVMeoF')) return 'nvmeof';
   if (jobName.startsWith('iSCSI:') || jobName.includes('iSCSI')) return 'iscsi';
+  if (jobName.startsWith('SMB:') || jobName.includes('SMB')) return 'smb';
   // Shared tests count for all protocols, but we return null to avoid double-counting
   return null;
 }
@@ -197,7 +199,8 @@ function parseTestResults(jobs) {
     byProtocol: {
       nfs: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 },
       nvmeof: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 },
-      iscsi: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 }
+      iscsi: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 },
+      smb: { total: 0, passed: 0, failed: 0, cancelled: 0, skipped: 0 }
     },
     byTestType: {},
     durations: [],
@@ -467,18 +470,18 @@ function generateHTML(results, runs) {
         new Chart(protocolCtx, {
             type: 'bar',
             data: {
-                labels: ['NFS', 'NVMe-oF', 'iSCSI'],
+                labels: ['NFS', 'NVMe-oF', 'iSCSI', 'SMB'],
                 datasets: [{
                     label: 'Passed',
-                    data: [${results.byProtocol.nfs.passed}, ${results.byProtocol.nvmeof.passed}, ${results.byProtocol.iscsi.passed}],
+                    data: [${results.byProtocol.nfs.passed}, ${results.byProtocol.nvmeof.passed}, ${results.byProtocol.iscsi.passed}, ${results.byProtocol.smb.passed}],
                     backgroundColor: '#28a745'
                 }, {
                     label: 'Failed',
-                    data: [${results.byProtocol.nfs.failed}, ${results.byProtocol.nvmeof.failed}, ${results.byProtocol.iscsi.failed}],
+                    data: [${results.byProtocol.nfs.failed}, ${results.byProtocol.nvmeof.failed}, ${results.byProtocol.iscsi.failed}, ${results.byProtocol.smb.failed}],
                     backgroundColor: '#dc3545'
                 }${results.skipped > 0 ? `, {
                     label: 'Skipped',
-                    data: [${results.byProtocol.nfs.skipped}, ${results.byProtocol.nvmeof.skipped}, ${results.byProtocol.iscsi.skipped}],
+                    data: [${results.byProtocol.nfs.skipped}, ${results.byProtocol.nvmeof.skipped}, ${results.byProtocol.iscsi.skipped}, ${results.byProtocol.smb.skipped}],
                     backgroundColor: '#ffc107'
                 }` : ''}]
             },

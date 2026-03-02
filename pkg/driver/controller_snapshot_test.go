@@ -139,6 +139,26 @@ func (m *MockAPIClientForSnapshots) QueryNFSShare(ctx context.Context, path stri
 	return nil, errors.New("QueryNFSShareFunc not implemented")
 }
 
+func (m *MockAPIClientForSnapshots) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	return nil, errors.New("CreateSMBShareFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) DeleteSMBShare(ctx context.Context, shareID int) error {
+	return errors.New("DeleteSMBShareFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
+	return nil, errors.New("QuerySMBShareFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {
+	return nil, errors.New("QuerySMBShareByIDFunc not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]tnsapi.SMBShare, error) {
+	return nil, errors.New("QueryAllSMBSharesFunc not implemented")
+}
+
 func (m *MockAPIClientForSnapshots) CreateZvol(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
 	if m.CreateZvolFunc != nil {
 		return m.CreateZvolFunc(ctx, params)

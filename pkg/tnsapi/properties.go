@@ -40,7 +40,7 @@ const (
 	PropertyCapacityBytes = "tns-csi:capacity_bytes"
 
 	// PropertyProtocol stores the storage protocol used.
-	// Value: "nfs", "nvmeof", or "iscsi".
+	// Value: "nfs", "nvmeof", "iscsi", or "smb".
 	PropertyProtocol = "tns-csi:protocol"
 
 	// PropertyDeleteStrategy stores the deletion strategy for the volume.
@@ -113,6 +113,17 @@ const (
 	// PropertyISCSIExtentID stores the TrueNAS iSCSI extent ID (mutable).
 	// Value: e.g., "15" (integer stored as string).
 	PropertyISCSIExtentID = "tns-csi:iscsi_extent_id"
+)
+
+// SMB-specific properties.
+const (
+	// PropertySMBShareID stores the TrueNAS SMB share ID (mutable on re-share).
+	// Value: e.g., "42" (integer stored as string).
+	PropertySMBShareID = "tns-csi:smb_share_id"
+
+	// PropertySMBShareName stores the SMB share name (stable identifier).
+	// Value: e.g., "pvc-xxx".
+	PropertySMBShareName = "tns-csi:smb_share_name"
 )
 
 // Snapshot-specific properties.
@@ -192,8 +203,11 @@ const (
 	// ProtocolNVMeOF indicates NVMe-oF protocol.
 	ProtocolNVMeOF = "nvmeof"
 
-	// ProtocolISCSI indicates iSCSI protocol (future).
+	// ProtocolISCSI indicates iSCSI protocol.
 	ProtocolISCSI = "iscsi"
+
+	// ProtocolSMB indicates SMB/CIFS protocol.
+	ProtocolSMB = "smb"
 
 	// ContentSourceSnapshot indicates the volume was created from a snapshot.
 	ContentSourceSnapshot = "snapshot"
@@ -234,10 +248,13 @@ func PropertyNames() []string {
 		PropertyNVMeSubsystemID,
 		PropertyNVMeNamespaceID,
 		PropertyNVMeSubsystemNQN,
-		// iSCSI properties (future)
+		// iSCSI properties
 		PropertyISCSIIQN,
 		PropertyISCSITargetID,
 		PropertyISCSIExtentID,
+		// SMB properties
+		PropertySMBShareID,
+		PropertySMBShareName,
 		// Snapshot properties
 		PropertySnapshotID,
 		PropertySourceVolumeID,
@@ -270,6 +287,8 @@ type NFSVolumeParams struct {
 }
 
 // NFSVolumePropertiesV1 returns Schema v1 properties for an NFS volume.
+//
+//nolint:dupl // Intentionally similar structure to SMB volume properties
 func NFSVolumePropertiesV1(params NFSVolumeParams) map[string]string {
 	props := map[string]string{
 		PropertySchemaVersion:  SchemaVersionV1,
@@ -407,6 +426,51 @@ func ISCSIVolumePropertiesV1(params ISCSIVolumeParams) map[string]string {
 		PropertyISCSITargetID:  intToString(params.TargetID),
 		PropertyISCSIExtentID:  intToString(params.ExtentID),
 		PropertyISCSIIQN:       params.TargetIQN,
+	}
+	// Add adoption properties if provided
+	if params.PVCName != "" {
+		props[PropertyPVCName] = params.PVCName
+	}
+	if params.PVCNamespace != "" {
+		props[PropertyPVCNamespace] = params.PVCNamespace
+	}
+	if params.StorageClass != "" {
+		props[PropertyStorageClass] = params.StorageClass
+	}
+	if params.Adoptable {
+		props[PropertyAdoptable] = PropertyValueTrue
+	}
+	return props
+}
+
+// SMBVolumeParams contains parameters for creating SMB volume properties.
+type SMBVolumeParams struct {
+	VolumeID       string
+	CreatedAt      string
+	DeleteStrategy string
+	ShareName      string
+	PVCName        string
+	PVCNamespace   string
+	StorageClass   string
+	CapacityBytes  int64
+	ShareID        int
+	Adoptable      bool // Mark volume as adoptable for cross-cluster adoption
+}
+
+// SMBVolumePropertiesV1 returns Schema v1 properties for an SMB volume.
+//
+//nolint:dupl // Intentionally similar structure to NFS volume properties
+func SMBVolumePropertiesV1(params SMBVolumeParams) map[string]string {
+	props := map[string]string{
+		PropertySchemaVersion:  SchemaVersionV1,
+		PropertyManagedBy:      ManagedByValue,
+		PropertyCSIVolumeName:  params.VolumeID,
+		PropertyCapacityBytes:  int64ToString(params.CapacityBytes),
+		PropertyProtocol:       ProtocolSMB,
+		PropertyCreatedAt:      params.CreatedAt,
+		PropertyDeleteStrategy: params.DeleteStrategy,
+		PropertySMBShareID:     intToString(params.ShareID),
+		PropertySMBShareName:   params.ShareName,
 	}
 	// Add adoption properties if provided
 	if params.PVCName != "" {

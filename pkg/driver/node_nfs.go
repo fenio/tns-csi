@@ -1,3 +1,4 @@
+//nolint:dupl // NFS node operations follow the same pattern as SMB but use NFS mount type
 package driver
 
 import (

@@ -280,6 +280,8 @@ func parseCapacityFromComment(comment string) int64 {
 }
 
 // buildNFSVolumeResponse builds the CreateVolumeResponse for an NFS volume.
+//
+//nolint:dupl // Similar to buildSMBVolumeResponse but uses NFS-specific types
 func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, nfsShare *tnsapi.NFSShare, capacity int64) *csi.CreateVolumeResponse {
 	meta := VolumeMetadata{
 		Name:        volumeName,

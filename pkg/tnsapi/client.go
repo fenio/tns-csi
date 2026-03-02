@@ -45,6 +45,7 @@ var (
 	ErrISCSITargetDeletionFailed       = errors.New("iSCSI target deletion returned false (unsuccessful)")
 	ErrISCSIExtentDeletionFailed       = errors.New("iSCSI extent deletion returned false (unsuccessful)")
 	ErrISCSITargetExtentDeletionFailed = errors.New("iSCSI target-extent deletion returned false (unsuccessful)")
+	ErrSMBShareDeletionFailed          = errors.New("SMB share deletion returned false (unsuccessful)")
 )
 
 // Client is a storage API client using JSON-RPC 2.0 over WebSocket.
@@ -1100,6 +1101,119 @@ func (c *Client) QueryNFSShareByID(ctx context.Context, shareID int) (*NFSShare,
 	}
 
 	return &result[0], nil
+}
+
+// SMB share API methods
+
+// SMBShareCreateParams represents parameters for SMB share creation.
+type SMBShareCreateParams struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Comment string `json:"comment,omitempty"`
+	Purpose string `json:"purpose,omitempty"` // DEFAULT_SHARE, LEGACY_SHARE, etc.
+	Enabled bool   `json:"enabled"`
+}
+
+// SMBShare represents an SMB share returned by TrueNAS.
+//
+//nolint:govet // fieldalignment: struct layout prioritizes readability over memory optimization
+type SMBShare struct {
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	Comment string `json:"comment"`
+	Locked  *bool  `json:"locked"`
+	ID      int    `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+// CreateSMBShare creates a new SMB share.
+func (c *Client) CreateSMBShare(ctx context.Context, params SMBShareCreateParams) (*SMBShare, error) {
+	klog.V(4).Infof("Creating SMB share %q for path: %s", params.Name, params.Path)
+
+	var result SMBShare
+	err := c.Call(ctx, "sharing.smb.create", []interface{}{params}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SMB share: %w", err)
+	}
+
+	klog.V(4).Infof("Successfully created SMB share %q with ID: %d", result.Name, result.ID)
+	return &result, nil
+}
+
+// DeleteSMBShare deletes an SMB share.
+func (c *Client) DeleteSMBShare(ctx context.Context, shareID int) error {
+	klog.V(4).Infof("Deleting SMB share: %d", shareID)
+
+	var result bool
+	err := c.Call(ctx, "sharing.smb.delete", []interface{}{shareID}, &result)
+	if err != nil {
+		return fmt.Errorf("failed to delete SMB share: %w", err)
+	}
+
+	// TrueNAS API returns true on success, false on failure
+	if !result {
+		return fmt.Errorf("%w: share ID %d", ErrSMBShareDeletionFailed, shareID)
+	}
+
+	klog.V(4).Infof("Successfully deleted SMB share: %d", shareID)
+	return nil
+}
+
+// QuerySMBShare queries SMB shares by path.
+func (c *Client) QuerySMBShare(ctx context.Context, path string) ([]SMBShare, error) {
+	klog.V(4).Infof("Querying SMB shares for path: %s", path)
+
+	var result []SMBShare
+	err := c.Call(ctx, "sharing.smb.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"path", "=", path},
+		},
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SMB shares: %w", err)
+	}
+
+	return result, nil
+}
+
+// QuerySMBShareByID queries a single SMB share by its ID using server-side filtering.
+func (c *Client) QuerySMBShareByID(ctx context.Context, shareID int) (*SMBShare, error) {
+	klog.V(4).Infof("Querying SMB share by ID: %d", shareID)
+
+	var result []SMBShare
+	err := c.Call(ctx, "sharing.smb.query", []interface{}{
+		[]interface{}{
+			[]interface{}{"id", "=", shareID},
+		},
+	}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SMB share by ID: %w", err)
+	}
+
+	if len(result) == 0 {
+		return nil, nil //nolint:nilnil // nil means "not found"
+	}
+
+	return &result[0], nil
+}
+
+// QueryAllSMBShares queries all SMB shares.
+func (c *Client) QueryAllSMBShares(ctx context.Context, pathFilter string) ([]SMBShare, error) {
+	// Always query all shares - ignore pathFilter parameter
+	// Callers filter client-side using strings.HasSuffix or similar
+	_ = pathFilter // Explicitly ignore - kept for API compatibility
+
+	klog.V(5).Info("Querying all SMB shares")
+
+	var result []SMBShare
+	// Pass empty params to get all shares - TrueNAS API expects either no filter or a valid filter array
+	err := c.Call(ctx, "sharing.smb.query", []interface{}{}, &result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query SMB shares: %w", err)
+	}
+
+	klog.V(5).Infof("Found %d SMB shares", len(result))
+	return result, nil
 }
 
 // NVMe-oF API methods

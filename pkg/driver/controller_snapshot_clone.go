@@ -339,8 +339,8 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 	// Explicitly set acltype/aclmode so the clone matches the source dataset.
 	if snapshotMeta.Protocol == ProtocolSMB {
 		cp.datasetProperties = map[string]string{
-			"acltype": "NFSV4",
-			"aclmode": "RESTRICTED",
+			"acltype": "nfsv4",
+			"aclmode": "restricted",
 		}
 	}
 

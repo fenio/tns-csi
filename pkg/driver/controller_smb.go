@@ -226,7 +226,9 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 		}
 	}
 
-	// Reuse NFS's getOrCreateDataset — SMB also uses FILESYSTEM datasets with quota
+	// Reuse NFS's getOrCreateDataset — SMB also uses FILESYSTEM datasets with quota.
+	// share_type: "SMB" tells TrueNAS to configure NFSv4 ACLs on the dataset,
+	// which is required for SMB sharing (matching democratic-csi's approach).
 	nfsParams := &nfsVolumeParams{
 		pool:              params.pool,
 		server:            params.server,
@@ -239,6 +241,7 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 		zfsProps:          params.zfsProps,
 		encryption:        params.encryption,
 		comment:           params.comment,
+		shareType:         "SMB",
 	}
 	dataset, err := s.getOrCreateDataset(ctx, nfsParams, existingDatasets, timer)
 	if err != nil {

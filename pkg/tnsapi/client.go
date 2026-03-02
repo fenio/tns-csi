@@ -881,6 +881,11 @@ type DatasetCreateParams struct {
 	Name string `json:"name"`
 	Type string `json:"type"` // FILESYSTEM, VOLUME
 
+	// ShareType tells TrueNAS to optimize the dataset for a specific sharing protocol.
+	// "SMB" configures NFSv4 ACLs (acltype=nfsv4, aclmode=restricted) automatically.
+	// "GENERIC" is the default (POSIX ACLs). Used by NFS and other protocols.
+	ShareType string `json:"share_type,omitempty"`
+
 	// RefQuota limits the space this dataset can consume (in bytes).
 	// Note: TrueNAS enforces a minimum of 1 GiB for quota values.
 	RefQuota *int64 `json:"refquota,omitempty"`
@@ -1218,11 +1223,10 @@ func (c *Client) QueryAllSMBShares(ctx context.Context, pathFilter string) ([]SM
 
 // Filesystem API methods
 
-// SetFilesystemACL sets NFSv4 ACLs on a dataset to allow full access for all users.
-// TrueNAS creates datasets with restricted NFSv4 ACLs by default (root-only).
-// SMB volumes need everyone@ FULL_CONTROL so any authenticated SMB user can read/write.
-// This uses filesystem.setacl (not filesystem.setperm) to preserve NFSv4 ACL type,
-// which is required for TrueNAS to serve SMB shares.
+// SetFilesystemACL sets NFSv4 ACLs on a dataset to allow full access for SMB users.
+// SMB datasets are created with share_type=SMB which gives them NFSv4 ACLs, but
+// the default ACL only grants access to root. This sets everyone@ FULL_CONTROL
+// so any authenticated SMB user can read/write.
 func (c *Client) SetFilesystemACL(ctx context.Context, path string) error {
 	klog.Infof("SetFilesystemACL: setting NFSv4 ACL on %s (owner@/group@/everyone@ FULL_CONTROL)", path)
 

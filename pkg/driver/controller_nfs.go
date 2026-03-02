@@ -53,6 +53,9 @@ type nfsVolumeParams struct {
 	encryption *encryptionConfig
 	// comment is the resolved dataset comment from commentTemplate (free-form text for TrueNAS UI)
 	comment string
+	// shareType is passed to TrueNAS pool.dataset.create as share_type.
+	// "SMB" configures NFSv4 ACLs automatically; empty or "GENERIC" uses POSIX ACLs.
+	shareType string
 	// Adoption metadata from CSI parameters
 	pvcName      string
 	pvcNamespace string
@@ -373,10 +376,11 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 
 	// Build dataset creation parameters with ZFS properties
 	createParams := tnsapi.DatasetCreateParams{
-		Name:     params.datasetName,
-		Type:     "FILESYSTEM",
-		RefQuota: &params.requestedCapacity, // Set quota at creation for consistency with expansion
-		Comments: params.comment,
+		Name:      params.datasetName,
+		Type:      "FILESYSTEM",
+		ShareType: params.shareType,          // "SMB" for SMB volumes, empty for NFS/others
+		RefQuota:  &params.requestedCapacity, // Set quota at creation for consistency with expansion
+		Comments:  params.comment,
 	}
 
 	// Apply ZFS properties if specified in StorageClass

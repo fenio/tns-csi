@@ -49,6 +49,8 @@ var _ = Describe("SMB ZFS Properties", func() {
 			"zfs.compression": "lz4",
 			"zfs.atime":       "off",
 			"zfs.recordsize":  "128K",
+			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {

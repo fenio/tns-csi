@@ -752,6 +752,11 @@ func (m *MockClient) QueryAllSMBShares(ctx context.Context, pathPrefix string) (
 	return result, nil
 }
 
+// FilesystemStat mocks filesystem.stat.
+func (m *MockClient) FilesystemStat(ctx context.Context, path string) error {
+	return nil
+}
+
 // SetFilesystemACL mocks filesystem.setacl.
 func (m *MockClient) SetFilesystemACL(ctx context.Context, path string) error {
 	return nil

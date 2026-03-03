@@ -381,11 +381,29 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 
 	volumeName := req.GetName()
 
+	// Wait for the clone's mountpoint to be accessible before creating the SMB share.
+	// sharing.smb.create triggers etc.generate('smb') which calls path_get_acltype()
+	// via os.getxattr() on the share path. If the clone isn't fully mounted yet,
+	// the path check fails and the share is silently excluded from smb4.conf.
+	// ZFS clones are typically mounted instantly, but we verify to be safe.
+	if dataset.Mountpoint != "" {
+		const maxWait = 5
+		for i := range maxWait {
+			if err := s.apiClient.FilesystemStat(ctx, dataset.Mountpoint); err == nil {
+				klog.Infof("[SMB clone] Clone mountpoint %s is accessible (attempt %d)", dataset.Mountpoint, i+1)
+				break
+			} else if i < maxWait-1 {
+				klog.Warningf("[SMB clone] Clone mountpoint %s not accessible yet (attempt %d/%d): %v — waiting 1s", dataset.Mountpoint, i+1, maxWait, err)
+				time.Sleep(1 * time.Second)
+			} else {
+				klog.Errorf("[SMB clone] Clone mountpoint %s still not accessible after %d attempts: %v — proceeding anyway", dataset.Mountpoint, maxWait, err)
+			}
+		}
+	}
+
 	// Do NOT call SetFilesystemACL for clones. The clone inherits ACL properties
 	// and data from the origin snapshot (which was created with share_type: "SMB").
-	// Calling SetFilesystemACL may disrupt the filesystem's ACL xattr metadata,
-	// causing TrueNAS's path_get_acltype() to fail during smb4.conf generation
-	// and silently exclude the share. This matches democratic-csi's approach.
+	// This matches democratic-csi's approach.
 
 	smbShare, err := s.apiClient.CreateSMBShare(ctx, tnsapi.SMBShareCreateParams{
 		Name:    volumeName,

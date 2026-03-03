@@ -51,6 +51,7 @@ type ClientInterface interface {
 	QueryAllSMBShares(ctx context.Context, pathPrefix string) ([]SMBShare, error)
 
 	// Filesystem operations
+	FilesystemStat(ctx context.Context, path string) error
 	SetFilesystemACL(ctx context.Context, path string) error
 
 	// ZVOL operations

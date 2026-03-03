@@ -1246,6 +1246,17 @@ func (c *Client) QueryAllSMBShares(ctx context.Context, pathFilter string) ([]SM
 
 // Filesystem API methods
 
+// FilesystemStat checks if a path exists and is accessible on TrueNAS.
+// Returns nil error if the path exists, or an error if it doesn't.
+func (c *Client) FilesystemStat(ctx context.Context, path string) error {
+	var result map[string]interface{}
+	err := c.Call(ctx, "filesystem.stat", []interface{}{path}, &result)
+	if err != nil {
+		return fmt.Errorf("filesystem.stat failed for %s: %w", path, err)
+	}
+	return nil
+}
+
 // SetFilesystemACL sets NFSv4 ACLs on a dataset to allow full access for SMB users.
 // SMB datasets are created with share_type=SMB which gives them NFSv4 ACLs, but
 // the default ACL only grants access to root. This sets everyone@ FULL_CONTROL

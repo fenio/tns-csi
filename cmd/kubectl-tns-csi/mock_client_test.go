@@ -509,6 +509,10 @@ func (m *mockClient) ReloadISCSIService(ctx context.Context) error {
 	return errNotImplemented
 }
 
+func (m *mockClient) ReloadSMBService(_ context.Context) error {
+	return nil
+}
+
 // Snapshot operations.
 
 func (m *mockClient) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {

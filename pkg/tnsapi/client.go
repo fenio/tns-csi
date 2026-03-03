@@ -2939,6 +2939,8 @@ func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([
 
 // ReloadISCSIService triggers a reload of the iSCSI service to pick up new configuration.
 // This is needed after creating targets to make them discoverable via iSCSI discovery.
+//
+//nolint:dupl // Same reload pattern as SMB but for a different service
 func (c *Client) ReloadISCSIService(ctx context.Context) error {
 	klog.V(4).Info("Reloading iSCSI service to apply configuration changes")
 
@@ -2957,5 +2959,29 @@ func (c *Client) ReloadISCSIService(ctx context.Context) error {
 	}
 
 	klog.V(4).Infof("iSCSI service reload completed (job ID: %d)", jobID)
+	return nil
+}
+
+// ReloadSMBService triggers a reload of the SMB/CIFS service.
+// This regenerates smb4.conf from the share database and sends SIGHUP to smbd.
+// Needed after creating shares for ZFS clones: TrueNAS's initial config generation
+// during sharing.smb.create can silently exclude the share if the clone's filesystem
+// metadata isn't fully ready for os.getxattr() yet.
+//
+//nolint:dupl // Same reload pattern as iSCSI but for a different service
+func (c *Client) ReloadSMBService(ctx context.Context) error {
+	klog.V(4).Info("Reloading SMB/CIFS service to apply configuration changes")
+
+	var jobID int
+	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "cifs"}, &jobID)
+	if err != nil {
+		klog.V(4).Infof("SMB service reload failed (%v), trying restart", err)
+		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "cifs"}, &jobID)
+		if err != nil {
+			return fmt.Errorf("failed to reload/restart SMB service: %w", err)
+		}
+	}
+
+	klog.V(4).Infof("SMB/CIFS service reload completed (job ID: %d)", jobID)
 	return nil
 }

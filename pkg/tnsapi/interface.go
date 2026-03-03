@@ -92,8 +92,9 @@ type ClientInterface interface {
 	QueryISCSITargetExtents(ctx context.Context, filters []interface{}) ([]ISCSITargetExtent, error)
 	ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([]ISCSITargetExtent, error)
 
-	// iSCSI service management
+	// Service management
 	ReloadISCSIService(ctx context.Context) error
+	ReloadSMBService(ctx context.Context) error
 
 	// Snapshot operations
 	CreateSnapshot(ctx context.Context, params SnapshotCreateParams) (*Snapshot, error)

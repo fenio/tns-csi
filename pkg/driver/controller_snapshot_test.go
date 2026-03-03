@@ -467,6 +467,10 @@ func (m *MockAPIClientForSnapshots) ReloadISCSIService(_ context.Context) error 
 	return nil
 }
 
+func (m *MockAPIClientForSnapshots) ReloadSMBService(_ context.Context) error {
+	return nil
+}
+
 func (m *MockAPIClientForSnapshots) Close() {
 	// Mock client doesn't need cleanup
 }

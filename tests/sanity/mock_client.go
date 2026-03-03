@@ -1807,6 +1807,12 @@ func (m *MockClient) ReloadISCSIService(ctx context.Context) error {
 	return nil // No-op for mock - always succeeds
 }
 
+// ReloadSMBService simulates reloading the SMB/CIFS service.
+func (m *MockClient) ReloadSMBService(ctx context.Context) error {
+	m.logCall("ReloadSMBService")
+	return nil // No-op for mock - always succeeds
+}
+
 // Close is a no-op for the mock client.
 func (m *MockClient) Close() {
 	// No-op for mock

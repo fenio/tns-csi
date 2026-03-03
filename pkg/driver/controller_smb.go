@@ -394,11 +394,34 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 		return nil, status.Errorf(codes.Internal, "Failed to create SMB share for cloned volume: %v", err)
 	}
 
+	// Diagnostic: verify the share was registered properly by querying it back.
+	// TrueNAS may silently exclude clone-backed shares from smb4.conf during
+	// the initial config generation (FileNotFoundError on os.getxattr for the clone path).
+	klog.Infof("[SMB clone diag] Created share: ID=%d, Name=%q, Path=%q, Enabled=%v, Locked=%v",
+		smbShare.ID, smbShare.Name, smbShare.Path, smbShare.Enabled, smbShare.Locked)
+	if verifyShares, verifyErr := s.apiClient.QuerySMBShare(ctx, dataset.Mountpoint); verifyErr != nil {
+		klog.Warningf("[SMB clone diag] Failed to verify share after creation: %v", verifyErr)
+	} else {
+		klog.Infof("[SMB clone diag] Shares at path %s: count=%d", dataset.Mountpoint, len(verifyShares))
+		for i, sh := range verifyShares {
+			klog.Infof("[SMB clone diag]   share[%d]: ID=%d, Name=%q, Path=%q, Enabled=%v, Locked=%v",
+				i, sh.ID, sh.Name, sh.Path, sh.Enabled, sh.Locked)
+		}
+	}
+
 	// Set NFSv4 ACLs AFTER share creation (same as new volumes)
 	if dataset.Mountpoint != "" {
 		if aclErr := s.apiClient.SetFilesystemACL(ctx, dataset.Mountpoint); aclErr != nil {
 			klog.Errorf("Failed to set ACL on cloned dataset %s: %v (SMB writes will likely fail with Permission denied)", dataset.Mountpoint, aclErr)
 		}
+	}
+
+	// Reload SMB service to regenerate smb4.conf. TrueNAS's initial config generation
+	// during sharing.smb.create can silently exclude shares for ZFS clones if the
+	// filesystem metadata isn't fully ready for os.getxattr() yet. By this point the
+	// ACL is set and the filesystem is confirmed accessible, so a reload picks it up.
+	if reloadErr := s.apiClient.ReloadSMBService(ctx); reloadErr != nil {
+		klog.Warningf("Failed to reload SMB service after clone share creation: %v (mount may fail)", reloadErr)
 	}
 
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()

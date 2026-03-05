@@ -185,7 +185,58 @@ func (k *KubernetesClient) DeletePVC(ctx context.Context, name string) error {
 }
 
 // WaitForPVCBound waits for a PVC to reach the Bound phase.
+// For dataSource PVCs (snapshot restores, clones), if binding times out it
+// will recreate the PVC to trigger a fresh provisioner event and retry once.
 func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, timeout time.Duration) error {
+	err := k.waitForPVCBoundOnce(ctx, name, timeout)
+	if err == nil {
+		return nil
+	}
+
+	// Check if this is a dataSource PVC (snapshot restore or clone)
+	pvc, getErr := k.GetPVC(ctx, name)
+	if getErr != nil || pvc.Spec.DataSource == nil {
+		// Not a dataSource PVC or can't retrieve it — fail with original error
+		k.dumpPVCDiagnostics(ctx, name)
+		return err
+	}
+
+	// DataSource PVC failed to bind — provisioner likely missed the event.
+	// Recreate the PVC to trigger a fresh provisioner watch event.
+	klog.Warningf("PVC %s with dataSource %s/%s failed to bind — recreating to retry provisioning",
+		name, pvc.Spec.DataSource.Kind, pvc.Spec.DataSource.Name)
+
+	savedSpec := pvc.Spec.DeepCopy()
+
+	if delErr := k.DeletePVC(ctx, name); delErr != nil {
+		k.dumpPVCDiagnostics(ctx, name)
+		return fmt.Errorf("failed to delete PVC for retry: %w (original: %w)", delErr, err)
+	}
+	if waitErr := k.WaitForPVCDeleted(ctx, name, 30*time.Second); waitErr != nil {
+		k.dumpPVCDiagnostics(ctx, name)
+		return fmt.Errorf("PVC deletion timed out during retry: %w (original: %w)", waitErr, err)
+	}
+
+	newPVC := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k.namespace},
+		Spec:       *savedSpec,
+	}
+	// Clear fields that shouldn't be carried over
+	newPVC.Spec.VolumeName = ""
+	if _, createErr := k.clientset.CoreV1().PersistentVolumeClaims(k.namespace).Create(ctx, newPVC, metav1.CreateOptions{}); createErr != nil {
+		return fmt.Errorf("failed to recreate PVC for retry: %w (original: %w)", createErr, err)
+	}
+
+	klog.Infof("Recreated PVC %s — waiting for binding (retry)", name)
+	if retryErr := k.waitForPVCBoundOnce(ctx, name, timeout); retryErr != nil {
+		k.dumpPVCDiagnostics(ctx, name)
+		return fmt.Errorf("PVC %s still not bound after recreate retry: %w", name, retryErr)
+	}
+	return nil
+}
+
+// waitForPVCBoundOnce polls until a PVC reaches Bound phase or timeout.
+func (k *KubernetesClient) waitForPVCBoundOnce(ctx context.Context, name string, timeout time.Duration) error {
 	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		pvc, err := k.GetPVC(ctx, name)
 		if err != nil {
@@ -194,8 +245,6 @@ func (k *KubernetesClient) WaitForPVCBound(ctx context.Context, name string, tim
 		return pvc.Status.Phase == corev1.ClaimBound, nil
 	})
 	if err != nil {
-		// Dump diagnostic information on failure
-		k.dumpPVCDiagnostics(ctx, name)
 		return err
 	}
 
@@ -561,59 +610,60 @@ func (k *KubernetesClient) WaitForPVCDeleted(ctx context.Context, name string, t
 	})
 }
 
-// CreatePVCFromSnapshot creates a PVC from a VolumeSnapshot using kubectl.
+// CreatePVCFromSnapshot creates a PVC from a VolumeSnapshot.
 func (k *KubernetesClient) CreatePVCFromSnapshot(ctx context.Context, pvcName, snapshotName, storageClass, size string, accessModes []corev1.PersistentVolumeAccessMode) error {
-	accessModeStr := defaultAccessMode
-	if len(accessModes) > 0 {
-		accessModeStr = string(accessModes[0])
+	snapshotAPIGroup := "snapshot.storage.k8s.io"
+	quantity, err := resource.ParseQuantity(size)
+	if err != nil {
+		return fmt.Errorf("invalid size %q: %w", size, err)
 	}
-
-	yaml := fmt.Sprintf(`apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  accessModes:
-    - %s
-  storageClassName: %s
-  resources:
-    requests:
-      storage: %s
-  dataSource:
-    name: %s
-    kind: VolumeSnapshot
-    apiGroup: snapshot.storage.k8s.io
-`, pvcName, k.namespace, accessModeStr, storageClass, size, snapshotName)
-
-	return k.applyYAML(ctx, yaml)
+	if len(accessModes) == 0 {
+		accessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: pvcName, Namespace: k.namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      accessModes,
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: quantity},
+			},
+			DataSource: &corev1.TypedLocalObjectReference{
+				APIGroup: &snapshotAPIGroup,
+				Kind:     "VolumeSnapshot",
+				Name:     snapshotName,
+			},
+		},
+	}
+	_, err = k.clientset.CoreV1().PersistentVolumeClaims(k.namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	return err
 }
 
-// CreatePVCFromPVC creates a clone PVC from an existing PVC using kubectl.
+// CreatePVCFromPVC creates a clone PVC from an existing PVC.
 func (k *KubernetesClient) CreatePVCFromPVC(ctx context.Context, cloneName, sourcePVCName, storageClass, size string, accessModes []corev1.PersistentVolumeAccessMode) error {
-	accessModeStr := defaultAccessMode
-	if len(accessModes) > 0 {
-		accessModeStr = string(accessModes[0])
+	quantity, err := resource.ParseQuantity(size)
+	if err != nil {
+		return fmt.Errorf("invalid size %q: %w", size, err)
 	}
-
-	yaml := fmt.Sprintf(`apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: %s
-  namespace: %s
-spec:
-  accessModes:
-    - %s
-  storageClassName: %s
-  resources:
-    requests:
-      storage: %s
-  dataSource:
-    name: %s
-    kind: PersistentVolumeClaim
-`, cloneName, k.namespace, accessModeStr, storageClass, size, sourcePVCName)
-
-	return k.applyYAML(ctx, yaml)
+	if len(accessModes) == 0 {
+		accessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
+	}
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: cloneName, Namespace: k.namespace},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      accessModes,
+			StorageClassName: &storageClass,
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{corev1.ResourceStorage: quantity},
+			},
+			DataSource: &corev1.TypedLocalObjectReference{
+				Kind: "PersistentVolumeClaim",
+				Name: sourcePVCName,
+			},
+		},
+	}
+	_, err = k.clientset.CoreV1().PersistentVolumeClaims(k.namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	return err
 }
 
 // CreateVolumeSnapshot creates a VolumeSnapshot using kubectl.

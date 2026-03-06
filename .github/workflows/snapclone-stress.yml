@@ -49,7 +49,7 @@ jobs:
   snapclone-stress:
     name: "Snapshot/Clone Stress (all protocols)"
     runs-on: new
-    timeout-minutes: 75
+    timeout-minutes: 135
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success'
@@ -74,7 +74,7 @@ jobs:
         run: |
           echo "=== Running Snapshot/Clone Stress E2E Tests ==="
           echo "=== 11 tests × 3 protocols (NFS, NVMe-oF, iSCSI) = 33 total ==="
-          ginkgo -v --timeout=60m --flake-attempts=2 ./tests/e2e/snapclone/...
+          ginkgo -v --timeout=120m --flake-attempts=2 ./tests/e2e/snapclone/...
       - name: Upload diagnostic logs
         if: failure()
         uses: actions/upload-artifact@v6

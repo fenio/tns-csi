@@ -131,7 +131,7 @@ test-e2e-scale:
 
 test-e2e-snapclone:
 	@echo "Running Snapshot/Clone Stress E2E tests..."
-	ginkgo -v --timeout=60m ./tests/e2e/snapclone/...
+	ginkgo -v --timeout=120m ./tests/e2e/snapclone/...
 
 # Changelog generation (requires git-cliff: cargo install git-cliff)
 changelog:

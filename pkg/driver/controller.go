@@ -422,15 +422,12 @@ func (s *ControllerService) datasetHasCSIManagedSnapshots(_ context.Context, dat
 	}
 
 	for _, snap := range snapshots {
-		if val, ok := tnsapi.GetSnapshotPropertyValue(snap, tnsapi.PropertyManagedBy); ok && val == tnsapi.ManagedByValue {
-			// Only consider snapshots where managed_by was set directly (source=local).
-			// COW clone temp snapshots inherit managed_by from their parent dataset
-			// but are NOT CSI-managed snapshots — they should be cleaned up with
-			// the dataset via recursive delete, not blocked by the guard.
-			if !tnsapi.IsSnapshotPropertyLocal(snap, tnsapi.PropertyManagedBy) {
-				klog.Infof("Dataset %s: skipping inherited managed_by on snapshot %s", datasetID, snap.ID)
-				continue
-			}
+		// Use tns-csi:snapshot_id as the definitive CSI snapshot indicator.
+		// This property is ONLY set on snapshots created by CSI CreateSnapshot
+		// and is never set on parent datasets, so it cannot be inherited.
+		// (tns-csi:managed_by is inherited by ALL child snapshots from the parent
+		// dataset, making it unreliable for distinguishing CSI vs temp snapshots.)
+		if _, hasSnapshotID := tnsapi.GetSnapshotPropertyValue(snap, tnsapi.PropertySnapshotID); hasSnapshotID {
 			// Skip snapshots marked for deferred destruction — DeleteSnapshot already
 			// succeeded (defer=true), ZFS will auto-destroy when all clones are gone.
 			if dv, dok := tnsapi.GetSnapshotPropertyValue(snap, "defer_destroy"); dok && dv == "on" {
@@ -475,12 +472,9 @@ func (s *ControllerService) deleteDatasetSnapshots(_ context.Context, datasetID 
 	}
 
 	for _, snap := range snapshots {
-		// Skip CSI-managed snapshots (locally set) — they must be deleted via DeleteSnapshot by their owner (e.g., VolSync).
-		// Snapshots that only inherit managed_by from the parent dataset (e.g., COW clone temp snapshots)
-		// are safe to delete as part of volume cleanup.
-		if val, ok := tnsapi.GetSnapshotPropertyValue(snap, tnsapi.PropertyManagedBy); ok && val == tnsapi.ManagedByValue &&
-			tnsapi.IsSnapshotPropertyLocal(snap, tnsapi.PropertyManagedBy) {
-
+		// Skip CSI-managed snapshots — they must be deleted via DeleteSnapshot by their owner (e.g., VolSync).
+		// Use tns-csi:snapshot_id as the indicator (not managed_by which is inherited from parent dataset).
+		if _, hasSnapshotID := tnsapi.GetSnapshotPropertyValue(snap, tnsapi.PropertySnapshotID); hasSnapshotID {
 			klog.Infof("Skipping CSI-managed snapshot %s (will be deleted via DeleteSnapshot)", snap.ID)
 			continue
 		}

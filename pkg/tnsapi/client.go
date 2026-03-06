@@ -1959,26 +1959,6 @@ func GetSnapshotPropertyValue(snap Snapshot, propertyName string) (string, bool)
 	return val, ok
 }
 
-// IsSnapshotPropertyLocal checks whether a snapshot property was set directly
-// on the snapshot ("local") rather than inherited from a parent dataset.
-// ZFS user properties are inherited by child snapshots, so a snapshot on a
-// managed dataset inherits tns-csi:managed_by even if it wasn't created by CSI.
-func IsSnapshotPropertyLocal(snap Snapshot, propertyName string) bool {
-	if snap.Properties == nil {
-		return false
-	}
-	propVal, ok := snap.Properties[propertyName]
-	if !ok {
-		return false
-	}
-	propMap, ok := propVal.(map[string]interface{})
-	if !ok {
-		return false
-	}
-	source, ok := propMap["source"].(string)
-	return ok && source == "local"
-}
-
 // QuerySnapshotIDs is a lightweight version of QuerySnapshots that only returns snapshot IDs.
 // It uses select: ["id"] to minimize response size, which is critical when datasets have
 // many snapshots with large property sets (e.g., after migration from democratic-csi).

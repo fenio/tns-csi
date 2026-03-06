@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -589,13 +590,35 @@ func (k *KubernetesClient) ExecInPod(ctx context.Context, podName string, comman
 }
 
 // WaitForPVDeleted waits for a PV to be deleted (after PVC deletion).
+// It periodically nudges the PV by patching an annotation to reset the
+// external-provisioner's exponential backoff. Without this, after repeated
+// CSI DeleteVolume failures (e.g., FAILED_PRECONDITION while snapshots exist),
+// the provisioner can back off for minutes before retrying.
 func (k *KubernetesClient) WaitForPVDeleted(ctx context.Context, pvName string, timeout time.Duration) error {
+	var lastNudge time.Time
+
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
-		_, err := k.clientset.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
+		pv, err := k.clientset.CoreV1().PersistentVolumes().Get(ctx, pvName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
 		}
-		return false, nil // Continue polling on transient errors
+		if err != nil {
+			return false, nil //nolint:nilerr // Continue polling on transient errors
+		}
+
+		// Nudge the PV every 10s to reset provisioner backoff.
+		if pv.Status.Phase == corev1.VolumeReleased && time.Since(lastNudge) >= 10*time.Second {
+			patch := fmt.Sprintf(`{"metadata":{"annotations":{"tns-csi-test/nudge":%q}}}`,
+				time.Now().Format(time.RFC3339))
+			if _, patchErr := k.clientset.CoreV1().PersistentVolumes().Patch(
+				ctx, pvName, types.MergePatchType, []byte(patch), metav1.PatchOptions{},
+			); patchErr == nil {
+				klog.Infof("Nudged PV %s to reset provisioner backoff", pvName)
+			}
+			lastNudge = time.Now()
+		}
+
+		return false, nil
 	})
 }
 

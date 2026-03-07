@@ -69,6 +69,8 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+          SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
+          SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
           CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
           KUBECONFIG: /etc/rancher/k3s/k3s.yaml
         run: |

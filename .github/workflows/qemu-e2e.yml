@@ -132,11 +132,11 @@ jobs:
                 nfsv4
 
           runcmd:
-            - echo "=== Installing linux-modules-extra for kernel $(uname -r) ==="
-            - apt-get install -y linux-modules-extra-$(uname -r) 2>&1
+            - echo "=== Installing linux-modules-extra for kernel \$(uname -r) ==="
+            - apt-get install -y linux-modules-extra-\$(uname -r) 2>&1
             - depmod -a
             - echo "=== Checking for nvme-tcp module file ==="
-            - find /lib/modules/$(uname -r) -name 'nvme*' -o -name 'nvme_tcp*' 2>/dev/null || echo "No nvme modules found in filesystem"
+            - find /lib/modules/\$(uname -r) -name 'nvme*' -o -name 'nvme_tcp*' 2>/dev/null || echo "No nvme modules found in filesystem"
             - echo "=== Loading kernel modules ==="
             - modprobe nvme-tcp && echo "nvme-tcp loaded" || echo "FAILED to load nvme-tcp"
             - modprobe nvme-fabrics && echo "nvme-fabrics loaded" || echo "FAILED to load nvme-fabrics"
@@ -237,6 +237,24 @@ jobs:
                 || echo \"  WARNING: $desc (port $port): NOT reachable\"
             "
           done
+
+      - name: Test NFS mount from VM
+        timeout-minutes: 1
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
+        run: |
+          echo "Testing manual NFS mount from VM..."
+          ssh $SSH_OPTS ci@localhost "
+            sudo mkdir -p /tmp/nfstest
+            echo '--- Trying NFSv4 mount with noresvport ---'
+            sudo mount -v -t nfs -o vers=4.2,nolock,noresvport $TRUENAS_HOST:/mnt/$TRUENAS_POOL /tmp/nfstest 2>&1 || true
+            echo '--- Trying NFSv4 mount without noresvport ---'
+            sudo mount -v -t nfs -o vers=4.2,nolock $TRUENAS_HOST:/mnt/$TRUENAS_POOL /tmp/nfstest 2>&1 || true
+            echo '--- Trying mount.nfs4 directly ---'
+            sudo mount -v -t nfs4 $TRUENAS_HOST:/mnt/$TRUENAS_POOL /tmp/nfstest 2>&1 || true
+            sudo umount /tmp/nfstest 2>/dev/null || true
+          "
 
       # ── Phase 5: Build and deploy CSI driver ─────────────────────
       - name: Build CSI image

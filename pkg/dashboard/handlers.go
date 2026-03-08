@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/fenio/tns-csi/pkg/tnsapi"
+	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 )
 
@@ -35,40 +37,104 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) fetchAllData(ctx context.Context) Data {
 	data := Data{}
 
-	volumes, err := FindManagedVolumes(ctx, s.client)
-	if err != nil {
-		klog.Warningf("Failed to fetch volumes: %v", err)
-	} else {
-		data.Volumes = volumes
-	}
+	// Phase 1: Concurrent raw data fetch — all API calls run in parallel.
+	g, gctx := errgroup.WithContext(ctx)
 
-	snapshots, err := FindManagedSnapshots(ctx, s.client)
-	if err != nil {
-		klog.Warningf("Failed to fetch snapshots: %v", err)
-	} else {
-		data.Snapshots = snapshots
-	}
+	var managedDatasets []tnsapi.DatasetWithProperties
+	var detachedDatasets []tnsapi.DatasetWithProperties
+	var allSnapshots []tnsapi.Snapshot
+	var nfsShares []tnsapi.NFSShare
+	var smbShares []tnsapi.SMBShare
+	var nvmeSubsystems []tnsapi.NVMeOFSubsystem
+	var iscsiTargets []tnsapi.ISCSITarget
+	var allDatasets []tnsapi.Dataset
+	var democraticDatasets []tnsapi.DatasetWithProperties
+	var k8sData *K8sEnrichmentResult
 
-	clones, err := FindClonedVolumes(ctx, s.client)
-	if err != nil {
-		klog.Warningf("Failed to fetch clones: %v", err)
-	} else {
-		data.Clones = clones
-	}
+	g.Go(func() error {
+		var err error
+		managedDatasets, err = s.client.FindDatasetsByProperty(gctx, "", tnsapi.PropertyManagedBy, tnsapi.ManagedByValue)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		detachedDatasets, err = s.client.FindDatasetsByProperty(gctx, "", tnsapi.PropertyDetachedSnapshot, valueTrue)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		allSnapshots, err = s.client.QuerySnapshots(gctx, []interface{}{})
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		nfsShares, err = s.client.QueryAllNFSShares(gctx, "")
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		smbShares, err = s.client.QueryAllSMBShares(gctx, "")
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		nvmeSubsystems, err = s.client.ListAllNVMeOFSubsystems(gctx)
+		return err
+	})
+
+	g.Go(func() error {
+		var err error
+		iscsiTargets, err = s.client.QueryISCSITargets(gctx, nil)
+		return err
+	})
 
 	if s.pool != "" {
-		unmanaged, unmanagedErr := FindUnmanagedVolumes(ctx, s.client, s.pool, false)
-		if unmanagedErr != nil {
-			klog.Warningf("Failed to fetch unmanaged volumes: %v", unmanagedErr)
-		} else {
-			data.Unmanaged = unmanaged
-		}
+		g.Go(func() error {
+			var err error
+			allDatasets, err = s.client.QueryAllDatasets(gctx, s.pool)
+			return err
+		})
+
+		g.Go(func() error {
+			//nolint:errcheck // non-fatal if democratic-csi datasets not found
+			democraticDatasets, _ = s.client.FindDatasetsByProperty(gctx, s.pool, "democratic-csi:csi_share_volume_context", "")
+			return nil
+		})
 	}
 
-	AnnotateVolumesWithHealth(ctx, s.client, data.Volumes)
+	g.Go(func() error {
+		result := EnrichWithK8sData(gctx, false)
+		k8sData = result
+		return nil
+	})
 
-	k8sData := EnrichWithK8sData(ctx, false)
-	if k8sData.Available {
+	if err := g.Wait(); err != nil {
+		klog.Warningf("Failed to fetch dashboard data: %v", err)
+		return data
+	}
+
+	// Phase 2: In-memory processing — no API calls.
+	data.Volumes = extractVolumes(managedDatasets)
+	data.Clones = extractClones(managedDatasets)
+
+	data.Snapshots = matchSnapshotsToDatasets(allSnapshots, managedDatasets)
+	data.Snapshots = append(data.Snapshots, extractDetachedSnapshots(detachedDatasets)...)
+
+	if s.pool != "" {
+		data.Unmanaged = buildUnmanagedFromData(allDatasets, managedDatasets, nfsShares, democraticDatasets, s.pool)
+	}
+
+	// Health annotation from pre-fetched maps
+	resources := BuildHealthMapsFromData(nfsShares, smbShares, nvmeSubsystems, iscsiTargets)
+	AnnotateHealthFromMaps(data.Volumes, managedDatasets, resources)
+
+	// K8s binding enrichment
+	if k8sData != nil && k8sData.Available {
 		for i := range data.Volumes {
 			if binding := MatchK8sBinding(k8sData.Bindings, data.Volumes[i].Dataset, data.Volumes[i].VolumeID); binding != nil {
 				data.Volumes[i].K8s = binding

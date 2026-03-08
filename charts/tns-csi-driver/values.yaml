@@ -94,12 +94,12 @@ controller:
     # Enable the in-cluster web dashboard
     enabled: false
     # Port to expose dashboard on
-    port: 9090
+    port: 2137
     # Create a Service for the dashboard
     service:
       enabled: true
       type: ClusterIP
-      port: 9090
+      port: 2137
       annotations: {}
     # Ingress for external access to dashboard
     ingress:

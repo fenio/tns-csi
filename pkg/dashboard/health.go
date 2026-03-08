@@ -258,6 +258,104 @@ func CheckISCSIHealth(ds *tnsapi.DatasetWithProperties, iscsiTargetMap map[strin
 	health.TargetOK = &targetOK
 }
 
+// BuildHealthMapsFromData builds health resource maps from pre-fetched data (no API calls).
+func BuildHealthMapsFromData(
+	nfsShares []tnsapi.NFSShare,
+	smbShares []tnsapi.SMBShare,
+	nvmeSubsystems []tnsapi.NVMeOFSubsystem,
+	iscsiTargets []tnsapi.ISCSITarget,
+) *healthResourceMaps {
+
+	m := &healthResourceMaps{
+		nfsShareMap:    make(map[string]*tnsapi.NFSShare, len(nfsShares)),
+		nvmeSubsysMap:  make(map[string]*tnsapi.NVMeOFSubsystem, len(nvmeSubsystems)*2),
+		smbShareMap:    make(map[string]*tnsapi.SMBShare, len(smbShares)),
+		iscsiTargetMap: make(map[string]*tnsapi.ISCSITarget, len(iscsiTargets)),
+	}
+
+	for i := range nfsShares {
+		m.nfsShareMap[nfsShares[i].Path] = &nfsShares[i]
+	}
+	for i := range nvmeSubsystems {
+		m.nvmeSubsysMap[nvmeSubsystems[i].Name] = &nvmeSubsystems[i]
+		m.nvmeSubsysMap[nvmeSubsystems[i].NQN] = &nvmeSubsystems[i]
+	}
+	for i := range smbShares {
+		m.smbShareMap[smbShares[i].Path] = &smbShares[i]
+	}
+	for i := range iscsiTargets {
+		m.iscsiTargetMap[iscsiTargets[i].Name] = &iscsiTargets[i]
+	}
+
+	return m
+}
+
+// AnnotateHealthFromMaps annotates volumes with health status using pre-fetched resource maps and datasets.
+func AnnotateHealthFromMaps(volumes []VolumeInfo, managedDatasets []tnsapi.DatasetWithProperties, resources *healthResourceMaps) {
+	// Build dataset lookup map
+	datasetMap := make(map[string]*tnsapi.DatasetWithProperties, len(managedDatasets))
+	for i := range managedDatasets {
+		ds := &managedDatasets[i]
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
+			continue
+		}
+		volumeID := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+			volumeID = prop.Value
+		}
+		if volumeID != "" {
+			datasetMap[volumeID] = ds
+		}
+	}
+
+	for i := range volumes {
+		ds, ok := datasetMap[volumes[i].VolumeID]
+		if !ok {
+			continue
+		}
+
+		health := VolumeHealth{
+			VolumeID:  volumes[i].VolumeID,
+			Dataset:   ds.ID,
+			DatasetOK: true,
+			Status:    HealthStatusHealthy,
+			Issues:    make([]string, 0),
+		}
+
+		protocol := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
+			protocol = prop.Value
+		}
+
+		switch protocol {
+		case protocolNFS:
+			CheckNFSHealth(ds, resources.nfsShareMap, &health)
+		case protocolNVMeOF:
+			CheckNVMeOFHealth(ds, resources.nvmeSubsysMap, &health)
+		case protocolSMB:
+			CheckSMBHealth(ds, resources.smbShareMap, &health)
+		case protocolISCSI:
+			CheckISCSIHealth(ds, resources.iscsiTargetMap, &health)
+		}
+
+		if len(health.Issues) > 0 {
+			health.Status = HealthStatusDegraded
+			for _, issue := range health.Issues {
+				issueLower := strings.ToLower(issue)
+				if strings.Contains(issueLower, "not found") || strings.Contains(issueLower, "disabled") {
+					health.Status = HealthStatusUnhealthy
+					break
+				}
+			}
+		}
+
+		volumes[i].HealthStatus = string(health.Status)
+		if len(health.Issues) > 0 {
+			volumes[i].HealthIssue = health.Issues[0]
+		}
+	}
+}
+
 // AnnotateVolumesWithHealth runs health checks and annotates VolumeInfo slices with health status.
 func AnnotateVolumesWithHealth(ctx context.Context, client tnsapi.ClientInterface, volumes []VolumeInfo) {
 	healthReport, err := CheckVolumeHealth(ctx, client)

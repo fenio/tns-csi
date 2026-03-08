@@ -26,51 +26,7 @@ func FindManagedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]V
 	if err != nil {
 		return nil, err
 	}
-
-	var volumes []VolumeInfo
-	for _, ds := range datasets {
-		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
-			continue
-		}
-
-		volumeID := ""
-		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
-			volumeID = prop.Value
-		}
-		if volumeID == "" {
-			continue
-		}
-
-		vol := VolumeInfo{
-			Dataset:  ds.ID,
-			VolumeID: volumeID,
-			Type:     ds.Type,
-		}
-
-		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
-			vol.Protocol = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyCapacityBytes]; ok {
-			vol.CapacityBytes = tnsapi.StringToInt64(prop.Value)
-			vol.CapacityHuman = FormatBytes(vol.CapacityBytes)
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyDeleteStrategy]; ok {
-			vol.DeleteStrategy = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyAdoptable]; ok {
-			vol.Adoptable = prop.Value == valueTrue
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceType]; ok {
-			vol.ContentSourceType = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceID]; ok {
-			vol.ContentSourceID = prop.Value
-		}
-
-		volumes = append(volumes, vol)
-	}
-
-	return volumes, nil
+	return extractVolumes(datasets), nil
 }
 
 // FindManagedSnapshots finds all snapshots managed by tns-csi.
@@ -150,40 +106,7 @@ func findDetachedSnapshots(ctx context.Context, client tnsapi.ClientInterface) (
 	if err != nil {
 		return nil, err
 	}
-
-	var snapshots []SnapshotInfo
-	for _, ds := range datasets {
-		if prop, ok := ds.UserProperties[tnsapi.PropertyManagedBy]; !ok || prop.Value != tnsapi.ManagedByValue {
-			continue
-		}
-
-		snap := SnapshotInfo{
-			Type: "detached",
-		}
-
-		if prop, ok := ds.UserProperties[tnsapi.PropertySnapshotID]; ok {
-			snap.Name = prop.Value
-		} else {
-			parts := strings.Split(ds.ID, "/")
-			snap.Name = parts[len(parts)-1]
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertySourceVolumeID]; ok {
-			snap.SourceVolume = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertySourceDataset]; ok {
-			snap.SourceDataset = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
-			snap.Protocol = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyDeleteStrategy]; ok {
-			snap.DeleteStrategy = prop.Value
-		}
-
-		snapshots = append(snapshots, snap)
-	}
-
-	return snapshots, nil
+	return extractDetachedSnapshots(datasets), nil
 }
 
 // FindClonedVolumes finds all volumes that were cloned from snapshots or other volumes.
@@ -192,56 +115,7 @@ func FindClonedVolumes(ctx context.Context, client tnsapi.ClientInterface) ([]Cl
 	if err != nil {
 		return nil, err
 	}
-
-	var clones []CloneInfo
-	for _, ds := range datasets {
-		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
-			continue
-		}
-
-		sourceTypeProp, hasSourceType := ds.UserProperties[tnsapi.PropertyContentSourceType]
-		if !hasSourceType || sourceTypeProp.Value == "" {
-			continue
-		}
-
-		clone := CloneInfo{
-			Dataset:    ds.ID,
-			SourceType: sourceTypeProp.Value,
-		}
-
-		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
-			clone.VolumeID = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
-			clone.Protocol = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceID]; ok {
-			clone.SourceID = prop.Value
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyCloneMode]; ok {
-			clone.CloneMode = prop.Value
-		} else {
-			clone.CloneMode = tnsapi.CloneModeCOW
-		}
-		if prop, ok := ds.UserProperties[tnsapi.PropertyOriginSnapshot]; ok {
-			clone.OriginSnapshot = prop.Value
-		}
-
-		switch clone.CloneMode {
-		case tnsapi.CloneModeCOW:
-			clone.DependencyNote = "Source snapshot CANNOT be deleted"
-		case tnsapi.CloneModePromoted:
-			clone.DependencyNote = "Source snapshot CAN be deleted"
-		case tnsapi.CloneModeDetached:
-			clone.DependencyNote = "Fully independent (no dependencies)"
-		default:
-			clone.DependencyNote = "Unknown mode"
-		}
-
-		clones = append(clones, clone)
-	}
-
-	return clones, nil
+	return extractClones(datasets), nil
 }
 
 // FindUnmanagedVolumes finds volumes not managed by tns-csi.
@@ -568,6 +442,270 @@ func extractDatasetName(datasetID string) string {
 		return parts[len(parts)-1]
 	}
 	return datasetID
+}
+
+// extractVolumes extracts VolumeInfo from pre-fetched managed datasets (no API calls).
+func extractVolumes(datasets []tnsapi.DatasetWithProperties) []VolumeInfo {
+	var volumes []VolumeInfo
+	for _, ds := range datasets {
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
+			continue
+		}
+
+		volumeID := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+			volumeID = prop.Value
+		}
+		if volumeID == "" {
+			continue
+		}
+
+		vol := VolumeInfo{
+			Dataset:  ds.ID,
+			VolumeID: volumeID,
+			Type:     ds.Type,
+		}
+
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
+			vol.Protocol = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCapacityBytes]; ok {
+			vol.CapacityBytes = tnsapi.StringToInt64(prop.Value)
+			vol.CapacityHuman = FormatBytes(vol.CapacityBytes)
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDeleteStrategy]; ok {
+			vol.DeleteStrategy = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyAdoptable]; ok {
+			vol.Adoptable = prop.Value == valueTrue
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceType]; ok {
+			vol.ContentSourceType = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceID]; ok {
+			vol.ContentSourceID = prop.Value
+		}
+
+		volumes = append(volumes, vol)
+	}
+	return volumes
+}
+
+// extractClones extracts CloneInfo from pre-fetched managed datasets (no API calls).
+func extractClones(datasets []tnsapi.DatasetWithProperties) []CloneInfo {
+	var clones []CloneInfo
+	for _, ds := range datasets {
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
+			continue
+		}
+
+		sourceTypeProp, hasSourceType := ds.UserProperties[tnsapi.PropertyContentSourceType]
+		if !hasSourceType || sourceTypeProp.Value == "" {
+			continue
+		}
+
+		clone := CloneInfo{
+			Dataset:    ds.ID,
+			SourceType: sourceTypeProp.Value,
+		}
+
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+			clone.VolumeID = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
+			clone.Protocol = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyContentSourceID]; ok {
+			clone.SourceID = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCloneMode]; ok {
+			clone.CloneMode = prop.Value
+		} else {
+			clone.CloneMode = tnsapi.CloneModeCOW
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyOriginSnapshot]; ok {
+			clone.OriginSnapshot = prop.Value
+		}
+
+		switch clone.CloneMode {
+		case tnsapi.CloneModeCOW:
+			clone.DependencyNote = "Source snapshot CANNOT be deleted"
+		case tnsapi.CloneModePromoted:
+			clone.DependencyNote = "Source snapshot CAN be deleted"
+		case tnsapi.CloneModeDetached:
+			clone.DependencyNote = "Fully independent (no dependencies)"
+		default:
+			clone.DependencyNote = "Unknown mode"
+		}
+
+		clones = append(clones, clone)
+	}
+	return clones
+}
+
+// matchSnapshotsToDatasets matches pre-fetched snapshots to managed datasets (no API calls).
+// It replaces the O(n) per-dataset QuerySnapshots with O(1) bulk query + O(S) in-memory filtering.
+func matchSnapshotsToDatasets(allSnapshots []tnsapi.Snapshot, managedDatasets []tnsapi.DatasetWithProperties) []SnapshotInfo {
+	// Build a map of dataset ID → (volumeID, protocol) for managed datasets
+	type datasetMeta struct {
+		volumeID string
+		protocol string
+	}
+	managedMap := make(map[string]datasetMeta, len(managedDatasets))
+	for _, ds := range managedDatasets {
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && prop.Value == valueTrue {
+			continue
+		}
+		volumeID := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyCSIVolumeName]; ok {
+			volumeID = prop.Value
+		}
+		if volumeID == "" {
+			continue
+		}
+		protocol := ""
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
+			protocol = prop.Value
+		}
+		managedMap[ds.ID] = datasetMeta{volumeID: volumeID, protocol: protocol}
+	}
+
+	var snapshots []SnapshotInfo
+	for _, snap := range allSnapshots {
+		meta, ok := managedMap[snap.Dataset]
+		if !ok {
+			continue
+		}
+		snapshots = append(snapshots, SnapshotInfo{
+			Name:          snap.Name,
+			SourceVolume:  meta.volumeID,
+			SourceDataset: snap.Dataset,
+			Protocol:      meta.protocol,
+			Type:          "attached",
+		})
+	}
+	return snapshots
+}
+
+// extractDetachedSnapshots extracts SnapshotInfo from pre-fetched detached datasets (no API calls).
+func extractDetachedSnapshots(detachedDatasets []tnsapi.DatasetWithProperties) []SnapshotInfo {
+	var snapshots []SnapshotInfo
+	for _, ds := range detachedDatasets {
+		if prop, ok := ds.UserProperties[tnsapi.PropertyManagedBy]; !ok || prop.Value != tnsapi.ManagedByValue {
+			continue
+		}
+
+		snap := SnapshotInfo{
+			Type: "detached",
+		}
+
+		if prop, ok := ds.UserProperties[tnsapi.PropertySnapshotID]; ok {
+			snap.Name = prop.Value
+		} else {
+			parts := strings.Split(ds.ID, "/")
+			snap.Name = parts[len(parts)-1]
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertySourceVolumeID]; ok {
+			snap.SourceVolume = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertySourceDataset]; ok {
+			snap.SourceDataset = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyProtocol]; ok {
+			snap.Protocol = prop.Value
+		}
+		if prop, ok := ds.UserProperties[tnsapi.PropertyDeleteStrategy]; ok {
+			snap.DeleteStrategy = prop.Value
+		}
+
+		snapshots = append(snapshots, snap)
+	}
+	return snapshots
+}
+
+// buildUnmanagedFromData builds unmanaged volume list from pre-fetched data (no API calls).
+func buildUnmanagedFromData(
+	allDatasets []tnsapi.Dataset,
+	managedDatasets []tnsapi.DatasetWithProperties,
+	nfsShares []tnsapi.NFSShare,
+	democraticDatasets []tnsapi.DatasetWithProperties,
+	searchPath string,
+) []UnmanagedVolume {
+
+	managedIDs := make(map[string]bool, len(managedDatasets))
+	for i := range managedDatasets {
+		managedIDs[managedDatasets[i].ID] = true
+	}
+
+	nfsShareByPath := make(map[string]*tnsapi.NFSShare, len(nfsShares))
+	for i := range nfsShares {
+		nfsShareByPath[nfsShares[i].Path] = &nfsShares[i]
+	}
+
+	democraticIDs := make(map[string]string, len(democraticDatasets))
+	for i := range democraticDatasets {
+		democraticIDs[democraticDatasets[i].ID] = "democratic-csi"
+	}
+
+	allDatasetIDs := make(map[string]bool, len(allDatasets))
+	for i := range allDatasets {
+		allDatasetIDs[allDatasets[i].ID] = true
+	}
+
+	hasChildren := func(datasetID string) bool {
+		prefix := datasetID + "/"
+		for id := range allDatasetIDs {
+			if strings.HasPrefix(id, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var volumes []UnmanagedVolume
+	for i := range allDatasets {
+		ds := &allDatasets[i]
+
+		if ds.ID == searchPath {
+			continue
+		}
+		if managedIDs[ds.ID] {
+			continue
+		}
+		if isSystemDataset(ds.ID, searchPath) {
+			continue
+		}
+
+		vol := UnmanagedVolume{
+			Dataset:     ds.ID,
+			Name:        extractDatasetName(ds.ID),
+			Type:        ds.Type,
+			IsContainer: hasChildren(ds.ID),
+		}
+
+		if ds.Used != nil {
+			if val, ok := ds.Used["parsed"].(float64); ok {
+				vol.SizeBytes = int64(val)
+				vol.Size = FormatBytes(vol.SizeBytes)
+			}
+		}
+
+		if share, ok := nfsShareByPath[ds.Mountpoint]; ok {
+			vol.Protocol = protocolNFS
+			vol.NFSShareID = share.ID
+			vol.NFSSharePath = share.Path
+		} else if ds.Type == datasetTypeVolume {
+			vol.Protocol = "block"
+		}
+
+		if manager, ok := democraticIDs[ds.ID]; ok {
+			vol.ManagedBy = manager
+		}
+
+		volumes = append(volumes, vol)
+	}
+
+	return volumes
 }
 
 // FormatBytes converts bytes to human-readable format.

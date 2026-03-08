@@ -126,12 +126,20 @@ jobs:
             - path: /etc/modules-load.d/csi.conf
               content: |
                 nvme-tcp
+                nvme-fabrics
                 iscsi_tcp
+                nfs
+                nfsv4
 
           runcmd:
-            - modprobe nvme-tcp
+            - apt-get install -y linux-modules-extra-$(uname -r) || true
+            - modprobe nvme-tcp || true
+            - modprobe nvme-fabrics || true
             - modprobe iscsi_tcp
+            - modprobe nfs
+            - modprobe nfsv4
             - systemctl enable --now iscsid
+            - lsmod | grep -E 'nvme|iscsi|nfs' || true
             - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage" sh -
             - until kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready'; do sleep 2; done
             - echo "K3S_READY" > /tmp/k3s-ready

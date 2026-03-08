@@ -132,8 +132,11 @@ jobs:
                 nfsv4
 
           runcmd:
-            - echo "=== Installing linux-modules-extra ==="
-            - apt-get install -y linux-modules-extra-$(uname -r) 2>&1 | tail -5
+            - echo "=== Installing linux-modules-extra for kernel $(uname -r) ==="
+            - apt-get install -y linux-modules-extra-$(uname -r) 2>&1
+            - depmod -a
+            - echo "=== Checking for nvme-tcp module file ==="
+            - find /lib/modules/$(uname -r) -name 'nvme*' -o -name 'nvme_tcp*' 2>/dev/null || echo "No nvme modules found in filesystem"
             - echo "=== Loading kernel modules ==="
             - modprobe nvme-tcp && echo "nvme-tcp loaded" || echo "FAILED to load nvme-tcp"
             - modprobe nvme-fabrics && echo "nvme-fabrics loaded" || echo "FAILED to load nvme-fabrics"
@@ -299,6 +302,7 @@ jobs:
             --set "storageClasses[0].protocol=nfs"
             --set "storageClasses[0].pool=${TRUENAS_POOL}"
             --set "storageClasses[0].server=${TRUENAS_HOST}"
+            --set "storageClasses[0].mountOptions[0]=noresvport"
             --set "storageClasses[1].name=tns-csi-nvmeof"
             --set "storageClasses[1].enabled=true"
             --set "storageClasses[1].protocol=nvmeof"

@@ -94,6 +94,7 @@ This driver supports four storage protocols:
 - **Configurable mount options** - Customize NFS/NVMe-oF/iSCSI/SMB mount options via StorageClass
 - **Configurable ZFS properties** - Set compression, dedup, recordsize, etc. via StorageClass parameters
 - **Access modes** - ReadWriteOnce (RWO), ReadWriteOncePod (RWOP), and ReadWriteMany (RWX) support
+- **Raw block RWX** - Block volumes with RWX access for KubeVirt live migration (NVMe-oF, iSCSI)
 - **Storage classes** - Flexible configuration via Kubernetes storage classes
 - **Connection resilience** - Automatic reconnection with exponential backoff for WebSocket API
 

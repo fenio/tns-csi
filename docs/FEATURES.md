@@ -368,6 +368,49 @@ spec:
 
 **Note:** This is a controller-side capability. Kubernetes periodically queries volume health for volumes with `GET_VOLUME` capability enabled.
 
+### Raw Block Volumes with RWX (KubeVirt Live Migration)
+- **Status**: ✅ Implemented (since v0.15.2)
+- **Protocols**: NVMe-oF, iSCSI
+- **Description**: Block storage volumes support `ReadWriteMany` access mode with `volumeMode: Block`, enabling KubeVirt live migration
+
+KubeVirt requires RWX block volumes to live migrate VMs between worker nodes. Both NVMe-oF and iSCSI support this mode — the CSI driver exposes the raw block device without mounting a filesystem, and KubeVirt's QEMU driver handles concurrent access.
+
+**PVC for KubeVirt:**
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vm-disk
+spec:
+  accessModes:
+    - ReadWriteMany
+  volumeMode: Block
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: tns-csi-nvmeof  # or tns-csi-iscsi
+```
+
+**StorageProfile for CDI:**
+
+KubeVirt's [Containerized Data Importer (CDI)](https://github.com/kubevirt/containerized-data-importer) uses StorageProfiles to determine the default access mode and volume mode for DataVolumes. Configure a StorageProfile for your storage class:
+
+```yaml
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: StorageProfile
+metadata:
+  name: tns-csi-nvmeof  # must match the StorageClass name
+spec:
+  claimPropertySets:
+    - accessModes:
+        - ReadWriteMany
+      volumeMode: Block
+```
+
+Create one for each block protocol storage class you use with KubeVirt (e.g., `tns-csi-nvmeof`, `tns-csi-iscsi`).
+
+See the [KubeVirt live migration documentation](https://kubevirt.io/user-guide/compute/live_migration/#limitations) for more details on requirements.
+
 ## Infrastructure Features
 
 ### WebSocket API Client

@@ -26,4 +26,9 @@ type (
 	MetricsSummary         = dashboard.MetricsSummary
 	DashboardData          = dashboard.Data
 	SummaryData            = dashboard.SummaryData
+	PaginationParams       = dashboard.PaginationParams
+	PaginatedVolumes       = dashboard.PaginatedVolumes
+	PaginatedSnapshots     = dashboard.PaginatedSnapshots
+	PaginatedClones        = dashboard.PaginatedClones
+	PaginatedUnmanaged     = dashboard.PaginatedUnmanaged
 )

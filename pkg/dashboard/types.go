@@ -7,13 +7,14 @@ package dashboard
 //
 //nolint:govet // field alignment not critical for this struct
 type Data struct {
-	Summary   SummaryData       `json:"summary"`
-	Volumes   []VolumeInfo      `json:"volumes"`
-	Snapshots []SnapshotInfo    `json:"snapshots"`
-	Clones    []CloneInfo       `json:"clones"`
-	Unmanaged []UnmanagedVolume `json:"unmanaged"`
-	Version   string            `json:"version"`
-	Error     string            `json:"error,omitempty"`
+	Summary     SummaryData       `json:"summary"`
+	Volumes     []VolumeInfo      `json:"volumes"`
+	VolumesPage PaginatedVolumes  `json:"-"` // paginated view for template rendering
+	Snapshots   []SnapshotInfo    `json:"snapshots"`
+	Clones      []CloneInfo       `json:"clones"`
+	Unmanaged   []UnmanagedVolume `json:"unmanaged"`
+	Version     string            `json:"version"`
+	Error       string            `json:"error,omitempty"`
 }
 
 // SummaryData contains summary statistics.
@@ -238,6 +239,83 @@ type MetricsSummary struct {
 	MessagesReceived       int64   `json:"messagesReceived"`
 	RawMetrics             string  `json:"rawMetrics,omitempty"`
 	Error                  string  `json:"error,omitempty"`
+}
+
+// PaginationParams holds parsed query parameters for pagination/search/sort.
+type PaginationParams struct {
+	Query    string
+	Sort     string
+	Order    string // "asc" or "desc"
+	Page     int
+	PageSize int
+}
+
+// PaginatedVolumes wraps a page of volumes with pagination metadata.
+//
+//nolint:govet // field alignment not critical for display struct
+type PaginatedVolumes struct {
+	Items      []VolumeInfo
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+	Query      string
+	Sort       string
+	Order      string
+	BaseURL    string
+	HasPrev    bool
+	HasNext    bool
+}
+
+// PaginatedSnapshots wraps a page of snapshots with pagination metadata.
+//
+//nolint:govet // field alignment not critical for display struct
+type PaginatedSnapshots struct {
+	Items      []SnapshotInfo
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+	Query      string
+	Sort       string
+	Order      string
+	BaseURL    string
+	HasPrev    bool
+	HasNext    bool
+}
+
+// PaginatedClones wraps a page of clones with pagination metadata.
+//
+//nolint:govet // field alignment not critical for display struct
+type PaginatedClones struct {
+	Items      []CloneInfo
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+	Query      string
+	Sort       string
+	Order      string
+	BaseURL    string
+	HasPrev    bool
+	HasNext    bool
+}
+
+// PaginatedUnmanaged wraps a page of unmanaged volumes with pagination metadata.
+//
+//nolint:govet // field alignment not critical for display struct
+type PaginatedUnmanaged struct {
+	Items      []UnmanagedVolume
+	Page       int
+	PageSize   int
+	TotalItems int
+	TotalPages int
+	Query      string
+	Sort       string
+	Order      string
+	BaseURL    string
+	HasPrev    bool
+	HasNext    bool
 }
 
 // Protocol constants.

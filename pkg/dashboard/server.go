@@ -26,7 +26,12 @@ type Server struct {
 
 // NewServer creates a new dashboard server.
 func NewServer(client tnsapi.ClientInterface, pool, version string) (*Server, error) {
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+		"sub": func(a, b int) int { return a - b },
+	}
+
+	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

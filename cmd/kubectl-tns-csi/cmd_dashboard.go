@@ -92,7 +92,11 @@ func runDashboard(ctx context.Context, url, apiKey, secretRef *string, skipTLSVe
 	}
 
 	// Parse templates
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+		"sub": func(a, b int) int { return a - b },
+	}
+	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return fmt.Errorf("failed to parse templates: %w", err)
 	}
@@ -214,6 +218,9 @@ func (s *dashboardServer) handleDashboard(w http.ResponseWriter, r *http.Request
 		data = s.fetchAllData(ctx, client)
 		data.Version = version
 	}
+
+	params := dashboard.ParsePaginationParams(r)
+	data.VolumesPage = dashboard.PaginateVolumes(data.Volumes, params, "/partials/volumes")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
@@ -347,6 +354,8 @@ func (s *dashboardServer) handleAPISummary(w http.ResponseWriter, r *http.Reques
 
 func (s *dashboardServer) handlePartialVolumes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := dashboard.ParsePaginationParams(r)
+
 	client, err := s.getClient(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -373,8 +382,10 @@ func (s *dashboardServer) handlePartialVolumes(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	paginated := dashboard.PaginateVolumes(volumes, params, "/partials/volumes")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "volumes_table.html", volumes); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "volumes_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
@@ -382,6 +393,8 @@ func (s *dashboardServer) handlePartialVolumes(w http.ResponseWriter, r *http.Re
 //nolint:dupl // Similar structure but different data types - clearer to keep separate
 func (s *dashboardServer) handlePartialSnapshots(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := dashboard.ParsePaginationParams(r)
+
 	client, err := s.getClient(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -395,8 +408,10 @@ func (s *dashboardServer) handlePartialSnapshots(w http.ResponseWriter, r *http.
 		return
 	}
 
+	paginated := dashboard.PaginateSnapshots(snapshots, params, "/partials/snapshots")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "snapshots_table.html", snapshots); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "snapshots_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
@@ -404,6 +419,8 @@ func (s *dashboardServer) handlePartialSnapshots(w http.ResponseWriter, r *http.
 //nolint:dupl // Similar structure but different data types - clearer to keep separate
 func (s *dashboardServer) handlePartialClones(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := dashboard.ParsePaginationParams(r)
+
 	client, err := s.getClient(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -417,8 +434,10 @@ func (s *dashboardServer) handlePartialClones(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	paginated := dashboard.PaginateClones(clones, params, "/partials/clones")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "clones_table.html", clones); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "clones_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
@@ -442,6 +461,7 @@ func (s *dashboardServer) handlePartialSummary(w http.ResponseWriter, r *http.Re
 
 func (s *dashboardServer) handlePartialUnmanaged(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := dashboard.ParsePaginationParams(r)
 
 	// Check if pool is configured
 	if s.pool == "" {
@@ -464,8 +484,10 @@ func (s *dashboardServer) handlePartialUnmanaged(w http.ResponseWriter, r *http.
 		return
 	}
 
+	paginated := dashboard.PaginateUnmanaged(unmanaged, params, "/partials/unmanaged")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "unmanaged_table.html", unmanaged); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "unmanaged_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }

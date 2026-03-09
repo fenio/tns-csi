@@ -333,6 +333,7 @@
         }
 
         .badge-nfs { background: rgba(59, 130, 246, 0.2); color: var(--accent-blue); }
+        .badge-smb { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); }
         .badge-nvmeof { background: rgba(168, 85, 247, 0.2); color: var(--accent-purple); }
         .badge-iscsi { background: rgba(234, 179, 8, 0.2); color: var(--accent-yellow); }
         .badge-cow { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); }
@@ -587,6 +588,42 @@
             background: var(--border-color);
         }
 
+        /* Pagination */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 12px 20px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .pagination button {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 6px 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: background 0.2s;
+        }
+
+        .pagination button:hover {
+            background: var(--accent-blue);
+        }
+
+        .pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .pagination button:disabled:hover {
+            background: var(--bg-tertiary);
+        }
+
         /* Toast notifications */
         .toast-container {
             position: fixed;
@@ -665,11 +702,15 @@
         </div>
         {{end}}
 
-        <div id="summary-cards">
+        <!-- Summary cards: rendered from K8s data initially, refreshed with TrueNAS data -->
+        <div id="summary-cards"
+             hx-get="/dashboard/partials/summary"
+             hx-trigger="load delay:500ms"
+             hx-swap="innerHTML">
             {{template "summary_cards.html" .Summary}}
         </div>
 
-        <!-- Controller Status Bar -->
+        <!-- Controller Status Bar: lazy-loaded -->
         <div id="controller-status" class="controller-status"
              hx-get="/dashboard/partials/metrics"
              hx-trigger="load"
@@ -681,16 +722,16 @@
 
         <div class="tabs">
             <button class="tab active" onclick="showPanel('volumes', this)">
-                Volumes ({{len .Volumes}})
+                Volumes (<span id="tab-count-volumes">{{.VolumesPage.TotalItems}}</span>)
             </button>
             <button class="tab" onclick="showPanel('snapshots', this)">
-                Snapshots ({{len .Snapshots}})
+                Snapshots (<span id="tab-count-snapshots">...</span>)
             </button>
             <button class="tab" onclick="showPanel('clones', this)">
-                Clones ({{len .Clones}})
+                Clones (<span id="tab-count-clones">...</span>)
             </button>
             <button class="tab" onclick="showPanel('unmanaged', this)">
-                Unmanaged ({{len .Unmanaged}})
+                Unmanaged (<span id="tab-count-unmanaged">...</span>)
             </button>
         </div>
 
@@ -698,24 +739,42 @@
             <div class="panel-header">
                 <div class="panel-header-left">
                     <span class="panel-title">Managed Volumes</span>
-                    <input type="text" class="search-input" placeholder="Search volumes..." oninput="filterTable('volumes-table', this.value)">
+                    <input type="text" class="search-input" placeholder="Search volumes..."
+                           name="q"
+                           hx-get="/dashboard/partials/volumes"
+                           hx-trigger="keyup changed delay:300ms"
+                           hx-target="#volumes-table"
+                           hx-swap="innerHTML">
                 </div>
             </div>
-            <div id="volumes-table">
-                {{template "volumes_table.html" .Volumes}}
+            <!-- K8s-fast volumes rendered inline, then replaced with TrueNAS-enriched data -->
+            <div id="volumes-table"
+                 hx-get="/dashboard/partials/volumes"
+                 hx-trigger="load delay:500ms"
+                 hx-swap="innerHTML">
+                {{template "volumes_table.html" .VolumesPage}}
             </div>
             <div class="panel-loading"><span class="spinner"></span></div>
         </div>
 
+        <!-- Other tabs: lazy-loaded via HTMX on page load (parallel background fetch) -->
         <div id="panel-snapshots" class="panel hidden">
             <div class="panel-header">
                 <div class="panel-header-left">
                     <span class="panel-title">Snapshots</span>
-                    <input type="text" class="search-input" placeholder="Search snapshots..." oninput="filterTable('snapshots-table', this.value)">
+                    <input type="text" class="search-input" placeholder="Search snapshots..."
+                           name="q"
+                           hx-get="/dashboard/partials/snapshots"
+                           hx-trigger="keyup changed delay:300ms"
+                           hx-target="#snapshots-table"
+                           hx-swap="innerHTML">
                 </div>
             </div>
-            <div id="snapshots-table">
-                {{template "snapshots_table.html" .Snapshots}}
+            <div id="snapshots-table"
+                 hx-get="/dashboard/partials/snapshots"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="loading"><span class="spinner"></span> Loading snapshots...</div>
             </div>
             <div class="panel-loading"><span class="spinner"></span></div>
         </div>
@@ -724,11 +783,19 @@
             <div class="panel-header">
                 <div class="panel-header-left">
                     <span class="panel-title">Cloned Volumes</span>
-                    <input type="text" class="search-input" placeholder="Search clones..." oninput="filterTable('clones-table', this.value)">
+                    <input type="text" class="search-input" placeholder="Search clones..."
+                           name="q"
+                           hx-get="/dashboard/partials/clones"
+                           hx-trigger="keyup changed delay:300ms"
+                           hx-target="#clones-table"
+                           hx-swap="innerHTML">
                 </div>
             </div>
-            <div id="clones-table">
-                {{template "clones_table.html" .Clones}}
+            <div id="clones-table"
+                 hx-get="/dashboard/partials/clones"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="loading"><span class="spinner"></span> Loading clones...</div>
             </div>
             <div class="panel-loading"><span class="spinner"></span></div>
         </div>
@@ -737,11 +804,19 @@
             <div class="panel-header">
                 <div class="panel-header-left">
                     <span class="panel-title">Unmanaged Volumes</span>
-                    <input type="text" class="search-input" placeholder="Search unmanaged..." oninput="filterTable('unmanaged-table', this.value)">
+                    <input type="text" class="search-input" placeholder="Search unmanaged..."
+                           name="q"
+                           hx-get="/dashboard/partials/unmanaged"
+                           hx-trigger="keyup changed delay:300ms"
+                           hx-target="#unmanaged-table"
+                           hx-swap="innerHTML">
                 </div>
             </div>
-            <div id="unmanaged-table">
-                {{template "unmanaged_table.html" .Unmanaged}}
+            <div id="unmanaged-table"
+                 hx-get="/dashboard/partials/unmanaged"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="loading"><span class="spinner"></span> Loading unmanaged volumes...</div>
             </div>
             <div class="panel-loading"><span class="spinner"></span></div>
         </div>
@@ -793,56 +868,30 @@
             if (e.key === 'Escape') closeDetailPanel();
         });
 
-        // --- Search/Filter ---
-        function filterTable(containerId, query) {
-            const container = document.getElementById(containerId);
-            if (!container) return;
-            const tbody = container.querySelector('tbody');
-            if (!tbody) return;
-            const rows = tbody.querySelectorAll('tr');
-            const q = query.toLowerCase();
-            rows.forEach(function(row) {
-                var text = row.textContent.toLowerCase();
-                row.style.display = text.includes(q) ? '' : 'none';
-            });
-        }
+        // --- Tab count updates ---
+        // After HTMX swaps table content, update tab counts from pagination metadata
+        document.addEventListener('htmx:afterSwap', function(evt) {
+            var target = evt.detail.target;
+            if (!target) return;
 
-        // --- Column sorting ---
-        function sortTable(th) {
-            var table = th.closest('table');
-            var tbody = table.querySelector('tbody');
-            if (!tbody) return;
-            var rows = Array.from(tbody.querySelectorAll('tr'));
-            var colIdx = Array.from(th.parentNode.children).indexOf(th);
-
-            // Determine direction
-            var isAsc = th.classList.contains('sort-asc');
-            // Clear all sort classes
-            th.parentNode.querySelectorAll('th').forEach(function(h) {
-                h.classList.remove('sort-asc', 'sort-desc');
-            });
-            var dir = isAsc ? 'desc' : 'asc';
-            th.classList.add('sort-' + dir);
-
-            rows.sort(function(a, b) {
-                var aText = (a.children[colIdx] || {}).textContent || '';
-                var bText = (b.children[colIdx] || {}).textContent || '';
-                aText = aText.trim().toLowerCase();
-                bText = bText.trim().toLowerCase();
-                // Try numeric sort
-                var aNum = parseFloat(aText);
-                var bNum = parseFloat(bText);
-                if (!isNaN(aNum) && !isNaN(bNum)) {
-                    return dir === 'asc' ? aNum - bNum : bNum - aNum;
+            // Look for pagination info in the swapped content
+            var pageInfo = target.querySelector('[data-total-items]');
+            if (pageInfo) {
+                var total = pageInfo.getAttribute('data-total-items');
+                var tabMap = {
+                    'volumes-table': 'tab-count-volumes',
+                    'snapshots-table': 'tab-count-snapshots',
+                    'clones-table': 'tab-count-clones',
+                    'unmanaged-table': 'tab-count-unmanaged'
+                };
+                var countEl = document.getElementById(tabMap[target.id]);
+                if (countEl && total) {
+                    countEl.textContent = total;
                 }
-                if (dir === 'asc') {
-                    return aText.localeCompare(bText);
-                }
-                return bText.localeCompare(aText);
-            });
+            }
 
-            rows.forEach(function(row) { tbody.appendChild(row); });
-        }
+            updateTimestamp();
+        });
 
         // --- Auto-refresh ---
         var autoRefreshTimer = null;
@@ -865,34 +914,22 @@
             var btn = document.getElementById('refresh-btn');
             if (btn) btn.disabled = true;
 
-            // Determine active panel's partial URL
-            var panelUrl = '/dashboard/partials/volumes';
-            var panelTarget = '#volumes-table';
-            var activePanel = document.querySelector('.panel:not(.hidden)');
-            if (activePanel) {
-                var tableEl = activePanel.querySelector('[id$="-table"]');
-                if (tableEl) {
-                    var name = tableEl.id.replace('-table', '');
-                    panelUrl = '/dashboard/partials/' + name;
-                    panelTarget = '#' + tableEl.id;
-                }
-            }
+            // Refresh all panels in parallel
+            var promises = [
+                htmx.ajax('GET', '/dashboard/partials/volumes', { target: '#volumes-table', swap: 'innerHTML' }),
+                htmx.ajax('GET', '/dashboard/partials/snapshots', { target: '#snapshots-table', swap: 'innerHTML' }),
+                htmx.ajax('GET', '/dashboard/partials/clones', { target: '#clones-table', swap: 'innerHTML' }),
+                htmx.ajax('GET', '/dashboard/partials/unmanaged', { target: '#unmanaged-table', swap: 'innerHTML' }),
+                htmx.ajax('GET', '/dashboard/partials/summary', { target: '#summary-cards', swap: 'innerHTML' }),
+                htmx.ajax('GET', '/dashboard/partials/metrics', { target: '#controller-status', swap: 'innerHTML' })
+            ];
 
-            // Chain requests sequentially to avoid overwhelming TrueNAS
-            htmx.ajax('GET', panelUrl, { target: panelTarget, swap: 'innerHTML' })
-                .then(function() {
-                    return htmx.ajax('GET', '/dashboard/partials/summary', { target: '#summary-cards', swap: 'innerHTML' });
-                })
-                .then(function() {
-                    return htmx.ajax('GET', '/dashboard/partials/metrics', { target: '#controller-status', swap: 'innerHTML' });
-                })
-                .then(function() {
-                    updateTimestamp();
-                })
+            Promise.all(promises)
                 .catch(function() {})
                 .then(function() {
                     refreshing = false;
                     if (btn) btn.disabled = false;
+                    updateTimestamp();
                 });
         }
 
@@ -927,11 +964,6 @@
 
         document.addEventListener('htmx:sendError', function(evt) {
             showToast('Connection Error', 'Could not reach the dashboard server.');
-        });
-
-        // Update timestamp after each successful HTMX swap
-        document.addEventListener('htmx:afterSwap', function(evt) {
-            updateTimestamp();
         });
     </script>
 </body>

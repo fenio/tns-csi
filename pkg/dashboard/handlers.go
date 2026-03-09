@@ -1,13 +1,11 @@
 package dashboard
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
-	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 )
@@ -24,127 +22,25 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	data := s.fetchAllData(ctx)
-	data.Version = s.version
+
+	// K8s-first: build volumes from PVs only (no TrueNAS calls).
+	// All other data (snapshots, clones, unmanaged, health, summary) loads
+	// via HTMX in the background after the page renders.
+	data := Data{Version: s.version}
+	volumes, _ := FetchK8sVolumes(ctx)
+	if len(volumes) > 0 {
+		data.Volumes = volumes
+		data.Summary = CalculateSummary(volumes, nil, nil)
+	}
+
+	params := ParsePaginationParams(r)
+	data.VolumesPage = PaginateVolumes(data.Volumes, params, "/dashboard/partials/volumes")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 		klog.Errorf("Template error: %v", err)
 		http.Error(w, "Template error", http.StatusInternalServerError)
 	}
-}
-
-func (s *Server) fetchAllData(ctx context.Context) Data {
-	data := Data{}
-
-	// Phase 1: Concurrent raw data fetch — all API calls run in parallel.
-	g, gctx := errgroup.WithContext(ctx)
-
-	var managedDatasets []tnsapi.DatasetWithProperties
-	var detachedDatasets []tnsapi.DatasetWithProperties
-	var allSnapshots []tnsapi.Snapshot
-	var nfsShares []tnsapi.NFSShare
-	var smbShares []tnsapi.SMBShare
-	var nvmeSubsystems []tnsapi.NVMeOFSubsystem
-	var iscsiTargets []tnsapi.ISCSITarget
-	var allDatasets []tnsapi.Dataset
-	var democraticDatasets []tnsapi.DatasetWithProperties
-	var k8sData *K8sEnrichmentResult
-
-	g.Go(func() error {
-		var err error
-		managedDatasets, err = s.client.FindDatasetsByProperty(gctx, "", tnsapi.PropertyManagedBy, tnsapi.ManagedByValue)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		detachedDatasets, err = s.client.FindDatasetsByProperty(gctx, "", tnsapi.PropertyDetachedSnapshot, valueTrue)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		allSnapshots, err = s.client.QuerySnapshots(gctx, []interface{}{})
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		nfsShares, err = s.client.QueryAllNFSShares(gctx, "")
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		smbShares, err = s.client.QueryAllSMBShares(gctx, "")
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		nvmeSubsystems, err = s.client.ListAllNVMeOFSubsystems(gctx)
-		return err
-	})
-
-	g.Go(func() error {
-		var err error
-		iscsiTargets, err = s.client.QueryISCSITargets(gctx, nil)
-		return err
-	})
-
-	if s.pool != "" {
-		g.Go(func() error {
-			var err error
-			allDatasets, err = s.client.QueryAllDatasets(gctx, s.pool)
-			return err
-		})
-
-		g.Go(func() error {
-			//nolint:errcheck // non-fatal if democratic-csi datasets not found
-			democraticDatasets, _ = s.client.FindDatasetsByProperty(gctx, s.pool, "democratic-csi:csi_share_volume_context", "")
-			return nil
-		})
-	}
-
-	g.Go(func() error {
-		result := EnrichWithK8sData(gctx, false)
-		k8sData = result
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
-		klog.Warningf("Failed to fetch dashboard data: %v", err)
-		return data
-	}
-
-	// Phase 2: In-memory processing — no API calls.
-	data.Volumes = extractVolumes(managedDatasets)
-	data.Clones = extractClones(managedDatasets)
-
-	data.Snapshots = matchSnapshotsToDatasets(allSnapshots, managedDatasets)
-	data.Snapshots = append(data.Snapshots, extractDetachedSnapshots(detachedDatasets)...)
-
-	if s.pool != "" {
-		data.Unmanaged = buildUnmanagedFromData(allDatasets, managedDatasets, nfsShares, democraticDatasets, s.pool)
-	}
-
-	// Health annotation from pre-fetched maps
-	resources := BuildHealthMapsFromData(nfsShares, smbShares, nvmeSubsystems, iscsiTargets)
-	AnnotateHealthFromMaps(data.Volumes, managedDatasets, resources)
-
-	// K8s binding enrichment
-	if k8sData != nil && k8sData.Available {
-		for i := range data.Volumes {
-			if binding := MatchK8sBinding(k8sData.Bindings, data.Volumes[i].Dataset, data.Volumes[i].VolumeID); binding != nil {
-				data.Volumes[i].K8s = binding
-			}
-		}
-	}
-
-	data.Summary = CalculateSummary(data.Volumes, data.Snapshots, data.Clones)
-
-	return data
 }
 
 // CalculateSummary computes summary statistics from volumes, snapshots, and clones.
@@ -213,12 +109,47 @@ func (s *Server) handleAPIClones(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAPISummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	data := s.fetchAllData(ctx)
-	writeJSONResponse(w, data.Summary)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	var volumes []VolumeInfo
+	var snapshots []SnapshotInfo
+	var clones []CloneInfo
+
+	g.Go(func() error {
+		v, err := FindManagedVolumes(gctx, s.client)
+		if err == nil {
+			volumes = v
+		}
+		return err
+	})
+	g.Go(func() error {
+		snaps, err := FindManagedSnapshots(gctx, s.client)
+		if err == nil {
+			snapshots = snaps
+		}
+		return err
+	})
+	g.Go(func() error {
+		cl, err := FindClonedVolumes(gctx, s.client)
+		if err == nil {
+			clones = cl
+		}
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		writeJSONError(w, err)
+		return
+	}
+
+	writeJSONResponse(w, CalculateSummary(volumes, snapshots, clones))
 }
 
 func (s *Server) handlePartialVolumes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := ParsePaginationParams(r)
+
 	volumes, err := FindManagedVolumes(ctx, s.client)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -236,52 +167,99 @@ func (s *Server) handlePartialVolumes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	paginated := PaginateVolumes(volumes, params, "/dashboard/partials/volumes")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "volumes_table.html", volumes); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "volumes_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
 
+//nolint:dupl // Similar structure per type — Go templates can't use generics
 func (s *Server) handlePartialSnapshots(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := ParsePaginationParams(r)
+
 	snapshots, err := FindManagedSnapshots(ctx, s.client)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	paginated := PaginateSnapshots(snapshots, params, "/dashboard/partials/snapshots")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "snapshots_table.html", snapshots); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "snapshots_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
 
+//nolint:dupl // Similar structure per type — Go templates can't use generics
 func (s *Server) handlePartialClones(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := ParsePaginationParams(r)
+
 	clones, err := FindClonedVolumes(ctx, s.client)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	paginated := PaginateClones(clones, params, "/dashboard/partials/clones")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "clones_table.html", clones); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "clones_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
 
 func (s *Server) handlePartialSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	data := s.fetchAllData(ctx)
+
+	// Fetch volumes, snapshots, and clones concurrently for summary computation.
+	g, gctx := errgroup.WithContext(ctx)
+
+	var volumes []VolumeInfo
+	var snapshots []SnapshotInfo
+	var clones []CloneInfo
+
+	g.Go(func() error {
+		v, err := FindManagedVolumes(gctx, s.client)
+		if err == nil {
+			volumes = v
+		}
+		return err
+	})
+	g.Go(func() error {
+		snaps, err := FindManagedSnapshots(gctx, s.client)
+		if err == nil {
+			snapshots = snaps
+		}
+		return err
+	})
+	g.Go(func() error {
+		cl, err := FindClonedVolumes(gctx, s.client)
+		if err == nil {
+			clones = cl
+		}
+		return err
+	})
+
+	if err := g.Wait(); err != nil {
+		klog.Warningf("Failed to fetch summary data: %v", err)
+	}
+
+	summary := CalculateSummary(volumes, snapshots, clones)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "summary_cards.html", data.Summary); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "summary_cards.html", summary); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }
 
 func (s *Server) handlePartialUnmanaged(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	params := ParsePaginationParams(r)
 
 	if s.pool == "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -296,8 +274,10 @@ func (s *Server) handlePartialUnmanaged(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	paginated := PaginateUnmanaged(unmanaged, params, "/dashboard/partials/unmanaged")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, "unmanaged_table.html", unmanaged); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "unmanaged_table.html", paginated); err != nil {
 		klog.Errorf("Template error: %v", err)
 	}
 }

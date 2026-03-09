@@ -1,17 +1,30 @@
 {{define "snapshots_table.html"}}
-{{if .}}
+<div data-total-items="{{.TotalItems}}">
+{{if .Items}}
 <table>
     <thead>
         <tr>
-            <th class="sortable" onclick="sortTable(this)">Snapshot Name</th>
-            <th class="sortable" onclick="sortTable(this)">Source Volume</th>
-            <th class="sortable" onclick="sortTable(this)">Protocol</th>
-            <th class="sortable" onclick="sortTable(this)">Type</th>
-            <th class="sortable" onclick="sortTable(this)">Source Dataset</th>
+            <th class="sortable{{if eq .Sort "name"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=name&order={{if and (eq .Sort "name") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Snapshot Name</th>
+            <th class="sortable{{if eq .Sort "sourceVolume"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=sourceVolume&order={{if and (eq .Sort "sourceVolume") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Source Volume</th>
+            <th class="sortable{{if eq .Sort "protocol"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=protocol&order={{if and (eq .Sort "protocol") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Protocol</th>
+            <th class="sortable{{if eq .Sort "type"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=type&order={{if and (eq .Sort "type") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Type</th>
+            <th>Source Dataset</th>
         </tr>
     </thead>
     <tbody>
-        {{range .}}
+        {{range .Items}}
         <tr>
             <td class="mono">{{.Name}}</td>
             <td class="mono">{{.SourceVolume}}</td>
@@ -22,6 +35,8 @@
                 <span class="badge badge-nvmeof">NVMe-oF</span>
                 {{else if eq .Protocol "iscsi"}}
                 <span class="badge badge-iscsi">iSCSI</span>
+                {{else if eq .Protocol "smb"}}
+                <span class="badge badge-smb">SMB</span>
                 {{else}}
                 <span class="badge">{{.Protocol}}</span>
                 {{end}}
@@ -38,10 +53,24 @@
         {{end}}
     </tbody>
 </table>
-{{else}}
-<div class="empty-state">
-    No snapshots found
-    <div class="hint">Create VolumeSnapshots using tns-csi VolumeSnapshotClass to see them here</div>
+{{if gt .TotalPages 1}}
+<div class="pagination">
+    <button {{if not .HasPrev}}disabled{{end}}
+            hx-get="{{.BaseURL}}?page={{sub .Page 1}}&pageSize={{.PageSize}}&q={{.Query}}&sort={{.Sort}}&order={{.Order}}"
+            hx-target="closest [id$='-table']"
+            hx-swap="innerHTML">Previous</button>
+    <span>Page {{.Page}} of {{.TotalPages}} ({{.TotalItems}} items)</span>
+    <button {{if not .HasNext}}disabled{{end}}
+            hx-get="{{.BaseURL}}?page={{add .Page 1}}&pageSize={{.PageSize}}&q={{.Query}}&sort={{.Sort}}&order={{.Order}}"
+            hx-target="closest [id$='-table']"
+            hx-swap="innerHTML">Next</button>
 </div>
 {{end}}
+{{else}}
+<div class="empty-state">
+    {{if .Query}}No snapshots matching "{{.Query}}"{{else}}No snapshots found{{end}}
+    <div class="hint">{{if .Query}}Try a different search term{{else}}Create VolumeSnapshots using tns-csi VolumeSnapshotClass to see them here{{end}}</div>
+</div>
+{{end}}
+</div>
 {{end}}

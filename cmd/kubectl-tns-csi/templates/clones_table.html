@@ -1,18 +1,31 @@
 {{define "clones_table.html"}}
-{{if .}}
+<div data-total-items="{{.TotalItems}}">
+{{if .Items}}
 <table>
     <thead>
         <tr>
-            <th class="sortable" onclick="sortTable(this)">Volume ID</th>
-            <th class="sortable" onclick="sortTable(this)">Protocol</th>
-            <th class="sortable" onclick="sortTable(this)">Clone Mode</th>
-            <th class="sortable" onclick="sortTable(this)">Source Type</th>
-            <th class="sortable" onclick="sortTable(this)">Source ID</th>
-            <th class="sortable" onclick="sortTable(this)">Dependency</th>
+            <th class="sortable{{if eq .Sort "volumeId"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=volumeId&order={{if and (eq .Sort "volumeId") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Volume ID</th>
+            <th class="sortable{{if eq .Sort "protocol"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=protocol&order={{if and (eq .Sort "protocol") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Protocol</th>
+            <th class="sortable{{if eq .Sort "cloneMode"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=cloneMode&order={{if and (eq .Sort "cloneMode") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Clone Mode</th>
+            <th>Source Type</th>
+            <th class="sortable{{if eq .Sort "sourceId"}} sort-{{.Order}}{{end}}"
+                hx-get="{{.BaseURL}}?sort=sourceId&order={{if and (eq .Sort "sourceId") (eq .Order "asc")}}desc{{else}}asc{{end}}&q={{.Query}}&pageSize={{.PageSize}}"
+                hx-target="closest [id$='-table']"
+                hx-swap="innerHTML">Source ID</th>
+            <th>Dependency</th>
         </tr>
     </thead>
     <tbody>
-        {{range .}}
+        {{range .Items}}
         <tr>
             <td class="mono">{{.VolumeID}}</td>
             <td>
@@ -22,6 +35,8 @@
                 <span class="badge badge-nvmeof">NVMe-oF</span>
                 {{else if eq .Protocol "iscsi"}}
                 <span class="badge badge-iscsi">iSCSI</span>
+                {{else if eq .Protocol "smb"}}
+                <span class="badge badge-smb">SMB</span>
                 {{else}}
                 <span class="badge">{{.Protocol}}</span>
                 {{end}}
@@ -44,10 +59,24 @@
         {{end}}
     </tbody>
 </table>
-{{else}}
-<div class="empty-state">
-    No cloned volumes found
-    <div class="hint">Clones are created when provisioning volumes from snapshots or other volumes</div>
+{{if gt .TotalPages 1}}
+<div class="pagination">
+    <button {{if not .HasPrev}}disabled{{end}}
+            hx-get="{{.BaseURL}}?page={{sub .Page 1}}&pageSize={{.PageSize}}&q={{.Query}}&sort={{.Sort}}&order={{.Order}}"
+            hx-target="closest [id$='-table']"
+            hx-swap="innerHTML">Previous</button>
+    <span>Page {{.Page}} of {{.TotalPages}} ({{.TotalItems}} items)</span>
+    <button {{if not .HasNext}}disabled{{end}}
+            hx-get="{{.BaseURL}}?page={{add .Page 1}}&pageSize={{.PageSize}}&q={{.Query}}&sort={{.Sort}}&order={{.Order}}"
+            hx-target="closest [id$='-table']"
+            hx-swap="innerHTML">Next</button>
 </div>
 {{end}}
+{{else}}
+<div class="empty-state">
+    {{if .Query}}No clones matching "{{.Query}}"{{else}}No cloned volumes found{{end}}
+    <div class="hint">{{if .Query}}Try a different search term{{else}}Clones are created when provisioning volumes from snapshots or other volumes{{end}}</div>
+</div>
+{{end}}
+</div>
 {{end}}

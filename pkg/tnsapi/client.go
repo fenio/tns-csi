@@ -908,7 +908,7 @@ type DatasetCreateParams struct {
 	// Compression algorithm: off, lz4, gzip, gzip-1 through gzip-9, zstd, zstd-1 through zstd-19, lzjb, zle
 	Compression string `json:"compression,omitempty"`
 	// Deduplication: off, on, verify, sha256, sha512
-	Dedup string `json:"dedup,omitempty"`
+	Dedup string `json:"deduplication,omitempty"`
 	// Access time updates: on, off
 	Atime string `json:"atime,omitempty"`
 	// Synchronous write behavior: standard, always, disabled
@@ -1356,7 +1356,7 @@ type ZvolCreateParams struct {
 	// Compression algorithm: off, lz4, gzip, gzip-1 through gzip-9, zstd, zstd-1 through zstd-19, lzjb, zle
 	Compression string `json:"compression,omitempty"`
 	// Deduplication: off, on, verify, sha256, sha512
-	Dedup string `json:"dedup,omitempty"`
+	Dedup string `json:"deduplication,omitempty"`
 	// Synchronous write behavior: standard, always, disabled
 	Sync string `json:"sync,omitempty"`
 	// Number of data copies: 1, 2, 3

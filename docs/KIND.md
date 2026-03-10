@@ -38,7 +38,7 @@ docker exec truenas-csi-test-worker apt-get install -y nfs-common
 ```bash
 # Install from OCI registry
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.17.2 \
+  --version 0.17.3 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -128,10 +128,10 @@ docker exec truenas-csi-test-worker apt-get install -y nfs-common
 
 ```bash
 # Build
-docker build -t bfenski/tns-csi:v0.17.2 .
+docker build -t bfenski/tns-csi:v0.17.3 .
 
 # Load into Kind
-kind load docker-image bfenski/tns-csi:v0.17.2 --name truenas-csi-test
+kind load docker-image bfenski/tns-csi:v0.17.3 --name truenas-csi-test
 ```
 
 ### 4. Create Kubernetes Secret

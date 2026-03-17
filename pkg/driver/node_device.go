@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -480,6 +481,22 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 		ErrDeviceNotReady, devicePath, maxRetries, lastErr, string(lastOutput))
 }
 
+// getLogicalSectorSize reads the logical block size for a device from sysfs.
+// devicePath should be an absolute path like /dev/nvme0n1 or /dev/sda.
+func getLogicalSectorSize(devicePath string) (int, error) {
+	devName := filepath.Base(devicePath)
+	sysPath := filepath.Join("/sys/block", devName, "queue", "logical_block_size")
+	data, err := os.ReadFile(sysPath)
+	if err != nil {
+		return 0, fmt.Errorf("reading logical_block_size for %s: %w", devName, err)
+	}
+	size, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, fmt.Errorf("parsing logical_block_size for %s: %w", devName, err)
+	}
+	return size, nil
+}
+
 // formatDevice formats a device with the specified filesystem.
 // This function performs the actual formatting operation. The caller is responsible
 // for determining whether formatting is appropriate (e.g., checking needsFormat first).
@@ -500,7 +517,18 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 		cmd = exec.CommandContext(formatCtx, "mkfs.ext3", "-F", devicePath)
 	case fsTypeXFS:
 		// -f force overwrite
-		cmd = exec.CommandContext(formatCtx, "mkfs.xfs", "-f", devicePath)
+		// Explicitly pass the logical sector size to avoid mismatches when the
+		// backing zvol's physical sector size differs from the transport's
+		// advertised logical sector size (common with NVMe-oF over TCP).
+		args := []string{"-f"}
+		if sectorSize, err := getLogicalSectorSize(devicePath); err == nil {
+			args = append(args, "-s", fmt.Sprintf("size=%d", sectorSize))
+			klog.V(4).Infof("Using logical sector size %d for XFS format of %s", sectorSize, devicePath)
+		} else {
+			klog.V(4).Infof("Could not detect logical sector size for %s, using mkfs.xfs default: %v", devicePath, err)
+		}
+		args = append(args, devicePath)
+		cmd = exec.CommandContext(formatCtx, "mkfs.xfs", args...)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedFSType, fsType)
 	}

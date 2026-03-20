@@ -485,8 +485,8 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 // devicePath should be an absolute path like /dev/nvme0n1 or /dev/sda.
 func getLogicalSectorSize(devicePath string) (int, error) {
 	devName := filepath.Base(devicePath)
-	sysPath := filepath.Join("/sys/block", devName, "queue", "logical_block_size")
-	data, err := os.ReadFile(sysPath)
+	sysPath := "/sys/block/" + devName + "/queue/logical_block_size"
+	data, err := os.ReadFile(sysPath) //nolint:gosec // path is constructed from filepath.Base output, not arbitrary user input
 	if err != nil {
 		return 0, fmt.Errorf("reading logical_block_size for %s: %w", devName, err)
 	}

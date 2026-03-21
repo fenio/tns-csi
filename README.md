@@ -179,7 +179,7 @@ The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry
 #### Docker Hub (recommended)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.17.3 \
+  --version 0.17.4 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -194,7 +194,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **NVMe-oF Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.17.3 \
+  --version 0.17.4 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -213,7 +213,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **iSCSI Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.17.3 \
+  --version 0.17.4 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -230,7 +230,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 **SMB Example:**
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --version 0.17.3 \
+  --version 0.17.4 \
   --namespace kube-system \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \

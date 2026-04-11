@@ -110,11 +110,12 @@ spec:
               mountPath: /sys
             - name: registry-dir
               mountPath: /var/lib/tns-csi
-            # iSCSI requires access to host iscsid socket and configuration
             - name: run-dir
               mountPath: /run
+            {{- if .Values.node.iscsi.enabled }}
             - name: iscsi-dir
               mountPath: /etc/iscsi
+            {{- end }}
           resources:
             {{- toYaml .Values.node.resources | nindent 12 }}
 
@@ -184,16 +185,16 @@ spec:
           hostPath:
             path: /var/lib/tns-csi
             type: DirectoryOrCreate
-        # iSCSI: host run directory for iscsid socket
         - name: run-dir
           hostPath:
             path: /run
             type: Directory
-        # iSCSI: host iSCSI configuration and initiator name
+        {{- if .Values.node.iscsi.enabled }}
         - name: iscsi-dir
           hostPath:
             path: /etc/iscsi
             type: DirectoryOrCreate
+        {{- end }}
 
       {{- with .Values.node.nodeSelector }}
       nodeSelector:

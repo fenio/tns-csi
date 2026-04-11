@@ -188,6 +188,12 @@ node:
   # Recommended: 3-5. Set to 0 for unlimited (not recommended with >10 volumes per node).
   maxConcurrentNVMeConnects: 5
 
+  # Enable mounting /etc/iscsi from the host.
+  # Disable on systems with read-only /etc (e.g. Talos Linux) if you don't use iSCSI.
+  # If you need iSCSI on Talos, install the iscsi-tools system extension instead.
+  iscsi:
+    enabled: true
+
   # Update strategy for DaemonSet
   updateStrategy:
     type: RollingUpdate

@@ -25,7 +25,7 @@ var (
 	driverName                = flag.String("driver-name", "tns.csi.io", "Name of the driver")
 	apiURL                    = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
 	apiKey                    = flag.String("api-key", "", "Storage system API key")
-	metricsAddr               = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
+	metricsAddr               = flag.String("metrics-addr", "", "Address to expose Prometheus metrics")
 	skipTLSVerify             = flag.Bool("skip-tls-verify", false, "Skip TLS certificate verification (for self-signed certificates)")
 	showVersion               = flag.Bool("show-version", false, "Show version and exit")
 	debug                     = flag.Bool("debug", false, "Enable debug logging (equivalent to -v=4)")

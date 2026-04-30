@@ -60,10 +60,15 @@ on:
 permissions:
   contents: read
 
-# Ensure only one integration test runs at a time on the new runner
+# TrueNAS pool is shared across protocol jobs, so serialize across workflow runs.
+# Within a single run, the 5 protocol jobs run in parallel (each in its own VM).
 concurrency:
   group: integration-tests
   cancel-in-progress: false
+
+env:
+  SSH_OPTS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+  SCP_OPTS: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -P 2222"
 
 jobs:
   # ==========================================
@@ -100,7 +105,7 @@ jobs:
 
   compute-tag:
     name: Compute Image Tag
-    runs-on: new
+    runs-on: ubuntu-latest
     needs: check-driver-changes
     # Skip if:
     # - triggered by workflow_run and the workflow failed
@@ -116,7 +121,8 @@ jobs:
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
     steps:
-      # PR mode: checkout PR code and build image locally
+      # PR mode: checkout PR code and build image; the protocol jobs will download
+      # this artifact and import it into the VM's k3s containerd.
       - name: Checkout PR code
         if: inputs.pr != ''
         uses: actions/checkout@v6
@@ -167,10 +173,11 @@ jobs:
             exit 0
           fi
 
-          # For workflow_run events, get ref from the triggering workflow
+          # Non-PR runs build the image locally inside each protocol job and tag
+          # it as 'e2e-test'. This output is unused for those runs but kept for
+          # diagnostic purposes / future use.
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             REF_NAME="$WORKFLOW_HEAD_BRANCH"
-            # Check if it was triggered by a tag (Release workflow)
             if [ "$WORKFLOW_EVENT" = "push" ] && [[ "$WORKFLOW_HEAD_BRANCH" == v* ]]; then
               REF_TYPE="tag"
             else
@@ -178,7 +185,6 @@ jobs:
             fi
             echo "Triggered by workflow: $WORKFLOW_NAME"
           else
-            # For manual dispatch or other events
             REF_NAME="${{ github.ref_name }}"
             REF_TYPE="${{ github.ref_type }}"
           fi
@@ -186,26 +192,21 @@ jobs:
           echo "REF_NAME: $REF_NAME, REF_TYPE: $REF_TYPE"
 
           if [ "$REF_TYPE" = "tag" ]; then
-            # For tags like v0.5.0, strip the 'v' prefix to match Docker image tags
-            # Release workflow uses semver pattern which produces tags like 0.5.0 (without v)
             TAG="${REF_NAME#v}"
-            echo "Using image tag: $TAG (from tag: $REF_NAME)"
           elif [ "$REF_NAME" = "main" ]; then
             TAG="latest"
-            echo "Using image tag: $TAG (from branch: $REF_NAME)"
           else
             TAG=$(echo "$REF_NAME" | sed 's/\//-/g')
-            echo "Using image tag: $TAG (from branch: $REF_NAME)"
           fi
           echo "tag=$TAG" >> $GITHUB_OUTPUT
 
   # ==========================================
-  # E2E Tests
+  # E2E Tests (QEMU VM on GitHub-hosted runners)
   # ==========================================
   ginkgo-e2e-nfs:
     name: "E2E: NFS"
-    runs-on: new
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -217,47 +218,102 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: fenio/setup-k3s@v5
+      - name: Boot QEMU VM with K3S
+        uses: ./.github/actions/qemu-vm
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
+          truenas_host: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          tailscale_authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Build and import CSI image
+        if: inputs.pr == ''
+        run: |
+          docker build -t ghcr.io/fenio/tns-csi:e2e-test .
+          docker save ghcr.io/fenio/tns-csi:e2e-test -o /tmp/csi-image.tar
+          scp $SCP_OPTS /tmp/csi-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
         uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
-      - name: Import PR image into k3s
+      - name: Import PR image into VM
         if: inputs.pr != ''
         run: |
-          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
-          echo "Imported PR image into k3s containerd"
-          sudo k3s crictl images | grep tns-csi || true
+          scp $SCP_OPTS /tmp/tns-csi-pr-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Enable NFS allow_nonroot for SLIRP networking
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+        run: |
+          # QEMU SLIRP user-mode networking remaps source ports through NAT,
+          # so NFS clients appear to use non-privileged ports (>1024).
+          # TrueNAS defaults to allow_nonroot=false which rejects these.
+          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
+            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"allow_nonroot": true}' >/dev/null
+          echo "NFS allow_nonroot enabled"
       - name: Run NFS E2E Tests
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
+          CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
+          CSI_IMAGE_PULL_POLICY: Never
+          KUBECONFIG: /tmp/kubeconfig
         run: |
-          echo "=== Running NFS E2E Tests ==="
-          # Run only NFS-specific tests from the nfs/ directory
-          ginkgo -v --timeout=55m --flake-attempts=2 ./tests/e2e/nfs/...
+          FOCUS=""
+          if [ -n "${{ inputs.test }}" ]; then
+            FOCUS="--focus=${{ inputs.test }}"
+          fi
+          ginkgo -v --timeout=110m --flake-attempts=2 $FOCUS ./tests/e2e/nfs/...
+      - name: Collect diagnostic logs
+        if: always()
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          mkdir -p /tmp/test-logs
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
+          kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
+          kubectl get pv -o wide > /tmp/test-logs/pvs.log 2>&1 || true
+          kubectl get volumesnapshots --all-namespaces -o wide > /tmp/test-logs/snapshots.log 2>&1 || true
+          kubectl get volumesnapshotcontents -o wide > /tmp/test-logs/snapshot-contents.log 2>&1 || true
+          ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
+          tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-nfs-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
+      - name: Restore NFS allow_nonroot
+        if: always()
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+        run: |
+          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
+            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"allow_nonroot": false}' >/dev/null || echo "WARNING: Failed to restore allow_nonroot"
+      - name: Cleanup VM
+        if: always()
+        run: |
+          if [ -f /tmp/vm.pid ]; then
+            kill "$(cat /tmp/vm.pid)" 2>/dev/null || true
+          fi
 
   ginkgo-e2e-nvmeof:
     name: "E2E: NVMe-oF"
-    runs-on: new
-    timeout-minutes: 75
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -269,47 +325,76 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: fenio/setup-k3s@v5
+      - name: Boot QEMU VM with K3S
+        uses: ./.github/actions/qemu-vm
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
+          truenas_host: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          tailscale_authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Build and import CSI image
+        if: inputs.pr == ''
+        run: |
+          docker build -t ghcr.io/fenio/tns-csi:e2e-test .
+          docker save ghcr.io/fenio/tns-csi:e2e-test -o /tmp/csi-image.tar
+          scp $SCP_OPTS /tmp/csi-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
         uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
-      - name: Import PR image into k3s
+      - name: Import PR image into VM
         if: inputs.pr != ''
         run: |
-          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
-          echo "Imported PR image into k3s containerd"
-          sudo k3s crictl images | grep tns-csi || true
+          scp $SCP_OPTS /tmp/tns-csi-pr-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run NVMe-oF E2E Tests
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
+          CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
+          CSI_IMAGE_PULL_POLICY: Never
+          KUBECONFIG: /tmp/kubeconfig
         run: |
-          echo "=== Running NVMe-oF E2E Tests ==="
-          # Run only NVMe-oF-specific tests from the nvmeof/ directory
-          ginkgo -v --timeout=70m --flake-attempts=2 ./tests/e2e/nvmeof/...
+          FOCUS=""
+          if [ -n "${{ inputs.test }}" ]; then
+            FOCUS="--focus=${{ inputs.test }}"
+          fi
+          ginkgo -v --timeout=110m --flake-attempts=2 $FOCUS ./tests/e2e/nvmeof/...
+      - name: Collect diagnostic logs
+        if: always()
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          mkdir -p /tmp/test-logs
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
+          kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
+          ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
+          tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-nvmeof-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
+      - name: Cleanup VM
+        if: always()
+        run: |
+          if [ -f /tmp/vm.pid ]; then
+            kill "$(cat /tmp/vm.pid)" 2>/dev/null || true
+          fi
 
   ginkgo-e2e-iscsi:
     name: "E2E: iSCSI"
-    runs-on: new
-    timeout-minutes: 75
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -321,47 +406,76 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: fenio/setup-k3s@v5
+      - name: Boot QEMU VM with K3S
+        uses: ./.github/actions/qemu-vm
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
+          truenas_host: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          tailscale_authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Build and import CSI image
+        if: inputs.pr == ''
+        run: |
+          docker build -t ghcr.io/fenio/tns-csi:e2e-test .
+          docker save ghcr.io/fenio/tns-csi:e2e-test -o /tmp/csi-image.tar
+          scp $SCP_OPTS /tmp/csi-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
         uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
-      - name: Import PR image into k3s
+      - name: Import PR image into VM
         if: inputs.pr != ''
         run: |
-          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
-          echo "Imported PR image into k3s containerd"
-          sudo k3s crictl images | grep tns-csi || true
+          scp $SCP_OPTS /tmp/tns-csi-pr-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
       - name: Run iSCSI E2E Tests
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
+          CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
+          CSI_IMAGE_PULL_POLICY: Never
+          KUBECONFIG: /tmp/kubeconfig
         run: |
-          echo "=== Running iSCSI E2E Tests ==="
-          # Run only iSCSI-specific tests from the iscsi/ directory
-          ginkgo -v --timeout=70m --flake-attempts=2 ./tests/e2e/iscsi/...
+          FOCUS=""
+          if [ -n "${{ inputs.test }}" ]; then
+            FOCUS="--focus=${{ inputs.test }}"
+          fi
+          ginkgo -v --timeout=110m --flake-attempts=2 $FOCUS ./tests/e2e/iscsi/...
+      - name: Collect diagnostic logs
+        if: always()
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          mkdir -p /tmp/test-logs
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
+          kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
+          ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
+          tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-iscsi-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
+      - name: Cleanup VM
+        if: always()
+        run: |
+          if [ -f /tmp/vm.pid ]; then
+            kill "$(cat /tmp/vm.pid)" 2>/dev/null || true
+          fi
 
   ginkgo-e2e-smb:
     name: "E2E: SMB"
-    runs-on: new
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success' &&
@@ -373,76 +487,84 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: fenio/setup-k3s@v5
+      - name: Boot QEMU VM with K3S
+        uses: ./.github/actions/qemu-vm
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
+          truenas_host: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          tailscale_authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Build and import CSI image
+        if: inputs.pr == ''
+        run: |
+          docker build -t ghcr.io/fenio/tns-csi:e2e-test .
+          docker save ghcr.io/fenio/tns-csi:e2e-test -o /tmp/csi-image.tar
+          scp $SCP_OPTS /tmp/csi-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
         uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
-      - name: Import PR image into k3s
+      - name: Import PR image into VM
         if: inputs.pr != ''
         run: |
-          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
-          echo "Imported PR image into k3s containerd"
-          sudo k3s crictl images | grep tns-csi || true
+          scp $SCP_OPTS /tmp/tns-csi-pr-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Install Ginkgo and smbclient
         run: |
           go install github.com/onsi/ginkgo/v2/ginkgo@latest
           sudo apt-get install -y smbclient 2>/dev/null || true
       - name: Run SMB E2E Tests
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
+          CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
+          CSI_IMAGE_PULL_POLICY: Never
+          KUBECONFIG: /tmp/kubeconfig
           SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
-          echo "=== Running SMB E2E Tests ==="
-          # Run only SMB-specific tests from the smb/ directory
-          ginkgo -v --timeout=55m --flake-attempts=2 ./tests/e2e/smb/...
+          FOCUS=""
+          if [ -n "${{ inputs.test }}" ]; then
+            FOCUS="--focus=${{ inputs.test }}"
+          fi
+          ginkgo -v --timeout=110m --flake-attempts=2 $FOCUS ./tests/e2e/smb/...
       - name: Collect diagnostic logs
-        if: failure()
+        if: always()
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          KUBECONFIG: /tmp/kubeconfig
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
           mkdir -p /tmp/test-logs
-          echo "=== CSI Controller Logs ===" > /tmp/test-logs/controller.log
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=500 >> /tmp/test-logs/controller.log 2>&1 || true
-          echo "=== CSI Node Logs ===" > /tmp/test-logs/node.log
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=500 >> /tmp/test-logs/node.log 2>&1 || true
-          echo "=== Pod Events ===" > /tmp/test-logs/events.log
-          kubectl get events --all-namespaces --sort-by='.lastTimestamp' >> /tmp/test-logs/events.log 2>&1 || true
-          echo "=== PVCs ===" >> /tmp/test-logs/events.log
-          kubectl get pvc --all-namespaces >> /tmp/test-logs/events.log 2>&1 || true
-          echo "=== CSI Driver Pods ===" >> /tmp/test-logs/events.log
-          kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide >> /tmp/test-logs/events.log 2>&1 || true
-
-          # SMB-specific diagnostics (note: runs after test cleanup, so shares may be gone)
-          echo "=== SMB Share Listing (smbclient -L) ===" > /tmp/test-logs/smb-diag.log
-          smbclient -L "//${TRUENAS_HOST}" -U "${SMB_USERNAME}%${SMB_PASSWORD}" --option="client min protocol=SMB3" 2>&1 >> /tmp/test-logs/smb-diag.log || true
-          echo "" >> /tmp/test-logs/smb-diag.log
-          echo "=== NOTE: Real-time share diagnostics are in controller.log [SMB clone diag] lines ===" >> /tmp/test-logs/smb-diag.log
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
+          kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
+          smbclient -L "//${TRUENAS_HOST}" -U "${SMB_USERNAME}%${SMB_PASSWORD}" --option="client min protocol=SMB3" > /tmp/test-logs/smb-diag.log 2>&1 || true
+          ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
+          tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-smb-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
+      - name: Cleanup VM
+        if: always()
+        run: |
+          if [ -f /tmp/vm.pid ]; then
+            kill "$(cat /tmp/vm.pid)" 2>/dev/null || true
+          fi
 
   ginkgo-e2e-shared:
     name: "E2E: Shared"
-    runs-on: new
-    timeout-minutes: 75
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     needs: compute-tag
     if: |
       !cancelled() && needs.compute-tag.result == 'success'
@@ -453,45 +575,95 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: fenio/setup-k3s@v5
+      - name: Boot QEMU VM with K3S
+        uses: ./.github/actions/qemu-vm
         with:
-          k3s-args: '--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage'
-      - uses: ./.github/actions/setup-snapshots
+          truenas_host: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          tailscale_authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+      - name: Build and import CSI image
+        if: inputs.pr == ''
+        run: |
+          docker build -t ghcr.io/fenio/tns-csi:e2e-test .
+          docker save ghcr.io/fenio/tns-csi:e2e-test -o /tmp/csi-image.tar
+          scp $SCP_OPTS /tmp/csi-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
         uses: actions/download-artifact@v7
         with:
           name: pr-image
           path: /tmp
-      - name: Import PR image into k3s
+      - name: Import PR image into VM
         if: inputs.pr != ''
         run: |
-          sudo k3s ctr images import /tmp/tns-csi-pr-image.tar
-          echo "Imported PR image into k3s containerd"
-          sudo k3s crictl images | grep tns-csi || true
+          scp $SCP_OPTS /tmp/tns-csi-pr-image.tar ci@localhost:/tmp/csi-image.tar
+          ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Install Ginkgo
         run: go install github.com/onsi/ginkgo/v2/ginkgo@latest
+      - name: Enable NFS allow_nonroot for SLIRP networking
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+        run: |
+          # Shared tests exercise NFS alongside other protocols, so the SLIRP
+          # workaround is needed here too.
+          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
+            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"allow_nonroot": true}' >/dev/null
+          echo "NFS allow_nonroot enabled"
       - name: Run Shared E2E Tests
         env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
-          CSI_IMAGE_TAG: ${{ needs.compute-tag.outputs.image_tag }}
-          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
+          CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
+          CSI_IMAGE_PULL_POLICY: Never
+          KUBECONFIG: /tmp/kubeconfig
           SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
-          echo "=== Running Shared E2E Tests ==="
-          # Run shared tests from the root e2e/ directory (not nfs/ or nvmeof/)
-          # These tests use "both" protocol setup (NFS, NVMe-oF, and iSCSI)
-          ginkgo -v --timeout=70m --flake-attempts=2 ./tests/e2e/
+          FOCUS=""
+          if [ -n "${{ inputs.test }}" ]; then
+            FOCUS="--focus=${{ inputs.test }}"
+          fi
+          ginkgo -v --timeout=110m --flake-attempts=2 $FOCUS ./tests/e2e/
+      - name: Collect diagnostic logs
+        if: always()
+        env:
+          KUBECONFIG: /tmp/kubeconfig
+        run: |
+          mkdir -p /tmp/test-logs
+          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
+          kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
+          ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
+          tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: e2e-shared-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
+      - name: Restore NFS allow_nonroot
+        if: always()
+        env:
+          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
+          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+        run: |
+          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
+            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"allow_nonroot": false}' >/dev/null || echo "WARNING: Failed to restore allow_nonroot"
+      - name: Cleanup VM
+        if: always()
+        run: |
+          if [ -f /tmp/vm.pid ]; then
+            kill "$(cat /tmp/vm.pid)" 2>/dev/null || true
+          fi
 
   # ==========================================
   # Summary
@@ -502,7 +674,7 @@ jobs:
 
   test-summary:
     name: "Test Summary"
-    runs-on: new
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [ginkgo-e2e-nfs, ginkgo-e2e-nvmeof, ginkgo-e2e-iscsi, ginkgo-e2e-smb, ginkgo-e2e-shared]
     if: always()

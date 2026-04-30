@@ -1,0 +1,250 @@
+name: Boot QEMU VM with K3S
+description: >
+  Boot a QEMU virtual machine with Ubuntu Noble, install K3S, and prepare
+  it for CSI driver E2E testing. Uses SLIRP user-mode networking with port
+  forwarding for SSH and K3S API access. Optionally connects host and VM
+  to a Tailscale tailnet for reaching a private TrueNAS server.
+
+inputs:
+  vm_memory:
+    description: VM memory in MB
+    required: false
+    default: "4096"
+  vm_cpus:
+    description: VM CPU cores
+    required: false
+    default: "4"
+  truenas_host:
+    description: TrueNAS server hostname/IP for connectivity check
+    required: true
+  tailscale_authkey:
+    description: Tailscale auth key for VPN connectivity (optional — if set, connects host and VM to tailnet)
+    required: false
+    default: ""
+
+outputs:
+  kubeconfig:
+    description: Path to the kubeconfig for the K3S cluster in the VM
+    value: /tmp/kubeconfig
+  ssh-opts:
+    description: SSH options for connecting to the VM
+    value: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+  scp-opts:
+    description: SCP options for copying files to/from the VM
+    value: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -P 2222"
+
+runs:
+  using: composite
+  steps:
+    - name: Enable KVM
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | \
+          sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -la /dev/kvm
+
+    - name: Install host dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          qemu-system-x86 \
+          qemu-utils \
+          genisoimage
+
+    - name: Cache Ubuntu cloud image
+      id: cache-image
+      uses: actions/cache@v4
+      with:
+        path: /tmp/ubuntu-cloud.img
+        key: ubuntu-noble-cloudimg-amd64-v1
+
+    - name: Download Ubuntu cloud image
+      if: steps.cache-image.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -fSL -o /tmp/ubuntu-cloud.img \
+          https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+        ls -lh /tmp/ubuntu-cloud.img
+
+    - name: Prepare VM disk
+      shell: bash
+      run: |
+        cp /tmp/ubuntu-cloud.img /tmp/vm-disk.qcow2
+        qemu-img resize /tmp/vm-disk.qcow2 20G
+
+    - name: Create cloud-init ISO
+      shell: bash
+      run: |
+        ssh-keygen -t ed25519 -f /tmp/vm-key -N "" -q
+        VM_SSH_PUB=$(cat /tmp/vm-key.pub)
+
+        mkdir -p /tmp/cloud-init
+
+        cat > /tmp/cloud-init/meta-data <<EOF
+        instance-id: qemu-e2e-test
+        local-hostname: qemu-k3s
+        EOF
+
+        cat > /tmp/cloud-init/user-data <<EOF
+        #cloud-config
+        users:
+          - name: ci
+            ssh_authorized_keys:
+              - $VM_SSH_PUB
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            shell: /bin/bash
+
+        package_update: true
+        packages:
+          - open-iscsi
+          - nfs-common
+          - cifs-utils
+          - nvme-cli
+
+        write_files:
+          - path: /etc/modules-load.d/csi.conf
+            content: |
+              nvme-tcp
+              nvme-fabrics
+              iscsi_tcp
+              nfs
+              nfsv4
+
+        runcmd:
+          - apt-get install -y linux-modules-extra-\$(uname -r) 2>&1
+          - depmod -a
+          - modprobe nvme-tcp || true
+          - modprobe nvme-fabrics || true
+          - modprobe iscsi_tcp || true
+          - modprobe nfs || true
+          - modprobe nfsv4 || true
+          - systemctl enable --now iscsid
+          - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage" sh -
+          - until kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready'; do sleep 2; done
+          - echo "K3S_READY" > /tmp/k3s-ready
+        EOF
+
+        genisoimage -output /tmp/cloud-init.iso \
+          -volid cidata -joliet -rock \
+          /tmp/cloud-init/user-data /tmp/cloud-init/meta-data
+
+    - name: Boot QEMU VM
+      shell: bash
+      run: |
+        qemu-system-x86_64 \
+          -enable-kvm \
+          -m ${{ inputs.vm_memory }} \
+          -smp ${{ inputs.vm_cpus }} \
+          -cpu host \
+          -drive file=/tmp/vm-disk.qcow2,format=qcow2,if=virtio \
+          -cdrom /tmp/cloud-init.iso \
+          -nic user,model=virtio-net-pci,hostfwd=tcp::2222-:22,hostfwd=tcp::6443-:6443 \
+          -display none \
+          -serial file:/tmp/vm-console.log \
+          -daemonize \
+          -pidfile /tmp/vm.pid
+
+        echo "VM started (PID: $(cat /tmp/vm.pid))"
+
+    - name: Wait for SSH
+      shell: bash
+      run: |
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+        echo "Waiting for VM SSH..."
+        for i in $(seq 1 60); do
+          if ssh $SSH_OPTS ci@localhost true 2>/dev/null; then
+            echo "SSH ready (attempt $i)"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "::error::SSH did not become available"
+        cat /tmp/vm-console.log || true
+        exit 1
+
+    - name: Wait for cloud-init and K3S
+      shell: bash
+      run: |
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+
+        echo "Waiting for cloud-init to finish..."
+        ssh $SSH_OPTS ci@localhost "sudo cloud-init status --wait"
+
+        echo "Waiting for K3S to be ready..."
+        for i in $(seq 1 60); do
+          if ssh $SSH_OPTS ci@localhost "test -f /tmp/k3s-ready" 2>/dev/null; then
+            echo "K3S is ready"
+            break
+          fi
+          sleep 5
+        done
+
+        echo "VM node status:"
+        ssh $SSH_OPTS ci@localhost "sudo kubectl get nodes -o wide"
+
+        echo ""
+        echo "Loaded kernel modules:"
+        ssh $SSH_OPTS ci@localhost "lsmod | grep -E 'nvme_tcp|iscsi_tcp|nfs|cifs' || echo 'WARNING: some modules not loaded'"
+
+    - name: Connect host to Tailscale
+      if: inputs.tailscale_authkey != ''
+      shell: bash
+      run: |
+        echo "Installing Tailscale on host runner..."
+        curl -fsSL https://tailscale.com/install.sh | sudo sh
+        echo "Connecting host to Tailscale..."
+        sudo tailscale up --auth-key='${{ inputs.tailscale_authkey }}' --accept-routes --hostname=ci-host-$(head -c4 /dev/urandom | xxd -p)
+        echo "Host Tailscale IP: $(tailscale ip -4)"
+
+    - name: Connect VM to Tailscale
+      if: inputs.tailscale_authkey != ''
+      shell: bash
+      run: |
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+        echo "Installing Tailscale in VM..."
+        ssh $SSH_OPTS ci@localhost "curl -fsSL https://tailscale.com/install.sh | sudo sh"
+        echo "Connecting VM to Tailscale..."
+        ssh $SSH_OPTS ci@localhost "sudo tailscale up --auth-key='${{ inputs.tailscale_authkey }}' --accept-routes --hostname=ci-vm-\$(head -c4 /dev/urandom | xxd -p)"
+        echo "Waiting for Tailscale IP..."
+        for i in $(seq 1 30); do
+          TS_IP=$(ssh $SSH_OPTS ci@localhost "tailscale ip -4 2>/dev/null" || true)
+          if [ -n "$TS_IP" ]; then
+            echo "VM Tailscale connected: $TS_IP"
+            break
+          fi
+          sleep 2
+        done
+
+    - name: Verify TrueNAS reachable from VM
+      shell: bash
+      run: |
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
+        echo "Checking connectivity to TrueNAS (${{ inputs.truenas_host }}) from VM..."
+        ssh $SSH_OPTS ci@localhost "
+          curl -sk --connect-timeout 10 --max-time 15 https://${{ inputs.truenas_host }} >/dev/null 2>&1 \
+            && echo 'TrueNAS API is reachable from VM' \
+            || { echo '::error::TrueNAS is NOT reachable from VM'; exit 1; }
+        "
+
+    - name: Fetch kubeconfig from VM
+      shell: bash
+      run: |
+        SCP_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -P 2222"
+        scp $SCP_OPTS ci@localhost:/etc/rancher/k3s/k3s.yaml /tmp/kubeconfig
+        echo "Kubeconfig fetched, testing kubectl from host..."
+        KUBECONFIG=/tmp/kubeconfig kubectl get nodes
+
+    - name: Install snapshot CRDs and controller
+      shell: bash
+      env:
+        KUBECONFIG: /tmp/kubeconfig
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.4/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.4/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.4/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.4/deploy/kubernetes/snapshot-controller/rbac-snapshot-controller.yaml
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/release-8.4/deploy/kubernetes/snapshot-controller/setup-snapshot-controller.yaml
+        kubectl wait --for=condition=available --timeout=60s deployment/snapshot-controller -n kube-system || true

@@ -251,10 +251,16 @@ jobs:
           # QEMU SLIRP user-mode networking remaps source ports through NAT,
           # so NFS clients appear to use non-privileged ports (>1024).
           # TrueNAS defaults to allow_nonroot=false which rejects these.
-          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
-            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{"allow_nonroot": true}' >/dev/null
+          # Use WebSocket API only — REST (/api/v2.0/...) is deprecated and removed in 26.04.
+          if [ ! -x /tmp/websocat ]; then
+            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
+            chmod +x /tmp/websocat
+          fi
+          {
+            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
+            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":true}]}'
+          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current"
           echo "NFS allow_nonroot enabled"
       - name: Run NFS E2E Tests
         env:
@@ -299,10 +305,15 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
         run: |
-          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
-            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{"allow_nonroot": false}' >/dev/null || echo "WARNING: Failed to restore allow_nonroot"
+          if [ ! -x /tmp/websocat ]; then
+            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
+            chmod +x /tmp/websocat
+          fi
+          {
+            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
+            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":false}]}'
+          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
       - name: Cleanup VM
         if: always()
         run: |
@@ -606,11 +617,16 @@ jobs:
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
         run: |
           # Shared tests exercise NFS alongside other protocols, so the SLIRP
-          # workaround is needed here too.
-          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
-            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{"allow_nonroot": true}' >/dev/null
+          # workaround is needed here too. WebSocket only — REST is deprecated.
+          if [ ! -x /tmp/websocat ]; then
+            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
+            chmod +x /tmp/websocat
+          fi
+          {
+            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
+            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":true}]}'
+          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current"
           echo "NFS allow_nonroot enabled"
       - name: Run Shared E2E Tests
         env:
@@ -654,10 +670,15 @@ jobs:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
         run: |
-          curl -sk -X PUT "https://${TRUENAS_HOST}/api/v2.0/nfs" \
-            -H "Authorization: Bearer ${TRUENAS_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{"allow_nonroot": false}' >/dev/null || echo "WARNING: Failed to restore allow_nonroot"
+          if [ ! -x /tmp/websocat ]; then
+            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
+            chmod +x /tmp/websocat
+          fi
+          {
+            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
+            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":false}]}'
+          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
       - name: Cleanup VM
         if: always()
         run: |

@@ -254,6 +254,7 @@ jobs:
           fi
           {
             echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            sleep 1  # let auth complete before sending the next call (TrueNAS processes frames concurrently)
             echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":true}]}'
           } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current"
           echo "NFS allow_nonroot enabled"
@@ -414,6 +415,7 @@ jobs:
           fi
           {
             echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            sleep 1  # let auth complete before sending the next call (TrueNAS processes frames concurrently)
             echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":false}]}'
           } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
 

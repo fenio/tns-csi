@@ -253,9 +253,8 @@ jobs:
             chmod +x /tmp/websocat
           fi
           {
-            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
-            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
-            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":true}]}'
+            echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":true}]}'
           } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current"
           echo "NFS allow_nonroot enabled"
 
@@ -414,9 +413,8 @@ jobs:
             chmod +x /tmp/websocat
           fi
           {
-            echo '{"id":"1","msg":"connect","version":"1","support":["1"]}'
-            echo "{\"id\":\"2\",\"msg\":\"method\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
-            echo '{"id":"3","msg":"method","method":"nfs.update","params":[{"allow_nonroot":false}]}'
+            echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
+            echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":false}]}'
           } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
 
       - name: Cleanup VM

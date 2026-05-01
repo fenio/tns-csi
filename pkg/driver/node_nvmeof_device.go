@@ -325,24 +325,54 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 }
 
 // handleDeviceFormatting checks if a device needs formatting and formats it if necessary.
+// On transient "device busy" errors from mke2fs (the BLKRRPART EBUSY check, typically
+// caused by udev/blkid briefly scanning the new LUN), we wait, re-run the filesystem
+// detection, and retry. We deliberately do not pass mke2fs a second -F to bypass that
+// check — if udev's scan eventually surfaces a filesystem we initially missed, we
+// preserve it instead of destroying data.
 func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool) error {
-	// Check if device is already formatted
 	needsFormat, err := needsFormatWithRetries(ctx, devicePath, isClone)
 	if err != nil {
 		return status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
 	}
 
-	if needsFormat {
-		klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
-		if formatErr := formatDevice(ctx, volumeID, devicePath, fsType); formatErr != nil {
-			return status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
-		}
+	if !needsFormat {
+		klog.V(4).Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s)",
+			devicePath, datasetName, nqn)
 		return nil
 	}
 
-	klog.V(4).Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s)",
-		devicePath, datasetName, nqn)
-	return nil
+	klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
+
+	const maxFormatAttempts = 5
+	backoff := 2 * time.Second
+	var lastErr error
+	for attempt := 1; attempt <= maxFormatAttempts; attempt++ {
+		formatErr := formatDevice(ctx, volumeID, devicePath, fsType)
+		if formatErr == nil {
+			return nil
+		}
+		lastErr = formatErr
+		if !isDeviceBusyError(formatErr) {
+			return status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
+		}
+
+		klog.Warningf("Format attempt %d/%d for %s hit transient device-busy, waiting %v then re-checking filesystem",
+			attempt, maxFormatAttempts, devicePath, backoff)
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		backoff *= 2
+
+		recheck, recheckErr := needsFormatWithRetries(ctx, devicePath, isClone)
+		if recheckErr == nil && !recheck {
+			klog.Infof("Device %s detected as already formatted on recheck after busy error — preserving existing filesystem", devicePath)
+			return nil
+		}
+	}
+	return status.Errorf(codes.Internal, "Failed to format device after %d attempts: %v", maxFormatAttempts, lastErr)
 }
 
 // logDeviceInfo logs detailed information about an NVMe device for troubleshooting.

@@ -544,3 +544,10 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 
 	return nil
 }
+
+// isDeviceBusyError returns true when a format failure is mke2fs's transient
+// "in use by the system" rejection (the BLKRRPART EBUSY check). This typically
+// fires when udev / blkid is briefly scanning a freshly-attached LUN.
+func isDeviceBusyError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "is apparently in use by the system")
+}

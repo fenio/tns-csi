@@ -49,7 +49,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned to avoid CI churn when upstream bumps default rule strictness.
+          # Bump deliberately and fix any new warnings in the same PR.
+          version: v2.11.4
           args: --config .golangci.yml
 
   test:

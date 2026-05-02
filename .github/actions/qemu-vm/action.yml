@@ -121,6 +121,11 @@ runs:
           - modprobe iscsi_tcp || true
           - modprobe nfs || true
           - modprobe nfsv4 || true
+          # Purge multipath-tools (pulled in as a Recommends of open-iscsi).
+          # multipathd auto-claims every iSCSI LUN with O_EXCL, which makes
+          # mke2fs fail with "is apparently in use by the system" during
+          # NodeStageVolume — every /dev/sd* gets wrapped as a dm-* device.
+          - apt-get purge -y multipath-tools || true
           - systemctl enable --now iscsid
           - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage" sh -
           - until kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready'; do sleep 2; done

@@ -469,6 +469,47 @@ jobs:
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
           tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
+          # Capture VM state to identify what's persistently holding /dev/sd* exclusive open
+          # (mke2fs reports "in use by the system" on every retry — we need evidence of who).
+          ssh $SSH_OPTS ci@localhost 'bash -s' > /tmp/test-logs/vm-state.log 2>&1 <<'REMOTE_EOF' || true
+          echo "=== systemctl running services ==="
+          systemctl list-units --type=service --state=running --no-pager 2>&1 | head -100
+          echo
+          echo "=== Loaded kernel modules (storage/dm/multipath) ==="
+          lsmod | grep -E 'iscsi|^dm_|multipath|^sd_|crypt' || true
+          echo
+          echo "=== Installed packages of interest ==="
+          dpkg -l 2>/dev/null | grep -E 'multipath|lvm|udisk|psmisc|iscsi|cryptset' || true
+          echo
+          echo "=== Current /dev/sd* devices ==="
+          ls -la /dev/sd* 2>&1 || echo "(none)"
+          echo
+          echo "=== /sys/block/sd* holders ==="
+          for d in /sys/block/sd*; do
+            [ -e "$d" ] || continue
+            echo "--- $(basename $d) ---"
+            ls -la "$d/holders/" 2>&1 || true
+          done
+          echo
+          echo "=== Processes holding /dev/sd* fds ==="
+          sudo bash -c '
+            for p in /proc/[0-9]*/fd/*; do
+              l=$(readlink "$p" 2>/dev/null) || continue
+              case "$l" in
+                /dev/sd*)
+                  pid=$(echo "$p" | cut -d/ -f3)
+                  echo "$p -> $l (pid=$pid comm=$(cat /proc/$pid/comm 2>/dev/null))"
+                  ;;
+              esac
+            done
+          ' 2>&1 | head -50
+          echo
+          echo "=== iscsiadm sessions ==="
+          sudo iscsiadm -m session 2>&1 | head -20 || true
+          echo
+          echo "=== udev rules touching sd*/iSCSI ==="
+          grep -lE 'KERNEL=="sd|iscsi' /lib/udev/rules.d/ /etc/udev/rules.d/ 2>/dev/null | head
+          REMOTE_EOF
       - name: Upload diagnostic logs
         if: always()
         uses: actions/upload-artifact@v6
@@ -657,6 +698,47 @@ jobs:
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
           tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
+          # Same VM-state capture as iSCSI job — Shared exercises iSCSI alongside others
+          # so we want to see what's persistently holding /dev/sd* exclusive open.
+          ssh $SSH_OPTS ci@localhost 'bash -s' > /tmp/test-logs/vm-state.log 2>&1 <<'REMOTE_EOF' || true
+          echo "=== systemctl running services ==="
+          systemctl list-units --type=service --state=running --no-pager 2>&1 | head -100
+          echo
+          echo "=== Loaded kernel modules (storage/dm/multipath) ==="
+          lsmod | grep -E 'iscsi|^dm_|multipath|^sd_|crypt' || true
+          echo
+          echo "=== Installed packages of interest ==="
+          dpkg -l 2>/dev/null | grep -E 'multipath|lvm|udisk|psmisc|iscsi|cryptset' || true
+          echo
+          echo "=== Current /dev/sd* devices ==="
+          ls -la /dev/sd* 2>&1 || echo "(none)"
+          echo
+          echo "=== /sys/block/sd* holders ==="
+          for d in /sys/block/sd*; do
+            [ -e "$d" ] || continue
+            echo "--- $(basename $d) ---"
+            ls -la "$d/holders/" 2>&1 || true
+          done
+          echo
+          echo "=== Processes holding /dev/sd* fds ==="
+          sudo bash -c '
+            for p in /proc/[0-9]*/fd/*; do
+              l=$(readlink "$p" 2>/dev/null) || continue
+              case "$l" in
+                /dev/sd*)
+                  pid=$(echo "$p" | cut -d/ -f3)
+                  echo "$p -> $l (pid=$pid comm=$(cat /proc/$pid/comm 2>/dev/null))"
+                  ;;
+              esac
+            done
+          ' 2>&1 | head -50
+          echo
+          echo "=== iscsiadm sessions ==="
+          sudo iscsiadm -m session 2>&1 | head -20 || true
+          echo
+          echo "=== udev rules touching sd*/iSCSI ==="
+          grep -lE 'KERNEL=="sd|iscsi' /lib/udev/rules.d/ /etc/udev/rules.d/ 2>/dev/null | head
+          REMOTE_EOF
       - name: Upload diagnostic logs
         if: always()
         uses: actions/upload-artifact@v6

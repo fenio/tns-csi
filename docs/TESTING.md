@@ -14,10 +14,10 @@ The TNS CSI Driver is tested comprehensively using **real infrastructure** - not
 - k3s is installed inside the VM with full kernel-module support (`nvme-tcp`, `iscsi_tcp`, `nfs`, `cifs`)
 - The host runner and VM both join a Tailscale tailnet so they can reach the private TrueNAS
 
-**Self-hosted runner (label `new`) — auxiliary workflows:**
-- Used by `encryption.yml`, `scale.yml`, `snapclone-stress.yml`, `snapshot-clone-matrix.yml`, `snapshot-debug.yml`, `compatibility.yml`, `distro-compatibility.yml`
-- Dedicated Linux server (OVH) — needed for distros that don't fit the QEMU-in-VM pattern and for long-running stress workflows
-- Will eventually migrate to the same QEMU pattern as `integration.yml`
+**Auxiliary workflows — currently disabled:**
+- `encryption.yml`, `scale.yml`, `snapclone-stress.yml`, `snapshot-clone-matrix.yml`, `snapshot-debug.yml`, `compatibility.yml`, `distro-compatibility.yml` previously ran on a dedicated self-hosted runner (label `new`); that runner has been retired
+- Files are renamed with a `.yml.disabled` suffix in `.github/workflows/` so GitHub Actions ignores them but the migration inventory stays visible
+- Pending port to the same QEMU composite-action pattern as `integration.yml`
 
 **Real TrueNAS Scale Server:**
 - Physical TrueNAS Scale 25.10+ installation (Akamai/Linode)

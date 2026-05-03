@@ -33,11 +33,10 @@ This CSI driver enables Kubernetes to provision and manage persistent volumes on
 
 If you find this driver useful, please consider helping keep it alive.
 
-Every commit is tested against a **real TrueNAS server** and a **real Kubernetes cluster** across 6 distributions and 4 storage protocols. The bulk of the integration suite now runs on GitHub-hosted runners with QEMU/KVM-booted k3s VMs, but distro-compatibility and longer-running stress workflows still need a dedicated self-hosted runner — and the TrueNAS backend is real hardware regardless.
+Every commit is tested against a **real TrueNAS server** and a **real Kubernetes cluster** across 4 storage protocols. The integration suite (NFS, SMB, NVMe-oF, iSCSI, Shared) runs on GitHub-hosted runners with QEMU/KVM-booted k3s VMs, reaching TrueNAS over Tailscale. The auxiliary workflows that previously ran on a dedicated self-hosted runner (encryption, scale, stress, compatibility, distro-compat) are currently disabled and pending migration to the same QEMU pattern.
 
 **What it takes to run this:**
 - **Dedicated TrueNAS server** (Akamai/Linode) running real ZFS pools, NFS/SMB shares, NVMe-oF subsystems, and iSCSI targets
-- **Self-hosted GitHub Actions runner** (OVH dedicated server) for the compatibility / encryption / scale / stress workflows that don't fit GitHub-hosted timing
 - **Tailscale tailnet** so GitHub-hosted CI VMs can reach the private TrueNAS
 
 These costs are currently paid out of pocket by the maintainer. This is a community project with **no corporate backing** — I reached out to iXsystems (the company behind TrueNAS) asking for any kind of support for a driver that directly benefits their platform and users. They didn't respond.
@@ -291,7 +290,7 @@ parameters:
 
 This driver is tested extensively using **real hardware and software** - not mocks or simulators:
 
-- **GitHub Actions CI** — `integration.yml` runs on GitHub-hosted `ubuntu-24.04` (k3s in QEMU VM); auxiliary workflows on a dedicated self-hosted OVH runner
+- **GitHub Actions CI** — `integration.yml` runs on GitHub-hosted `ubuntu-24.04` (k3s in QEMU VM); auxiliary workflows (encryption, scale, stress, compatibility, distro-compat) are currently disabled, pending migration to the same QEMU pattern
 - **Real Kubernetes cluster** (k3s) provisioned for each test run
 - **Real TrueNAS Scale server** with actual storage pools and network services on dedicated Akamai/Linode infrastructure, reached over Tailscale
 - **Full protocol stack testing** - NFS mounts, NVMe-oF connections, actual I/O operations
@@ -406,7 +405,7 @@ make build
 
 ### Testing
 
-Tests are automated via GitHub Actions CI/CD against a real TrueNAS server. The main integration suite runs on GitHub-hosted `ubuntu-24.04` runners with k3s booted inside a QEMU VM; auxiliary workflows (encryption, scale, stress, distro-compatibility) still run on a dedicated self-hosted runner. See `.github/workflows/` for per-workflow configuration.
+Tests are automated via GitHub Actions CI/CD against a real TrueNAS server. The main integration suite runs on GitHub-hosted `ubuntu-24.04` runners with k3s booted inside a QEMU VM; auxiliary workflows (encryption, scale, stress, distro-compatibility) are currently disabled and pending migration to the same QEMU pattern. See [`.github/workflows/README.md`](.github/workflows/README.md) for the full inventory.
 
 **Local Testing:**
 ```bash

@@ -177,7 +177,7 @@ Tests run automatically via GitHub Actions:
 
 - **Workflow**: `.github/workflows/integration.yml`
 - **Trigger**: Push to main, pull requests, and manual dispatch
-- **Runner**: Self-hosted (`new`)
+- **Runner**: GitHub-hosted `ubuntu-24.04` — each protocol job boots a QEMU VM with k3s via the `.github/actions/qemu-vm` composite action and joins Tailscale to reach the private TrueNAS
 
 To run manually:
 1. Go to Actions → "E2E Tests (Go)"

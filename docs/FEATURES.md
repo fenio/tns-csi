@@ -1048,7 +1048,7 @@ reclaimPolicy: Delete
 
 ### CI/CD Pipeline
 - **Status**: ✅ Fully automated
-- **Platform**: GitHub Actions with self-hosted runner
+- **Platform**: GitHub Actions — `integration.yml` runs on GitHub-hosted `ubuntu-24.04` runners (k3s in QEMU VM); auxiliary workflows (encryption, scale, stress, distro-compatibility) run on a self-hosted runner
 - **Workflows**:
   - CI (lint, build, unit tests)
   - Integration tests (NFS, NVMe-oF, iSCSI, and SMB)
@@ -1057,7 +1057,7 @@ reclaimPolicy: Delete
 
 ### Integration Tests
 - **Status**: ✅ Comprehensive test suite
-- **Infrastructure**: Self-hosted (k3s + real TrueNAS)
+- **Infrastructure**: k3s (in QEMU VM on GitHub-hosted runner for `integration.yml`, on self-hosted runner for auxiliary workflows) + real TrueNAS over Tailscale
 - **Test Scenarios**:
   - Basic volume provisioning and deletion (NFS, NVMe-oF, iSCSI, SMB)
   - Volume expansion (NFS, NVMe-oF, iSCSI, SMB)
@@ -1130,7 +1130,7 @@ reclaimPolicy: Delete
 ## Platform Support
 
 ### Kubernetes Distributions
-- ✅ **Tested**: k3s (self-hosted CI/CD)
+- ✅ **Tested**: k3s (in QEMU VM on GitHub-hosted CI for `integration.yml`; on self-hosted runner for auxiliary workflows)
 - ✅ **Supported**: Standard Kubernetes 1.27+
 - ⚠️ **Should Work**: 
   - kind (local development)
@@ -1275,9 +1275,9 @@ reclaimPolicy: Delete
 All features are tested on **real infrastructure** - not mocks or simulators:
 
 **Test Environment:**
-- ✅ Self-hosted GitHub Actions runner (dedicated Akamai/Linode infrastructure)
+- ✅ GitHub Actions CI (GitHub-hosted `ubuntu-24.04` + QEMU/k3s for `integration.yml`; dedicated OVH self-hosted runner for auxiliary workflows)
 - ✅ Real Kubernetes clusters (k3s) provisioned for each test run
-- ✅ Real TrueNAS Scale 25.10+ server with actual storage pools
+- ✅ Real TrueNAS Scale 25.10+ server with actual storage pools (Akamai/Linode), reached via Tailscale
 - ✅ Real protocol operations (NFS mounts, NVMe-oF connections, SMB shares, actual I/O)
 
 **CSI Specification Compliance:**

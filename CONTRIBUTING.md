@@ -137,7 +137,7 @@ go test -cover ./...
 
 ### Ginkgo E2E Tests
 
-Integration tests use [Ginkgo](https://onsi.github.io/ginkgo/) and run automatically in CI using self-hosted runners. To run locally:
+Integration tests use [Ginkgo](https://onsi.github.io/ginkgo/) and run automatically in CI. The main `integration.yml` workflow runs on GitHub-hosted `ubuntu-24.04` runners (k3s in a QEMU VM via `.github/actions/qemu-vm`); auxiliary workflows (encryption, scale, stress, distro-compatibility) still run on a dedicated self-hosted runner. To run locally:
 
 ```bash
 # Install Ginkgo CLI

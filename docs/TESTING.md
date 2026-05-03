@@ -8,16 +8,22 @@ The TNS CSI Driver is tested comprehensively using **real infrastructure** - not
 
 ### Real Hardware, Real Tests
 
-**Self-hosted GitHub Actions Runner:**
-- Dedicated Linux server running GitHub Actions runner
-- Hosted on: Akamai/Linode cloud infrastructure
-- Runs real k3s Kubernetes clusters for each test
-- No Kind clusters, no mocks - actual Kubernetes distribution
+**Main integration suite — GitHub-hosted runners with QEMU:**
+- `integration.yml` runs on GitHub Actions `ubuntu-24.04` runners
+- Each protocol job boots its own Ubuntu Noble cloud-image VM via QEMU/KVM (`.github/actions/qemu-vm` composite action)
+- k3s is installed inside the VM with full kernel-module support (`nvme-tcp`, `iscsi_tcp`, `nfs`, `cifs`)
+- The host runner and VM both join a Tailscale tailnet so they can reach the private TrueNAS
+
+**Self-hosted runner (label `new`) — auxiliary workflows:**
+- Used by `encryption.yml`, `scale.yml`, `snapclone-stress.yml`, `snapshot-clone-matrix.yml`, `snapshot-debug.yml`, `compatibility.yml`, `distro-compatibility.yml`
+- Dedicated Linux server (OVH) — needed for distros that don't fit the QEMU-in-VM pattern and for long-running stress workflows
+- Will eventually migrate to the same QEMU pattern as `integration.yml`
 
 **Real TrueNAS Scale Server:**
-- Physical TrueNAS Scale 25.10+ installation
+- Physical TrueNAS Scale 25.10+ installation (Akamai/Linode)
+- Reachable from CI via Tailscale tailnet (`TRUENAS_HOST_TAILSCALE` secret) — never exposed to the public internet
 - Real storage pools with ZFS
-- Actual NFS shares and NVMe-oF subsystems
+- Actual NFS shares, SMB shares, NVMe-oF subsystems, iSCSI targets
 - Real network I/O and protocol operations
 
 **Real Protocol Testing:**

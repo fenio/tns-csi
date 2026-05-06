@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/fenio/tns-csi/pkg/driver"
 	"github.com/fenio/tns-csi/pkg/metrics"
@@ -25,6 +26,7 @@ var (
 	driverName                = flag.String("driver-name", "tns.csi.io", "Name of the driver")
 	apiURL                    = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
 	apiKey                    = flag.String("api-key", "", "Storage system API key")
+	apiKeyFile                = flag.String("api-key-file", "", "Path to file containing the storage system API key")
 	metricsAddr               = flag.String("metrics-addr", ":8080", "Address to expose Prometheus metrics")
 	skipTLSVerify             = flag.Bool("skip-tls-verify", false, "Skip TLS certificate verification (for self-signed certificates)")
 	showVersion               = flag.Bool("show-version", false, "Show version and exit")
@@ -64,7 +66,11 @@ func main() {
 		klog.Fatal("Storage API URL must be provided")
 	}
 
-	if *apiKey == "" {
+	resolvedAPIKey, err := loadAPIKey(*apiKey, *apiKeyFile)
+	if err != nil {
+		klog.Fatalf("Storage API key: %v", err)
+	}
+	if resolvedAPIKey == "" {
 		klog.Fatal("Storage API key must be provided")
 	}
 
@@ -81,7 +87,7 @@ func main() {
 		NodeID:                    *nodeID,
 		Endpoint:                  *endpoint,
 		APIURL:                    *apiURL,
-		APIKey:                    *apiKey,
+		APIKey:                    resolvedAPIKey,
 		MetricsAddr:               *metricsAddr,
 		SkipTLSVerify:             *skipTLSVerify,
 		EnableNVMeDiscovery:       *enableNVMeDiscovery,
@@ -97,4 +103,22 @@ func main() {
 	if err := drv.Run(); err != nil {
 		klog.Fatalf("Failed to run driver: %v", err)
 	}
+}
+
+func loadAPIKey(value, filePath string) (string, error) {
+	if strings.TrimSpace(filePath) == "" {
+		return strings.TrimSpace(value), nil
+	}
+
+	contents, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", filePath, err)
+	}
+
+	key := strings.TrimSpace(string(contents))
+	if key == "" {
+		return "", fmt.Errorf("%s is empty", filePath)
+	}
+
+	return key, nil
 }

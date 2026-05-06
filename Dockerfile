@@ -37,6 +37,7 @@ RUN apk add --no-cache \
     e2fsprogs \
     e2fsprogs-extra \
     xfsprogs \
+    xfsprogs-extra \
     blkid \
     util-linux \
     eudev \

@@ -32,7 +32,7 @@ jobs:
         run: make test-coverage
 
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 

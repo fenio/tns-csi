@@ -33,8 +33,24 @@ var (
 	ErrUnexpectedFormat        = errors.New("unexpected output format")
 )
 
-// Default access mode for PVCs.
-const defaultAccessMode = "ReadWriteOnce"
+const (
+	defaultAccessMode = "ReadWriteOnce"
+
+	kubectlVerbGet    = "get"
+	kubectlVerbDelete = "delete"
+	kubectlVerbLogs   = "logs"
+
+	flagNamespace      = "--namespace"
+	flagTimeout        = "--timeout"
+	flagSet            = "--set"
+	flagIgnoreNotFound = "--ignore-not-found=true"
+	outputName         = "name"
+
+	testVolumeName     = "test-volume"
+	controllerSelector = "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller"
+
+	resourceVolumeSnapshot = "volumesnapshot"
+)
 
 // KubernetesClient wraps a Kubernetes clientset with helper methods.
 type KubernetesClient struct {
@@ -289,7 +305,7 @@ func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName strin
 	// Get PVC events using kubectl
 	eventsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(eventsCtx, "kubectl", "get", "events",
+	cmd := exec.CommandContext(eventsCtx, "kubectl", kubectlVerbGet, "events",
 		"-n", k.namespace,
 		"--field-selector", "involvedObject.name="+pvcName,
 		"-o", "wide")
@@ -303,9 +319,9 @@ func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName strin
 	// Get controller pod logs
 	logsCtx, logsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer logsCancel()
-	logsCmd := exec.CommandContext(logsCtx, "kubectl", "logs",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+	logsCmd := exec.CommandContext(logsCtx, "kubectl", kubectlVerbLogs,
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		"--tail", "100")
 	logsOutput, logsErr := logsCmd.CombinedOutput()
 	if logsErr != nil {
@@ -317,8 +333,8 @@ func (k *KubernetesClient) dumpPVCDiagnostics(ctx context.Context, pvcName strin
 	// Get node POD logs (important for mount failures like iSCSI/NVMe-oF)
 	nodeLogsCtx, nodeLogsCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer nodeLogsCancel()
-	nodeLogsCmd := exec.CommandContext(nodeLogsCtx, "kubectl", "logs",
-		"-n", "kube-system",
+	nodeLogsCmd := exec.CommandContext(nodeLogsCtx, "kubectl", kubectlVerbLogs,
+		"-n", helmNamespace,
 		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node",
 		"-c", "tns-csi-plugin",
 		"--tail", "200")
@@ -416,7 +432,7 @@ func (k *KubernetesClient) CreatePod(ctx context.Context, opts PodOptions) (*cor
 			},
 			Volumes: []corev1.Volume{
 				{
-					Name: "test-volume",
+					Name: testVolumeName,
 					VolumeSource: corev1.VolumeSource{
 						PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 							ClaimName: opts.PVCName,
@@ -433,7 +449,7 @@ func (k *KubernetesClient) CreatePod(ctx context.Context, opts PodOptions) (*cor
 		// Block mode - use VolumeDevices
 		pod.Spec.Containers[0].VolumeDevices = []corev1.VolumeDevice{
 			{
-				Name:       "test-volume",
+				Name:       testVolumeName,
 				DevicePath: opts.MountPath,
 			},
 		}
@@ -441,7 +457,7 @@ func (k *KubernetesClient) CreatePod(ctx context.Context, opts PodOptions) (*cor
 		// Filesystem mode - use VolumeMounts
 		pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
 			{
-				Name:      "test-volume",
+				Name:      testVolumeName,
 				MountPath: opts.MountPath,
 			},
 		}
@@ -530,8 +546,8 @@ func (k *KubernetesClient) WaitForPodReady(ctx context.Context, name string, tim
 func (k *KubernetesClient) logCSINodeLogs(ctx context.Context) {
 	nodeLogsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(nodeLogsCtx, "kubectl", "logs",
-		"-n", "kube-system",
+	cmd := exec.CommandContext(nodeLogsCtx, "kubectl", kubectlVerbLogs,
+		"-n", helmNamespace,
 		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node",
 		"-c", "tns-csi-plugin",
 		"--tail", "200")
@@ -545,7 +561,7 @@ func (k *KubernetesClient) logCSINodeLogs(ctx context.Context) {
 
 // logPodEvents logs events related to a pod for debugging.
 func (k *KubernetesClient) logPodEvents(ctx context.Context, podName string) {
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "events",
+	cmd := exec.CommandContext(ctx, "kubectl", kubectlVerbGet, "events",
 		"-n", k.namespace,
 		"--field-selector", "involvedObject.name="+podName,
 		"--sort-by=.lastTimestamp",
@@ -709,7 +725,7 @@ spec:
 func (k *KubernetesClient) WaitForSnapshotReady(ctx context.Context, snapshotName string, timeout time.Duration) error {
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
 		args := []string{
-			"get", "volumesnapshot", snapshotName,
+			kubectlVerbGet, resourceVolumeSnapshot, snapshotName,
 			"-n", k.namespace,
 			"-o", "jsonpath={.status.readyToUse}",
 		}
@@ -727,9 +743,9 @@ func (k *KubernetesClient) WaitForSnapshotReady(ctx context.Context, snapshotNam
 // before returning, preventing race conditions with subsequent PVC deletions.
 func (k *KubernetesClient) DeleteVolumeSnapshot(ctx context.Context, snapshotName string) error {
 	args := []string{
-		"delete", "volumesnapshot", snapshotName,
+		kubectlVerbDelete, resourceVolumeSnapshot, snapshotName,
 		"-n", k.namespace,
-		"--ignore-not-found=true",
+		flagIgnoreNotFound,
 		"--timeout=3m",
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -741,10 +757,10 @@ func (k *KubernetesClient) DeleteVolumeSnapshot(ctx context.Context, snapshotNam
 	// the resource is truly gone (external-snapshotter finalizer triggers CSI DeleteSnapshot)
 	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 3*time.Minute, true, func(ctx context.Context) (bool, error) {
 		checkArgs := []string{
-			"get", "volumesnapshot", snapshotName,
+			kubectlVerbGet, resourceVolumeSnapshot, snapshotName,
 			"-n", k.namespace,
-			"--ignore-not-found=true",
-			"-o", "name",
+			flagIgnoreNotFound,
+			"-o", outputName,
 		}
 		checkCmd := exec.CommandContext(ctx, "kubectl", checkArgs...)
 		output, err := checkCmd.Output()
@@ -800,7 +816,7 @@ type VolumeSnapshotInfo struct {
 // GetVolumeSnapshot gets a VolumeSnapshot by name.
 func (k *KubernetesClient) GetVolumeSnapshot(ctx context.Context, name string) (*VolumeSnapshotInfo, error) {
 	args := []string{
-		"get", "volumesnapshot", name,
+		kubectlVerbGet, resourceVolumeSnapshot, name,
 		"-n", k.namespace,
 		"-o", "json",
 	}
@@ -852,7 +868,7 @@ type VolumeSnapshotContentInfo struct {
 func (k *KubernetesClient) GetVolumeSnapshotContent(ctx context.Context, snapshotName string) (*VolumeSnapshotContentInfo, error) {
 	// First get the VolumeSnapshot to find the boundVolumeSnapshotContentName
 	args := []string{
-		"get", "volumesnapshot", snapshotName,
+		kubectlVerbGet, resourceVolumeSnapshot, snapshotName,
 		"-n", k.namespace,
 		"-o", "jsonpath={.status.boundVolumeSnapshotContentName}",
 	}
@@ -872,7 +888,7 @@ func (k *KubernetesClient) GetVolumeSnapshotContent(ctx context.Context, snapsho
 
 	// Now get the VolumeSnapshotContent (cluster-scoped, no namespace)
 	args = []string{
-		"get", "volumesnapshotcontent", contentName,
+		kubectlVerbGet, "volumesnapshotcontent", contentName,
 		"-o", "json",
 	}
 	cmd = exec.CommandContext(ctx, "kubectl", args...)
@@ -918,8 +934,8 @@ func (k *KubernetesClient) GetVolumeSnapshotContent(ctx context.Context, snapsho
 // DeleteVolumeSnapshotClass deletes a VolumeSnapshotClass using kubectl.
 func (k *KubernetesClient) DeleteVolumeSnapshotClass(ctx context.Context, name string) error {
 	args := []string{
-		"delete", "volumesnapshotclass", name,
-		"--ignore-not-found=true",
+		kubectlVerbDelete, "volumesnapshotclass", name,
+		flagIgnoreNotFound,
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	return cmd.Run()
@@ -954,7 +970,7 @@ func (k *KubernetesClient) FileExistsInPod(ctx context.Context, podName, filePat
 // ForceDeletePod force deletes a pod (simulating crash).
 func (k *KubernetesClient) ForceDeletePod(ctx context.Context, name string) error {
 	args := []string{
-		"delete", "pod", name,
+		kubectlVerbDelete, "pod", name,
 		"-n", k.namespace,
 		"--force",
 		"--grace-period=0",
@@ -1098,9 +1114,9 @@ func (k *KubernetesClient) WaitForStatefulSetReady(ctx context.Context, name str
 // DeleteStatefulSet deletes a StatefulSet using kubectl.
 func (k *KubernetesClient) DeleteStatefulSet(ctx context.Context, name string) error {
 	args := []string{
-		"delete", "statefulset", name,
+		kubectlVerbDelete, "statefulset", name,
 		"-n", k.namespace,
-		"--ignore-not-found=true",
+		flagIgnoreNotFound,
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	return cmd.Run()
@@ -1109,9 +1125,9 @@ func (k *KubernetesClient) DeleteStatefulSet(ctx context.Context, name string) e
 // DeleteService deletes a Service using kubectl.
 func (k *KubernetesClient) DeleteService(ctx context.Context, name string) error {
 	args := []string{
-		"delete", "service", name,
+		kubectlVerbDelete, "service", name,
 		"-n", k.namespace,
-		"--ignore-not-found=true",
+		flagIgnoreNotFound,
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	return cmd.Run()
@@ -1230,8 +1246,8 @@ volumeBindingMode: %s
 // DeleteStorageClass deletes a StorageClass using kubectl.
 func (k *KubernetesClient) DeleteStorageClass(ctx context.Context, name string) error {
 	args := []string{
-		"delete", "storageclass", name,
-		"--ignore-not-found=true",
+		kubectlVerbDelete, "storageclass", name,
+		flagIgnoreNotFound,
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	return cmd.Run()
@@ -1269,9 +1285,9 @@ func (k *KubernetesClient) GetPV(ctx context.Context, pvName string) (*corev1.Pe
 // GetControllerLogs returns recent logs from the CSI controller.
 func (k *KubernetesClient) GetControllerLogs(ctx context.Context, tailLines int) (string, error) {
 	args := []string{
-		"logs",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		kubectlVerbLogs,
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		fmt.Sprintf("--tail=%d", tailLines),
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -1290,9 +1306,9 @@ func (k *KubernetesClient) GetCSIDriver(ctx context.Context, name string) (*stor
 // IsControllerReady checks if the CSI controller deployment is ready.
 func (k *KubernetesClient) IsControllerReady(ctx context.Context) (bool, error) {
 	args := []string{
-		"get", "deployment",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		kubectlVerbGet, "deployment",
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		"-o", "jsonpath={.items[0].status.readyReplicas}",
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -1306,8 +1322,8 @@ func (k *KubernetesClient) IsControllerReady(ctx context.Context) (bool, error) 
 // GetNodeDaemonSetStatus returns the ready and desired count for the CSI node daemonset.
 func (k *KubernetesClient) GetNodeDaemonSetStatus(ctx context.Context) (ready, desired int, err error) {
 	args := []string{
-		"get", "daemonset",
-		"-n", "kube-system",
+		kubectlVerbGet, "daemonset",
+		"-n", helmNamespace,
 		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node",
 		"-o", "jsonpath={.items[0].status.numberReady},{.items[0].status.desiredNumberScheduled}",
 	}
@@ -1431,8 +1447,8 @@ func (k *KubernetesClient) GetMetricsEndpoint(ctx context.Context) (string, erro
 	// For simplicity, we use kubectl exec to curl the metrics endpoint
 	args := []string{
 		"exec",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		"--", "wget", "-q", "-O", "-", "http://localhost:8080/metrics",
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -1457,7 +1473,7 @@ func (k *KubernetesClient) GetPodsWithLabel(ctx context.Context, namespace, labe
 // GetPodLogs returns logs from a specific container in a pod.
 func (k *KubernetesClient) GetPodLogs(ctx context.Context, namespace, podName, containerName string, tailLines int) (string, error) {
 	args := []string{
-		"logs",
+		kubectlVerbLogs,
 		"-n", namespace,
 		podName,
 		fmt.Sprintf("--tail=%d", tailLines),

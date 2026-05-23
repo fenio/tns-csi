@@ -51,9 +51,9 @@ func getDriverVersionInfo() string {
 
 	// Get controller logs to find the startup message with version info
 	args := []string{
-		"logs",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		kubectlVerbLogs,
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		"--tail=50",
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
@@ -83,9 +83,9 @@ func getDriverVersionInfo() string {
 
 	// Last resort: check image tag from deployment
 	argsImage := []string{
-		"get", "deployment",
-		"-n", "kube-system",
-		"-l", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller",
+		kubectlVerbGet, "deployment",
+		"-n", helmNamespace,
+		"-l", controllerSelector,
 		"-o", "jsonpath={.items[0].spec.template.spec.containers[0].image}",
 	}
 	cmdImage := exec.CommandContext(ctx, "kubectl", argsImage...)

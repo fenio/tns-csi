@@ -248,7 +248,7 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 	}
 
 	// SMB/CIFS mounts will show "cifs" or "smb3" as filesystem type
-	if fsType == "cifs" || strings.HasPrefix(fsType, "smb") {
+	if fsType == fsTypeCIFS || strings.HasPrefix(fsType, "smb") {
 		return ProtocolSMB
 	}
 

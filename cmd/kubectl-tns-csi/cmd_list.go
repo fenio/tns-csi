@@ -104,7 +104,7 @@ func outputVolumes(volumes []VolumeInfo, format string) error {
 
 	case outputFormatTable, "":
 		t := newStyledTable()
-		t.AppendHeader(table.Row{"DATASET", "VOLUME_ID", "PROTOCOL", "CAPACITY", "PVC", "NAMESPACE", "TYPE", "CLONE_SOURCE", "ADOPTABLE"})
+		t.AppendHeader(table.Row{colDataset, colVolumeID, colProtocol, "CAPACITY", "PVC", "NAMESPACE", colType, "CLONE_SOURCE", "ADOPTABLE"})
 		for i := range volumes {
 			v := &volumes[i]
 			adoptable := ""

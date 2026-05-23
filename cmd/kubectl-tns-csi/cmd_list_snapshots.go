@@ -76,7 +76,7 @@ func outputSnapshots(snapshots []SnapshotInfo, format string) error {
 
 	case outputFormatTable, "":
 		t := newStyledTable()
-		t.AppendHeader(table.Row{"NAME", "SOURCE_VOLUME", "PROTOCOL", "TYPE", "SOURCE_DATASET"})
+		t.AppendHeader(table.Row{"NAME", "SOURCE_VOLUME", colProtocol, colType, "SOURCE_DATASET"})
 		for _, s := range snapshots {
 			snapType := colorSuccess.Sprint(s.Type)
 			if s.Type == "detached" {

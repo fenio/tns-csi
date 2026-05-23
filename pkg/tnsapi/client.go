@@ -20,6 +20,30 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// TrueNAS API methods, query/option keys, and ACL values used in JSON-RPC calls.
+const (
+	methodAuthLoginWithAPIKey = "auth.login_with_api_key" //nolint:gosec // API method name, not a credential
+
+	filterFieldName = "name"
+	filterFieldPath = "path"
+
+	queryOptExtra            = "extra"
+	queryOptUserProperties   = "user_properties"
+	queryOptUserPropsUpdate  = "user_properties_update"
+	queryOptFlat             = "flat"
+	queryOptRetrieveChildren = "retrieve_children"
+	queryOptKey              = "key"
+
+	aclTagKey      = "tag"
+	aclTypeKey     = "type"
+	aclFlagsKey    = "flags"
+	aclPermsKey    = "perms"
+	aclTypeAllow   = "ALLOW"
+	aclBasic       = "BASIC"
+	aclInherit     = "INHERIT"
+	aclFullControl = "FULL_CONTROL"
+)
+
 // Static errors for client operations.
 var (
 	ErrAuthenticationRejected = errors.New("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
@@ -314,7 +338,7 @@ func (c *Client) authenticate() error {
 	defer cancel()
 
 	var authResult bool
-	if err := c.Call(ctx, "auth.login_with_api_key", []interface{}{c.apiKey}, &authResult); err != nil {
+	if err := c.Call(ctx, methodAuthLoginWithAPIKey, []interface{}{c.apiKey}, &authResult); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
@@ -344,7 +368,7 @@ func (c *Client) authenticateDirect() error {
 	req := &Request{
 		ID:      id,
 		JSONRPC: "2.0",
-		Method:  "auth.login_with_api_key",
+		Method:  methodAuthLoginWithAPIKey,
 		Params:  []interface{}{c.apiKey},
 	}
 
@@ -823,7 +847,7 @@ func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) 
 	var result []Pool
 	err := c.Call(ctx, "pool.query", []interface{}{
 		[]interface{}{
-			[]interface{}{"name", "=", poolName},
+			[]interface{}{filterFieldName, "=", poolName},
 		},
 	}, &result)
 	if err != nil {
@@ -1079,7 +1103,7 @@ func (c *Client) QueryNFSShare(ctx context.Context, path string) ([]NFSShare, er
 	var result []NFSShare
 	err := c.Call(ctx, "sharing.nfs.query", []interface{}{
 		[]interface{}{
-			[]interface{}{"path", "=", path},
+			[]interface{}{filterFieldPath, "=", path},
 		},
 	}, &result)
 	if err != nil {
@@ -1197,7 +1221,7 @@ func (c *Client) QuerySMBShare(ctx context.Context, path string) ([]SMBShare, er
 	var result []SMBShare
 	err := c.Call(ctx, "sharing.smb.query", []interface{}{
 		[]interface{}{
-			[]interface{}{"path", "=", path},
+			[]interface{}{filterFieldPath, "=", path},
 		},
 	}, &result)
 	if err != nil {
@@ -1284,25 +1308,25 @@ func (c *Client) SetFilesystemACL(ctx context.Context, path string) error {
 
 	dacl := []map[string]interface{}{
 		{
-			"tag":   "owner@",
-			"id":    -1,
-			"type":  "ALLOW",
-			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
-			"flags": map[string]string{"BASIC": "INHERIT"},
+			aclTagKey:   "owner@",
+			"id":        -1,
+			aclTypeKey:  aclTypeAllow,
+			aclPermsKey: map[string]string{aclBasic: aclFullControl},
+			aclFlagsKey: map[string]string{aclBasic: aclInherit},
 		},
 		{
-			"tag":   "group@",
-			"id":    -1,
-			"type":  "ALLOW",
-			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
-			"flags": map[string]string{"BASIC": "INHERIT"},
+			aclTagKey:   "group@",
+			"id":        -1,
+			aclTypeKey:  aclTypeAllow,
+			aclPermsKey: map[string]string{aclBasic: aclFullControl},
+			aclFlagsKey: map[string]string{aclBasic: aclInherit},
 		},
 		{
-			"tag":   "everyone@",
-			"id":    -1,
-			"type":  "ALLOW",
-			"perms": map[string]string{"BASIC": "FULL_CONTROL"},
-			"flags": map[string]string{"BASIC": "INHERIT"},
+			aclTagKey:   "everyone@",
+			"id":        -1,
+			aclTypeKey:  aclTypeAllow,
+			aclPermsKey: map[string]string{aclBasic: aclFullControl},
+			aclFlagsKey: map[string]string{aclBasic: aclInherit},
 		},
 	}
 
@@ -1926,8 +1950,8 @@ func (c *Client) QuerySnapshotsWithProperties(ctx context.Context, filters []int
 	klog.V(4).Infof("Querying snapshots with properties, filters: %+v", filters)
 
 	queryOpts := map[string]interface{}{
-		"extra": map[string]interface{}{
-			"user_properties": true,
+		queryOptExtra: map[string]interface{}{
+			queryOptUserProperties: true,
 		},
 	}
 	var result []Snapshot
@@ -2184,13 +2208,13 @@ func (c *Client) SetDatasetProperties(ctx context.Context, datasetID string, pro
 	userProps := make([]map[string]string, 0, len(properties))
 	for key, value := range properties {
 		userProps = append(userProps, map[string]string{
-			"key":   key,
-			"value": value,
+			queryOptKey: key,
+			"value":     value,
 		})
 	}
 
 	params := map[string]interface{}{
-		"user_properties_update": userProps,
+		queryOptUserPropsUpdate: userProps,
 	}
 	klog.V(4).Infof("Sending pool.dataset.update with user_properties_update: %v", userProps)
 
@@ -2220,13 +2244,13 @@ func (c *Client) SetSnapshotProperties(ctx context.Context, snapshotID string, u
 	userPropsUpdate := make([]map[string]string, 0, len(updateProperties))
 	for key, value := range updateProperties {
 		userPropsUpdate = append(userPropsUpdate, map[string]string{
-			"key":   key,
-			"value": value,
+			queryOptKey: key,
+			"value":     value,
 		})
 	}
 
 	params := map[string]interface{}{
-		"user_properties_update": userPropsUpdate,
+		queryOptUserPropsUpdate: userPropsUpdate,
 	}
 	if len(removeProperties) > 0 {
 		params["user_properties_remove"] = removeProperties
@@ -2267,10 +2291,10 @@ func (c *Client) GetDatasetWithProperties(ctx context.Context, datasetID string)
 
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
-		"extra": map[string]interface{}{
-			"flat":              true,
-			"retrieve_children": false,
-			"user_properties":   true,
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:             true,
+			queryOptRetrieveChildren: false,
+			queryOptUserProperties:   true,
 		},
 	}
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
@@ -2307,10 +2331,10 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 	// a list of ZFS property names, not a boolean. We only need user_properties.
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
-		"extra": map[string]interface{}{
-			"flat":              true,
-			"retrieve_children": false,
-			"user_properties":   true,
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:             true,
+			queryOptRetrieveChildren: false,
+			queryOptUserProperties:   true,
 		},
 	}
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
@@ -2360,10 +2384,10 @@ func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) 
 	// Query the dataset with extra options to include user_properties
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
-		"extra": map[string]interface{}{
-			"flat":              true,
-			"retrieve_children": false,
-			"user_properties":   true,
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:             true,
+			queryOptRetrieveChildren: false,
+			queryOptUserProperties:   true,
 		},
 	}
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
@@ -2403,8 +2427,8 @@ func (c *Client) InheritDatasetProperty(ctx context.Context, datasetID, property
 	klog.V(4).Infof("Removing user property %s from dataset: %s", propertyName, datasetID)
 
 	params := map[string]interface{}{
-		"user_properties_update": []map[string]interface{}{
-			{"key": propertyName, "remove": true},
+		queryOptUserPropsUpdate: []map[string]interface{}{
+			{queryOptKey: propertyName, "remove": true},
 		},
 	}
 
@@ -2616,9 +2640,9 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 	// datasets under the prefix, so we need child datasets to be included.
 	var result []DatasetWithProperties
 	queryOpts := map[string]interface{}{
-		"extra": map[string]interface{}{
-			"flat":            true,
-			"user_properties": true,
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:           true,
+			queryOptUserProperties: true,
 		},
 	}
 
@@ -2849,7 +2873,7 @@ func (c *Client) QueryISCSITargets(ctx context.Context, filters []interface{}) (
 // ISCSITargetByName finds an iSCSI target by name.
 func (c *Client) ISCSITargetByName(ctx context.Context, name string) (*ISCSITarget, error) {
 	filters := []interface{}{
-		[]interface{}{"name", "=", name},
+		[]interface{}{filterFieldName, "=", name},
 	}
 
 	targets, err := c.QueryISCSITargets(ctx, filters)
@@ -2946,7 +2970,7 @@ func (c *Client) QueryISCSIExtents(ctx context.Context, filters []interface{}) (
 // ISCSIExtentByName finds an iSCSI extent by name.
 func (c *Client) ISCSIExtentByName(ctx context.Context, name string) (*ISCSIExtent, error) {
 	filters := []interface{}{
-		[]interface{}{"name", "=", name},
+		[]interface{}{filterFieldName, "=", name},
 	}
 
 	extents, err := c.QueryISCSIExtents(ctx, filters)

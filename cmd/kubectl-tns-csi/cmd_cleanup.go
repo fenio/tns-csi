@@ -372,7 +372,7 @@ func deleteISCSIVolumeResources(ctx context.Context, client tnsapi.ClientInterfa
 // showCleanupPreview displays the volumes that will be deleted.
 func showCleanupPreview(volumes []OrphanedVolumeInfo) {
 	t := newStyledTable()
-	t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "DATASET", "REASON"})
+	t.AppendHeader(table.Row{"VOLUME_ID", colProtocol, colDataset, "REASON"})
 	for i := range volumes {
 		v := &volumes[i]
 		t.AppendRow(table.Row{v.VolumeID, protocolBadge(v.Protocol), v.Dataset, colorWarning.Sprint(v.Reason)})

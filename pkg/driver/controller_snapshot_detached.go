@@ -178,7 +178,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		tnsapi.PropertyDetachedSnapshot: VolumeContextValueTrue,
 		tnsapi.PropertySourceDataset:    sourceDataset,
 		tnsapi.PropertyProtocol:         protocol,
-		tnsapi.PropertyDeleteStrategy:   "delete",
+		tnsapi.PropertyDeleteStrategy:   verbDelete,
 	}
 	if s.clusterID != "" {
 		props[tnsapi.PropertyClusterID] = s.clusterID
@@ -247,7 +247,7 @@ func (s *ControllerService) ensureDetachedSnapshotsParentDataset(ctx context.Con
 
 	createParams := tnsapi.DatasetCreateParams{
 		Name: parentDataset,
-		Type: "FILESYSTEM",
+		Type: datasetTypeFilesystem,
 	}
 
 	_, err = s.apiClient.CreateDataset(ctx, createParams)

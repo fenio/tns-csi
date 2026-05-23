@@ -83,7 +83,7 @@ func outputClones(clones []CloneInfo, format string) error {
 			return nil
 		}
 		t := newStyledTable()
-		t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "CLONE_MODE", "SOURCE_TYPE", "SOURCE_ID", "DEPENDENCY"})
+		t.AppendHeader(table.Row{colVolumeID, colProtocol, "CLONE_MODE", "SOURCE_TYPE", "SOURCE_ID", "DEPENDENCY"})
 		for i := range clones {
 			var modeStr string
 			switch clones[i].CloneMode {

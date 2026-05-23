@@ -83,8 +83,8 @@ func outputHealthReport(report *HealthReport, format string, showAll bool) error
 		}
 		// Just encode problems
 		return enc.Encode(map[string]interface{}{
-			"summary":  report.Summary,
-			"problems": report.Problems,
+			summaryName: report.Summary,
+			"problems":  report.Problems,
 		})
 
 	case outputFormatYAML:
@@ -94,8 +94,8 @@ func outputHealthReport(report *HealthReport, format string, showAll bool) error
 			return enc.Encode(report)
 		}
 		return enc.Encode(map[string]interface{}{
-			"summary":  report.Summary,
-			"problems": report.Problems,
+			summaryName: report.Summary,
+			"problems":  report.Problems,
 		})
 
 	case outputFormatTable, "":
@@ -139,7 +139,7 @@ func outputHealthReportTable(report *HealthReport, showAll bool) error {
 	}
 
 	t := newStyledTable()
-	t.AppendHeader(table.Row{"VOLUME_ID", "PROTOCOL", "STATUS", "ISSUES"})
+	t.AppendHeader(table.Row{colVolumeID, colProtocol, "STATUS", "ISSUES"})
 
 	for i := range volumes {
 		v := &volumes[i]

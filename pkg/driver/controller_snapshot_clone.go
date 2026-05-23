@@ -510,7 +510,7 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 
 	// Check if snapshot already exists (idempotency for retried operations)
 	existingSnapshots, queryErr := s.apiClient.QuerySnapshots(ctx, []interface{}{
-		[]interface{}{"dataset", "=", snapshotMeta.DatasetName},
+		[]interface{}{verbDataset, "=", snapshotMeta.DatasetName},
 	})
 	if queryErr != nil {
 		klog.V(4).Infof("Failed to query existing snapshots (will attempt to create): %v", queryErr)

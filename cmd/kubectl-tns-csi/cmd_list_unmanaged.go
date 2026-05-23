@@ -114,7 +114,7 @@ func outputUnmanagedVolumes(volumes []UnmanagedVolume, format string) error {
 
 	case outputFormatTable, "":
 		t := newStyledTable()
-		t.AppendHeader(table.Row{"DATASET", "TYPE", "PROTOCOL", "SIZE", "MANAGED_BY"})
+		t.AppendHeader(table.Row{colDataset, colType, colProtocol, "SIZE", "MANAGED_BY"})
 
 		for i := range volumes {
 			v := &volumes[i]

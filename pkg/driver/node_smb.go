@@ -141,7 +141,7 @@ func (s *NodeService) stageSMBVolume(ctx context.Context, req *csi.NodeStageVolu
 
 	klog.Infof("SMB mount options: user=%v, final=%v", userMountOptions, mountOptions)
 
-	args := []string{"-t", "cifs", "-o", mount.JoinMountOptions(mountOptions), cifsSource, stagingTargetPath}
+	args := []string{"-t", fsTypeCIFS, "-o", mount.JoinMountOptions(mountOptions), cifsSource, stagingTargetPath}
 
 	klog.Infof("Executing mount command for staging: mount %v", args)
 	mountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -223,7 +223,7 @@ func (s *NodeService) publishSMBVolume(ctx context.Context, req *csi.NodePublish
 		return &csi.NodePublishVolumeResponse{}, nil
 	}
 
-	mountOptions := []string{"bind"}
+	mountOptions := []string{mountTypeBind}
 	if req.GetReadonly() {
 		mountOptions = append(mountOptions, "ro")
 	}

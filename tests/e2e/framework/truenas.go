@@ -27,6 +27,9 @@ var ErrInvalidIDType = errors.New("cannot convert resource ID to int")
 // ErrDatasetNotFound is returned when a requested dataset doesn't exist.
 var ErrDatasetNotFound = errors.New("dataset not found")
 
+// filterFieldName is the TrueNAS query filter key referencing the "name" attribute.
+const filterFieldName = "name"
+
 // TrueNASVerifier provides methods for verifying TrueNAS backend state.
 type TrueNASVerifier struct {
 	client *tnsapi.Client
@@ -103,7 +106,7 @@ func (v *TrueNASVerifier) NFSShareExists(ctx context.Context, path string) (bool
 // Note: TrueNAS uses "nvmet.subsys" API namespace, not "nvmeof.subsystem".
 func (v *TrueNASVerifier) NVMeOFSubsystemExists(ctx context.Context, nqn string) (bool, error) {
 	var subsystems []map[string]any
-	filter := []any{[]any{"name", "=", nqn}}
+	filter := []any{[]any{filterFieldName, "=", nqn}}
 	// Try nvmet.subsys.query first (current TrueNAS API)
 	if err := v.client.Call(ctx, "nvmet.subsys.query", []any{filter}, &subsystems); err != nil {
 		return false, fmt.Errorf("failed to query NVMe-oF subsystems: %w", err)
@@ -171,7 +174,7 @@ func (v *TrueNASVerifier) deleteResourceByFilter(
 func (v *TrueNASVerifier) DeleteNVMeOFSubsystem(ctx context.Context, nqn string) error {
 	// Step 1: Query the subsystem to get its ID
 	var subsystems []map[string]any
-	filter := []any{[]any{"name", "=", nqn}}
+	filter := []any{[]any{filterFieldName, "=", nqn}}
 	if err := v.client.Call(ctx, "nvmet.subsys.query", []any{filter}, &subsystems); err != nil {
 		return fmt.Errorf("failed to query NVMe-oF subsystem: %w", err)
 	}
@@ -346,7 +349,7 @@ func (v *TrueNASVerifier) DeleteSMBShare(ctx context.Context, path string) error
 // ISCSITargetExists checks if an iSCSI target exists with the given name.
 func (v *TrueNASVerifier) ISCSITargetExists(ctx context.Context, targetName string) (bool, error) {
 	var targets []map[string]any
-	filter := []any{[]any{"name", "=", targetName}}
+	filter := []any{[]any{filterFieldName, "=", targetName}}
 	if err := v.client.Call(ctx, "iscsi.target.query", []any{filter}, &targets); err != nil {
 		return false, fmt.Errorf("failed to query iSCSI targets: %w", err)
 	}
@@ -356,7 +359,7 @@ func (v *TrueNASVerifier) ISCSITargetExists(ctx context.Context, targetName stri
 // ISCSIExtentExists checks if an iSCSI extent exists with the given name.
 func (v *TrueNASVerifier) ISCSIExtentExists(ctx context.Context, extentName string) (bool, error) {
 	var extents []map[string]any
-	filter := []any{[]any{"name", "=", extentName}}
+	filter := []any{[]any{filterFieldName, "=", extentName}}
 	if err := v.client.Call(ctx, "iscsi.extent.query", []any{filter}, &extents); err != nil {
 		return false, fmt.Errorf("failed to query iSCSI extents: %w", err)
 	}
@@ -368,7 +371,7 @@ func (v *TrueNASVerifier) ISCSIExtentExists(ctx context.Context, extentName stri
 func (v *TrueNASVerifier) DeleteISCSITarget(ctx context.Context, targetName string) error {
 	// Query for the target first
 	var targets []map[string]any
-	filter := []any{[]any{"name", "=", targetName}}
+	filter := []any{[]any{filterFieldName, "=", targetName}}
 	if err := v.client.Call(ctx, "iscsi.target.query", []any{filter}, &targets); err != nil {
 		return fmt.Errorf("failed to query iSCSI target: %w", err)
 	}
@@ -399,7 +402,7 @@ func (v *TrueNASVerifier) DeleteISCSITarget(ctx context.Context, targetName stri
 func (v *TrueNASVerifier) DeleteISCSIExtent(ctx context.Context, extentName string) error {
 	// Query for the extent first
 	var extents []map[string]any
-	filter := []any{[]any{"name", "=", extentName}}
+	filter := []any{[]any{filterFieldName, "=", extentName}}
 	if err := v.client.Call(ctx, "iscsi.extent.query", []any{filter}, &extents); err != nil {
 		return fmt.Errorf("failed to query iSCSI extent: %w", err)
 	}

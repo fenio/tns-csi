@@ -316,7 +316,7 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 //
 //nolint:dupl,gocyclo,gocognit // Intentionally similar dataset deletion pattern as NFS/iSCSI; complexity from ownership checks + CSI snapshot guard + dependent clones guard
 func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
-	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolSMB, "delete")
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolSMB, verbDelete)
 	klog.V(4).Infof("Deleting SMB volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.SMBShareID)
 
 	deleteStrategy := tnsapi.DeleteStrategyDelete

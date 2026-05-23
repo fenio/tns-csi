@@ -11,6 +11,11 @@ import (
 	"github.com/fenio/tns-csi/pkg/tnsapi"
 )
 
+const (
+	parsedKey             = "parsed"
+	datasetTypeFilesystem = "FILESYSTEM"
+)
+
 var (
 	// ErrDatasetExists indicates a dataset already exists.
 	ErrDatasetExists = errors.New("dataset already exists")
@@ -234,8 +239,8 @@ func (m *MockClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCre
 		ID:         params.Name,
 		Name:       params.Name,
 		Type:       params.Type,
-		Used:       map[string]any{"parsed": float64(0)},
-		Available:  map[string]any{"parsed": float64(107374182400)}, // 100GB
+		Used:       map[string]any{parsedKey: float64(0)},
+		Available:  map[string]any{parsedKey: float64(107374182400)}, // 100GB
 		Mountpoint: "/mnt/" + params.Name,
 	}
 
@@ -243,8 +248,8 @@ func (m *MockClient) CreateDataset(ctx context.Context, params tnsapi.DatasetCre
 		ID:         params.Name,
 		Name:       params.Name,
 		Type:       params.Type,
-		Used:       map[string]any{"parsed": float64(0)},
-		Available:  map[string]any{"parsed": float64(107374182400)},
+		Used:       map[string]any{parsedKey: float64(0)},
+		Available:  map[string]any{parsedKey: float64(107374182400)},
 		Mountpoint: "/mnt/" + params.Name,
 	}, nil
 }
@@ -286,7 +291,7 @@ func (m *MockClient) Dataset(ctx context.Context, name string) (*tnsapi.Dataset,
 		Used:       ds.Used,
 		Available:  ds.Available,
 		Mountpoint: ds.Mountpoint,
-		Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+		Volsize:    map[string]interface{}{parsedKey: float64(ds.Volsize)},
 	}, nil
 }
 
@@ -312,7 +317,7 @@ func (m *MockClient) UpdateDataset(ctx context.Context, datasetID string, params
 				Used:       ds.Used,
 				Available:  ds.Available,
 				Mountpoint: ds.Mountpoint,
-				Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+				Volsize:    map[string]interface{}{parsedKey: float64(ds.Volsize)},
 			}, nil
 		}
 	}
@@ -352,7 +357,7 @@ func (m *MockClient) QueryAllDatasets(ctx context.Context, prefix string) ([]tns
 				Used:       ds.Used,
 				Available:  ds.Available,
 				Mountpoint: ds.Mountpoint,
-				Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+				Volsize:    map[string]interface{}{parsedKey: float64(ds.Volsize)},
 			})
 		}
 	}
@@ -458,7 +463,7 @@ func (m *MockClient) GetDatasetWithProperties(ctx context.Context, datasetID str
 					Used:       ds.Used,
 					Available:  ds.Available,
 					Mountpoint: ds.Mountpoint,
-					Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+					Volsize:    map[string]interface{}{parsedKey: float64(ds.Volsize)},
 				},
 				UserProperties: userProps,
 			}
@@ -793,7 +798,7 @@ func (m *MockClient) CreateZvol(ctx context.Context, params tnsapi.ZvolCreatePar
 		ID:      params.Name,
 		Name:    params.Name,
 		Type:    "VOLUME",
-		Volsize: map[string]interface{}{"parsed": float64(params.Volsize)},
+		Volsize: map[string]interface{}{parsedKey: float64(params.Volsize)},
 	}, nil
 }
 
@@ -1169,18 +1174,18 @@ func (m *MockClient) CloneSnapshot(ctx context.Context, params tnsapi.CloneSnaps
 	m.datasets[params.Dataset] = mockDataset{
 		ID:         params.Dataset,
 		Name:       params.Dataset,
-		Type:       "FILESYSTEM",
-		Used:       map[string]any{"parsed": float64(0)},
-		Available:  map[string]any{"parsed": float64(107374182400)},
+		Type:       datasetTypeFilesystem,
+		Used:       map[string]any{parsedKey: float64(0)},
+		Available:  map[string]any{parsedKey: float64(107374182400)},
 		Mountpoint: "/mnt/" + params.Dataset,
 	}
 
 	return &tnsapi.Dataset{
 		ID:         params.Dataset,
 		Name:       params.Dataset,
-		Type:       "FILESYSTEM",
-		Used:       map[string]any{"parsed": float64(0)},
-		Available:  map[string]any{"parsed": float64(107374182400)},
+		Type:       datasetTypeFilesystem,
+		Used:       map[string]any{parsedKey: float64(0)},
+		Available:  map[string]any{parsedKey: float64(107374182400)},
 		Mountpoint: "/mnt/" + params.Dataset,
 	}, nil
 }
@@ -1234,9 +1239,9 @@ func (m *MockClient) RunOnetimeReplication(ctx context.Context, params tnsapi.Re
 	m.datasets[params.TargetDataset] = mockDataset{
 		ID:         datasetID,
 		Name:       params.TargetDataset,
-		Type:       "FILESYSTEM",
-		Used:       map[string]any{"parsed": float64(0)},
-		Available:  map[string]any{"parsed": float64(107374182400)},
+		Type:       datasetTypeFilesystem,
+		Used:       map[string]any{parsedKey: float64(0)},
+		Available:  map[string]any{parsedKey: float64(107374182400)},
 		Mountpoint: "/mnt/" + params.TargetDataset,
 	}
 
@@ -1308,7 +1313,7 @@ func (m *MockClient) FindDatasetsByProperty(ctx context.Context, prefix, propert
 						Used:       ds.Used,
 						Available:  ds.Available,
 						Mountpoint: ds.Mountpoint,
-						Volsize:    map[string]interface{}{"parsed": float64(ds.Volsize)},
+						Volsize:    map[string]interface{}{parsedKey: float64(ds.Volsize)},
 					},
 					UserProperties: userProps,
 				})

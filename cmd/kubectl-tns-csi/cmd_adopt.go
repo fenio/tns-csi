@@ -54,7 +54,7 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&pvcName, "pvc-name", "", "PVC name (defaults to volume's stored pvc_name or volume ID)")
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "default", "Namespace for the PVC")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultNamespace, "Namespace for the PVC")
 	cmd.Flags().StringVar(&storageClass, "storage-class", "", "StorageClass name (defaults to volume's stored storage_class)")
 	cmd.Flags().StringVar(&accessMode, "access-mode", "", "Access mode: ReadWriteOnce, ReadWriteMany (auto-detected from protocol)")
 
@@ -176,7 +176,7 @@ func extractVolumeInfo(ds *tnsapi.DatasetWithProperties) (*adoptionVolumeInfo, e
 
 	info := &adoptionVolumeInfo{
 		dataset:   ds.ID,
-		namespace: "default", // Default
+		namespace: defaultNamespace, // Default
 	}
 
 	// Extract volume ID
@@ -326,7 +326,7 @@ func generatePV(info *adoptionVolumeInfo, server string) map[string]interface{} 
 			"volumeAttributes": volumeAttributes,
 		},
 		"claimRef": map[string]interface{}{
-			"name":      info.pvcName,
+			metaNameKey: info.pvcName,
 			"namespace": info.namespace,
 		},
 	}
@@ -339,10 +339,10 @@ func generatePV(info *adoptionVolumeInfo, server string) map[string]interface{} 
 		"apiVersion": "v1",
 		"kind":       "PersistentVolume",
 		"metadata": map[string]interface{}{
-			"name": pvName,
+			metaNameKey: pvName,
 			"labels": map[string]string{
-				"app.kubernetes.io/managed-by": "kubectl-tns-csi",
-				"tns-csi.io/adopted":           "true",
+				"app.kubernetes.io/managed-by": cmdName,
+				"tns-csi.io/adopted":           valueTrue,
 			},
 			"annotations": map[string]string{
 				"tns-csi.io/dataset": info.dataset,
@@ -373,11 +373,11 @@ func generatePVC(info *adoptionVolumeInfo) map[string]interface{} {
 		"apiVersion": "v1",
 		"kind":       "PersistentVolumeClaim",
 		"metadata": map[string]interface{}{
-			"name":      info.pvcName,
+			metaNameKey: info.pvcName,
 			"namespace": info.namespace,
 			"labels": map[string]string{
-				"app.kubernetes.io/managed-by": "kubectl-tns-csi",
-				"tns-csi.io/adopted":           "true",
+				"app.kubernetes.io/managed-by": cmdName,
+				"tns-csi.io/adopted":           valueTrue,
 			},
 			"annotations": map[string]string{
 				"tns-csi.io/dataset": info.dataset,

@@ -248,7 +248,7 @@ func (s *ControllerService) listSnapshotsBySourceVolume(ctx context.Context, req
 
 	// Query snapshots for this dataset (snapshots will have format dataset@snapname)
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", datasetName},
+		[]interface{}{verbDataset, "=", datasetName},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshots(ctx, filters)
@@ -369,7 +369,7 @@ func (s *ControllerService) listAllSnapshots(ctx context.Context, req *csi.ListS
 	var allSnapshots []tnsapi.Snapshot
 	for datasetID := range managedMeta {
 		snaps, queryErr := s.apiClient.QuerySnapshots(ctx, []interface{}{
-			[]interface{}{"dataset", "=", datasetID},
+			[]interface{}{verbDataset, "=", datasetID},
 		})
 		if queryErr != nil {
 			klog.Warningf("Failed to query snapshots for dataset %s: %v", datasetID, queryErr)

@@ -400,7 +400,7 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
 		tnsapi.PropertyDetachedSnapshot: VolumeContextValueFalse,
 		tnsapi.PropertyProtocol:         protocol,
-		tnsapi.PropertyDeleteStrategy:   "delete",
+		tnsapi.PropertyDeleteStrategy:   verbDelete,
 	}
 	if s.clusterID != "" {
 		props[tnsapi.PropertyClusterID] = s.clusterID
@@ -447,7 +447,7 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 
 // DeleteSnapshot deletes a snapshot.
 func (s *ControllerService) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
-	timer := metrics.NewVolumeOperationTimer("snapshot", "delete")
+	timer := metrics.NewVolumeOperationTimer("snapshot", verbDelete)
 	klog.V(4).Infof("DeleteSnapshot called with request: %+v", req)
 
 	if req.GetSnapshotId() == "" {

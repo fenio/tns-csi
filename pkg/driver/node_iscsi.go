@@ -27,7 +27,7 @@ var (
 )
 
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
-var defaultISCSIMountOptions = []string{"noatime", "_netdev"}
+var defaultISCSIMountOptions = []string{zfsNoatime, "_netdev"}
 
 // iscsiadmCmd builds a command to run iscsiadm, using nsenter to execute
 // in the host's namespaces when running in a container. This allows the

@@ -4,7 +4,7 @@ package driver
 
 // Default NFS mount options for macOS.
 // macOS supports NFSv3 and NFSv4 (but not v4.2).
-var defaultNFSMountOptions = []string{"vers=4", "nolock"}
+var defaultNFSMountOptions = []string{"vers=4", mountOptNolock}
 
 // getNFSMountOptions merges user-provided mount options with sensible defaults.
 // User options take precedence - if a user specifies an option that conflicts

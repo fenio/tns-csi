@@ -54,6 +54,32 @@ const (
 	VolumeContextValueFalse           = "false"
 )
 
+// TrueNAS dataset/zfs type values and kubectl verbs used across the driver package.
+const (
+	datasetTypeFilesystem = "FILESYSTEM"
+	datasetTypeVolume     = "VOLUME"
+	datasetTypeZVOL       = "ZVOL"
+
+	zfsLogicalDiskType = "DISK"
+	iscsiExtentType    = "ISCSI"
+
+	zfsAtime   = "atime"
+	zfsNoatime = "noatime"
+
+	zfsACLModeRoot  = "root"
+	zfsACLModeWheel = "wheel"
+
+	encryptionAlgorithmAES256GCM = "AES-256-GCM"
+
+	fsTypeCIFS = "cifs"
+
+	verbDelete    = "delete"
+	verbDataset   = "dataset"
+	mountTypeBind = "bind"
+
+	mountOptNolock = "nolock"
+)
+
 // Static errors for controller operations.
 var (
 	ErrVolumeNotFound  = errors.New("volume not found")
@@ -410,7 +436,7 @@ func (s *ControllerService) datasetHasCSIManagedSnapshots(_ context.Context, dat
 	defer cancel()
 
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", datasetID},
+		[]interface{}{verbDataset, "=", datasetID},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshotsWithProperties(snapCtx, filters) //nolint:contextcheck // intentional: parent gRPC context deadline is too short
@@ -459,7 +485,7 @@ func (s *ControllerService) deleteDatasetSnapshots(_ context.Context, datasetID 
 	defer cancel()
 
 	filters := []interface{}{
-		[]interface{}{"dataset", "=", datasetID},
+		[]interface{}{verbDataset, "=", datasetID},
 	}
 
 	snapshots, err := s.apiClient.QuerySnapshotsWithProperties(snapCtx, filters) //nolint:contextcheck // intentional: background context needed for reliable cleanup
@@ -504,7 +530,7 @@ func (s *ControllerService) promoteClonesOfDeferredSnapshots(_ context.Context, 
 	defer cancel()
 
 	snapshots, err := s.apiClient.QuerySnapshotsWithProperties(snapCtx, []interface{}{ //nolint:contextcheck // intentional: background context needed
-		[]interface{}{"dataset", "=", datasetID},
+		[]interface{}{verbDataset, "=", datasetID},
 	})
 	if err != nil {
 		klog.Warningf("Failed to query snapshots for %s: %v", datasetID, err)
@@ -872,11 +898,11 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 	}
 
 	volumeContext := map[string]string{
-		"server":      server,
-		"share":       existingDataset.Mountpoint,
-		"datasetID":   existingDataset.ID,
-		"datasetName": expectedDatasetName,
-		"nfsShareID":  strconv.Itoa(shares[0].ID),
+		VolumeContextKeyServer: server,
+		"share":                existingDataset.Mountpoint,
+		"datasetID":            existingDataset.ID,
+		"datasetName":          expectedDatasetName,
+		"nfsShareID":           strconv.Itoa(shares[0].ID),
 	}
 
 	return volumeMeta, volumeContext, nil
@@ -1298,7 +1324,7 @@ func (s *ControllerService) listManagedVolumes(ctx context.Context) ([]*csi.List
 
 		// Skip detached snapshots — they are not volumes
 		if ds.UserProperties != nil {
-			if detached, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && detached.Value == "true" {
+			if detached, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && detached.Value == VolumeContextValueTrue {
 				continue
 			}
 			if _, ok := ds.UserProperties[tnsapi.PropertySnapshotID]; ok {

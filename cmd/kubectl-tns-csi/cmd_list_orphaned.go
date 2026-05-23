@@ -246,7 +246,7 @@ func outputOrphanedVolumes(volumes []OrphanedVolumeInfo, format string) error {
 
 	case outputFormatTable, "":
 		t := newStyledTable()
-		t.AppendHeader(table.Row{"DATASET", "VOLUME_ID", "PROTOCOL", "CAPACITY", "ADOPTABLE", "REASON"})
+		t.AppendHeader(table.Row{colDataset, colVolumeID, colProtocol, "CAPACITY", "ADOPTABLE", "REASON"})
 		for i := range volumes {
 			v := &volumes[i]
 			adoptable := ""

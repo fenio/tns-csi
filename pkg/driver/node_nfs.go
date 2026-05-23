@@ -69,7 +69,7 @@ func (s *NodeService) stageNFSVolume(ctx context.Context, req *csi.NodeStageVolu
 	klog.V(4).Infof("NFS mount options: user=%v, final=%v", userMountOptions, mountOptions)
 
 	// Construct mount command
-	args := []string{"-t", "nfs", "-o", mount.JoinMountOptions(mountOptions), nfsSource, stagingTargetPath}
+	args := []string{"-t", ProtocolNFS, "-o", mount.JoinMountOptions(mountOptions), nfsSource, stagingTargetPath}
 
 	klog.V(4).Infof("Executing mount command for staging: mount %v", args)
 	mountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -161,7 +161,7 @@ func (s *NodeService) publishNFSVolume(ctx context.Context, req *csi.NodePublish
 	}
 
 	// Build mount options for bind mount
-	mountOptions := []string{"bind"}
+	mountOptions := []string{mountTypeBind}
 	if req.GetReadonly() {
 		mountOptions = append(mountOptions, "ro")
 	}

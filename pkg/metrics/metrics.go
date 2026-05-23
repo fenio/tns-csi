@@ -13,6 +13,9 @@ import (
 
 const (
 	namespace = "tns_csi"
+
+	labelOperation = "operation"
+	labelProtocol  = "protocol"
 )
 
 // VersionInfo holds version information for the driver.
@@ -101,7 +104,7 @@ var (
 			Name:      "operations_total",
 			Help:      "Total number of CSI operations by operation type and status",
 		},
-		[]string{"operation", "status"},
+		[]string{labelOperation, "status"},
 	)
 
 	csiOperationDuration = promauto.NewHistogramVec(
@@ -111,7 +114,7 @@ var (
 			Help:      "Duration of CSI operations in seconds",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15), // 1ms to ~16s
 		},
-		[]string{"operation"},
+		[]string{labelOperation},
 	)
 
 	// Volume operation metrics with protocol labels.
@@ -121,7 +124,7 @@ var (
 			Name:      "volume_operations_total",
 			Help:      "Total number of volume operations by protocol, operation type and status",
 		},
-		[]string{"protocol", "operation", "status"},
+		[]string{labelProtocol, labelOperation, "status"},
 	)
 
 	volumeOperationDuration = promauto.NewHistogramVec(
@@ -131,7 +134,7 @@ var (
 			Help:      "Duration of volume operations in seconds by protocol",
 			Buckets:   prometheus.ExponentialBuckets(0.1, 2, 12), // 100ms to ~400s
 		},
-		[]string{"protocol", "operation"},
+		[]string{labelProtocol, labelOperation},
 	)
 
 	// WebSocket connection metrics.
@@ -202,7 +205,7 @@ var (
 			Name:      "volume_capacity_bytes",
 			Help:      "Volume capacity in bytes",
 		},
-		[]string{"volume_id", "protocol"},
+		[]string{"volume_id", labelProtocol},
 	)
 )
 

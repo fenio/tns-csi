@@ -75,7 +75,7 @@ func (s *NodeService) publishBlockVolume(ctx context.Context, stagingTargetPath,
 	}
 
 	// Bind mount the device from staging to target
-	mountOptions := []string{"bind"}
+	mountOptions := []string{mountTypeBind}
 	if readonly {
 		mountOptions = append(mountOptions, "ro")
 	}

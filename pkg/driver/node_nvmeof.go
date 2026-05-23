@@ -41,7 +41,7 @@ const (
 
 // defaultNVMeOFMountOptions are sensible defaults for NVMe-oF filesystem mounts.
 // These are merged with user-specified mount options from StorageClass.
-var defaultNVMeOFMountOptions = []string{"noatime"}
+var defaultNVMeOFMountOptions = []string{zfsNoatime}
 
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
 // With independent subsystems per volume, NSID is always 1.

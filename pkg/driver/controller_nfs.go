@@ -84,7 +84,7 @@ func parseZFSDatasetProperties(params map[string]string) *zfsDatasetProperties {
 		case "dedup":
 			// TrueNAS API requires uppercase: ON, OFF, VERIFY
 			props.Dedup = strings.ToUpper(value)
-		case "atime":
+		case zfsAtime:
 			// TrueNAS API requires uppercase: ON, OFF, INHERIT
 			props.Atime = strings.ToUpper(value)
 		case "sync":
@@ -153,7 +153,7 @@ func parseEncryptionConfig(params, secrets map[string]string) *encryptionConfig 
 
 	// Default algorithm if not specified
 	if config.Algorithm == "" {
-		config.Algorithm = "AES-256-GCM"
+		config.Algorithm = encryptionAlgorithmAES256GCM
 	}
 
 	// Get sensitive values from secrets
@@ -400,7 +400,7 @@ func (s *ControllerService) getOrCreateDataset(ctx context.Context, params *nfsV
 	// Build dataset creation parameters with ZFS properties
 	createParams := tnsapi.DatasetCreateParams{
 		Name:      params.datasetName,
-		Type:      "FILESYSTEM",
+		Type:      datasetTypeFilesystem,
 		ShareType: params.shareType,          // "SMB" for SMB volumes, empty for NFS/others
 		RefQuota:  &params.requestedCapacity, // Set quota at creation for consistency with expansion
 		Comments:  params.comment,
@@ -473,8 +473,8 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 		Path:         dataset.Mountpoint,
 		Comment:      comment,
-		MaprootUser:  "root",
-		MaprootGroup: "wheel",
+		MaprootUser:  zfsACLModeRoot,
+		MaprootGroup: zfsACLModeWheel,
 		Enabled:      true,
 	})
 	if err != nil {
@@ -578,7 +578,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 //
 //nolint:dupl,gocyclo,gocognit // Intentionally similar dataset deletion pattern as iSCSI; complexity from ownership checks + CSI snapshot guard + dependent clones guard
 func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
-	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "delete")
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, verbDelete)
 	klog.V(4).Infof("Deleting NFS volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.NFSShareID)
 
 	// Step 0: Verify ownership using ZFS properties (safe deletion)
@@ -754,8 +754,8 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 		Path:         dataset.Mountpoint,
 		Comment:      "CSI Volume (from snapshot): " + volumeName,
-		MaprootUser:  "root",
-		MaprootGroup: "wheel",
+		MaprootUser:  zfsACLModeRoot,
+		MaprootGroup: zfsACLModeWheel,
 		Enabled:      true,
 	})
 	if err != nil {
@@ -897,8 +897,8 @@ func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateV
 		newShare, createErr := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
 			Path:         dataset.Mountpoint,
 			Comment:      comment,
-			MaprootUser:  "root",
-			MaprootGroup: "wheel",
+			MaprootUser:  zfsACLModeRoot,
+			MaprootGroup: zfsACLModeWheel,
 			Enabled:      true,
 		})
 		if createErr != nil {

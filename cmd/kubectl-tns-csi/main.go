@@ -43,7 +43,7 @@ func newRootCmd() *cobra.Command {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "kubectl-tns-csi",
+		Use:   cmdName,
 		Short: "Manage TrueNAS CSI volumes",
 		Long: `kubectl-tns-csi is a kubectl plugin for managing TrueNAS CSI driver volumes.
 
@@ -58,7 +58,7 @@ Connection to TrueNAS can be configured via:
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringVar(&truenasURL, "url", "", "TrueNAS WebSocket URL (wss://host/api/current)")
+	rootCmd.PersistentFlags().StringVar(&truenasURL, keyURL, "", "TrueNAS WebSocket URL (wss://host/api/current)")
 	rootCmd.PersistentFlags().StringVar(&truenasAPIKey, "api-key", "", "TrueNAS API key")
 	rootCmd.PersistentFlags().StringVar(&secretRef, "secret", "", "Kubernetes secret with TrueNAS credentials (namespace/name)")
 	rootCmd.PersistentFlags().StringVarP(&outputFormat, "output", "o", "table", "Output format: table, yaml, json")

@@ -23,6 +23,32 @@ const (
 	protocolSMB    = "smb"
 )
 
+// Table column headers, CLI tokens, and component names shared across kubectl-tns-csi commands.
+const (
+	cmdName = "kubectl-tns-csi"
+
+	defaultNamespace = "default"
+	summaryName      = "summary"
+
+	colDataset  = "DATASET"
+	colProtocol = "PROTOCOL"
+	colVolumeID = "VOLUME_ID"
+	colType     = "TYPE"
+
+	metaNameKey = "name"
+
+	flagTruenasURL = "truenas-url"
+	flagAPIKey     = "api-key"
+	keyURL         = "url"
+	keyAPIKey      = "apiKey"
+
+	componentTrueNASConnection = "TrueNAS Connection"
+	componentNFSShare          = "NFS Share"
+	componentSMBShare          = "SMB Share"
+	componentNVMeOFSubsystem   = "NVMe-oF Subsystem"
+	componentISCSIExtent       = "iSCSI Extent"
+)
+
 func newDescribeCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "describe <volume-id>",

@@ -91,7 +91,7 @@ func (s *NodeService) detectProtocolFromVolumePath(ctx context.Context, volumePa
 	}
 
 	// SMB/CIFS mounts show "cifs" or "smb3"
-	if fsType == "cifs" || strings.HasPrefix(fsType, "smb") {
+	if fsType == fsTypeCIFS || strings.HasPrefix(fsType, "smb") {
 		return ProtocolSMB
 	}
 

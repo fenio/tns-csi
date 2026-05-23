@@ -61,7 +61,7 @@ type CapacitySummary struct {
 
 func newSummaryCmd(url, apiKey, secretRef, outputFormat *string, skipTLSVerify *bool) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "summary",
+		Use:   summaryName,
 		Short: "Show summary of all tns-csi managed resources",
 		Long: `Display a dashboard-style summary of all tns-csi managed resources.
 

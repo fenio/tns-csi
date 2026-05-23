@@ -625,7 +625,7 @@ func (s *ControllerService) getOrCreateZVOL(ctx context.Context, params *nvmeofV
 	// Build ZVOL creation parameters with ZFS properties
 	createParams := tnsapi.ZvolCreateParams{
 		Name:         params.zvolName,
-		Type:         "VOLUME",
+		Type:         datasetTypeVolume,
 		Volsize:      params.requestedCapacity,
 		Volblocksize: "16K", // Default block size for NVMe-oF
 		Comments:     params.comment,
@@ -700,7 +700,7 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 		SubsysID:   subsystem.ID,
 		DevicePath: devicePath,
-		DeviceType: "ZVOL",
+		DeviceType: datasetTypeZVOL,
 		NSID:       1, // Always NSID 1 with independent subsystems
 	})
 	if err != nil {
@@ -786,7 +786,7 @@ func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *Vol
 // This prevents orphaned resources on TrueNAS when partial failures occur.
 // If deleteStrategy is "retain", the volume is kept but CSI returns success.
 func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
-	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, "delete")
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNVMeOF, verbDelete)
 	klog.V(4).Infof("Deleting NVMe-oF volume: %s (dataset: %s, namespace ID: %d, subsystem ID: %d)",
 		meta.Name, meta.DatasetName, meta.NVMeOFNamespaceID, meta.NVMeOFSubsystemID)
 
@@ -1089,7 +1089,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 
 	// Validate that the dataset is a ZVOL (type=VOLUME), not a filesystem
 	// This can happen if detached snapshot was created incorrectly
-	if zvol.Type != "VOLUME" {
+	if zvol.Type != datasetTypeVolume {
 		klog.Errorf("Expected ZVOL (type=VOLUME) but got type=%q for dataset %s. "+
 			"This can happen if the source detached snapshot was not a ZVOL.", zvol.Type, zvol.Name)
 		// Cleanup the non-ZVOL dataset
@@ -1161,7 +1161,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 	namespace, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 		SubsysID:   subsystem.ID,
 		DevicePath: devicePath,
-		DeviceType: "ZVOL",
+		DeviceType: datasetTypeZVOL,
 		NSID:       1, // Always NSID 1 with independent subsystems
 	})
 	if err != nil {
@@ -1369,7 +1369,7 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 		newNS, err := s.apiClient.CreateNVMeOFNamespace(ctx, tnsapi.NVMeOFNamespaceCreateParams{
 			SubsysID:   subsystem.ID,
 			DevicePath: devicePath,
-			DeviceType: "ZVOL",
+			DeviceType: datasetTypeZVOL,
 			NSID:       1, // Always NSID 1 with independent subsystems
 		})
 		if err != nil {

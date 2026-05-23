@@ -111,13 +111,13 @@ func runConnectivity(ctx context.Context, url, apiKey, secretRef *string, skipTL
 		smbCount := 0
 		for i := range volumes {
 			switch volumes[i].Protocol {
-			case "nfs":
+			case protocolNFS:
 				nfsCount++
-			case "nvmeof":
+			case protocolNVMeOF:
 				nvmeCount++
-			case "iscsi":
+			case protocolISCSI:
 				iscsiCount++
-			case "smb":
+			case protocolSMB:
 				smbCount++
 			}
 		}

@@ -99,7 +99,7 @@ func validateISCSIParams(req *csi.CreateVolumeRequest) (*iscsiVolumeParams, erro
 	// Get delete strategy (default: delete)
 	deleteStrategy := params["deleteStrategy"]
 	if deleteStrategy == "" {
-		deleteStrategy = "delete"
+		deleteStrategy = verbDelete
 	}
 
 	// Check if volume should be marked as adoptable
@@ -456,7 +456,7 @@ func (s *ControllerService) getOrCreateZVOLForISCSI(ctx context.Context, params 
 	createParams := tnsapi.ZvolCreateParams{
 		Name:     params.zvolName,
 		Volsize:  params.requestedCapacity,
-		Type:     "VOLUME",
+		Type:     datasetTypeVolume,
 		Comments: params.comment,
 	}
 
@@ -507,7 +507,7 @@ func (s *ControllerService) createISCSIExtent(ctx context.Context, params *iscsi
 
 	extentParams := tnsapi.ISCSIExtentCreateParams{
 		Name: params.volumeName,
-		Type: "DISK",
+		Type: zfsLogicalDiskType,
 		Disk: "zvol/" + params.zvolName,
 	}
 
@@ -665,7 +665,7 @@ func (s *ControllerService) verifyISCSIOwnership(ctx context.Context, meta *Volu
 //
 //nolint:gocognit // Complexity from ownership verification + CSI snapshot guard + dependent clones guard + ZVOL-first delete order
 func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
-	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, "delete")
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, verbDelete)
 	klog.Infof("Deleting iSCSI volume: %s (Dataset: %s, Target: %d, Extent: %d)",
 		meta.Name, meta.DatasetID, meta.ISCSITargetID, meta.ISCSIExtentID)
 
@@ -974,7 +974,7 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 	// Step 1: Create iSCSI extent (points to the cloned ZVOL)
 	extent, err := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
 		Name:      volumeName,
-		Type:      "DISK",
+		Type:      zfsLogicalDiskType,
 		Disk:      "zvol/" + zvol.ID,
 		Blocksize: 512,
 	})
@@ -993,7 +993,7 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 	// Without groups, the target won't be advertised on any portal and won't be discoverable.
 	target, err := s.apiClient.CreateISCSITarget(ctx, tnsapi.ISCSITargetCreateParams{
 		Name: volumeName,
-		Mode: "ISCSI",
+		Mode: iscsiExtentType,
 		Groups: []tnsapi.ISCSITargetGroup{
 			{
 				Portal:    portalID,
@@ -1202,7 +1202,7 @@ func (s *ControllerService) adoptISCSIVolume(ctx context.Context, req *csi.Creat
 
 		newExtent, createErr := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
 			Name:      volumeName,
-			Type:      "DISK",
+			Type:      zfsLogicalDiskType,
 			Disk:      extentPath,
 			Blocksize: 512, // Standard block size
 		})

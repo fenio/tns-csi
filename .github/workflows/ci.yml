@@ -51,7 +51,7 @@ jobs:
         with:
           # Pinned to avoid CI churn when upstream bumps default rule strictness.
           # Bump deliberately and fix any new warnings in the same PR.
-          version: v2.11.4
+          version: v2.12.2
           args: --config .golangci.yml
 
   test:

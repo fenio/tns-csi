@@ -135,7 +135,7 @@ func getConfigFromSecret(ctx context.Context, secretRef string) (*connectionConf
 	cfg := &connectionConfig{}
 
 	// Try common key names for URL
-	for _, key := range []string{"url", "truenas-url", "TRUENAS_URL"} {
+	for _, key := range []string{keyURL, flagTruenasURL, "TRUENAS_URL"} {
 		if val, ok := secret.Data[key]; ok {
 			cfg.URL = string(val)
 			break
@@ -143,7 +143,7 @@ func getConfigFromSecret(ctx context.Context, secretRef string) (*connectionConf
 	}
 
 	// Try common key names for API key
-	for _, key := range []string{"api-key", "apiKey", "truenas-api-key", "TRUENAS_API_KEY"} {
+	for _, key := range []string{flagAPIKey, keyAPIKey, "truenas-api-key", "TRUENAS_API_KEY"} {
 		if val, ok := secret.Data[key]; ok {
 			cfg.APIKey = string(val)
 			break
@@ -310,7 +310,7 @@ func extractConfigFromSecretData(data map[string][]byte) *connectionConfig {
 	cfg := &connectionConfig{}
 
 	// Try common key names for URL
-	for _, key := range []string{"url", "truenas-url", "TRUENAS_URL"} {
+	for _, key := range []string{keyURL, flagTruenasURL, "TRUENAS_URL"} {
 		if val, ok := data[key]; ok && len(val) > 0 {
 			cfg.URL = string(val)
 			break
@@ -318,7 +318,7 @@ func extractConfigFromSecretData(data map[string][]byte) *connectionConfig {
 	}
 
 	// Try common key names for API key
-	for _, key := range []string{"api-key", "apiKey", "truenas-api-key", "TRUENAS_API_KEY"} {
+	for _, key := range []string{flagAPIKey, keyAPIKey, "truenas-api-key", "TRUENAS_API_KEY"} {
 		if val, ok := data[key]; ok && len(val) > 0 {
 			cfg.APIKey = string(val)
 			break

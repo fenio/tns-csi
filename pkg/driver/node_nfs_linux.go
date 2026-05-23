@@ -4,7 +4,7 @@ package driver
 
 // Default NFS mount options for Linux.
 // These are used when no mount options are specified in the StorageClass.
-var defaultNFSMountOptions = []string{"vers=4.2", "nolock"}
+var defaultNFSMountOptions = []string{"vers=4.2", mountOptNolock}
 
 // getNFSMountOptions merges user-provided mount options with sensible defaults.
 // User options take precedence - if a user specifies an option that conflicts

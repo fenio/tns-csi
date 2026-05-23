@@ -95,7 +95,7 @@ Examples:
 		},
 	}
 
-	cmd.Flags().StringVarP(&namespace, "namespace", "n", "default", "Kubernetes namespace")
+	cmd.Flags().StringVarP(&namespace, "namespace", "n", defaultNamespace, "Kubernetes namespace")
 	cmd.Flags().BoolVar(&showLogs, "logs", false, "Include CSI controller logs in output")
 	return cmd
 }
@@ -185,7 +185,7 @@ func runTroubleshoot(ctx context.Context, pvcName, namespace string, url, apiKey
 	cfg, err := getConnectionConfig(ctx, url, apiKey, secretRef, skipTLSVerify)
 	if err != nil {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "TrueNAS Connection",
+			Name:    componentTrueNASConnection,
 			Status:  statusError,
 			Message: "Cannot connect to TrueNAS: " + err.Error(),
 		})
@@ -198,7 +198,7 @@ func runTroubleshoot(ctx context.Context, pvcName, namespace string, url, apiKey
 	client, err := connectToTrueNAS(ctx, cfg)
 	if err != nil {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "TrueNAS Connection",
+			Name:    componentTrueNASConnection,
 			Status:  statusError,
 			Message: "Cannot connect to TrueNAS: " + err.Error(),
 		})
@@ -210,7 +210,7 @@ func runTroubleshoot(ctx context.Context, pvcName, namespace string, url, apiKey
 	defer client.Close()
 
 	result.Checks = append(result.Checks, TroubleshootCheck{
-		Name:    "TrueNAS Connection",
+		Name:    componentTrueNASConnection,
 		Status:  statusOK,
 		Message: "Connected to TrueNAS",
 	})
@@ -346,7 +346,7 @@ func checkNFSResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	shares, err := client.QueryNFSShare(ctx, sharePath)
 	if err != nil || len(shares) == 0 {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "NFS Share",
+			Name:    componentNFSShare,
 			Status:  statusError,
 			Message: "NFS share not found for path " + sharePath,
 		})
@@ -357,7 +357,7 @@ func checkNFSResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	share := shares[0]
 	if !share.Enabled {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "NFS Share",
+			Name:    componentNFSShare,
 			Status:  statusError,
 			Message: "NFS share exists but is disabled",
 		})
@@ -366,7 +366,7 @@ func checkNFSResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	}
 
 	result.Checks = append(result.Checks, TroubleshootCheck{
-		Name:    "NFS Share",
+		Name:    componentNFSShare,
 		Status:  statusOK,
 		Message: fmt.Sprintf("NFS share found and enabled (ID: %d)", share.ID),
 	})
@@ -391,7 +391,7 @@ func checkNVMeOFResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clie
 	subsystem, err := client.NVMeOFSubsystemByNQN(ctx, nqn)
 	if err != nil {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "NVMe-oF Subsystem",
+			Name:    componentNVMeOFSubsystem,
 			Status:  statusError,
 			Message: "NVMe-oF subsystem not found: " + nqn,
 		})
@@ -401,7 +401,7 @@ func checkNVMeOFResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clie
 
 	if !subsystem.Enabled {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "NVMe-oF Subsystem",
+			Name:    componentNVMeOFSubsystem,
 			Status:  statusError,
 			Message: "NVMe-oF subsystem exists but is disabled",
 		})
@@ -410,7 +410,7 @@ func checkNVMeOFResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clie
 	}
 
 	result.Checks = append(result.Checks, TroubleshootCheck{
-		Name:    "NVMe-oF Subsystem",
+		Name:    componentNVMeOFSubsystem,
 		Status:  statusOK,
 		Message: fmt.Sprintf("NVMe-oF subsystem found and enabled (ID: %d, NQN: %s)", subsystem.ID, subsystem.NQN),
 	})
@@ -425,7 +425,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 			share, err := client.QuerySMBShareByID(ctx, shareID)
 			if err != nil || share == nil {
 				result.Checks = append(result.Checks, TroubleshootCheck{
-					Name:    "SMB Share",
+					Name:    componentSMBShare,
 					Status:  statusError,
 					Message: fmt.Sprintf("SMB share not found (ID: %d)", shareID),
 				})
@@ -435,7 +435,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 
 			if !share.Enabled {
 				result.Checks = append(result.Checks, TroubleshootCheck{
-					Name:    "SMB Share",
+					Name:    componentSMBShare,
 					Status:  statusError,
 					Message: "SMB share exists but is disabled",
 				})
@@ -444,7 +444,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 			}
 
 			result.Checks = append(result.Checks, TroubleshootCheck{
-				Name:    "SMB Share",
+				Name:    componentSMBShare,
 				Status:  statusOK,
 				Message: fmt.Sprintf("SMB share found and enabled (ID: %d, Name: %s)", share.ID, share.Name),
 			})
@@ -456,7 +456,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	sharePath := dataset.Mountpoint
 	if sharePath == "" {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "SMB Share",
+			Name:    componentSMBShare,
 			Status:  statusWarning,
 			Message: "No share path found in volume properties",
 		})
@@ -466,7 +466,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	shares, err := client.QuerySMBShare(ctx, sharePath)
 	if err != nil || len(shares) == 0 {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "SMB Share",
+			Name:    componentSMBShare,
 			Status:  statusError,
 			Message: "SMB share not found for path " + sharePath,
 		})
@@ -477,7 +477,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	share := shares[0]
 	if !share.Enabled {
 		result.Checks = append(result.Checks, TroubleshootCheck{
-			Name:    "SMB Share",
+			Name:    componentSMBShare,
 			Status:  statusError,
 			Message: "SMB share exists but is disabled",
 		})
@@ -486,7 +486,7 @@ func checkSMBResourcesForTroubleshoot(ctx context.Context, client tnsapi.ClientI
 	}
 
 	result.Checks = append(result.Checks, TroubleshootCheck{
-		Name:    "SMB Share",
+		Name:    componentSMBShare,
 		Status:  statusOK,
 		Message: fmt.Sprintf("SMB share found and enabled (ID: %d, Name: %s)", share.ID, share.Name),
 	})
@@ -540,7 +540,7 @@ func checkISCSIResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clien
 			})
 			if extentErr != nil || len(extents) == 0 {
 				result.Checks = append(result.Checks, TroubleshootCheck{
-					Name:    "iSCSI Extent",
+					Name:    componentISCSIExtent,
 					Status:  statusError,
 					Message: fmt.Sprintf("iSCSI extent not found (ID: %d)", extentID),
 				})
@@ -551,14 +551,14 @@ func checkISCSIResourcesForTroubleshoot(ctx context.Context, client tnsapi.Clien
 			extent := &extents[0]
 			if !extent.Enabled {
 				result.Checks = append(result.Checks, TroubleshootCheck{
-					Name:    "iSCSI Extent",
+					Name:    componentISCSIExtent,
 					Status:  statusWarning,
 					Message: fmt.Sprintf("iSCSI extent exists but is disabled (ID: %d)", extentID),
 				})
 				result.Suggestions = append(result.Suggestions, "Enable the iSCSI extent in TrueNAS UI or via API")
 			} else {
 				result.Checks = append(result.Checks, TroubleshootCheck{
-					Name:    "iSCSI Extent",
+					Name:    componentISCSIExtent,
 					Status:  statusOK,
 					Message: fmt.Sprintf("iSCSI extent found and enabled (ID: %d)", extentID),
 				})

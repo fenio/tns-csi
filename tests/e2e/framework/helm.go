@@ -58,28 +58,28 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 		"upgrade", "--install",
 		helmReleaseName,
 		chartPath,
-		"--namespace", helmNamespace,
+		flagNamespace, helmNamespace,
 		"--create-namespace",
 		"--wait",
-		"--timeout", "8m",
-		"--set", "truenas.url=wss://" + h.config.TrueNASHost + "/api/current",
-		"--set", "truenas.apiKey=" + h.config.TrueNASAPIKey,
-		"--set", "truenas.pool=" + h.config.TrueNASPool,
-		"--set", "image.repository=" + h.config.CSIImageRepo,
-		"--set", "image.tag=" + h.config.CSIImageTag,
-		"--set", "image.pullPolicy=" + h.config.CSIImagePullPolicy,
-		"--set", "truenas.skipTLSVerify=true",
+		flagTimeout, "8m",
+		flagSet, "truenas.url=wss://" + h.config.TrueNASHost + "/api/current",
+		flagSet, "truenas.apiKey=" + h.config.TrueNASAPIKey,
+		flagSet, "truenas.pool=" + h.config.TrueNASPool,
+		flagSet, "image.repository=" + h.config.CSIImageRepo,
+		flagSet, "image.tag=" + h.config.CSIImageTag,
+		flagSet, "image.pullPolicy=" + h.config.CSIImagePullPolicy,
+		flagSet, "truenas.skipTLSVerify=true",
 	}
 
 	// Enable snapshots for all protocols (required for snapshot tests)
 	args = append(args,
-		"--set", "snapshots.enabled=true",
+		flagSet, "snapshots.enabled=true",
 	)
 
 	// Set cluster ID for multi-cluster isolation testing
 	if h.config.ClusterID != "" {
 		args = append(args,
-			"--set", "clusterID="+h.config.ClusterID,
+			flagSet, "clusterID="+h.config.ClusterID,
 		)
 	}
 
@@ -88,75 +88,75 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 	switch protocol {
 	case "nfs":
 		args = append(args,
-			"--set", "storageClasses[0].name=tns-csi-nfs",
-			"--set", "storageClasses[0].enabled=true",
-			"--set", "storageClasses[0].protocol=nfs",
-			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[0].name=tns-csi-nfs",
+			flagSet, "storageClasses[0].enabled=true",
+			flagSet, "storageClasses[0].protocol=nfs",
+			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
 		)
 	case "nvmeof":
 		args = append(args,
-			"--set", "storageClasses[0].name=tns-csi-nvmeof",
-			"--set", "storageClasses[0].enabled=true",
-			"--set", "storageClasses[0].protocol=nvmeof",
-			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
-			"--set", "storageClasses[0].transport=tcp",
-			"--set", "storageClasses[0].port=4420",
+			flagSet, "storageClasses[0].name=tns-csi-nvmeof",
+			flagSet, "storageClasses[0].enabled=true",
+			flagSet, "storageClasses[0].protocol=nvmeof",
+			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[0].transport=tcp",
+			flagSet, "storageClasses[0].port=4420",
 		)
 	case "iscsi":
 		args = append(args,
-			"--set", "storageClasses[0].name=tns-csi-iscsi",
-			"--set", "storageClasses[0].enabled=true",
-			"--set", "storageClasses[0].protocol=iscsi",
-			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
-			"--set", "storageClasses[0].port=3260",
+			flagSet, "storageClasses[0].name=tns-csi-iscsi",
+			flagSet, "storageClasses[0].enabled=true",
+			flagSet, "storageClasses[0].protocol=iscsi",
+			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[0].port=3260",
 		)
 	case protocolSMB:
 		args = append(args,
-			"--set", "storageClasses[0].name=tns-csi-smb",
-			"--set", "storageClasses[0].enabled=true",
-			"--set", "storageClasses[0].protocol=smb",
-			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[0].name=tns-csi-smb",
+			flagSet, "storageClasses[0].enabled=true",
+			flagSet, "storageClasses[0].protocol=smb",
+			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
 		)
 		if h.config.SMBUsername != "" {
 			args = append(args,
-				"--set", "storageClasses[0].smbCredentialsSecret.name=tns-csi-smb-creds",
-				"--set", "storageClasses[0].smbCredentialsSecret.namespace="+helmNamespace,
+				flagSet, "storageClasses[0].smbCredentialsSecret.name=tns-csi-smb-creds",
+				flagSet, "storageClasses[0].smbCredentialsSecret.namespace="+helmNamespace,
 			)
 		}
 	case protocolBoth, protocolAll:
 		args = append(args,
-			"--set", "storageClasses[0].name=tns-csi-nfs",
-			"--set", "storageClasses[0].enabled=true",
-			"--set", "storageClasses[0].protocol=nfs",
-			"--set", "storageClasses[0].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[0].server="+h.config.TrueNASHost,
-			"--set", "storageClasses[1].name=tns-csi-nvmeof",
-			"--set", "storageClasses[1].enabled=true",
-			"--set", "storageClasses[1].protocol=nvmeof",
-			"--set", "storageClasses[1].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[1].server="+h.config.TrueNASHost,
-			"--set", "storageClasses[1].transport=tcp",
-			"--set", "storageClasses[1].port=4420",
-			"--set", "storageClasses[2].name=tns-csi-iscsi",
-			"--set", "storageClasses[2].enabled=true",
-			"--set", "storageClasses[2].protocol=iscsi",
-			"--set", "storageClasses[2].pool="+h.config.TrueNASPool,
-			"--set", "storageClasses[2].server="+h.config.TrueNASHost,
-			"--set", "storageClasses[2].port=3260",
+			flagSet, "storageClasses[0].name=tns-csi-nfs",
+			flagSet, "storageClasses[0].enabled=true",
+			flagSet, "storageClasses[0].protocol=nfs",
+			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[1].name=tns-csi-nvmeof",
+			flagSet, "storageClasses[1].enabled=true",
+			flagSet, "storageClasses[1].protocol=nvmeof",
+			flagSet, "storageClasses[1].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[1].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[1].transport=tcp",
+			flagSet, "storageClasses[1].port=4420",
+			flagSet, "storageClasses[2].name=tns-csi-iscsi",
+			flagSet, "storageClasses[2].enabled=true",
+			flagSet, "storageClasses[2].protocol=iscsi",
+			flagSet, "storageClasses[2].pool="+h.config.TrueNASPool,
+			flagSet, "storageClasses[2].server="+h.config.TrueNASHost,
+			flagSet, "storageClasses[2].port=3260",
 		)
 		if h.config.SMBUsername != "" {
 			args = append(args,
-				"--set", "storageClasses[3].name=tns-csi-smb",
-				"--set", "storageClasses[3].enabled=true",
-				"--set", "storageClasses[3].protocol=smb",
-				"--set", "storageClasses[3].pool="+h.config.TrueNASPool,
-				"--set", "storageClasses[3].server="+h.config.TrueNASHost,
-				"--set", "storageClasses[3].smbCredentialsSecret.name=tns-csi-smb-creds",
-				"--set", "storageClasses[3].smbCredentialsSecret.namespace="+helmNamespace,
+				flagSet, "storageClasses[3].name=tns-csi-smb",
+				flagSet, "storageClasses[3].enabled=true",
+				flagSet, "storageClasses[3].protocol=smb",
+				flagSet, "storageClasses[3].pool="+h.config.TrueNASPool,
+				flagSet, "storageClasses[3].server="+h.config.TrueNASHost,
+				flagSet, "storageClasses[3].smbCredentialsSecret.name=tns-csi-smb-creds",
+				flagSet, "storageClasses[3].smbCredentialsSecret.namespace="+helmNamespace,
 			)
 		}
 	default:
@@ -173,9 +173,9 @@ func (h *HelmDeployer) Undeploy() error {
 	args := []string{
 		"uninstall",
 		helmReleaseName,
-		"--namespace", helmNamespace,
+		flagNamespace, helmNamespace,
 		"--wait",
-		"--timeout", "2m",
+		flagTimeout, "2m",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -194,7 +194,7 @@ func (h *HelmDeployer) IsDeployed() bool {
 	args := []string{
 		"status",
 		helmReleaseName,
-		"--namespace", helmNamespace,
+		flagNamespace, helmNamespace,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -224,8 +224,8 @@ func (h *HelmDeployer) waitForDeployment(name string, timeout time.Duration) err
 	args := []string{
 		"wait", "--for=condition=available",
 		"deployment/" + name,
-		"--namespace", helmNamespace,
-		"--timeout", timeout.String(),
+		flagNamespace, helmNamespace,
+		flagTimeout, timeout.String(),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
 	defer cancel()
@@ -238,8 +238,8 @@ func (h *HelmDeployer) waitForDaemonSet(name string, timeout time.Duration) erro
 	args := []string{
 		"rollout", "status",
 		"daemonset/" + name,
-		"--namespace", helmNamespace,
-		"--timeout", timeout.String(),
+		flagNamespace, helmNamespace,
+		flagTimeout, timeout.String(),
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)
 	defer cancel()

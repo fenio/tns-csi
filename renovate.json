@@ -7,8 +7,10 @@
     {
       "description": "Ignore registry.k8s.io sidecar images (updated manually)",
       "matchDatasources": ["docker"],
-      "matchPackagePrefixes": ["registry.k8s.io/"],
-      "enabled": false
+      "enabled": false,
+      "matchPackageNames": [
+        "registry.k8s.io/{/,}**"
+      ]
     },
     {
       "description": "Go modules",
@@ -19,9 +21,11 @@
     {
       "description": "Block k8s.io major version bumps",
       "matchManagers": ["gomod"],
-      "matchPackagePrefixes": ["k8s.io/"],
       "matchUpdateTypes": ["major"],
-      "enabled": false
+      "enabled": false,
+      "matchPackageNames": [
+        "k8s.io/{/,}**"
+      ]
     },
     {
       "description": "GitHub Actions",

@@ -783,7 +783,7 @@ jobs:
     if: always()
     steps:
       - name: Generate Test Summary
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const e2eResults = {

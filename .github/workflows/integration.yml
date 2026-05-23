@@ -150,7 +150,7 @@ jobs:
 
       - name: Upload PR image artifact
         if: inputs.pr != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: pr-image
           path: /tmp/tns-csi-pr-image.tar
@@ -232,7 +232,7 @@ jobs:
           ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-image
           path: /tmp
@@ -294,7 +294,7 @@ jobs:
           tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-nfs-diagnostics
           path: /tmp/test-logs/
@@ -350,7 +350,7 @@ jobs:
           ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-image
           path: /tmp
@@ -390,7 +390,7 @@ jobs:
           tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-nvmeof-diagnostics
           path: /tmp/test-logs/
@@ -431,7 +431,7 @@ jobs:
           ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-image
           path: /tmp
@@ -512,7 +512,7 @@ jobs:
           REMOTE_EOF
       - name: Upload diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-iscsi-diagnostics
           path: /tmp/test-logs/
@@ -553,7 +553,7 @@ jobs:
           ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-image
           path: /tmp
@@ -601,7 +601,7 @@ jobs:
           tail -200 /tmp/vm-console.log > /tmp/test-logs/vm-console.log 2>&1 || true
       - name: Upload diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-smb-diagnostics
           path: /tmp/test-logs/
@@ -641,7 +641,7 @@ jobs:
           ssh $SSH_OPTS ci@localhost "sudo k3s ctr images import /tmp/csi-image.tar"
       - name: Download PR image artifact
         if: inputs.pr != ''
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-image
           path: /tmp
@@ -741,7 +741,7 @@ jobs:
           REMOTE_EOF
       - name: Upload diagnostic logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-shared-diagnostics
           path: /tmp/test-logs/

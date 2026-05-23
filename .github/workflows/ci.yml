@@ -128,7 +128,7 @@ jobs:
           echo "date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
 
       - name: Build and push images
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           # Only build amd64 for faster CI (ARM64 builds via QEMU take 10+ minutes)
@@ -147,7 +147,7 @@ jobs:
 
       - name: Push latest tag (main branch only)
         if: steps.branch.outputs.is_main == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64

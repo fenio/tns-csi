@@ -8,7 +8,9 @@ package driver
 // nosharesock: force a dedicated TCP connection per mount — prevents mount failures
 // when the CIFS client reuses a session that received a negative tree connect response
 // (STATUS_BAD_NETWORK_NAME) before a new share was fully registered in Samba's config.
-var defaultSMBMountOptions = []string{"vers=3.0", "nosharesock", "file_mode=0777", "dir_mode=0777"}
+const smbVersDefault = "vers=3.0"
+
+var defaultSMBMountOptions = []string{smbVersDefault, "nosharesock", "file_mode=0777", "dir_mode=0777"}
 
 // getSMBMountOptions merges user-provided mount options with sensible defaults.
 // User options take precedence over defaults.

@@ -27,7 +27,7 @@ RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     make build
 
 # Final stage - use distroless or minimal base to avoid trigger issues
-FROM alpine:3.23
+FROM alpine:3.24
 
 # Install runtime dependencies
 # Note: apk exit code 4 means trigger scripts failed but packages are installed (expected under QEMU emulation)

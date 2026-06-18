@@ -83,7 +83,7 @@ jobs:
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
@@ -125,7 +125,7 @@ jobs:
       # this artifact and import it into the VM's k3s containerd.
       - name: Checkout PR code
         if: inputs.pr != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: refs/pull/${{ inputs.pr }}/merge
 
@@ -212,7 +212,7 @@ jobs:
       !cancelled() && needs.compute-tag.result == 'success' &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nfs' || github.event.inputs.protocol == '')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
@@ -330,7 +330,7 @@ jobs:
       !cancelled() && needs.compute-tag.result == 'success' &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'nvmeof' || github.event.inputs.protocol == '')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
@@ -411,7 +411,7 @@ jobs:
       !cancelled() && needs.compute-tag.result == 'success' &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'iscsi' || github.event.inputs.protocol == '')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
@@ -533,7 +533,7 @@ jobs:
       !cancelled() && needs.compute-tag.result == 'success' &&
       (github.event.inputs.protocol == 'all' || github.event.inputs.protocol == 'smb' || github.event.inputs.protocol == '')
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6
@@ -621,7 +621,7 @@ jobs:
     if: |
       !cancelled() && needs.compute-tag.result == 'success'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.pr != '' && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: actions/setup-go@v6

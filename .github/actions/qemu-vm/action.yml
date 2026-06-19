@@ -244,6 +244,16 @@ runs:
         echo "--- tailscale ping ---"
         sudo tailscale ping -c 2 "$HOST" 2>&1 | head -5 || echo "(tailscale ping failed)"
 
+        echo "--- TCP port probe (refused everywhere => ACL/container-net; selective => service bind) ---"
+        for p in 22 80 443 3260 2049 445 4420; do
+          if timeout 5 bash -c "exec 3<>/dev/tcp/$HOST/$p" 2>/dev/null; then
+            echo "port $p: OPEN"
+            exec 3>&- 2>/dev/null || true
+          else
+            echo "port $p: refused/closed"
+          fi
+        done
+
         echo "--- HTTPS connectivity ---"
         curl -sk --connect-timeout 10 --max-time 15 "https://$HOST" >/dev/null 2>/tmp/curl.err
         rc=$?

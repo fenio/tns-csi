@@ -228,11 +228,35 @@ runs:
       run: |
         SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
         echo "Checking connectivity to TrueNAS (${{ inputs.truenas_host }}) from VM..."
-        ssh $SSH_OPTS ci@localhost "
-          curl -sk --connect-timeout 10 --max-time 15 https://${{ inputs.truenas_host }} >/dev/null 2>&1 \
-            && echo 'TrueNAS API is reachable from VM' \
-            || { echo '::error::TrueNAS is NOT reachable from VM'; exit 1; }
-        "
+        ssh $SSH_OPTS ci@localhost bash -s <<'EOF'
+        HOST='${{ inputs.truenas_host }}'
+
+        echo "--- tailscale status (VM) ---"
+        sudo tailscale status || echo "(tailscale status failed)"
+
+        echo "--- DNS resolution check ---"
+        if getent hosts "$HOST" >/dev/null 2>&1; then
+          echo "RESOLVE: ok (host resolves)"
+        else
+          echo "RESOLVE: FAILED (host does not resolve in VM)"
+        fi
+
+        echo "--- tailscale ping ---"
+        sudo tailscale ping -c 2 "$HOST" 2>&1 | head -5 || echo "(tailscale ping failed)"
+
+        echo "--- HTTPS connectivity ---"
+        curl -sk --connect-timeout 10 --max-time 15 "https://$HOST" >/dev/null 2>/tmp/curl.err
+        rc=$?
+        echo "curl exit code: $rc"
+        case $rc in
+          0)  echo 'TrueNAS API is reachable from VM'; exit 0 ;;
+          6)  echo '::error::curl 6 = could not resolve host -> MagicDNS/DNS problem (need --accept-dns or use the 100.x IP)' ;;
+          7)  echo '::error::curl 7 = could not connect / no route -> tailnet ACL likely blocks the CI node from TrueNAS' ;;
+          28) echo '::error::curl 28 = timeout -> firewall or TrueNAS host down' ;;
+          *)  echo "::error::curl failed with code $rc"; sed 's/^/curl: /' /tmp/curl.err ;;
+        esac
+        exit 1
+        EOF
 
     - name: Fetch kubeconfig from VM
       shell: bash

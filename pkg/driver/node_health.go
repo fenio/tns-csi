@@ -23,6 +23,11 @@ var (
 	errISCSIStateUnknown = errors.New("could not determine iSCSI session state")
 )
 
+// sysClassNVMePath is the sysfs directory exposing NVMe controllers.
+// It is a variable so tests can point it at a controlled directory instead
+// of depending on the NVMe devices present on the host running the tests.
+var sysClassNVMePath = "/sys/class/nvme"
+
 // VolumeHealth represents the health status of a volume.
 type VolumeHealth struct {
 	Message  string
@@ -311,7 +316,7 @@ func getNVMeControllerState(devicePath string) (string, error) {
 	}
 
 	// Read state from /sys/class/nvme/<ctrl>/state
-	statePath := "/sys/class/nvme/" + ctrlName + "/state"
+	statePath := filepath.Join(sysClassNVMePath, ctrlName, "state")
 	data, err := os.ReadFile(statePath) //nolint:gosec // path is constructed from device name
 	if err != nil {
 		return "", fmt.Errorf("failed to read NVMe state: %w", err)

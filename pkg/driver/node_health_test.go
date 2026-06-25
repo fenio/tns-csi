@@ -1,6 +1,8 @@
 package driver
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -117,9 +119,24 @@ func TestCheckBasicHealth(t *testing.T) {
 }
 
 func TestGetNVMeControllerState(t *testing.T) {
+	// Point the sysfs lookup at a controlled directory so the test does not
+	// depend on which NVMe devices happen to be present on the host runner.
+	sysRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sysRoot, "nvme0"), 0o755); err != nil {
+		t.Fatalf("failed to set up fake sysfs: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sysRoot, "nvme0", "state"), []byte("live\n"), 0o600); err != nil {
+		t.Fatalf("failed to write fake state: %v", err)
+	}
+
+	origPath := sysClassNVMePath
+	sysClassNVMePath = sysRoot
+	t.Cleanup(func() { sysClassNVMePath = origPath })
+
 	tests := []struct {
 		name       string
 		devicePath string
+		wantState  string
 		wantErr    bool
 	}{
 		{
@@ -128,20 +145,33 @@ func TestGetNVMeControllerState(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "nvme device - likely not present",
+			name:       "nvme device - controller present",
 			devicePath: "/dev/nvme0n1",
-			wantErr:    true, // Will fail on most test systems without NVMe
+			wantState:  "live",
+		},
+		{
+			name:       "nvme device - controller absent",
+			devicePath: "/dev/nvme9n1",
+			wantErr:    true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := getNVMeControllerState(tt.devicePath)
-			if tt.wantErr && err == nil {
-				t.Errorf("getNVMeControllerState(%q) expected error, got nil", tt.devicePath)
+			state, err := getNVMeControllerState(tt.devicePath)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("getNVMeControllerState(%q) expected error, got nil", tt.devicePath)
+				}
+				return
 			}
-			// If we don't expect an error but get one, that's okay - the device may not exist
-			// This test is mainly to ensure the function doesn't panic
+			if err != nil {
+				t.Errorf("getNVMeControllerState(%q) unexpected error: %v", tt.devicePath, err)
+				return
+			}
+			if state != tt.wantState {
+				t.Errorf("getNVMeControllerState(%q) = %q, want %q", tt.devicePath, state, tt.wantState)
+			}
 		})
 	}
 }

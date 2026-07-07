@@ -24,6 +24,10 @@ import (
 const (
 	methodAuthLoginWithAPIKey = "auth.login_with_api_key" //nolint:gosec // API method name, not a credential
 
+	// errNameNotAuthenticated is reported by the storage API when the
+	// WebSocket session is not (or no longer) authenticated.
+	errNameNotAuthenticated = "ENOTAUTHENTICATED"
+
 	filterFieldName = "name"
 	filterFieldPath = "path"
 
@@ -89,6 +93,12 @@ type Client struct {
 	closed        bool
 	reconnecting  bool
 	skipTLSVerify bool // Skip TLS certificate verification
+
+	// reauthMu serializes session re-authentication after ENOTAUTHENTICATED;
+	// lastReauthAt lets concurrent failing calls reuse a just-completed re-auth
+	// instead of each performing its own.
+	reauthMu     sync.Mutex
+	lastReauthAt time.Time
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
@@ -423,6 +433,44 @@ func (c *Client) authenticateDirect() error {
 	return nil
 }
 
+// isSessionAuthError reports whether err is an ENOTAUTHENTICATED error from
+// the storage API — the WebSocket session lost its authentication while the
+// connection itself stayed alive (observed after storage middleware restarts:
+// protocol-level pings keep succeeding, so reconnect() never fires, yet every
+// RPC fails). Unlike isAuthenticationError (permanent failures such as an
+// invalid API key), this condition is recoverable by re-authenticating on the
+// live connection.
+func isSessionAuthError(err error) bool {
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.ErrorName == errNameNotAuthenticated {
+		return true
+	}
+	return apiErr.Data != nil && apiErr.Data.ErrorName == errNameNotAuthenticated
+}
+
+// reauthenticate restores session authentication on the live connection after
+// an ENOTAUTHENTICATED response. Serialized so that many concurrent calls
+// failing at once trigger a single auth.login_with_api_key: callers that
+// arrive right after a completed re-authentication reuse its result.
+func (c *Client) reauthenticate() error {
+	c.reauthMu.Lock()
+	defer c.reauthMu.Unlock()
+
+	// Another caller has just re-authenticated this session — reuse it.
+	if time.Since(c.lastReauthAt) < time.Second {
+		return nil
+	}
+
+	if err := c.authenticate(); err != nil {
+		return err
+	}
+	c.lastReauthAt = time.Now()
+	return nil
+}
+
 // isConnectionError checks if the error is a connection-related error that should trigger a retry.
 func isConnectionError(err error) bool {
 	if err == nil {
@@ -456,6 +504,21 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 		}
 
 		lastErr = err
+
+		// Session-level auth loss: the storage system dropped our session
+		// without closing the WebSocket, so the connection looks healthy and
+		// reconnect() never fires — without re-authentication every call
+		// would fail with ENOTAUTHENTICATED forever. Re-authenticate on the
+		// live connection and retry. The auth call itself is excluded to
+		// avoid recursion.
+		if method != methodAuthLoginWithAPIKey && isSessionAuthError(err) {
+			klog.Warningf("Request %s failed with %s on a live connection (attempt %d/%d), re-authenticating...",
+				method, errNameNotAuthenticated, attempt, maxRetries)
+			if raErr := c.reauthenticate(); raErr != nil {
+				return fmt.Errorf("re-authentication after %s failed: %w", errNameNotAuthenticated, raErr)
+			}
+			continue
+		}
 
 		// Check if this is a retryable connection error
 		if !isConnectionError(err) {

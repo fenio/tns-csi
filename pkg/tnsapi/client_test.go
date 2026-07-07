@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -878,5 +879,200 @@ func TestQueryPool(t *testing.T) {
 				t.Errorf("Pool free = %d, want %d", pool.Properties.Free.Parsed, tt.wantFree)
 			}
 		})
+	}
+}
+
+// enotauthenticatedError mimics the error the storage API returns when the
+// WebSocket session has lost its authentication (e.g. middleware restart on
+// the storage side that keeps TCP connections alive).
+func enotauthenticatedError() *Error {
+	return &Error{
+		Code:    -32001,
+		Message: "Method call error",
+		Data: &ErrorData{
+			Error:     207,
+			ErrorName: "ENOTAUTHENTICATED",
+			Reason:    "[ENOTAUTHENTICATED] Not authenticated",
+		},
+	}
+}
+
+func TestIsSessionAuthError(t *testing.T) {
+	tests := []struct {
+		err  error
+		name string
+		want bool
+	}{
+		{name: "nil error", err: nil, want: false},
+		{name: "plain error", err: errors.New("boom"), want: false},
+		{name: "connection error", err: ErrConnectionClosed, want: false},
+		{name: "ENOTAUTHENTICATED in data", err: enotauthenticatedError(), want: true},
+		{
+			name: "ENOTAUTHENTICATED in top-level errname",
+			err:  &Error{ErrorName: "ENOTAUTHENTICATED", Reason: "[ENOTAUTHENTICATED] Not authenticated"},
+			want: true,
+		},
+		{
+			name: "wrapped ENOTAUTHENTICATED",
+			err:  fmt.Errorf("call failed: %w", enotauthenticatedError()),
+			want: true,
+		},
+		{
+			name: "other API error",
+			err:  &Error{Code: 401, Message: "invalid API key"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSessionAuthError(tt.err); got != tt.want {
+				t.Errorf("isSessionAuthError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCallReauthenticatesOnSessionAuthLoss reproduces the session-loss
+// scenario: the server starts answering ENOTAUTHENTICATED on a perfectly
+// healthy connection. Call() must re-authenticate on the live socket and
+// retry the original request instead of failing forever.
+func TestCallReauthenticatesOnSessionAuthLoss(t *testing.T) {
+	server := newMockWSServer()
+	defer server.Close()
+
+	var mu sync.Mutex
+	authCalls := 0
+	dataCalls := 0
+
+	server.handler = func(conn *websocket.Conn) {
+		ctx := context.Background()
+		for {
+			_, message, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+
+			var req Request
+			if err := json.Unmarshal(message, &req); err != nil {
+				continue
+			}
+
+			resp := Response{ID: req.ID}
+
+			mu.Lock()
+			switch req.Method {
+			case "auth.login_with_api_key":
+				authCalls++
+				resp.Result = json.RawMessage(`true`)
+			default:
+				dataCalls++
+				if dataCalls == 1 {
+					// Session silently dropped server-side: the connection
+					// stays open, but calls are no longer authenticated.
+					resp.Error = enotauthenticatedError()
+				} else {
+					resp.Result = json.RawMessage(`true`)
+				}
+			}
+			mu.Unlock()
+
+			respBytes, err := json.Marshal(resp)
+			if err == nil {
+				//nolint:errcheck,gosec // test server write
+				conn.Write(ctx, websocket.MessageText, respBytes)
+			}
+		}
+	}
+
+	client, err := NewClient(server.URL(), "test-api-key", false)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer cleanupClient(client)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var result bool
+	if err := client.Call(ctx, "test.method", nil, &result); err != nil {
+		t.Fatalf("Call() after session auth loss should recover, got error: %v", err)
+	}
+	if !result {
+		t.Error("Call() result = false, want true")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// initial NewClient auth + one re-auth triggered by ENOTAUTHENTICATED
+	if authCalls != 2 {
+		t.Errorf("auth.login_with_api_key calls = %d, want 2 (initial + re-auth)", authCalls)
+	}
+	if dataCalls != 2 {
+		t.Errorf("data calls = %d, want 2 (failed + retried)", dataCalls)
+	}
+}
+
+// TestAuthCallDoesNotRecurseOnSessionAuthLoss guards against infinite
+// recursion: if auth.login_with_api_key itself fails with ENOTAUTHENTICATED,
+// Call() must NOT trigger another re-authentication.
+func TestAuthCallDoesNotRecurseOnSessionAuthLoss(t *testing.T) {
+	server := newMockWSServer()
+	defer server.Close()
+
+	var mu sync.Mutex
+	authCalls := 0
+
+	server.handler = func(conn *websocket.Conn) {
+		ctx := context.Background()
+		for {
+			_, message, err := conn.Read(ctx)
+			if err != nil {
+				return
+			}
+
+			var req Request
+			if err := json.Unmarshal(message, &req); err != nil {
+				continue
+			}
+
+			resp := Response{ID: req.ID}
+
+			mu.Lock()
+			authCalls++
+			if authCalls == 1 {
+				// Let NewClient succeed
+				resp.Result = json.RawMessage(`true`)
+			} else {
+				resp.Error = enotauthenticatedError()
+			}
+			mu.Unlock()
+
+			respBytes, err := json.Marshal(resp)
+			if err == nil {
+				//nolint:errcheck,gosec // test server write
+				conn.Write(ctx, websocket.MessageText, respBytes)
+			}
+		}
+	}
+
+	client, err := NewClient(server.URL(), "test-api-key", false)
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+	defer cleanupClient(client)
+
+	// Force lastReauthAt out of the reuse window and re-authenticate: the
+	// auth call fails with ENOTAUTHENTICATED and must surface the error
+	// without recursing.
+	if err := client.reauthenticate(); err == nil {
+		t.Fatal("reauthenticate() should fail when auth itself gets ENOTAUTHENTICATED")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	// initial NewClient auth + exactly ONE failed re-auth attempt
+	if authCalls != 2 {
+		t.Errorf("auth.login_with_api_key calls = %d, want 2 (no recursion)", authCalls)
 	}
 }

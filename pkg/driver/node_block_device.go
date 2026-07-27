@@ -76,15 +76,9 @@ func waitForDeviceInitialization(ctx context.Context, devicePath string) error {
 func forceDeviceRescan(ctx context.Context, devicePath string) error {
 	klog.V(4).Infof("Forcing device rescan for %s to clear kernel caches", devicePath)
 
-	// Step 1: Sync and flush device buffers
-	syncCtx, syncCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer syncCancel()
-	syncCmd := exec.CommandContext(syncCtx, "sync")
-	if output, err := syncCmd.CombinedOutput(); err != nil {
-		klog.V(4).Infof("sync command failed: %v, output: %s", err, string(output))
-	}
-
-	// Step 2: Flush device buffers
+	// Step 1: Flush only the target device. A host-wide sync can block
+	// indefinitely on an unrelated stale network filesystem and prevent this
+	// volume from reaching NodeStageVolume's mount step.
 	flushCtx, flushCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer flushCancel()
 	flushCmd := exec.CommandContext(flushCtx, "blockdev", "--flushbufs", devicePath)
@@ -94,7 +88,7 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 		klog.V(4).Infof("Flushed device buffers for %s", devicePath)
 	}
 
-	// Step 3: Trigger udev to re-process the device
+	// Step 2: Trigger udev to re-process the device
 	udevCtx, udevCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer udevCancel()
 	udevCmd := exec.CommandContext(udevCtx, "udevadm", "trigger", "--action=change", devicePath)
@@ -104,7 +98,7 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 		klog.V(4).Infof("Triggered udev change event for %s", devicePath)
 	}
 
-	// Step 4: Wait for udev to settle
+	// Step 3: Wait for udev to settle
 	settleCtx, settleCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer settleCancel()
 	settleCmd := exec.CommandContext(settleCtx, "udevadm", "settle", "--timeout=5")

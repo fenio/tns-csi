@@ -32,6 +32,7 @@ var (
 	ErrNVMeEmptyNQN                = errors.New("empty NQN in sysfs")
 	ErrNVMeNotNVMeDevice           = errors.New("not an NVMe device")
 	ErrNVMeNonNVMeStagingDevice    = errors.New("staging path resolved to non-NVMe device")
+	ErrNVMeCleanupTimeout          = errors.New("timeout waiting for NVMe-oF controller cleanup")
 )
 
 // NVMe subsystem states.
@@ -42,6 +43,8 @@ const (
 // defaultNVMeOFMountOptions are sensible defaults for NVMe-oF filesystem mounts.
 // These are merged with user-specified mount options from StorageClass.
 var defaultNVMeOFMountOptions = []string{zfsNoatime}
+
+const nvmeStagingMetadataSuffix = ".tns-csi-nvmeof"
 
 // nvmeOFConnectionParams holds validated NVMe-oF connection parameters.
 // With independent subsystems per volume, NSID is always 1.
@@ -65,6 +68,9 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 	params, err := s.validateNVMeOFParams(volumeContext)
 	if err != nil {
 		return nil, err
+	}
+	if err := writeNVMeStagingNQN(stagingTargetPath, params.nqn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to persist NVMe-oF staging metadata: %v", err)
 	}
 
 	isBlockVolume := volumeCapability.GetBlock() != nil
@@ -400,6 +406,23 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 			klog.V(4).Infof("Derived NVMe-oF NQN from staging path %s: %s", stagingTargetPath, nqn)
 		}
 	}
+	if nqn == "" {
+		// A missing path after a completed unstage is an idempotent success. If the
+		// path still exists, losing its NQN is unsafe because a live session may leak.
+		if _, statErr := os.Lstat(stagingTargetPath); os.IsNotExist(statErr) {
+			klog.V(4).Infof("Staging path %s no longer exists; volume %s is already unstaged", stagingTargetPath, volumeID)
+			return &csi.NodeUnstageVolumeResponse{}, nil
+		}
+		return nil, status.Errorf(codes.Internal,
+			"cannot determine NQN for NVMe-oF volume %s at staging path %s; refusing to report successful unstage",
+			volumeID, stagingTargetPath)
+	}
+
+	// CSI does not include VolumeContext in NodeUnstageVolume retries. Persist the
+	// NQN before unmounting so a failed disconnect cannot be retried as NFS.
+	if err := writeNVMeStagingNQN(stagingTargetPath, nqn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to persist NVMe-oF staging metadata before unmount: %v", err)
+	}
 
 	// Check if mounted and unmount if necessary
 	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
@@ -414,25 +437,27 @@ func (s *NodeService) unstageNVMeOFVolume(ctx context.Context, req *csi.NodeUnst
 		}
 	}
 
-	// If we don't have NQN, we can't disconnect
-	if nqn == "" {
-		klog.Warningf("Cannot determine NQN for volume %s - skipping NVMe-oF disconnect", volumeID)
-		return &csi.NodeUnstageVolumeResponse{}, nil
-	}
-
 	// With independent subsystems, always disconnect (no shared subsystem to worry about)
 	klog.V(4).Infof("Disconnecting NVMe-oF subsystem for volume %s: NQN=%s", volumeID, nqn)
 	if err := s.disconnectNVMeOF(ctx, nqn); err != nil {
-		klog.Warningf("Failed to disconnect NVMe-oF device (continuing anyway): %v", err)
-	} else {
-		klog.V(4).Infof("Disconnected from NVMe-oF target: %s", nqn)
+		return nil, status.Errorf(codes.Internal, "failed to disconnect NVMe-oF volume %s (NQN %s): %v", volumeID, nqn, err)
 	}
+	if err := removeNVMeStagingNQN(stagingTargetPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "disconnected NVMe-oF volume %s but failed to remove staging metadata: %v", volumeID, err)
+	}
+	klog.Infof("Disconnected NVMe-oF volume %s from target %s", volumeID, nqn)
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
 // deriveNQNFromStagingPath derives the NVMe-oF NQN from Linux mount/device metadata.
 func (s *NodeService) deriveNQNFromStagingPath(ctx context.Context, stagingTargetPath string) (string, error) {
+	if nqn, err := readNVMeStagingNQN(stagingTargetPath); err == nil && nqn != "" {
+		return nqn, nil
+	} else if err != nil {
+		klog.Warningf("Failed to read NVMe-oF staging metadata for %s: %v; falling back to device metadata", stagingTargetPath, err)
+	}
+
 	devicePath, err := s.getStagedNVMeDevicePath(ctx, stagingTargetPath)
 	if err != nil {
 		return "", err
@@ -455,6 +480,43 @@ func (s *NodeService) deriveNQNFromStagingPath(ctx context.Context, stagingTarge
 		return "", fmt.Errorf("%s: %w", nqnPath, ErrNVMeEmptyNQN)
 	}
 	return nqn, nil
+}
+
+func nvmeStagingMetadataPath(stagingTargetPath string) string {
+	return stagingTargetPath + nvmeStagingMetadataSuffix
+}
+
+func writeNVMeStagingNQN(stagingTargetPath, nqn string) error {
+	if strings.TrimSpace(nqn) == "" {
+		return ErrNVMeEmptyNQN
+	}
+	if err := os.MkdirAll(filepath.Dir(stagingTargetPath), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(nvmeStagingMetadataPath(stagingTargetPath), []byte(nqn+"\n"), 0o600)
+}
+
+func readNVMeStagingNQN(stagingTargetPath string) (string, error) {
+	data, err := os.ReadFile(nvmeStagingMetadataPath(stagingTargetPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	nqn := strings.TrimSpace(string(data))
+	if nqn == "" {
+		return "", ErrNVMeEmptyNQN
+	}
+	return nqn, nil
+}
+
+func removeNVMeStagingNQN(stagingTargetPath string) error {
+	err := os.Remove(nvmeStagingMetadataPath(stagingTargetPath))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 // getStagedNVMeDevicePath resolves the NVMe device backing a staging path.

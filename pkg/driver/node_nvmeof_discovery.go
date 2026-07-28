@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -27,36 +28,52 @@ func getSubsystemState(ctx context.Context, nqn string) string {
 		return ""
 	}
 
-	// Parse the JSON to find the subsystem and its state
-	// Look for the NQN and then find the State field in the same subsystem block
-	lines := strings.Split(string(output), "\n")
-	foundNQN := false
-	for _, line := range lines {
-		if strings.Contains(line, nqn) {
-			foundNQN = true
-		}
-		// Once we found the NQN, look for the State field
-		if foundNQN && strings.Contains(line, "\"State\"") {
-			// Extract state value: "State" : "live"
-			parts := strings.Split(line, "\"")
-			for i, part := range parts {
-				if part == "State" && i+2 < len(parts) {
-					state := strings.TrimSpace(parts[i+2])
-					klog.V(4).Infof("Subsystem %s state: %s", nqn, state)
-					return state
-				}
-			}
-		}
-		// Stop if we hit the next subsystem (next NQN)
-		if foundNQN && strings.Contains(line, "\"NQN\"") && !strings.Contains(line, nqn) {
-			break
-		}
+	subsystem, parseErr := findNVMeSubsystem(output, nqn)
+	if parseErr != nil {
+		klog.V(4).Infof("Failed to parse nvme list-subsys output: %v", parseErr)
+		return ""
 	}
-
-	if foundNQN {
-		klog.V(4).Infof("Found NQN %s but could not extract state", nqn)
+	if subsystem != nil && len(subsystem.Paths) > 0 {
+		state := subsystem.Paths[0].State
+		klog.V(4).Infof("Subsystem %s state: %s", nqn, state)
+		return state
 	}
 	return ""
+}
+
+type nvmeListSubsystemsOutput struct {
+	Subsystems []nvmeListSubsystem `json:"Subsystems"`
+}
+
+type nvmeListSubsystem struct {
+	NQN          string         `json:"NQN"`
+	SubsystemNQN string         `json:"SubsystemNQN"`
+	Paths        []nvmeListPath `json:"Paths"`
+}
+
+type nvmeListPath struct {
+	Name  string `json:"Name"`
+	State string `json:"State"`
+}
+
+func (s nvmeListSubsystem) nqn() string {
+	if s.SubsystemNQN != "" {
+		return s.SubsystemNQN
+	}
+	return s.NQN
+}
+
+func findNVMeSubsystem(output []byte, nqn string) (*nvmeListSubsystem, error) {
+	var parsed nvmeListSubsystemsOutput
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		return nil, err
+	}
+	for i := range parsed.Subsystems {
+		if parsed.Subsystems[i].nqn() == nqn {
+			return &parsed.Subsystems[i], nil
+		}
+	}
+	return nil, nil //nolint:nilnil // nil means the exact NQN was not found
 }
 
 // waitForSubsystemLive waits for the NVMe subsystem to reach "live" state.
@@ -179,62 +196,16 @@ func (s *NodeService) runNVMeListSubsys(ctx context.Context) ([]byte, error) {
 // parseNVMeListSubsysOutputForNQN parses nvme list-subsys JSON output to find device path.
 // With independent subsystems, NSID is always 1.
 func (s *NodeService) parseNVMeListSubsysOutputForNQN(output []byte, nqn string) string {
-	lines := strings.Split(string(output), "\n")
-	foundNQN := false
-
-	for i, line := range lines {
-		if !strings.Contains(line, nqn) {
-			continue
-		}
-
-		foundNQN = true
-		devicePath := s.extractDevicePathFromLinesForNQN(lines, i, nqn)
-		if devicePath != "" {
+	subsystem, err := findNVMeSubsystem(output, nqn)
+	if err != nil || subsystem == nil {
+		return ""
+	}
+	for _, path := range subsystem.Paths {
+		if isNVMeControllerName(path.Name) {
+			devicePath := fmt.Sprintf("/dev/%sn1", path.Name)
+			klog.V(4).Infof("Found NVMe device from list-subsys: %s (controller: %s, NQN: %s)",
+				devicePath, path.Name, nqn)
 			return devicePath
-		}
-	}
-
-	if foundNQN {
-		klog.Warningf("Found NQN but could not extract device name, falling back to sysfs")
-	}
-	return ""
-}
-
-// extractDevicePathFromLinesForNQN searches for controller name in lines after the NQN line.
-// With independent subsystems, NSID is always 1.
-func (s *NodeService) extractDevicePathFromLinesForNQN(lines []string, startIdx int, nqn string) string {
-	// Look ahead for the "Name" field in the Paths section (up to 20 lines)
-	endIdx := startIdx + 20
-	if endIdx > len(lines) {
-		endIdx = len(lines)
-	}
-
-	for j := startIdx; j < endIdx; j++ {
-		if !strings.Contains(lines[j], "\"Name\"") || !strings.Contains(lines[j], "nvme") {
-			continue
-		}
-
-		// Extract controller name - format: "Name" : "nvme0"
-		parts := strings.Split(lines[j], "\"")
-		controllerName := s.extractControllerFromParts(parts)
-		if controllerName == "" {
-			continue
-		}
-
-		// With independent subsystems, NSID is always 1
-		devicePath := fmt.Sprintf("/dev/%sn1", controllerName)
-		klog.V(4).Infof("Found NVMe device from list-subsys: %s (controller: %s, NQN: %s)",
-			devicePath, controllerName, nqn)
-		return devicePath
-	}
-	return ""
-}
-
-// extractControllerFromParts extracts controller name from parsed JSON parts.
-func (s *NodeService) extractControllerFromParts(parts []string) string {
-	for k := range len(parts) - 1 {
-		if parts[k] == "Name" && k+2 < len(parts) {
-			return strings.TrimSpace(parts[k+2])
 		}
 	}
 	return ""
@@ -436,28 +407,13 @@ func (s *NodeService) findNVMeDeviceByNQNWithController(ctx context.Context, nqn
 
 // findControllerForNQN parses nvme list-subsys output to find the controller name for a given NQN.
 func (s *NodeService) findControllerForNQN(output, nqn string) string {
-	lines := strings.Split(output, "\n")
-	foundNQN := false
-
-	for i, line := range lines {
-		if strings.Contains(line, nqn) {
-			foundNQN = true
-		}
-		if foundNQN && strings.Contains(line, "\"Name\"") && strings.Contains(line, "nvme") {
-			// Extract controller name from "Name" : "nvme0"
-			parts := strings.Split(line, "\"")
-			for k := range len(parts) - 1 {
-				if parts[k] == "Name" && k+2 < len(parts) {
-					name := strings.TrimSpace(parts[k+2])
-					if strings.HasPrefix(name, "nvme") && !strings.Contains(name, "n") {
-						return name
-					}
-				}
-			}
-		}
-		// Reset if we've moved past this subsystem's section
-		if foundNQN && i > 0 && strings.Contains(line, "NQN") && !strings.Contains(line, nqn) {
-			foundNQN = false
+	subsystem, err := findNVMeSubsystem([]byte(output), nqn)
+	if err != nil || subsystem == nil {
+		return ""
+	}
+	for _, path := range subsystem.Paths {
+		if isNVMeControllerName(path.Name) {
+			return path.Name
 		}
 	}
 	return ""

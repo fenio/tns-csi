@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +23,9 @@ import (
 var (
 	ErrISCSIAdmNotFound     = errors.New("iscsiadm command not found - please install open-iscsi")
 	ErrISCSIDeviceNotFound  = errors.New("iSCSI device not found")
+	ErrISCSIDeviceAmbiguous = errors.New("multiple iSCSI devices found")
+	ErrISCSIDeviceInvalid   = errors.New("invalid iSCSI device state")
+	ErrISCSINotBlockDevice  = errors.New("iSCSI device is not a block device")
 	ErrISCSIDeviceTimeout   = errors.New("timeout waiting for iSCSI device to appear")
 	ErrISCSILoginFailed     = errors.New("failed to login to iSCSI target")
 	ErrISCSIDiscoveryFailed = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
@@ -58,6 +64,22 @@ type iscsiConnectionParams struct {
 	lun    int
 }
 
+type iscsiDeviceDiscoveryConfig struct {
+	validateDevice     func(string) error
+	sessionClassDir    string
+	connectionClassDir string
+	deviceDir          string
+}
+
+func defaultISCSIDeviceDiscoveryConfig() *iscsiDeviceDiscoveryConfig {
+	return &iscsiDeviceDiscoveryConfig{
+		validateDevice:     validateISCSIBlockDevice,
+		sessionClassDir:    "/sys/class/iscsi_session",
+		connectionClassDir: "/sys/class/iscsi_connection",
+		deviceDir:          "/dev",
+	}
+}
+
 // stageISCSIVolume stages an iSCSI volume by logging into the target.
 // It uses a retry mechanism to handle transient device stability issues.
 func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVolumeRequest, volumeContext map[string]string) (*csi.NodeStageVolumeResponse, error) {
@@ -76,10 +98,16 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	klog.V(4).Infof("Staging iSCSI volume %s (block mode: %v): server=%s:%s, IQN=%s, LUN=%d, dataset=%s",
 		volumeID, isBlockVolume, params.server, params.port, params.iqn, params.lun, datasetName)
 
-	// Try to reuse existing connection (idempotency)
-	if devicePath, findErr := s.findISCSIDevice(ctx, params); findErr == nil && devicePath != "" {
+	// Try to reuse an existing connection. Only a definitive not-found result
+	// may fall through to login; ambiguous or unreadable identity state must
+	// not mutate host sessions.
+	devicePath, findErr := s.findISCSIDevice(ctx, params)
+	if findErr == nil && devicePath != "" {
 		klog.V(4).Infof("iSCSI device already connected at %s - reusing existing connection", devicePath)
 		return s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	}
+	if findErr != nil && !errors.Is(findErr, ErrISCSIDeviceNotFound) {
+		return nil, iscsiDiscoveryStatusError(findErr)
 	}
 
 	// Check if iscsiadm is installed
@@ -114,6 +142,9 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 		// Wait for device to appear
 		devicePath, err := s.waitForISCSIDevice(ctx, params, 30*time.Second)
 		if err != nil {
+			if !errors.Is(err, ErrISCSIDeviceTimeout) && !errors.Is(err, ErrISCSIDeviceNotFound) {
+				return nil, iscsiDiscoveryStatusError(err)
+			}
 			lastErr = err
 			klog.Warningf("iSCSI device wait failed on attempt %d: %v", attempt, err)
 			// Cleanup: logout before retry
@@ -155,6 +186,13 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 
 	// All retries exhausted
 	return nil, status.Errorf(codes.Internal, "Failed to stage iSCSI volume after %d attempts: %v", maxRetries, lastErr)
+}
+
+func iscsiDiscoveryStatusError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return status.FromContextError(err).Err()
+	}
+	return status.Errorf(codes.FailedPrecondition, "cannot safely identify iSCSI device: %v", err)
 }
 
 // validateISCSIParams validates and extracts iSCSI connection parameters from volume context.
@@ -285,84 +323,289 @@ func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnec
 
 // findISCSIDevice finds the device path for an iSCSI LUN.
 func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnectionParams) (string, error) {
-	// Query active sessions with detail level 3 to see attached devices
-	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
+	config := s.iscsiDiscovery
+	if config == nil ||
+		config.sessionClassDir == "" ||
+		config.connectionClassDir == "" ||
+		config.deviceDir == "" ||
+		config.validateDevice == nil {
 
-	cmd := iscsiadmCmd(sessionCtx, "-m", "session", "-P", "3")
-	output, err := cmd.CombinedOutput()
+		config = defaultISCSIDeviceDiscoveryConfig()
+	}
 
-	// Always log the output for debugging
-	klog.Infof("iscsiadm -m session -P 3: err=%v, output:\n%s", err, string(output))
-
+	devicePath, err := findISCSIDeviceInSysfs(ctx, config, params)
 	if err != nil {
-		return "", ErrISCSIDeviceNotFound
+		klog.V(4).Infof("iSCSI sysfs lookup failed for IQN %s LUN %d: %v", params.iqn, params.lun, err)
+		return "", err
 	}
 
-	deviceName := parseISCSISessionDevice(string(output), params.iqn)
-	if deviceName == "" {
-		klog.Infof("parseISCSISessionDevice found no device for IQN: %s", params.iqn)
-		return "", ErrISCSIDeviceNotFound
-	}
-
-	devicePath := "/dev/" + deviceName
-	klog.Infof("Found iSCSI device: %s", devicePath)
+	klog.Infof("Found iSCSI device in sysfs: %s (IQN: %s, LUN: %d)", devicePath, params.iqn, params.lun)
 	return devicePath, nil
 }
 
-// parseISCSISessionDevice parses iscsiadm -m session -P 3 output to find
-// the attached disk for a specific IQN.
-func parseISCSISessionDevice(output, targetIQN string) string {
-	lines := strings.Split(output, "\n")
-	inTargetSection := false
+func findISCSIDeviceInSysfs(
+	ctx context.Context,
+	config *iscsiDeviceDiscoveryConfig,
+	params *iscsiConnectionParams,
+) (string, error) {
 
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 
-		// Check if we're entering a target section
-		// Format: "Target: iqn.2005-10.org.freenas.ctl:pvc-xxx (non-flash)"
-		// The IQN might be followed by extra text like "(non-flash)"
-		if strings.HasPrefix(line, "Target:") {
-			targetLine := strings.TrimPrefix(line, "Target:")
-			targetLine = strings.TrimSpace(targetLine)
-			// Check if this line contains our target IQN (use Contains/HasPrefix
-			// because there might be extra text after the IQN)
-			inTargetSection = strings.HasPrefix(targetLine, targetIQN)
+	sessionEntries, err := os.ReadDir(config.sessionClassDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("%w for IQN %s: session class is not present", ErrISCSIDeviceNotFound, params.iqn)
+		}
+		return "", fmt.Errorf("%w: read session class %s: %w", ErrISCSIDeviceInvalid, config.sessionClassDir, err)
+	}
+
+	var matchingSessions []string
+	for _, entry := range sessionEntries {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		if !strings.HasPrefix(entry.Name(), "session") {
 			continue
 		}
 
-		// If we're in the right target section, look for attached disk
-		if inTargetSection && strings.Contains(line, "Attached scsi disk") {
-			// Line format: "Attached scsi disk sda	State: running"
-			parts := strings.Fields(line)
-			for i, part := range parts {
-				if part == "disk" && i+1 < len(parts) {
-					return parts[i+1] // Return device name like "sda"
+		sessionPath := filepath.Join(config.sessionClassDir, entry.Name())
+		//nolint:gosec // The path is bounded to kernel-created sysfs session entries.
+		targetName, readErr := os.ReadFile(filepath.Join(sessionPath, "targetname"))
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return "", fmt.Errorf("%w: read target name for %s: %w", ErrISCSIDeviceInvalid, entry.Name(), readErr)
+		}
+		if strings.TrimSpace(string(targetName)) == params.iqn {
+			matchingSessions = append(matchingSessions, sessionPath)
+		}
+	}
+
+	if len(matchingSessions) == 0 {
+		return "", fmt.Errorf("%w for IQN %s", ErrISCSIDeviceNotFound, params.iqn)
+	}
+	if len(matchingSessions) > 1 {
+		matchingSessions, err = filterISCSISessionsByPortal(ctx, config.connectionClassDir, matchingSessions, params)
+		if err != nil {
+			return "", err
+		}
+	}
+	if len(matchingSessions) > 1 {
+		return "", fmt.Errorf("%w for IQN %s: %d exact sessions", ErrISCSIDeviceAmbiguous, params.iqn, len(matchingSessions))
+	}
+
+	resolvedDeviceDir, err := filepath.EvalSymlinks(filepath.Join(matchingSessions[0], "device"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("%w for IQN %s: session device disappeared", ErrISCSIDeviceNotFound, params.iqn)
+		}
+		return "", fmt.Errorf("%w: resolve session device for IQN %s: %w", ErrISCSIDeviceInvalid, params.iqn, err)
+	}
+
+	deviceNames, err := findISCSILUNDeviceNames(ctx, resolvedDeviceDir, params.lun)
+	if err != nil {
+		return "", err
+	}
+	if len(deviceNames) == 0 {
+		return "", fmt.Errorf("%w for IQN %s LUN %d", ErrISCSIDeviceNotFound, params.iqn, params.lun)
+	}
+	if len(deviceNames) > 1 {
+		return "", fmt.Errorf("%w for IQN %s LUN %d: %v", ErrISCSIDeviceAmbiguous, params.iqn, params.lun, deviceNames)
+	}
+
+	devicePath := filepath.Join(config.deviceDir, deviceNames[0])
+	if _, statErr := os.Stat(devicePath); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return "", fmt.Errorf("%w for IQN %s: device node %s not ready", ErrISCSIDeviceNotFound, params.iqn, devicePath)
+		}
+		return "", fmt.Errorf("%w: stat device node %s: %w", ErrISCSIDeviceInvalid, devicePath, statErr)
+	}
+	if validateErr := config.validateDevice(devicePath); validateErr != nil {
+		if os.IsNotExist(validateErr) {
+			return "", fmt.Errorf("%w for IQN %s: device node %s disappeared", ErrISCSIDeviceNotFound, params.iqn, devicePath)
+		}
+		return "", fmt.Errorf("%w: validate device node %s: %w", ErrISCSIDeviceInvalid, devicePath, validateErr)
+	}
+
+	return devicePath, nil
+}
+
+func filterISCSISessionsByPortal(
+	ctx context.Context,
+	connectionClassDir string,
+	sessions []string,
+	params *iscsiConnectionParams,
+) ([]string, error) {
+
+	if params.server == "" || params.port == "" {
+		return sessions, nil
+	}
+
+	connectionEntries, err := os.ReadDir(connectionClassDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return sessions, nil
+		}
+		return nil, fmt.Errorf("%w: read connection class %s: %w", ErrISCSIDeviceInvalid, connectionClassDir, err)
+	}
+
+	matchingPortals := make([]string, 0, len(sessions))
+	for _, sessionPath := range sessions {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+
+		sessionNumber := strings.TrimPrefix(filepath.Base(sessionPath), "session")
+		connectionPrefix := "connection" + sessionNumber + ":"
+		sessionMatches := false
+		for _, connectionEntry := range connectionEntries {
+			if !strings.HasPrefix(connectionEntry.Name(), connectionPrefix) {
+				continue
+			}
+
+			connectionPath := filepath.Join(connectionClassDir, connectionEntry.Name())
+			//nolint:gosec // The path is bounded to kernel-created sysfs connection entries.
+			address, readErr := os.ReadFile(filepath.Join(connectionPath, "address"))
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					continue
 				}
+				return nil, fmt.Errorf("%w: read address for %s: %w", ErrISCSIDeviceInvalid, connectionEntry.Name(), readErr)
+			}
+			//nolint:gosec // The path is bounded to kernel-created sysfs connection entries.
+			port, readErr := os.ReadFile(filepath.Join(connectionPath, "port"))
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					continue
+				}
+				return nil, fmt.Errorf("%w: read port for %s: %w", ErrISCSIDeviceInvalid, connectionEntry.Name(), readErr)
+			}
+
+			if strings.TrimSpace(string(address)) == params.server &&
+				strings.TrimSpace(string(port)) == params.port {
+
+				sessionMatches = true
+				break
+			}
+		}
+		if sessionMatches {
+			matchingPortals = append(matchingPortals, sessionPath)
+		}
+	}
+
+	if len(matchingPortals) == 0 {
+		return sessions, nil
+	}
+	return matchingPortals, nil
+}
+
+func findISCSILUNDeviceNames(ctx context.Context, sessionDeviceDir string, lun int) ([]string, error) {
+	targetEntries, err := os.ReadDir(sessionDeviceDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: read session device directory %s: %w", ErrISCSIDeviceInvalid, sessionDeviceDir, err)
+	}
+
+	devices := make(map[string]struct{})
+	for _, targetEntry := range targetEntries {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if !strings.HasPrefix(targetEntry.Name(), "target") {
+			continue
+		}
+
+		targetPath := filepath.Join(sessionDeviceDir, targetEntry.Name())
+		scsiEntries, readErr := os.ReadDir(targetPath)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return nil, fmt.Errorf("%w: read SCSI target %s: %w", ErrISCSIDeviceInvalid, targetPath, readErr)
+		}
+
+		for _, scsiEntry := range scsiEntries {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if !scsiAddressMatchesLUN(scsiEntry.Name(), lun) {
+				continue
+			}
+
+			blockPath := filepath.Join(targetPath, scsiEntry.Name(), "block")
+			blockEntries, readErr := os.ReadDir(blockPath)
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					continue
+				}
+				return nil, fmt.Errorf("%w: read block devices at %s: %w", ErrISCSIDeviceInvalid, blockPath, readErr)
+			}
+			for _, blockEntry := range blockEntries {
+				devices[blockEntry.Name()] = struct{}{}
 			}
 		}
 	}
 
-	return ""
+	deviceNames := make([]string, 0, len(devices))
+	for deviceName := range devices {
+		deviceNames = append(deviceNames, deviceName)
+	}
+	sort.Strings(deviceNames)
+	return deviceNames, nil
+}
+
+func scsiAddressMatchesLUN(address string, lun int) bool {
+	parts := strings.Split(address, ":")
+	if len(parts) != 4 {
+		return false
+	}
+	addressLUN, err := strconv.Atoi(parts[3])
+	return err == nil && addressLUN == lun
+}
+
+func validateISCSIBlockDevice(devicePath string) error {
+	info, err := os.Stat(devicePath)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeDevice == 0 || info.Mode()&os.ModeCharDevice != 0 {
+		return fmt.Errorf("%w: %s", ErrISCSINotBlockDevice, devicePath)
+	}
+	return nil
 }
 
 // waitForISCSIDevice waits for the iSCSI device to appear after login.
 func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConnectionParams, timeout time.Duration) (string, error) {
 	klog.Infof("Waiting for iSCSI device for IQN %s (timeout: %v)", params.iqn, timeout)
 
-	deadline := time.Now().Add(timeout)
-	for attempt := 1; time.Now().Before(deadline); attempt++ {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for attempt := 1; ; attempt++ {
 		devicePath, err := s.findISCSIDevice(ctx, params)
 		if err == nil && devicePath != "" {
-			if _, statErr := os.Stat(devicePath); statErr == nil {
-				klog.Infof("iSCSI device ready: %s (attempt %d)", devicePath, attempt)
-				return devicePath, nil
-			}
+			klog.Infof("iSCSI device ready: %s (attempt %d)", devicePath, attempt)
+			return devicePath, nil
 		}
-		time.Sleep(2 * time.Second)
-	}
+		if err != nil && !errors.Is(err, ErrISCSIDeviceNotFound) {
+			return "", err
+		}
 
-	return "", ErrISCSIDeviceTimeout
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timer.C:
+			return "", ErrISCSIDeviceTimeout
+		case <-ticker.C:
+		}
+	}
 }
 
 // stageISCSIDevice stages an iSCSI device as either block or filesystem volume.

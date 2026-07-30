@@ -39,6 +39,7 @@ type NodeService struct {
 	apiClient       tnsapi.ClientInterface
 	nodeRegistry    *NodeRegistry
 	nvmeConnectSem  chan struct{}
+	iscsiDiscovery  *iscsiDeviceDiscoveryConfig
 	nodeID          string
 	testMode        bool
 	enableDiscovery bool
@@ -56,6 +57,7 @@ func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bo
 		nodeRegistry:    nodeRegistry,
 		enableDiscovery: enableDiscovery,
 		nvmeConnectSem:  make(chan struct{}, maxConcurrentNVMeConnects),
+		iscsiDiscovery:  defaultISCSIDeviceDiscoveryConfig(),
 	}
 }
 

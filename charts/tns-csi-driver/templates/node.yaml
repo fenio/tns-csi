@@ -39,6 +39,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       hostPID: true   # Required for iSCSI nsenter to access host's iscsid (Talos)
       hostIPC: true   # Required for iSCSI to communicate with host's iscsid daemon
       containers:

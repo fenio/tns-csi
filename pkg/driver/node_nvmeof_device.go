@@ -3,7 +3,9 @@ package driver
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +17,11 @@ import (
 // This handles transient failures when TrueNAS has just created a new subsystem
 // (e.g., for snapshot-restored volumes) but it's not yet fully ready for connections.
 func (s *NodeService) connectNVMeOFTarget(ctx context.Context, params *nvmeOFConnectionParams) error {
+	// Connect and disconnect both mutate the kernel NVMe controller registry.
+	// Serializing those transitions prevents teardown from racing registration.
+	s.nvmeLifecycleMu.Lock()
+	defer s.nvmeLifecycleMu.Unlock()
+
 	if s.enableDiscovery {
 		// Discover the NVMe-oF target
 		klog.V(4).Infof("Discovering NVMe-oF target at %s:%s", params.server, params.port)
@@ -151,6 +158,14 @@ func (s *NodeService) checkNVMeCLI(ctx context.Context) error {
 
 // disconnectNVMeOF disconnects from an NVMe-oF target and waits for device cleanup.
 func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
+	if s.disconnectNVMeOFFn != nil {
+		return s.disconnectNVMeOFFn(ctx, nqn)
+	}
+
+	// Keep controller teardown mutually exclusive with controller registration.
+	s.nvmeLifecycleMu.Lock()
+	defer s.nvmeLifecycleMu.Unlock()
+
 	klog.V(4).Infof("Disconnecting from NVMe-oF target: %s", nqn)
 
 	disconnectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -159,28 +174,104 @@ func (s *NodeService) disconnectNVMeOF(ctx context.Context, nqn string) error {
 	cmd := exec.CommandContext(disconnectCtx, "nvme", "disconnect", "-n", nqn)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Check if already disconnected
-		if strings.Contains(string(output), "No subsystems") || strings.Contains(string(output), "not found") {
-			klog.V(4).Infof("NVMe device already disconnected")
+		// nvme-cli error text varies by version. Verify the kernel state instead
+		// of relying on messages such as "No subsystems" for idempotency.
+		present, verifyErr := nvmeNQNPresent(nvmeSysClassPath, nqn)
+		if verifyErr != nil {
+			return fmt.Errorf("failed to disconnect NVMe-oF device: %w, output: %s; cleanup verification failed: %w", err, string(output), verifyErr)
+		}
+		if present {
+			return fmt.Errorf("failed to disconnect NVMe-oF device: %w, output: %s", err, string(output))
+		}
+		klog.V(4).Infof("NVMe-oF target %s is already absent after disconnect returned: %v", nqn, err)
+	} else {
+		klog.V(4).Infof("Successfully requested disconnect from NVMe-oF target")
+	}
+
+	// nvme disconnect returning does not guarantee that sysfs and device nodes
+	// have been removed. Do not let kubelet reuse the volume until the exact NQN
+	// is absent from the kernel controller registry.
+	if err := waitForNVMeNQNRemoval(ctx, nqn, 30*time.Second); err != nil {
+		return err
+	}
+
+	klog.V(4).Infof("Kernel cleanup complete for NVMe-oF target %s", nqn)
+	return nil
+}
+
+const nvmeSysClassPath = "/sys/class/nvme"
+
+func waitForNVMeNQNRemoval(ctx context.Context, nqn string, timeout time.Duration) error {
+	return waitForNVMeNQNRemovalAt(ctx, nvmeSysClassPath, nqn, timeout, 250*time.Millisecond)
+}
+
+func waitForNVMeNQNRemovalAt(ctx context.Context, sysClassPath, nqn string, timeout, pollInterval time.Duration) error {
+	cleanupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		present, err := nvmeNQNPresent(sysClassPath, nqn)
+		if err != nil {
+			return fmt.Errorf("failed to verify NVMe-oF cleanup for NQN %s: %w", nqn, err)
+		}
+		if !present {
 			return nil
 		}
-		return fmt.Errorf("failed to disconnect NVMe-oF device: %w, output: %s", err, string(output))
+
+		select {
+		case <-time.After(pollInterval):
+		case <-cleanupCtx.Done():
+			return fmt.Errorf("%w for NQN %s: %w", ErrNVMeCleanupTimeout, nqn, cleanupCtx.Err())
+		}
+	}
+}
+
+// nvmeNQNPresent checks exact subsystem identities rather than relying on
+// ephemeral controller numbers such as nvme4.
+func nvmeNQNPresent(sysClassPath, nqn string) (bool, error) {
+	entries, err := os.ReadDir(sysClassPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
 	}
 
-	klog.V(4).Infof("Successfully disconnected from NVMe-oF target")
+	for _, entry := range entries {
+		name := entry.Name()
+		if !isNVMeControllerName(name) {
+			continue
+		}
 
-	// Wait for kernel to cleanup device nodes
-	const deviceCleanupDelay = 1 * time.Second
-	klog.V(4).Infof("Waiting %v for kernel to cleanup NVMe devices after disconnect", deviceCleanupDelay)
-	select {
-	case <-time.After(deviceCleanupDelay):
-		klog.V(4).Infof("Device cleanup delay complete")
-	case <-ctx.Done():
-		klog.Warningf("Context canceled during device cleanup delay: %v", ctx.Err())
-		return ctx.Err()
+		data, readErr := os.ReadFile(filepath.Join(sysClassPath, name, "subsysnqn")) //nolint:gosec // fixed sysfs file below a validated controller name
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return false, readErr
+		}
+		if strings.TrimSpace(string(data)) == nqn {
+			return true, nil
+		}
 	}
 
-	return nil
+	return false, nil
+}
+
+func isNVMeControllerName(name string) bool {
+	if !strings.HasPrefix(name, "nvme") {
+		return false
+	}
+	suffix := strings.TrimPrefix(name, "nvme")
+	if suffix == "" {
+		return false
+	}
+	for _, char := range suffix {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // rescanNVMeNamespace rescans an NVMe namespace to ensure the kernel has fresh device data.

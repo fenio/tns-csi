@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -36,12 +37,15 @@ const (
 // NodeService implements the CSI Node service.
 type NodeService struct {
 	csi.UnimplementedNodeServer
-	apiClient       tnsapi.ClientInterface
-	nodeRegistry    *NodeRegistry
-	nvmeConnectSem  chan struct{}
-	nodeID          string
-	testMode        bool
-	enableDiscovery bool
+	apiClient      tnsapi.ClientInterface
+	nodeRegistry   *NodeRegistry
+	nvmeConnectSem chan struct{}
+	// disconnectNVMeOFFn is overridden by focused node-service tests.
+	disconnectNVMeOFFn func(context.Context, string) error
+	nodeID             string
+	nvmeLifecycleMu    sync.Mutex
+	testMode           bool
+	enableDiscovery    bool
 }
 
 // NewNodeService creates a new node service.
@@ -211,6 +215,13 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 // detectProtocolFromStagingPath attempts to detect the protocol from the staging path.
 // It checks the mount source to determine if it's a block device (NVMe-oF/iSCSI) or NFS mount.
 func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, stagingPath string) string {
+	if nqn, err := readNVMeStagingNQN(stagingPath); err != nil {
+		klog.Warningf("NVMe-oF staging metadata for %s is invalid: %v", stagingPath, err)
+		return ProtocolNVMeOF
+	} else if nqn != "" {
+		return ProtocolNVMeOF
+	}
+
 	// Check if the path exists first
 	if _, err := os.Stat(stagingPath); os.IsNotExist(err) {
 		// Path doesn't exist, default to NFS (most common case for cleanup)

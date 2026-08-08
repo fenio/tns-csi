@@ -63,14 +63,38 @@ func (s nvmeListSubsystem) nqn() string {
 	return s.NQN
 }
 
+var errInvalidNVMeListSubsystemsOutput = errors.New("invalid nvme list-subsys output")
+
 func findNVMeSubsystem(output []byte, nqn string) (*nvmeListSubsystem, error) {
-	var parsed nvmeListSubsystemsOutput
-	if err := json.Unmarshal(output, &parsed); err != nil {
-		return nil, err
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return nil, errInvalidNVMeListSubsystemsOutput
 	}
-	for i := range parsed.Subsystems {
-		if parsed.Subsystems[i].nqn() == nqn {
-			return &parsed.Subsystems[i], nil
+
+	var groups []nvmeListSubsystemsOutput
+	switch trimmed[0] {
+	case '[':
+		// nvme-cli 2.x groups subsystems by host in a top-level array.
+		if err := json.Unmarshal([]byte(trimmed), &groups); err != nil {
+			return nil, err
+		}
+	case '{':
+		// Older nvme-cli versions return the subsystem collection directly.
+		var parsed nvmeListSubsystemsOutput
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+			return nil, err
+		}
+		groups = append(groups, parsed)
+	default:
+		return nil, fmt.Errorf("%w: unexpected JSON prefix %q", errInvalidNVMeListSubsystemsOutput, trimmed[0])
+	}
+
+	for groupIndex := range groups {
+		for subsystemIndex := range groups[groupIndex].Subsystems {
+			subsystem := &groups[groupIndex].Subsystems[subsystemIndex]
+			if subsystem.nqn() == nqn {
+				return subsystem, nil
+			}
 		}
 	}
 	return nil, nil //nolint:nilnil // nil means the exact NQN was not found

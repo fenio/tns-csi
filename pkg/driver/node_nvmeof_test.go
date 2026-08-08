@@ -51,6 +51,34 @@ func TestParseNVMeListSubsysOutputSupportsNQNField(t *testing.T) {
 	}
 }
 
+func TestParseNVMeListSubsysOutputSupportsHostArray(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	output := []byte(`[
+  {
+    "HostNQN": "nqn.2014-08.org.nvmexpress:uuid:test-host",
+    "HostID": "11f02066-71f9-44c9-a4b3-42daf10c0d1e",
+    "Subsystems": [{
+      "Name": "nvme-subsys4",
+      "NQN": "nqn.2026-02.csi.tns:volume",
+      "IOPolicy": "numa",
+      "Paths": [{"Name": "nvme4", "State": "live"}]
+    }]
+  }
+]`)
+
+	const nqn = "nqn.2026-02.csi.tns:volume"
+	if got := service.parseNVMeListSubsysOutputForNQN(output, nqn); got != "/dev/nvme4n1" {
+		t.Fatalf("parseNVMeListSubsysOutputForNQN() = %q, want %q", got, "/dev/nvme4n1")
+	}
+	if got := service.findControllerForNQN(string(output), nqn); got != "nvme4" {
+		t.Fatalf("findControllerForNQN() = %q, want %q", got, "nvme4")
+	}
+	subsystem, err := findNVMeSubsystem(output, nqn)
+	if err != nil || subsystem == nil || len(subsystem.Paths) != 1 || subsystem.Paths[0].State != nvmeSubsystemStateLive {
+		t.Fatalf("findNVMeSubsystem() = %#v, %v; want one live path", subsystem, err)
+	}
+}
+
 func TestNVMeNQNPresentUsesExactIdentity(t *testing.T) {
 	sysClassPath := t.TempDir()
 	writeTestSubsystemNQN(t, sysClassPath, "nvme4", "nqn.2026-02.csi.tns:volume-longer")

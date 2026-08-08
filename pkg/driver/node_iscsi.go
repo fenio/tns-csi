@@ -33,7 +33,10 @@ var (
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
 var defaultISCSIMountOptions = []string{zfsNoatime, "_netdev"}
 
-const iscsiStagingMetadataSuffix = ".tns-csi-iscsi"
+const (
+	iscsiStagingMetadataSuffix = ".tns-csi-iscsi"
+	iscsiTargetPrefix          = "Target:"
+)
 
 // iscsiadmCmd builds a command to run iscsiadm, using nsenter to execute
 // in the host's namespaces when running in a container. This allows the
@@ -406,12 +409,9 @@ func parseISCSISessionDevice(output, targetIQN string) string {
 		// Check if we're entering a target section
 		// Format: "Target: iqn.2005-10.org.freenas.ctl:pvc-xxx (non-flash)"
 		// The IQN might be followed by extra text like "(non-flash)"
-		if strings.HasPrefix(line, "Target:") {
-			targetLine := strings.TrimPrefix(line, "Target:")
-			targetLine = strings.TrimSpace(targetLine)
-			// Check if this line contains our target IQN (use Contains/HasPrefix
-			// because there might be extra text after the IQN)
-			inTargetSection = strings.HasPrefix(targetLine, targetIQN)
+		if strings.HasPrefix(line, iscsiTargetPrefix) {
+			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, iscsiTargetPrefix)))
+			inTargetSection = len(targetFields) > 0 && targetFields[0] == targetIQN
 			continue
 		}
 
@@ -582,17 +582,7 @@ func (s *NodeService) unstageISCSIVolume(ctx context.Context, req *csi.NodeUnsta
 
 	klog.V(4).Infof("Unstaging iSCSI volume %s from %s", volumeID, stagingTargetPath)
 
-	// Get IQN from volume context
-	iqn := volumeContext[VolumeContextKeyISCSIIQN]
-	if iqn == "" {
-		derivedIQN, deriveErr := s.deriveISCSIIQNFromStagingPath(ctx, stagingTargetPath)
-		if deriveErr != nil {
-			klog.Warningf("Failed to derive iSCSI IQN from staging path %s: %v", stagingTargetPath, deriveErr)
-		} else {
-			iqn = derivedIQN
-			klog.V(4).Infof("Derived iSCSI IQN from staging path %s: %s", stagingTargetPath, iqn)
-		}
-	}
+	iqn := s.resolveISCSIUnstageIQN(ctx, stagingTargetPath, volumeContext)
 	if iqn == "" {
 		if _, statErr := os.Lstat(stagingTargetPath); os.IsNotExist(statErr) {
 			klog.V(4).Infof("Staging path %s no longer exists; iSCSI volume %s is already unstaged", stagingTargetPath, volumeID)
@@ -649,6 +639,20 @@ func (s *NodeService) unstageISCSIVolume(ctx context.Context, req *csi.NodeUnsta
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
+func (s *NodeService) resolveISCSIUnstageIQN(ctx context.Context, stagingTargetPath string, volumeContext map[string]string) string {
+	if iqn := volumeContext[VolumeContextKeyISCSIIQN]; iqn != "" {
+		return iqn
+	}
+
+	iqn, err := s.deriveISCSIIQNFromStagingPath(ctx, stagingTargetPath)
+	if err != nil {
+		klog.Warningf("Failed to derive iSCSI IQN from staging path %s: %v", stagingTargetPath, err)
+		return ""
+	}
+	klog.V(4).Infof("Derived iSCSI IQN from staging path %s: %s", stagingTargetPath, iqn)
+	return iqn
+}
+
 func (s *NodeService) deriveISCSIIQNFromStagingPath(ctx context.Context, stagingTargetPath string) (string, error) {
 	if iqn, err := readISCSIStagingIQN(stagingTargetPath); err == nil && iqn != "" {
 		return iqn, nil
@@ -681,7 +685,7 @@ func (s *NodeService) findISCSIIQNForDevice(ctx context.Context, devicePath stri
 
 func getStagedISCSIDevicePath(ctx context.Context, stagingTargetPath string) (string, error) {
 	if mounted, err := mount.IsMounted(ctx, stagingTargetPath); err == nil && mounted {
-		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
+		cmd := exec.CommandContext(ctx, "/usr/bin/findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
 		output, cmdErr := cmd.CombinedOutput()
 		if cmdErr != nil {
 			return "", fmt.Errorf("findmnt source lookup failed for %s: %w", stagingTargetPath, cmdErr)
@@ -708,8 +712,8 @@ func parseISCSISessionIQNForDevice(output, deviceName string) string {
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Target:") {
-			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, "Target:")))
+		if strings.HasPrefix(line, iscsiTargetPrefix) {
+			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, iscsiTargetPrefix)))
 			currentIQN = ""
 			if len(targetFields) > 0 {
 				currentIQN = targetFields[0]

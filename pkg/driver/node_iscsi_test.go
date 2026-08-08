@@ -44,6 +44,19 @@ Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume-longer (non-flash)
 	}
 }
 
+func TestParseISCSISessionDeviceUsesExactIQN(t *testing.T) {
+	output := `
+Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume-longer (non-flash)
+    Attached scsi disk sdb State: running
+Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume (non-flash)
+    Attached scsi disk sdc State: running
+`
+
+	if got := parseISCSISessionDevice(output, testISCSIIQN); got != "sdc" {
+		t.Fatalf("parseISCSISessionDevice() = %q, want %q", got, "sdc")
+	}
+}
+
 func TestFindISCSIIQNForDeviceUsesSessionMetadata(t *testing.T) {
 	service := NewNodeService("test-node", nil, true, nil, false, 5)
 	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
@@ -56,6 +69,24 @@ func TestFindISCSIIQNForDeviceUsesSessionMetadata(t *testing.T) {
 	iqn, err := service.findISCSIIQNForDevice(context.Background(), "/dev/sdc")
 	if err != nil || iqn != testISCSIIQN {
 		t.Fatalf("findISCSIIQNForDevice() = %q, %v; want %q, nil", iqn, err, testISCSIIQN)
+	}
+}
+
+func TestFindISCSIIQNForDeviceReturnsSessionErrors(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	queryErr := errors.New("session query failed")
+	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("query output"), queryErr
+	}
+	if _, err := service.findISCSIIQNForDevice(context.Background(), "/dev/sdc"); !errors.Is(err, queryErr) {
+		t.Fatalf("findISCSIIQNForDevice() error = %v, want wrapped query error", err)
+	}
+
+	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("Target: " + testISCSIIQN + "\n    Attached scsi disk sdb State: running\n"), nil
+	}
+	if _, err := service.findISCSIIQNForDevice(context.Background(), "/dev/sdc"); !errors.Is(err, ErrISCSIDeviceNotFound) {
+		t.Fatalf("findISCSIIQNForDevice() error = %v, want ErrISCSIDeviceNotFound", err)
 	}
 }
 
@@ -110,6 +141,23 @@ func TestLogoutISCSITargetTreatsVerifiedAbsenceAsIdempotent(t *testing.T) {
 	}
 }
 
+func TestLogoutISCSITargetReportsCommandAndVerificationFailure(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	commandErr := errors.New("logout command failed")
+	queryErr := errors.New("session query failed")
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) >= 2 && args[1] == "node" {
+			return []byte("logout output"), commandErr
+		}
+		return []byte("query output"), queryErr
+	}
+
+	err := service.logoutISCSITarget(context.Background(), &iscsiConnectionParams{iqn: testISCSIIQN})
+	if !errors.Is(err, commandErr) || !errors.Is(err, queryErr) {
+		t.Fatalf("logoutISCSITarget() error = %v, want wrapped command and query errors", err)
+	}
+}
+
 func TestIsISCSISessionPresent(t *testing.T) {
 	service := NewNodeService("test-node", nil, true, nil, false, 5)
 	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
@@ -126,6 +174,15 @@ func TestIsISCSISessionPresent(t *testing.T) {
 	present, err = service.isISCSISessionPresent(context.Background(), testISCSIIQN)
 	if err != nil || present {
 		t.Fatalf("isISCSISessionPresent() = %v, %v; want false, nil", present, err)
+	}
+
+	queryErr := errors.New("session query failed")
+	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
+		return []byte("unexpected output"), queryErr
+	}
+	present, err = service.isISCSISessionPresent(context.Background(), testISCSIIQN)
+	if present || !errors.Is(err, queryErr) {
+		t.Fatalf("isISCSISessionPresent() = %v, %v; want false and wrapped query error", present, err)
 	}
 }
 
@@ -209,6 +266,38 @@ func TestISCSIStagingMetadataSupportsUnstageRetry(t *testing.T) {
 	}
 	if _, statErr := os.Stat(iscsiStagingMetadataPath(stagingPath)); !os.IsNotExist(statErr) {
 		t.Fatalf("staging metadata still exists after successful unstage: %v", statErr)
+	}
+}
+
+func TestGetStagedISCSIDevicePathRecoversBlockSymlink(t *testing.T) {
+	stagingPath := filepath.Join(t.TempDir(), "globalmount")
+	if err := os.Symlink("/dev/null", stagingPath); err != nil {
+		t.Fatalf("failed to create block staging symlink: %v", err)
+	}
+
+	devicePath, err := getStagedISCSIDevicePath(context.Background(), stagingPath)
+	if err != nil || devicePath != "/dev/null" {
+		t.Fatalf("getStagedISCSIDevicePath() = %q, %v; want %q, nil", devicePath, err, "/dev/null")
+	}
+
+	nonDevicePath := t.TempDir()
+	if _, err := getStagedISCSIDevicePath(context.Background(), nonDevicePath); !errors.Is(err, ErrISCSINonDevicePath) {
+		t.Fatalf("getStagedISCSIDevicePath() error = %v, want ErrISCSINonDevicePath", err)
+	}
+}
+
+func TestInvalidISCSIStagingMetadataStillSelectsISCSI(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	stagingPath := filepath.Join(t.TempDir(), "globalmount")
+	if err := os.WriteFile(iscsiStagingMetadataPath(stagingPath), nil, 0o600); err != nil {
+		t.Fatalf("failed to write empty staging metadata: %v", err)
+	}
+
+	if _, err := readISCSIStagingIQN(stagingPath); !errors.Is(err, ErrISCSIEmptyIQN) {
+		t.Fatalf("readISCSIStagingIQN() error = %v, want ErrISCSIEmptyIQN", err)
+	}
+	if got := service.detectProtocolFromStagingPath(context.Background(), stagingPath); got != ProtocolISCSI {
+		t.Fatalf("detectProtocolFromStagingPath() = %q, want %q", got, ProtocolISCSI)
 	}
 }
 

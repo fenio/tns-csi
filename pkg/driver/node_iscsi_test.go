@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -90,27 +92,42 @@ func TestFindISCSIIQNForDeviceReturnsSessionErrors(t *testing.T) {
 	}
 }
 
-func TestISCSISessionPresentInOutputUsesExactIQN(t *testing.T) {
-	output := "tcp: [5] 192.168.20.10:3260,1 " + testISCSIIQN + "-longer (non-flash)\n" +
-		"tcp: [6] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)\n"
+func TestParseISCSISessionIDsUsesExactIQN(t *testing.T) {
+	output := "tcp: [4] 192.168.20.10:3260,1 " + testISCSIIQN + "-longer (non-flash)\n" +
+		"tcp: [59] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)\n" +
+		"tcp: [61] 192.168.20.11:3260,1 " + testISCSIIQN + " (non-flash)\n"
 
-	if !iscsiSessionPresentInOutput(output, testISCSIIQN) {
-		t.Fatal("iscsiSessionPresentInOutput() did not find exact IQN")
+	sessionIDs, err := parseISCSISessionIDs(output, testISCSIIQN)
+	if err != nil {
+		t.Fatalf("parseISCSISessionIDs() unexpected error: %v", err)
 	}
-	if iscsiSessionPresentInOutput(output, "iqn.2005-10.org.freenas.ctl:pvc-test") {
-		t.Fatal("iscsiSessionPresentInOutput() matched a partial IQN")
+	if len(sessionIDs) != 2 || sessionIDs[0] != "59" || sessionIDs[1] != "61" {
+		t.Fatalf("parseISCSISessionIDs() = %v, want [59 61]", sessionIDs)
+	}
+}
+
+func TestParseISCSISessionIDsRejectsInvalidSID(t *testing.T) {
+	output := "tcp: [invalid] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"
+	if _, err := parseISCSISessionIDs(output, testISCSIIQN); !errors.Is(err, strconv.ErrSyntax) {
+		t.Fatalf("parseISCSISessionIDs() error = %v, want strconv.ErrSyntax", err)
 	}
 }
 
 func TestLogoutISCSITargetVerifiesExactSessionRemoval(t *testing.T) {
 	service := NewNodeService("test-node", nil, true, nil, false, 5)
-	commands := 0
+	var commands atomic.Int32
 	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
-		commands++
-		if len(args) >= 2 && args[0] == "-m" && args[1] == "node" {
-			return []byte("Logout of session successful"), nil
+		command := commands.Add(1)
+		if len(args) == 5 && args[0] == "-m" && args[1] == "session" && args[2] == "-r" && args[4] == "--logout" {
+			if args[3] == "59" || args[3] == "61" {
+				return []byte("Logout of session successful"), nil
+			}
 		}
-		if len(args) >= 2 && args[0] == "-m" && args[1] == "session" {
+		if len(args) == 2 && args[0] == "-m" && args[1] == "session" && command == 1 {
+			return []byte("tcp: [59] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)\n" +
+				"tcp: [61] 192.168.20.11:3260,1 " + testISCSIIQN + " (non-flash)"), nil
+		}
+		if len(args) == 2 && args[0] == "-m" && args[1] == "session" {
 			return []byte("tcp: [4] 192.168.20.10:3260,1 iqn.2005-10.org.freenas.ctl:pvc-other (non-flash)"), nil
 		}
 		t.Fatalf("unexpected iscsiadm arguments: %v", args)
@@ -121,8 +138,114 @@ func TestLogoutISCSITargetVerifiesExactSessionRemoval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("logoutISCSITarget() unexpected error: %v", err)
 	}
-	if commands != 2 {
-		t.Fatalf("iscsiadm commands = %d, want 2", commands)
+	if commands.Load() != 4 {
+		t.Fatalf("iscsiadm commands = %d, want 4", commands.Load())
+	}
+}
+
+func TestLogoutISCSISessionsRunsConcurrently(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	started := make(chan string, 2)
+	release := make(chan struct{})
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		started <- args[3]
+		<-release
+		return []byte("Logout successful"), nil
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- service.logoutISCSISessions(context.Background(), testISCSIIQN, []string{"59", "61"})
+	}()
+
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case sessionID := <-started:
+			seen[sessionID] = true
+		case <-time.After(time.Second):
+			t.Fatal("session logout commands did not start concurrently")
+		}
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatalf("logoutISCSISessions() unexpected error: %v", err)
+	}
+	if !seen["59"] || !seen["61"] {
+		t.Fatalf("started session logouts = %v, want 59 and 61", seen)
+	}
+}
+
+func TestLogoutISCSITargetUsesLiveSessionWithoutNodeRecords(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	sessionPresent := true
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) == 2 && args[0] == "-m" && args[1] == "session" {
+			if sessionPresent {
+				return []byte("tcp: [59] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"), nil
+			}
+			return []byte("No active sessions."), errors.New("exit status 21")
+		}
+		if len(args) == 5 && args[0] == "-m" && args[1] == "session" && args[2] == "-r" && args[3] == "59" && args[4] == "--logout" {
+			sessionPresent = false
+			return []byte("Logout of session [sid: 59] successful."), nil
+		}
+		t.Fatalf("unexpected iscsiadm arguments: %v", args)
+		return nil, nil
+	}
+
+	if err := service.logoutISCSITarget(context.Background(), &iscsiConnectionParams{iqn: testISCSIIQN}); err != nil {
+		t.Fatalf("logoutISCSITarget() unexpected error: %v", err)
+	}
+}
+
+func TestLogoutISCSITargetReenumeratesLiveSessions(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	queries := 0
+	var loggedOut []string
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) == 2 {
+			queries++
+			switch queries {
+			case 1:
+				return []byte("tcp: [59] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"), nil
+			case 2:
+				return []byte("tcp: [60] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"), nil
+			default:
+				return []byte("No active sessions."), errors.New("exit status 21")
+			}
+		}
+		if len(args) == 5 && args[0] == "-m" && args[1] == "session" && args[2] == "-r" && args[4] == "--logout" {
+			loggedOut = append(loggedOut, args[3])
+			return []byte("Logout successful"), nil
+		}
+		t.Fatalf("unexpected iscsiadm arguments: %v", args)
+		return nil, nil
+	}
+
+	if err := service.logoutISCSITarget(context.Background(), &iscsiConnectionParams{iqn: testISCSIIQN}); err != nil {
+		t.Fatalf("logoutISCSITarget() unexpected error: %v", err)
+	}
+	if len(loggedOut) != 2 || loggedOut[0] != "59" || loggedOut[1] != "60" {
+		t.Fatalf("logged out sessions = %v, want [59 60]", loggedOut)
+	}
+}
+
+func TestLogoutISCSITargetReportsTimeout(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := service.logoutISCSITarget(canceledCtx, &iscsiConnectionParams{iqn: testISCSIIQN})
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrISCSILogoutTimeout) {
+		t.Fatalf("logoutISCSITarget() cancellation error = %v, want context.Canceled only", err)
+	}
+
+	deadlineCtx, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer deadlineCancel()
+	err = service.logoutISCSITarget(deadlineCtx, &iscsiConnectionParams{iqn: testISCSIIQN})
+	if !errors.Is(err, ErrISCSILogoutTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("logoutISCSITarget() deadline error = %v, want logout timeout wrapping deadline", err)
 	}
 }
 
@@ -130,10 +253,11 @@ func TestLogoutISCSITargetTreatsVerifiedAbsenceAsIdempotent(t *testing.T) {
 	service := NewNodeService("test-node", nil, true, nil, false, 5)
 	commandErr := errors.New("exit status 21")
 	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[1] == "node" {
-			return []byte("No matching sessions found"), commandErr
+		if len(args) == 2 {
+			return []byte("No active sessions."), commandErr
 		}
-		return []byte("No active sessions."), commandErr
+		t.Fatalf("unexpected iscsiadm arguments: %v", args)
+		return nil, nil
 	}
 
 	if err := service.logoutISCSITarget(context.Background(), &iscsiConnectionParams{iqn: testISCSIIQN}); err != nil {
@@ -145,9 +269,14 @@ func TestLogoutISCSITargetReportsCommandAndVerificationFailure(t *testing.T) {
 	service := NewNodeService("test-node", nil, true, nil, false, 5)
 	commandErr := errors.New("logout command failed")
 	queryErr := errors.New("session query failed")
+	queries := 0
 	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
-		if len(args) >= 2 && args[1] == "node" {
+		if len(args) == 5 {
 			return []byte("logout output"), commandErr
+		}
+		queries++
+		if queries == 1 {
+			return []byte("tcp: [59] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"), nil
 		}
 		return []byte("query output"), queryErr
 	}
@@ -155,84 +284,6 @@ func TestLogoutISCSITargetReportsCommandAndVerificationFailure(t *testing.T) {
 	err := service.logoutISCSITarget(context.Background(), &iscsiConnectionParams{iqn: testISCSIIQN})
 	if !errors.Is(err, commandErr) || !errors.Is(err, queryErr) {
 		t.Fatalf("logoutISCSITarget() error = %v, want wrapped command and query errors", err)
-	}
-}
-
-func TestIsISCSISessionPresent(t *testing.T) {
-	service := NewNodeService("test-node", nil, true, nil, false, 5)
-	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
-		return []byte("tcp: [5] 192.168.20.10:3260,1 " + testISCSIIQN + " (non-flash)"), nil
-	}
-	present, err := service.isISCSISessionPresent(context.Background(), testISCSIIQN)
-	if err != nil || !present {
-		t.Fatalf("isISCSISessionPresent() = %v, %v; want true, nil", present, err)
-	}
-
-	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
-		return []byte("No active sessions."), errors.New("exit status 21")
-	}
-	present, err = service.isISCSISessionPresent(context.Background(), testISCSIIQN)
-	if err != nil || present {
-		t.Fatalf("isISCSISessionPresent() = %v, %v; want false, nil", present, err)
-	}
-
-	queryErr := errors.New("session query failed")
-	service.runISCSIAdmFn = func(_ context.Context, _ ...string) ([]byte, error) {
-		return []byte("unexpected output"), queryErr
-	}
-	present, err = service.isISCSISessionPresent(context.Background(), testISCSIIQN)
-	if present || !errors.Is(err, queryErr) {
-		t.Fatalf("isISCSISessionPresent() = %v, %v; want false and wrapped query error", present, err)
-	}
-}
-
-func TestWaitForISCSISessionLogout(t *testing.T) {
-	checks := 0
-	err := waitForISCSISessionLogout(
-		context.Background(),
-		testISCSIIQN,
-		time.Second,
-		time.Millisecond,
-		func(_ context.Context, iqn string) (bool, error) {
-			if iqn != testISCSIIQN {
-				t.Fatalf("session check IQN = %q, want %q", iqn, testISCSIIQN)
-			}
-			checks++
-			return checks < 3, nil
-		},
-	)
-	if err != nil {
-		t.Fatalf("waitForISCSISessionLogout() unexpected error: %v", err)
-	}
-	if checks != 3 {
-		t.Fatalf("session checks = %d, want 3", checks)
-	}
-}
-
-func TestWaitForISCSISessionLogoutTimesOut(t *testing.T) {
-	err := waitForISCSISessionLogout(
-		context.Background(),
-		testISCSIIQN,
-		20*time.Millisecond,
-		5*time.Millisecond,
-		func(_ context.Context, _ string) (bool, error) { return true, nil },
-	)
-	if !errors.Is(err, ErrISCSILogoutTimeout) {
-		t.Fatalf("waitForISCSISessionLogout() error = %v, want ErrISCSILogoutTimeout", err)
-	}
-}
-
-func TestWaitForISCSISessionLogoutReturnsQueryError(t *testing.T) {
-	queryErr := errors.New("session query failed")
-	err := waitForISCSISessionLogout(
-		context.Background(),
-		testISCSIIQN,
-		time.Second,
-		time.Millisecond,
-		func(_ context.Context, _ string) (bool, error) { return false, queryErr },
-	)
-	if !errors.Is(err, queryErr) {
-		t.Fatalf("waitForISCSISessionLogout() error = %v, want wrapped query error", err)
 	}
 }
 

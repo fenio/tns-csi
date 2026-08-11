@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -19,15 +21,16 @@ import (
 
 // Static errors for iSCSI operations.
 var (
-	ErrISCSIAdmNotFound     = errors.New("iscsiadm command not found - please install open-iscsi")
-	ErrISCSIDeviceNotFound  = errors.New("iSCSI device not found")
-	ErrISCSIDeviceTimeout   = errors.New("timeout waiting for iSCSI device to appear")
-	ErrISCSILoginFailed     = errors.New("failed to login to iSCSI target")
-	ErrISCSIDiscoveryFailed = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
-	ErrISCSITargetNotInDB   = errors.New("iSCSI target not found in node database after discovery")
-	ErrISCSIEmptyIQN        = errors.New("empty iSCSI IQN")
-	ErrISCSILogoutTimeout   = errors.New("timeout waiting for iSCSI session logout")
-	ErrISCSINonDevicePath   = errors.New("iSCSI staging path resolved to a non-device path")
+	ErrISCSIAdmNotFound      = errors.New("iscsiadm command not found - please install open-iscsi")
+	ErrISCSIDeviceNotFound   = errors.New("iSCSI device not found")
+	ErrISCSIDeviceTimeout    = errors.New("timeout waiting for iSCSI device to appear")
+	ErrISCSILoginFailed      = errors.New("failed to login to iSCSI target")
+	ErrISCSIDiscoveryFailed  = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
+	ErrISCSITargetNotInDB    = errors.New("iSCSI target not found in node database after discovery")
+	ErrISCSIEmptyIQN         = errors.New("empty iSCSI IQN")
+	ErrISCSILogoutTimeout    = errors.New("timeout waiting for iSCSI session logout")
+	ErrISCSINonDevicePath    = errors.New("iSCSI staging path resolved to a non-device path")
+	ErrISCSIMalformedSession = errors.New("malformed iSCSI session output")
 )
 
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
@@ -285,65 +288,75 @@ func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnec
 	}
 
 	klog.V(4).Infof("Logging out from iSCSI target: %s", params.iqn)
-	operationCtx, operationCancel := context.WithTimeout(ctx, 20*time.Second)
+	operationCtx, operationCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer operationCancel()
-	logoutCtx, logoutCancel := context.WithTimeout(operationCtx, 15*time.Second)
-	defer logoutCancel()
 
-	// Don't specify portal - logout from target on all portals
-	output, err := s.runISCSIAdm(logoutCtx, "-m", "node", "-T", params.iqn, "--logout")
-	if err != nil {
-		klog.V(4).Infof("iSCSI logout command returned an error for %s: %v, output: %s", params.iqn, err, string(output))
-	}
-
-	// iscsiadm output differs across versions and "No matching sessions" can
-	// also be returned for an incorrect IQN. Verify the exact session identity
-	// instead of trusting command text.
-	verifyErr := s.waitForISCSISessionLogout(operationCtx, params.iqn, 15*time.Second)
-	if verifyErr != nil {
-		if err != nil {
-			return fmt.Errorf("iSCSI logout command failed for %s: %w, output: %s; session verification failed: %w", params.iqn, err, string(output), verifyErr)
-		}
-		return verifyErr
-	}
-
-	klog.V(4).Infof("Successfully logged out from iSCSI target: %s", params.iqn)
-	return nil
-}
-
-func (s *NodeService) waitForISCSISessionLogout(ctx context.Context, iqn string, timeout time.Duration) error {
-	return waitForISCSISessionLogout(ctx, iqn, timeout, 250*time.Millisecond, s.isISCSISessionPresent)
-}
-
-func waitForISCSISessionLogout(
-	ctx context.Context,
-	iqn string,
-	timeout time.Duration,
-	pollInterval time.Duration,
-	sessionPresent func(context.Context, string) (bool, error),
-) error {
-
-	logoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
+	var logoutErr error
 	for {
-		present, err := sessionPresent(logoutCtx, iqn)
-		if err != nil {
-			return fmt.Errorf("failed to verify iSCSI session state for %s: %w", iqn, err)
+		if operationErr := operationCtx.Err(); operationErr != nil {
+			return iscsiLogoutContextError(params.iqn, operationErr, logoutErr)
 		}
-		if !present {
+
+		sessionIDs, err := s.findISCSISessionIDs(operationCtx, params.iqn)
+		if err != nil {
+			if operationErr := operationCtx.Err(); operationErr != nil {
+				return iscsiLogoutContextError(params.iqn, operationErr, logoutErr)
+			}
+			return errors.Join(logoutErr, fmt.Errorf("failed to find active iSCSI sessions for %s: %w", params.iqn, err))
+		}
+		if len(sessionIDs) == 0 {
+			klog.V(4).Infof("Successfully logged out from iSCSI target: %s", params.iqn)
 			return nil
 		}
 
+		logoutErr = errors.Join(logoutErr, s.logoutISCSISessions(operationCtx, params.iqn, sessionIDs))
+
 		select {
-		case <-time.After(pollInterval):
-		case <-logoutCtx.Done():
-			return fmt.Errorf("%w for IQN %s: %w", ErrISCSILogoutTimeout, iqn, logoutCtx.Err())
+		case <-time.After(250 * time.Millisecond):
+		case <-operationCtx.Done():
+			return iscsiLogoutContextError(params.iqn, operationCtx.Err(), logoutErr)
 		}
 	}
 }
 
-func (s *NodeService) isISCSISessionPresent(ctx context.Context, iqn string) (bool, error) {
+func (s *NodeService) logoutISCSISessions(ctx context.Context, iqn string, sessionIDs []string) error {
+	errorsBySession := make(chan error, len(sessionIDs))
+	var waitGroup sync.WaitGroup
+	for _, sessionID := range sessionIDs {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			output, err := s.runISCSIAdm(logoutCtx, "-m", "session", "-r", sessionID, "--logout")
+			if err != nil {
+				klog.V(4).Infof("iSCSI logout command returned an error for %s session %s: %v, output: %s", iqn, sessionID, err, string(output))
+				errorsBySession <- fmt.Errorf("session %s: %w, output: %s", sessionID, err, string(output))
+			}
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsBySession)
+
+	var logoutErr error
+	for err := range errorsBySession {
+		logoutErr = errors.Join(logoutErr, err)
+	}
+	return logoutErr
+}
+
+func iscsiLogoutContextError(iqn string, operationErr, logoutErr error) error {
+	if errors.Is(operationErr, context.Canceled) {
+		return errors.Join(logoutErr, fmt.Errorf("iSCSI logout canceled for %s: %w", iqn, operationErr))
+	}
+	timeoutErr := fmt.Errorf("%w for IQN %s: %w", ErrISCSILogoutTimeout, iqn, operationErr)
+	if logoutErr == nil {
+		return timeoutErr
+	}
+	return fmt.Errorf("iSCSI logout command failed for %s: %w; session verification failed: %w", iqn, logoutErr, timeoutErr)
+}
+
+func (s *NodeService) findISCSISessionIDs(ctx context.Context, iqn string) ([]string, error) {
 	sessionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -354,16 +367,37 @@ func (s *NodeService) isISCSISessionPresent(ctx context.Context, iqn string) (bo
 			strings.Contains(lowerOutput, "no matching sessions") ||
 			strings.Contains(lowerOutput, "no records found") {
 
-			return false, nil
+			return nil, nil
 		}
-		return false, fmt.Errorf("iscsiadm session query failed: %w, output: %s", err, string(output))
+		return nil, fmt.Errorf("iscsiadm session query failed: %w, output: %s", err, string(output))
 	}
-	return iscsiSessionPresentInOutput(string(output), iqn), nil
+
+	return parseISCSISessionIDs(string(output), iqn)
 }
 
-func iscsiSessionPresentInOutput(output, iqn string) bool {
-	for _, field := range strings.Fields(output) {
-		if field == iqn {
+func parseISCSISessionIDs(output, targetIQN string) ([]string, error) {
+	var sessionIDs []string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if !containsExactField(fields, targetIQN) {
+			continue
+		}
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "[") || !strings.HasSuffix(fields[1], "]") {
+			return nil, fmt.Errorf("%w for target %s: %s", ErrISCSIMalformedSession, targetIQN, line)
+		}
+
+		sessionID := strings.TrimSuffix(strings.TrimPrefix(fields[1], "["), "]")
+		if _, err := strconv.ParseUint(sessionID, 10, 64); err != nil {
+			return nil, fmt.Errorf("invalid iSCSI session ID %q for target %s: %w", sessionID, targetIQN, err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	return sessionIDs, nil
+}
+
+func containsExactField(fields []string, value string) bool {
+	for _, field := range fields {
+		if field == value {
 			return true
 		}
 	}

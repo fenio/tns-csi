@@ -42,10 +42,14 @@ type NodeService struct {
 	nvmeConnectSem chan struct{}
 	// disconnectNVMeOFFn is overridden by focused node-service tests.
 	disconnectNVMeOFFn func(context.Context, string) error
-	nodeID             string
-	nvmeLifecycleMu    sync.Mutex
-	testMode           bool
-	enableDiscovery    bool
+	// logoutISCSITargetFn is overridden by focused node-service tests.
+	logoutISCSITargetFn func(context.Context, *iscsiConnectionParams) error
+	// runISCSIAdmFn is overridden by focused command-result tests.
+	runISCSIAdmFn   func(context.Context, ...string) ([]byte, error)
+	nodeID          string
+	nvmeLifecycleMu sync.Mutex
+	testMode        bool
+	enableDiscovery bool
 }
 
 // NewNodeService creates a new node service.
@@ -176,11 +180,9 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return resp, nil
 
 	case ProtocolISCSI:
-		// For iSCSI, we need to pass the IQN which is derived from the volume ID
-		// IQN format is: iqn.2024-01.io.truenas.csi:<volumeID>
-		volumeContext := map[string]string{
-			VolumeContextKeyISCSIIQN: "iqn.2024-01.io.truenas.csi:" + volumeID,
-		}
+		// NodeUnstageVolume does not include VolumeContext. The real IQN is
+		// recovered from staging metadata or the attached iSCSI session.
+		volumeContext := map[string]string{}
 		resp, err := s.unstageISCSIVolume(ctx, req, volumeContext)
 		if err != nil {
 			timer.ObserveError()
@@ -220,6 +222,12 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 		return ProtocolNVMeOF
 	} else if nqn != "" {
 		return ProtocolNVMeOF
+	}
+	if iqn, err := readISCSIStagingIQN(stagingPath); err != nil {
+		klog.Warningf("iSCSI staging metadata for %s is invalid: %v", stagingPath, err)
+		return ProtocolISCSI
+	} else if iqn != "" {
+		return ProtocolISCSI
 	}
 
 	// Check if the path exists first

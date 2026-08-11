@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -18,16 +21,25 @@ import (
 
 // Static errors for iSCSI operations.
 var (
-	ErrISCSIAdmNotFound     = errors.New("iscsiadm command not found - please install open-iscsi")
-	ErrISCSIDeviceNotFound  = errors.New("iSCSI device not found")
-	ErrISCSIDeviceTimeout   = errors.New("timeout waiting for iSCSI device to appear")
-	ErrISCSILoginFailed     = errors.New("failed to login to iSCSI target")
-	ErrISCSIDiscoveryFailed = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
-	ErrISCSITargetNotInDB   = errors.New("iSCSI target not found in node database after discovery")
+	ErrISCSIAdmNotFound      = errors.New("iscsiadm command not found - please install open-iscsi")
+	ErrISCSIDeviceNotFound   = errors.New("iSCSI device not found")
+	ErrISCSIDeviceTimeout    = errors.New("timeout waiting for iSCSI device to appear")
+	ErrISCSILoginFailed      = errors.New("failed to login to iSCSI target")
+	ErrISCSIDiscoveryFailed  = errors.New("iSCSI discovery failed - iscsid may not be running or accessible")
+	ErrISCSITargetNotInDB    = errors.New("iSCSI target not found in node database after discovery")
+	ErrISCSIEmptyIQN         = errors.New("empty iSCSI IQN")
+	ErrISCSILogoutTimeout    = errors.New("timeout waiting for iSCSI session logout")
+	ErrISCSINonDevicePath    = errors.New("iSCSI staging path resolved to a non-device path")
+	ErrISCSIMalformedSession = errors.New("malformed iSCSI session output")
 )
 
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
 var defaultISCSIMountOptions = []string{zfsNoatime, "_netdev"}
+
+const (
+	iscsiStagingMetadataSuffix = ".tns-csi-iscsi"
+	iscsiTargetPrefix          = "Target:"
+)
 
 // iscsiadmCmd builds a command to run iscsiadm, using nsenter to execute
 // in the host's namespaces when running in a container. This allows the
@@ -50,6 +62,13 @@ func iscsiadmCmd(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "iscsiadm", args...)
 }
 
+func (s *NodeService) runISCSIAdm(ctx context.Context, args ...string) ([]byte, error) {
+	if s.runISCSIAdmFn != nil {
+		return s.runISCSIAdmFn(ctx, args...)
+	}
+	return iscsiadmCmd(ctx, args...).CombinedOutput()
+}
+
 // iscsiConnectionParams holds validated iSCSI connection parameters.
 type iscsiConnectionParams struct {
 	iqn    string
@@ -69,6 +88,9 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	params, err := s.validateISCSIParams(volumeContext)
 	if err != nil {
 		return nil, err
+	}
+	if err := writeISCSIStagingIQN(stagingTargetPath, params.iqn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to persist iSCSI staging metadata: %v", err)
 	}
 
 	isBlockVolume := volumeCapability.GetBlock() != nil
@@ -261,26 +283,125 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 
 // logoutISCSITarget logs out from an iSCSI target.
 func (s *NodeService) logoutISCSITarget(ctx context.Context, params *iscsiConnectionParams) error {
-	klog.V(4).Infof("Logging out from iSCSI target: %s", params.iqn)
-	logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	// Don't specify portal - logout from target on all portals
-	cmd := iscsiadmCmd(logoutCtx, "-m", "node", "-T", params.iqn, "--logout")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// Check if already logged out
-		alreadyLoggedOut := strings.Contains(string(output), "No matching sessions") ||
-			strings.Contains(string(output), "not found")
-		if alreadyLoggedOut {
-			klog.V(4).Infof("iSCSI target already logged out")
-			return nil
-		}
-		return err
+	if s.logoutISCSITargetFn != nil {
+		return s.logoutISCSITargetFn(ctx, params)
 	}
 
-	klog.V(4).Infof("Successfully logged out from iSCSI target: %s", params.iqn)
-	return nil
+	klog.V(4).Infof("Logging out from iSCSI target: %s", params.iqn)
+	operationCtx, operationCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer operationCancel()
+
+	var logoutErr error
+	for {
+		if operationErr := operationCtx.Err(); operationErr != nil {
+			return iscsiLogoutContextError(params.iqn, operationErr, logoutErr)
+		}
+
+		sessionIDs, err := s.findISCSISessionIDs(operationCtx, params.iqn)
+		if err != nil {
+			if operationErr := operationCtx.Err(); operationErr != nil {
+				return iscsiLogoutContextError(params.iqn, operationErr, logoutErr)
+			}
+			return errors.Join(logoutErr, fmt.Errorf("failed to find active iSCSI sessions for %s: %w", params.iqn, err))
+		}
+		if len(sessionIDs) == 0 {
+			klog.V(4).Infof("Successfully logged out from iSCSI target: %s", params.iqn)
+			return nil
+		}
+
+		logoutErr = errors.Join(logoutErr, s.logoutISCSISessions(operationCtx, params.iqn, sessionIDs))
+
+		select {
+		case <-time.After(250 * time.Millisecond):
+		case <-operationCtx.Done():
+			return iscsiLogoutContextError(params.iqn, operationCtx.Err(), logoutErr)
+		}
+	}
+}
+
+func (s *NodeService) logoutISCSISessions(ctx context.Context, iqn string, sessionIDs []string) error {
+	errorsBySession := make(chan error, len(sessionIDs))
+	var waitGroup sync.WaitGroup
+	for _, sessionID := range sessionIDs {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			defer cancel()
+			output, err := s.runISCSIAdm(logoutCtx, "-m", "session", "-r", sessionID, "--logout")
+			if err != nil {
+				klog.V(4).Infof("iSCSI logout command returned an error for %s session %s: %v, output: %s", iqn, sessionID, err, string(output))
+				errorsBySession <- fmt.Errorf("session %s: %w, output: %s", sessionID, err, string(output))
+			}
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsBySession)
+
+	var logoutErr error
+	for err := range errorsBySession {
+		logoutErr = errors.Join(logoutErr, err)
+	}
+	return logoutErr
+}
+
+func iscsiLogoutContextError(iqn string, operationErr, logoutErr error) error {
+	if errors.Is(operationErr, context.Canceled) {
+		return errors.Join(logoutErr, fmt.Errorf("iSCSI logout canceled for %s: %w", iqn, operationErr))
+	}
+	timeoutErr := fmt.Errorf("%w for IQN %s: %w", ErrISCSILogoutTimeout, iqn, operationErr)
+	if logoutErr == nil {
+		return timeoutErr
+	}
+	return fmt.Errorf("iSCSI logout command failed for %s: %w; session verification failed: %w", iqn, logoutErr, timeoutErr)
+}
+
+func (s *NodeService) findISCSISessionIDs(ctx context.Context, iqn string) ([]string, error) {
+	sessionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	output, err := s.runISCSIAdm(sessionCtx, "-m", "session")
+	if err != nil {
+		lowerOutput := strings.ToLower(string(output))
+		if strings.Contains(lowerOutput, "no active sessions") ||
+			strings.Contains(lowerOutput, "no matching sessions") ||
+			strings.Contains(lowerOutput, "no records found") {
+
+			return nil, nil
+		}
+		return nil, fmt.Errorf("iscsiadm session query failed: %w, output: %s", err, string(output))
+	}
+
+	return parseISCSISessionIDs(string(output), iqn)
+}
+
+func parseISCSISessionIDs(output, targetIQN string) ([]string, error) {
+	var sessionIDs []string
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if !containsExactField(fields, targetIQN) {
+			continue
+		}
+		if len(fields) < 2 || !strings.HasPrefix(fields[1], "[") || !strings.HasSuffix(fields[1], "]") {
+			return nil, fmt.Errorf("%w for target %s: %s", ErrISCSIMalformedSession, targetIQN, line)
+		}
+
+		sessionID := strings.TrimSuffix(strings.TrimPrefix(fields[1], "["), "]")
+		if _, err := strconv.ParseUint(sessionID, 10, 64); err != nil {
+			return nil, fmt.Errorf("invalid iSCSI session ID %q for target %s: %w", sessionID, targetIQN, err)
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	return sessionIDs, nil
+}
+
+func containsExactField(fields []string, value string) bool {
+	for _, field := range fields {
+		if field == value {
+			return true
+		}
+	}
+	return false
 }
 
 // findISCSIDevice finds the device path for an iSCSI LUN.
@@ -322,12 +443,9 @@ func parseISCSISessionDevice(output, targetIQN string) string {
 		// Check if we're entering a target section
 		// Format: "Target: iqn.2005-10.org.freenas.ctl:pvc-xxx (non-flash)"
 		// The IQN might be followed by extra text like "(non-flash)"
-		if strings.HasPrefix(line, "Target:") {
-			targetLine := strings.TrimPrefix(line, "Target:")
-			targetLine = strings.TrimSpace(targetLine)
-			// Check if this line contains our target IQN (use Contains/HasPrefix
-			// because there might be extra text after the IQN)
-			inTargetSection = strings.HasPrefix(targetLine, targetIQN)
+		if strings.HasPrefix(line, iscsiTargetPrefix) {
+			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, iscsiTargetPrefix)))
+			inTargetSection = len(targetFields) > 0 && targetFields[0] == targetIQN
 			continue
 		}
 
@@ -498,8 +616,21 @@ func (s *NodeService) unstageISCSIVolume(ctx context.Context, req *csi.NodeUnsta
 
 	klog.V(4).Infof("Unstaging iSCSI volume %s from %s", volumeID, stagingTargetPath)
 
-	// Get IQN from volume context
-	iqn := volumeContext[VolumeContextKeyISCSIIQN]
+	iqn := s.resolveISCSIUnstageIQN(ctx, stagingTargetPath, volumeContext)
+	if iqn == "" {
+		if _, statErr := os.Lstat(stagingTargetPath); os.IsNotExist(statErr) {
+			klog.V(4).Infof("Staging path %s no longer exists; iSCSI volume %s is already unstaged", stagingTargetPath, volumeID)
+			return &csi.NodeUnstageVolumeResponse{}, nil
+		}
+		return nil, status.Errorf(codes.Internal,
+			"cannot determine IQN for iSCSI volume %s at staging path %s; refusing to report successful unstage",
+			volumeID, stagingTargetPath)
+	}
+
+	// Preserve the real IQN before unmounting so a failed logout can be retried.
+	if err := writeISCSIStagingIQN(stagingTargetPath, iqn); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to persist iSCSI staging metadata before unmount: %v", err)
+	}
 
 	// Check if mounted and unmount if necessary
 	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
@@ -512,12 +643,6 @@ func (s *NodeService) unstageISCSIVolume(ctx context.Context, req *csi.NodeUnsta
 		if err := mount.Unmount(ctx, stagingTargetPath); err != nil {
 			return nil, status.Errorf(codes.Internal, "Failed to unmount staging path: %v", err)
 		}
-	}
-
-	// If we don't have IQN, we can't logout
-	if iqn == "" {
-		klog.Warningf("Cannot determine IQN for volume %s - skipping iSCSI logout", volumeID)
-		return &csi.NodeUnstageVolumeResponse{}, nil
 	}
 
 	// Logout from the iSCSI target
@@ -535,10 +660,163 @@ func (s *NodeService) unstageISCSIVolume(ctx context.Context, req *csi.NodeUnsta
 
 	klog.V(4).Infof("Logging out from iSCSI target for volume %s: IQN=%s", volumeID, iqn)
 	if err := s.logoutISCSITarget(ctx, params); err != nil {
-		klog.Warningf("Failed to logout from iSCSI target (continuing anyway): %v", err)
+		return nil, status.Errorf(codes.Internal, "failed to logout iSCSI volume %s (IQN %s): %v", volumeID, iqn, err)
 	}
+	if err := removeISCSIBlockStagingPath(stagingTargetPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "logged out iSCSI volume %s but failed to remove block staging path: %v", volumeID, err)
+	}
+	if err := removeISCSIStagingIQN(stagingTargetPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "logged out iSCSI volume %s but failed to remove staging metadata: %v", volumeID, err)
+	}
+	klog.Infof("Logged out iSCSI volume %s from target %s", volumeID, iqn)
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
+}
+
+func (s *NodeService) resolveISCSIUnstageIQN(ctx context.Context, stagingTargetPath string, volumeContext map[string]string) string {
+	if iqn := volumeContext[VolumeContextKeyISCSIIQN]; iqn != "" {
+		return iqn
+	}
+
+	iqn, err := s.deriveISCSIIQNFromStagingPath(ctx, stagingTargetPath)
+	if err != nil {
+		klog.Warningf("Failed to derive iSCSI IQN from staging path %s: %v", stagingTargetPath, err)
+		return ""
+	}
+	klog.V(4).Infof("Derived iSCSI IQN from staging path %s: %s", stagingTargetPath, iqn)
+	return iqn
+}
+
+func (s *NodeService) deriveISCSIIQNFromStagingPath(ctx context.Context, stagingTargetPath string) (string, error) {
+	if iqn, err := readISCSIStagingIQN(stagingTargetPath); err == nil && iqn != "" {
+		return iqn, nil
+	} else if err != nil {
+		klog.Warningf("Failed to read iSCSI staging metadata for %s: %v; falling back to session metadata", stagingTargetPath, err)
+	}
+
+	devicePath, err := getStagedISCSIDevicePath(ctx, stagingTargetPath)
+	if err != nil {
+		return "", err
+	}
+
+	return s.findISCSIIQNForDevice(ctx, devicePath)
+}
+
+func (s *NodeService) findISCSIIQNForDevice(ctx context.Context, devicePath string) (string, error) {
+	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	output, err := s.runISCSIAdm(sessionCtx, "-m", "session", "-P", "3")
+	if err != nil {
+		return "", fmt.Errorf("failed to query iSCSI sessions: %w, output: %s", err, string(output))
+	}
+
+	iqn := parseISCSISessionIQNForDevice(string(output), filepath.Base(devicePath))
+	if iqn == "" {
+		return "", fmt.Errorf("%w for staged device %s", ErrISCSIDeviceNotFound, devicePath)
+	}
+	return iqn, nil
+}
+
+func getStagedISCSIDevicePath(ctx context.Context, stagingTargetPath string) (string, error) {
+	if mounted, err := mount.IsMounted(ctx, stagingTargetPath); err == nil && mounted {
+		cmd := exec.CommandContext(ctx, "/usr/bin/findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
+		output, cmdErr := cmd.CombinedOutput()
+		if cmdErr != nil {
+			return "", fmt.Errorf("findmnt source lookup failed for %s: %w", stagingTargetPath, cmdErr)
+		}
+		devicePath := strings.TrimSpace(string(output))
+		if strings.HasPrefix(devicePath, "/dev/") {
+			return devicePath, nil
+		}
+	}
+
+	resolved, err := filepath.EvalSymlinks(stagingTargetPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve iSCSI staging path %s: %w", stagingTargetPath, err)
+	}
+	if !strings.HasPrefix(resolved, "/dev/") {
+		return "", fmt.Errorf("%w: %s -> %s", ErrISCSINonDevicePath, stagingTargetPath, resolved)
+	}
+	return resolved, nil
+}
+
+func parseISCSISessionIQNForDevice(output, deviceName string) string {
+	deviceName = filepath.Base(deviceName)
+	currentIQN := ""
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, iscsiTargetPrefix) {
+			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, iscsiTargetPrefix)))
+			currentIQN = ""
+			if len(targetFields) > 0 {
+				currentIQN = targetFields[0]
+			}
+			continue
+		}
+		if currentIQN == "" || !strings.Contains(line, "Attached scsi disk") {
+			continue
+		}
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field == "disk" && i+1 < len(fields) && fields[i+1] == deviceName {
+				return currentIQN
+			}
+		}
+	}
+
+	return ""
+}
+
+func iscsiStagingMetadataPath(stagingTargetPath string) string {
+	return stagingTargetPath + iscsiStagingMetadataSuffix
+}
+
+func writeISCSIStagingIQN(stagingTargetPath, iqn string) error {
+	if strings.TrimSpace(iqn) == "" {
+		return ErrISCSIEmptyIQN
+	}
+	if err := os.MkdirAll(filepath.Dir(stagingTargetPath), 0o750); err != nil {
+		return err
+	}
+	return os.WriteFile(iscsiStagingMetadataPath(stagingTargetPath), []byte(iqn+"\n"), 0o600)
+}
+
+func readISCSIStagingIQN(stagingTargetPath string) (string, error) {
+	data, err := os.ReadFile(iscsiStagingMetadataPath(stagingTargetPath))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	iqn := strings.TrimSpace(string(data))
+	if iqn == "" {
+		return "", ErrISCSIEmptyIQN
+	}
+	return iqn, nil
+}
+
+func removeISCSIStagingIQN(stagingTargetPath string) error {
+	err := os.Remove(iscsiStagingMetadataPath(stagingTargetPath))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+func removeISCSIBlockStagingPath(stagingTargetPath string) error {
+	info, err := os.Lstat(stagingTargetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	return os.Remove(stagingTargetPath)
 }
 
 // getISCSIMountOptions merges user-provided mount options with sensible defaults.

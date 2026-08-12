@@ -522,34 +522,44 @@ func (c *Client) reauthenticate(ctx context.Context, requestEpoch uint64) error 
 		c.reauthDone = reauthDone
 		c.reauthMu.Unlock()
 
-		err := c.acquireAuthentication(ctx)
-		performedAuth := false
-		if err == nil {
-			c.reauthMu.Lock()
-			if c.reauthEpoch != requestEpoch {
-				err = c.lastReauthErr
-			} else {
-				performedAuth = true
-			}
-			c.reauthMu.Unlock()
-			if performedAuth {
-				err = c.authenticateLocked(ctx)
-			}
-			c.releaseAuthentication()
-		}
-
-		c.reauthMu.Lock()
-		// Do not make one caller's cancellation the shared result for callers
-		// that still have time to perform authentication themselves.
-		if performedAuth && ctx.Err() == nil && !isConnectionError(err) {
-			c.reauthEpoch++
-			c.lastReauthErr = err
-		}
-		c.reauthDone = nil
-		close(reauthDone)
-		c.reauthMu.Unlock()
+		performedAuth, err := c.performReauthentication(ctx, requestEpoch)
+		c.finishReauthentication(ctx, reauthDone, err, performedAuth)
 		return err
 	}
+}
+
+func (c *Client) performReauthentication(ctx context.Context, requestEpoch uint64) (bool, error) {
+	if err := c.acquireAuthentication(ctx); err != nil {
+		return false, err
+	}
+	defer c.releaseAuthentication()
+
+	c.reauthMu.Lock()
+	defer c.reauthMu.Unlock()
+	if c.reauthEpoch != requestEpoch {
+		return false, c.lastReauthErr
+	}
+
+	// Authentication dispatch also takes reauthMu, preventing regular RPCs
+	// from capturing the old epoch while the authentication request is sent.
+	c.reauthMu.Unlock()
+	err := c.authenticateLocked(ctx)
+	c.reauthMu.Lock()
+	return true, err
+}
+
+func (c *Client) finishReauthentication(ctx context.Context, done chan struct{}, err error, performedAuth bool) {
+	c.reauthMu.Lock()
+	defer c.reauthMu.Unlock()
+
+	// Do not make one caller's cancellation the shared result for callers
+	// that still have time to perform authentication themselves.
+	if performedAuth && ctx.Err() == nil && !isConnectionError(err) {
+		c.reauthEpoch++
+		c.lastReauthErr = err
+	}
+	c.reauthDone = nil
+	close(done)
 }
 
 func (c *Client) currentReauthEpoch() uint64 {
@@ -598,72 +608,102 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 		}
 
 		lastErr = err
-
-		// Session-level auth loss: the storage system dropped our session
-		// without closing the WebSocket, so the connection looks healthy and
-		// reconnect() never fires — without re-authentication every call
-		// would fail with ENOTAUTHENTICATED forever. Re-authenticate on the
-		// live connection and retry. The auth call itself is excluded to
-		// avoid recursion.
-		if method != methodAuthLoginWithAPIKey && isSessionAuthError(err) {
-			if attempt == maxRetries {
-				break
-			}
-			klog.Warningf("Request %s failed with %s on a live connection (attempt %d/%d), re-authenticating...",
-				method, errNameNotAuthenticated, attempt, maxRetries)
-			if raErr := c.reauthenticate(ctx, requestEpoch); raErr != nil {
-				if isConnectionError(raErr) {
-					lastErr = raErr
-					continue
-				}
-				return fmt.Errorf("re-authentication after %s failed: %w", errNameNotAuthenticated, raErr)
-			}
-			continue
+		retryErr, retry, terminalErr := c.prepareCallRetry(ctx, method, attempt, maxRetries, requestEpoch, err)
+		if terminalErr != nil {
+			return terminalErr
 		}
-		// Authentication is already wrapped by connection initialization or
-		// live-session reauthentication. Return connection loss immediately so
-		// those coordinators can release the authentication gate.
-		if method == methodAuthLoginWithAPIKey && isConnectionError(err) {
-			return err
+		if retryErr != nil {
+			lastErr = retryErr
 		}
-
-		// Check if this is a retryable connection error
-		if !isConnectionError(err) {
-			// Not a connection error, don't retry
-			return err
-		}
-
-		// Check if context is still valid for retry
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		// Don't retry if client is closed
-		c.mu.Lock()
-		closed := c.closed
-		c.mu.Unlock()
-		if closed {
-			return ErrClientClosed
-		}
-
-		if attempt < maxRetries {
-			// Exponential backoff: 1s, 2s, 4s
-			backoff := time.Duration(1<<(attempt-1)) * time.Second
-			klog.V(4).Infof("Request failed with connection error (attempt %d/%d): %v, retrying in %v...",
-				attempt, maxRetries, err, backoff)
-
-			select {
-			case <-time.After(backoff):
-				// Continue to next attempt
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-c.closeCh:
-				return ErrClientClosed
-			}
+		if !retry {
+			break
 		}
 	}
 
 	return fmt.Errorf("request failed after %d attempts: %w", maxRetries, lastErr)
+}
+
+func (c *Client) prepareCallRetry(
+	ctx context.Context,
+	method string,
+	attempt int,
+	maxRetries int,
+	requestEpoch uint64,
+	err error,
+) (retryErr error, retry bool, terminalErr error) {
+
+	// A live connection can lose its server-side session authentication. The
+	// auth method is excluded here so a rejected auth request cannot recurse.
+	if method != methodAuthLoginWithAPIKey && isSessionAuthError(err) {
+		if attempt >= maxRetries {
+			return nil, false, nil
+		}
+		reauthErr := c.reauthenticateAfterSessionLoss(ctx, method, attempt, maxRetries, requestEpoch)
+		if reauthErr != nil && !isConnectionError(reauthErr) {
+			return nil, false, reauthErr
+		}
+		return reauthErr, true, nil
+	}
+
+	// Connection initialization and live-session reauthentication coordinate
+	// auth retries themselves and need the connection loss immediately.
+	if method == methodAuthLoginWithAPIKey && isConnectionError(err) {
+		return nil, false, err
+	}
+	if waitErr := c.waitForCallRetry(ctx, attempt, maxRetries, err); waitErr != nil {
+		return nil, false, waitErr
+	}
+	return nil, true, nil
+}
+
+func (c *Client) reauthenticateAfterSessionLoss(
+	ctx context.Context,
+	method string,
+	attempt int,
+	maxRetries int,
+	requestEpoch uint64,
+) error {
+
+	klog.Warningf("Request %s failed with %s on a live connection (attempt %d/%d), re-authenticating...",
+		method, errNameNotAuthenticated, attempt, maxRetries)
+	if err := c.reauthenticate(ctx, requestEpoch); err != nil {
+		if isConnectionError(err) {
+			return err
+		}
+		return fmt.Errorf("re-authentication after %s failed: %w", errNameNotAuthenticated, err)
+	}
+	return nil
+}
+
+func (c *Client) waitForCallRetry(ctx context.Context, attempt, maxRetries int, err error) error {
+	if !isConnectionError(err) {
+		return err
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	if closed {
+		return ErrClientClosed
+	}
+	if attempt >= maxRetries {
+		return nil
+	}
+
+	backoff := time.Duration(1<<(attempt-1)) * time.Second
+	klog.V(4).Infof("Request failed with connection error (attempt %d/%d): %v, retrying in %v...",
+		attempt, maxRetries, err, backoff)
+	select {
+	case <-time.After(backoff):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.closeCh:
+		return ErrClientClosed
+	}
 }
 
 // callOnce makes a single JSON-RPC 2.0 call attempt.

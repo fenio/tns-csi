@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 )
 
 // mockWSServer provides a mock WebSocket server for testing.
@@ -27,6 +28,42 @@ type mockWSServer struct {
 	disconnectAfter int // Disconnect after N messages (0 = never)
 	mu              sync.Mutex
 	msgCount        int
+}
+
+type concurrentReauthState struct { //nolint:govet // Field order follows synchronization and state semantics.
+	mu              sync.Mutex
+	authCalls       int
+	dataCalls       int
+	pendingReauthID string
+	callerCount     int
+}
+
+func (s *concurrentReauthState) handle(req Request) []Response {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if req.Method == methodAuthLoginWithAPIKey {
+		s.authCalls++
+		if s.authCalls > 1 && s.dataCalls < s.callerCount {
+			s.pendingReauthID = req.ID
+			return nil
+		}
+		return []Response{{ID: req.ID, Result: json.RawMessage(`true`)}}
+	}
+
+	s.dataCalls++
+	resp := Response{ID: req.ID, Result: json.RawMessage(`true`)}
+	if s.dataCalls <= s.callerCount {
+		resp.Result = nil
+		resp.Error = enotauthenticatedError()
+	}
+	if s.dataCalls != s.callerCount || s.pendingReauthID == "" {
+		return []Response{resp}
+	}
+
+	reauthResp := Response{ID: s.pendingReauthID, Result: json.RawMessage(`true`)}
+	s.pendingReauthID = ""
+	return []Response{resp, reauthResp}
 }
 
 func newMockWSServer() *mockWSServer {
@@ -112,6 +149,21 @@ func (m *mockWSServer) defaultHandler(ctx context.Context, conn *websocket.Conn)
 		respBytes, errMarshal := json.Marshal(resp)
 		if errMarshal == nil {
 			conn.Write(ctx, websocket.MessageText, respBytes)
+		}
+	}
+}
+
+func serveMockRequests(conn *websocket.Conn, handle func(Request) []Response) {
+	ctx := context.Background()
+	for {
+		var req Request
+		if err := wsjson.Read(ctx, conn, &req); err != nil {
+			return
+		}
+		for _, resp := range handle(req) {
+			if err := wsjson.Write(ctx, conn, resp); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -410,26 +462,14 @@ func TestCallWaitsForReconnectAuthentication(t *testing.T) {
 	var mu sync.Mutex
 	dataCalls := 0
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
+		serveMockRequests(conn, func(req Request) []Response {
 			if req.Method != methodAuthLoginWithAPIKey {
 				mu.Lock()
 				dataCalls++
 				mu.Unlock()
 			}
-			respBytes, marshalErr := json.Marshal(Response{ID: req.ID, Result: json.RawMessage(`true`)})
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{{ID: req.ID, Result: json.RawMessage(`true`)}}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1044,20 +1084,8 @@ func TestCallReauthenticatesOnSessionAuthLoss(t *testing.T) {
 	dataCalls := 0
 
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			resp := Response{ID: req.ID}
-
 			mu.Lock()
 			switch req.Method {
 			case "auth.login_with_api_key":
@@ -1074,12 +1102,8 @@ func TestCallReauthenticatesOnSessionAuthLoss(t *testing.T) {
 				}
 			}
 			mu.Unlock()
-
-			respBytes, marshalErr := json.Marshal(resp)
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{resp}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1119,17 +1143,7 @@ func TestCallReauthenticatesOnRapidSecondSessionLoss(t *testing.T) {
 	authCalls := 0
 	dataCalls := 0
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			resp := Response{ID: req.ID}
 			mu.Lock()
 			if req.Method == methodAuthLoginWithAPIKey {
@@ -1145,12 +1159,8 @@ func TestCallReauthenticatesOnRapidSecondSessionLoss(t *testing.T) {
 				}
 			}
 			mu.Unlock()
-
-			respBytes, marshalErr := json.Marshal(resp)
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{resp}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1191,61 +1201,9 @@ func TestConcurrentCallsShareReauthentication(t *testing.T) {
 	server := newMockWSServer()
 	defer server.Close()
 
-	var mu sync.Mutex
-	authCalls := 0
-	dataCalls := 0
-	pendingReauthID := ""
+	state := concurrentReauthState{callerCount: callerCount}
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		writeResponse := func(resp Response) {
-			respBytes, marshalErr := json.Marshal(resp)
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
-
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
-			mu.Lock()
-			if req.Method == methodAuthLoginWithAPIKey {
-				authCalls++
-				if authCalls > 1 && dataCalls < callerCount {
-					pendingReauthID = req.ID
-					mu.Unlock()
-					continue
-				}
-				mu.Unlock()
-				writeResponse(Response{ID: req.ID, Result: json.RawMessage(`true`)})
-				continue
-			}
-
-			dataCalls++
-			currentDataCalls := dataCalls
-			reauthID := ""
-			if dataCalls == callerCount {
-				reauthID = pendingReauthID
-				pendingReauthID = ""
-			}
-			mu.Unlock()
-
-			resp := Response{ID: req.ID, Result: json.RawMessage(`true`)}
-			if currentDataCalls <= callerCount {
-				resp.Result = nil
-				resp.Error = enotauthenticatedError()
-			}
-			writeResponse(resp)
-			if reauthID != "" {
-				writeResponse(Response{ID: reauthID, Result: json.RawMessage(`true`)})
-			}
-		}
+		serveMockRequests(conn, state.handle)
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1277,13 +1235,13 @@ func TestConcurrentCallsShareReauthentication(t *testing.T) {
 		}
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if authCalls != 2 {
-		t.Errorf("auth calls = %d, want 2 (initial + one shared re-authentication)", authCalls)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.authCalls != 2 {
+		t.Errorf("auth calls = %d, want 2 (initial + one shared re-authentication)", state.authCalls)
 	}
-	if dataCalls != callerCount*2 {
-		t.Errorf("data calls = %d, want %d", dataCalls, callerCount*2)
+	if state.dataCalls != callerCount*2 {
+		t.Errorf("data calls = %d, want %d", state.dataCalls, callerCount*2)
 	}
 }
 
@@ -1293,34 +1251,16 @@ func TestCallCancellationStopsReauthentication(t *testing.T) {
 
 	authCalls := 0
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			if req.Method == methodAuthLoginWithAPIKey {
 				authCalls++
 				if authCalls > 1 {
-					continue
+					return nil
 				}
-				respBytes, marshalErr := json.Marshal(Response{ID: req.ID, Result: json.RawMessage(`true`)})
-				if marshalErr == nil {
-					_ = conn.Write(ctx, websocket.MessageText, respBytes)
-				}
-				continue
+				return []Response{{ID: req.ID, Result: json.RawMessage(`true`)}}
 			}
-
-			respBytes, marshalErr := json.Marshal(Response{ID: req.ID, Error: enotauthenticatedError()})
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{{ID: req.ID, Error: enotauthenticatedError()}}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1348,37 +1288,19 @@ func TestConcurrentCallsShareInternalAuthenticationTimeout(t *testing.T) {
 	var mu sync.Mutex
 	authCalls := 0
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			if req.Method == methodAuthLoginWithAPIKey {
 				mu.Lock()
 				authCalls++
 				currentAuthCalls := authCalls
 				mu.Unlock()
 				if currentAuthCalls > 1 {
-					continue
+					return nil
 				}
-				respBytes, marshalErr := json.Marshal(Response{ID: req.ID, Result: json.RawMessage(`true`)})
-				if marshalErr == nil {
-					_ = conn.Write(ctx, websocket.MessageText, respBytes)
-				}
-				continue
+				return []Response{{ID: req.ID, Result: json.RawMessage(`true`)}}
 			}
-
-			respBytes, marshalErr := json.Marshal(Response{ID: req.ID, Error: enotauthenticatedError()})
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{{ID: req.ID, Error: enotauthenticatedError()}}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1416,17 +1338,7 @@ func TestCallDoesNotReauthenticateAfterFinalAttempt(t *testing.T) {
 	authCalls := 0
 	dataCalls := 0
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			resp := Response{ID: req.ID}
 			mu.Lock()
 			if req.Method == methodAuthLoginWithAPIKey {
@@ -1437,12 +1349,8 @@ func TestCallDoesNotReauthenticateAfterFinalAttempt(t *testing.T) {
 				resp.Error = enotauthenticatedError()
 			}
 			mu.Unlock()
-
-			respBytes, marshalErr := json.Marshal(resp)
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{resp}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1478,20 +1386,8 @@ func TestAuthCallDoesNotRecurseOnSessionAuthLoss(t *testing.T) {
 	authCalls := 0
 
 	server.handler = func(conn *websocket.Conn) {
-		ctx := context.Background()
-		for {
-			_, message, readErr := conn.Read(ctx)
-			if readErr != nil {
-				return
-			}
-
-			var req Request
-			if unmarshalErr := json.Unmarshal(message, &req); unmarshalErr != nil {
-				continue
-			}
-
+		serveMockRequests(conn, func(req Request) []Response {
 			resp := Response{ID: req.ID}
-
 			mu.Lock()
 			authCalls++
 			if authCalls == 1 {
@@ -1501,12 +1397,8 @@ func TestAuthCallDoesNotRecurseOnSessionAuthLoss(t *testing.T) {
 				resp.Error = enotauthenticatedError()
 			}
 			mu.Unlock()
-
-			respBytes, marshalErr := json.Marshal(resp)
-			if marshalErr == nil {
-				_ = conn.Write(ctx, websocket.MessageText, respBytes)
-			}
-		}
+			return []Response{resp}
+		})
 	}
 
 	client, err := NewClient(server.URL(), "test-api-key", false)
@@ -1526,5 +1418,154 @@ func TestAuthCallDoesNotRecurseOnSessionAuthLoss(t *testing.T) {
 	// initial NewClient auth + exactly ONE failed re-auth attempt
 	if authCalls != 2 {
 		t.Errorf("auth.login_with_api_key calls = %d, want 2 (no recursion)", authCalls)
+	}
+}
+
+func TestAuthenticationGateStopsOnContextOrClose(t *testing.T) {
+	//nolint:govet // Field order keeps the test case readable.
+	tests := []struct {
+		name    string
+		prepare func(context.CancelFunc, chan struct{})
+		wantErr error
+	}{
+		{
+			name: "canceled context",
+			prepare: func(cancel context.CancelFunc, _ chan struct{}) {
+				cancel()
+			},
+			wantErr: context.Canceled,
+		},
+		{
+			name: "closed client",
+			prepare: func(_ context.CancelFunc, closeCh chan struct{}) {
+				close(closeCh)
+			},
+			wantErr: ErrClientClosed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{
+				authGate: make(chan struct{}, 1),
+				closeCh:  make(chan struct{}),
+			}
+			client.authGate <- struct{}{}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tt.prepare(cancel, client.closeCh)
+
+			if err := client.acquireAuthentication(ctx); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("acquireAuthentication() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestReauthenticationSynchronizationBranches(t *testing.T) {
+	t.Run("waiter cancellation", func(t *testing.T) {
+		done := make(chan struct{})
+		client := &Client{reauthDone: done}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if err := client.reauthenticate(ctx, 0); !errors.Is(err, context.Canceled) {
+			t.Fatalf("reauthenticate() error = %v, want context canceled", err)
+		}
+		if client.reauthDone != done {
+			t.Fatal("waiter cancellation changed the active reauthentication")
+		}
+	})
+
+	t.Run("stale epoch after gate", func(t *testing.T) {
+		wantErr := errors.New("reauthentication already completed")
+		client := &Client{
+			authGate:      make(chan struct{}, 1),
+			closeCh:       make(chan struct{}),
+			reauthEpoch:   2,
+			lastReauthErr: wantErr,
+		}
+
+		performed, err := client.performReauthentication(context.Background(), 1)
+		if !errors.Is(err, wantErr) || performed {
+			t.Fatalf("performReauthentication() = (%v, %v), want (%v, false)", err, performed, wantErr)
+		}
+	})
+
+	t.Run("record completion", func(t *testing.T) {
+		client := &Client{}
+		wantErr := errors.New("authentication rejected")
+		client.recordReauthentication(wantErr)
+
+		if client.currentReauthEpoch() != 1 {
+			t.Fatalf("reauth epoch = %d, want 1", client.currentReauthEpoch())
+		}
+		if !errors.Is(client.lastReauthErr, wantErr) {
+			t.Fatalf("last reauthentication error = %v, want %v", client.lastReauthErr, wantErr)
+		}
+	})
+}
+
+func TestWaitForCallRetry(t *testing.T) {
+	//nolint:govet // Field order keeps the test case readable.
+	tests := []struct {
+		err     error
+		prepare func(*Client, context.CancelFunc)
+		name    string
+		attempt int
+		wantErr error
+	}{
+		{name: "non-connection error", err: errors.New("invalid request"), wantErr: errors.New("invalid request")},
+		{
+			name: "canceled context",
+			err:  ErrConnectionClosed,
+			prepare: func(_ *Client, cancel context.CancelFunc) {
+				cancel()
+			},
+			wantErr: context.Canceled,
+		},
+		{
+			name: "closed client",
+			err:  ErrConnectionClosed,
+			prepare: func(client *Client, _ context.CancelFunc) {
+				client.closed = true
+			},
+			wantErr: ErrClientClosed,
+		},
+		{name: "final attempt", err: ErrConnectionClosed, attempt: 3},
+		{
+			name: "close during backoff",
+			err:  ErrConnectionClosed,
+			prepare: func(client *Client, _ context.CancelFunc) {
+				close(client.closeCh)
+			},
+			wantErr: ErrClientClosed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{closeCh: make(chan struct{})}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.prepare != nil {
+				tt.prepare(client, cancel)
+			}
+			attempt := tt.attempt
+			if attempt == 0 {
+				attempt = 1
+			}
+
+			err := client.waitForCallRetry(ctx, attempt, 3, tt.err)
+			if tt.name == "non-connection error" {
+				if err == nil || err.Error() != tt.wantErr.Error() {
+					t.Fatalf("waitForCallRetry() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("waitForCallRetry() error = %v, want %v", err, tt.wantErr)
+			}
+		})
 	}
 }

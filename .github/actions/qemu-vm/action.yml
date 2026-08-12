@@ -127,8 +127,8 @@ runs:
           # NodeStageVolume — every /dev/sd* gets wrapped as a dm-* device.
           - apt-get purge -y multipath-tools || true
           - systemctl enable --now iscsid
-          - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage" sh -
-          - until kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready'; do sleep 2; done
+          - for attempt in 1 2 3; do curl --retry 5 --retry-all-errors --connect-timeout 15 --max-time 300 -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --disable=traefik --disable=local-storage" sh - && break; [ "\$attempt" -eq 3 ] && exit 1; sleep 10; done
+          - for attempt in \$(seq 1 150); do kubectl get nodes --no-headers 2>/dev/null | grep -q ' Ready' && break; [ "\$attempt" -eq 150 ] && exit 1; sleep 2; done
           - echo "K3S_READY" > /tmp/k3s-ready
         EOF
 
@@ -176,7 +176,11 @@ runs:
         SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222"
 
         echo "Waiting for cloud-init to finish..."
-        ssh $SSH_OPTS ci@localhost "sudo cloud-init status --wait"
+        if ! timeout 20m ssh $SSH_OPTS ci@localhost "sudo cloud-init status --wait"; then
+          echo "::error::cloud-init did not complete successfully"
+          ssh $SSH_OPTS ci@localhost "sudo cloud-init status --long; sudo tail -200 /var/log/cloud-init-output.log" || true
+          exit 1
+        fi
 
         echo "Waiting for K3S to be ready..."
         for i in $(seq 1 60); do

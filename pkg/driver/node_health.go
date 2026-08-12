@@ -50,12 +50,19 @@ func Unhealthy(message string) VolumeHealth {
 	}
 }
 
-// ToCSI converts VolumeHealth to a CSI VolumeCondition.
-func (h VolumeHealth) ToCSI() *csi.VolumeCondition {
-	return &csi.VolumeCondition{
-		Abnormal: h.Abnormal,
-		Message:  h.Message,
+// ToCSI converts VolumeHealth to the CSI 1.13 volume health model.
+func (h VolumeHealth) ToCSI(volumeID string) *csi.VolumeHealth {
+	health := &csi.VolumeHealth{VolumeId: volumeID}
+	if h.Abnormal {
+		health.HealthStatuses = []*csi.VolumeHealth_VolumeHealthEntry{
+			{
+				Status:  csi.VolumeHealthErrorType_INACCESSIBLE,
+				Reason:  "VolumeUnavailable",
+				Message: h.Message,
+			},
+		}
 	}
+	return health
 }
 
 // checkVolumeHealth checks the health of a volume based on its protocol.

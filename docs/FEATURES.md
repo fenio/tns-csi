@@ -335,10 +335,11 @@ spec:
 ### Volume Health Monitoring
 - **Status**: ✅ Implemented
 - **Protocols**: NFS, NVMe-oF, iSCSI, SMB
-- **Description**: Report volume health status to Kubernetes via CSI `ControllerGetVolume` capability
-- **CSI Capability**: `GET_VOLUME` - enables Kubernetes to query volume health
+- **Description**: Report volume health through the dedicated CSI 1.13 controller and node RPCs
+- **CSI Capabilities**: `GET_VOLUME_HEALTH` on the controller and node services
 - **Features**:
-  - Reports `VolumeCondition` with `Abnormal` flag and descriptive `Message`
+  - Reports adverse `VolumeHealth` entries with status, reason, and descriptive message
+  - Returns an empty health status list when no adverse condition is known
   - Health checks performed on-demand when Kubernetes queries volume status
   - Protocol-specific validation of underlying storage resources
 

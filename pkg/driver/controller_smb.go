@@ -3,6 +3,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -732,32 +733,33 @@ func (s *ControllerService) expandSMBVolume(ctx context.Context, meta *VolumeMet
 }
 
 // getSMBVolumeInfo retrieves volume information and health status for an SMB volume.
-func (s *ControllerService) getSMBVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, error) {
+func (s *ControllerService) getSMBVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, VolumeHealth, error) {
 	klog.V(4).Infof("Getting SMB volume info: %s (dataset: %s, shareID: %d)", meta.Name, meta.DatasetName, meta.SMBShareID)
 
 	abnormal := false
 	var messages []string
 
 	dataset, err := s.apiClient.Dataset(ctx, meta.DatasetName)
-	if err != nil || dataset == nil {
+	switch {
+	case err != nil && !errors.Is(err, tnsapi.ErrDatasetNotFound):
+		return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query dataset %s: %v", meta.DatasetName, err)
+	case errors.Is(err, tnsapi.ErrDatasetNotFound) || dataset == nil:
 		abnormal = true
-		messages = append(messages, fmt.Sprintf("Dataset %s not accessible: %v", meta.DatasetName, err))
+		messages = append(messages, fmt.Sprintf("Dataset %s not found", meta.DatasetName))
 	}
 
 	if meta.SMBShareID > 0 {
 		foundShare, err := s.apiClient.QuerySMBShareByID(ctx, meta.SMBShareID)
 		if err != nil {
+			return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query SMB share %d: %v", meta.SMBShareID, err)
+		}
+		switch {
+		case foundShare == nil:
 			abnormal = true
-			messages = append(messages, fmt.Sprintf("Failed to query SMB share %d: %v", meta.SMBShareID, err))
-		} else {
-			switch {
-			case foundShare == nil:
-				abnormal = true
-				messages = append(messages, fmt.Sprintf("SMB share %d not found", meta.SMBShareID))
-			case !foundShare.Enabled:
-				abnormal = true
-				messages = append(messages, fmt.Sprintf("SMB share %d is disabled", meta.SMBShareID))
-			}
+			messages = append(messages, fmt.Sprintf("SMB share %d not found", meta.SMBShareID))
+		case !foundShare.Enabled:
+			abnormal = true
+			messages = append(messages, fmt.Sprintf("SMB share %d is disabled", meta.SMBShareID))
 		}
 	}
 
@@ -781,11 +783,6 @@ func (s *ControllerService) getSMBVolumeInfo(ctx context.Context, meta *VolumeMe
 			CapacityBytes: capacityBytes,
 			VolumeContext: volumeContext,
 		},
-		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{
-			VolumeCondition: &csi.VolumeCondition{
-				Abnormal: abnormal,
-				Message:  message,
-			},
-		},
-	}, nil
+		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{},
+	}, VolumeHealth{Abnormal: abnormal, Message: message}, nil
 }

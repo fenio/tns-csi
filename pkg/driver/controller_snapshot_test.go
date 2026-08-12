@@ -39,6 +39,7 @@ type MockAPIClientForSnapshots struct {
 	QueryAllDatasetsFunc           func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error)
 	QueryNFSShareByIDFunc          func(ctx context.Context, shareID int) (*tnsapi.NFSShare, error)
 	QueryAllNFSSharesFunc          func(ctx context.Context, pathPrefix string) ([]tnsapi.NFSShare, error)
+	QuerySMBShareByIDFunc          func(ctx context.Context, shareID int) (*tnsapi.SMBShare, error)
 	QueryNVMeOFNamespaceByIDFunc   func(ctx context.Context, namespaceID int) (*tnsapi.NVMeOFNamespace, error)
 	QueryAllNVMeOFNamespacesFunc   func(ctx context.Context) ([]tnsapi.NVMeOFNamespace, error)
 	QueryPoolFunc                  func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
@@ -156,6 +157,9 @@ func (m *MockAPIClientForSnapshots) QuerySMBShare(ctx context.Context, path stri
 }
 
 func (m *MockAPIClientForSnapshots) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {
+	if m.QuerySMBShareByIDFunc != nil {
+		return m.QuerySMBShareByIDFunc(ctx, shareID)
+	}
 	return nil, errors.New("QuerySMBShareByIDFunc not implemented")
 }
 

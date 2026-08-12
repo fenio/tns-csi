@@ -2,11 +2,13 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/fenio/tns-csi/pkg/tnsapi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -62,7 +64,7 @@ func TestNodeGetCapabilities(t *testing.T) {
 		csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME: false,
 		csi.NodeServiceCapability_RPC_GET_VOLUME_STATS:     false,
 		csi.NodeServiceCapability_RPC_EXPAND_VOLUME:        false,
-		csi.NodeServiceCapability_RPC_VOLUME_CONDITION:     false,
+		csi.NodeServiceCapability_RPC_GET_VOLUME_HEALTH:    false,
 	}
 
 	for _, cap := range resp.Capabilities {
@@ -547,11 +549,75 @@ func TestNodeGetVolumeStats_TestMode(t *testing.T) {
 		t.Error("Expected BYTES usage in response")
 	}
 
-	// Check for VolumeCondition (should be healthy in test mode).
-	if resp.VolumeCondition == nil {
-		t.Error("Expected VolumeCondition in response")
-	} else if resp.VolumeCondition.Abnormal {
-		t.Errorf("Expected healthy volume condition, got abnormal: %s", resp.VolumeCondition.Message)
+	healthResp, err := service.NodeGetVolumeHealth(ctx, &csi.NodeGetVolumeHealthRequest{
+		VolumeId:          "test-volume",
+		VolumePublishPath: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("NodeGetVolumeHealth() error = %v", err)
+	}
+	if healthResp.GetVolumeHealth().GetVolumeId() != "test-volume" {
+		t.Errorf("health volume ID = %q, want test-volume", healthResp.GetVolumeHealth().GetVolumeId())
+	}
+	if len(healthResp.GetVolumeHealth().GetHealthStatuses()) != 0 {
+		t.Error("test-mode volume unexpectedly reported adverse health")
+	}
+}
+
+func TestNodeGetVolumeHealthValidation(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	resp, err := service.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("NodeGetVolumeHealth() error = %v, want InvalidArgument", err)
+	}
+	if resp != nil {
+		t.Fatal("NodeGetVolumeHealth() returned a response for an invalid request")
+	}
+}
+
+func TestNodeGetVolumeHealthWithoutPath(t *testing.T) {
+	tests := []struct {
+		lookup  func(context.Context, string, string) (*tnsapi.DatasetWithProperties, error)
+		name    string
+		wantErr codes.Code
+	}{
+		{
+			name: "existing volume",
+			lookup: func(context.Context, string, string) (*tnsapi.DatasetWithProperties, error) {
+				return &tnsapi.DatasetWithProperties{Dataset: tnsapi.Dataset{ID: "tank/test-volume"}}, nil
+			},
+			wantErr: codes.OK,
+		},
+		{
+			name: "missing volume",
+			lookup: func(context.Context, string, string) (*tnsapi.DatasetWithProperties, error) {
+				return nil, nil //nolint:nilnil // The API uses nil, nil to represent a missing volume.
+			},
+			wantErr: codes.NotFound,
+		},
+		{
+			name: "lookup failure",
+			lookup: func(context.Context, string, string) (*tnsapi.DatasetWithProperties, error) {
+				return nil, errors.New("backend unavailable")
+			},
+			wantErr: codes.Internal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &MockAPIClientForSnapshots{FindDatasetByCSIVolumeNameFunc: tt.lookup}
+			service := NewNodeService("test-node", client, false, nil, false, 5)
+			resp, err := service.NodeGetVolumeHealth(context.Background(), &csi.NodeGetVolumeHealthRequest{
+				VolumeId: "test-volume",
+			})
+			if status.Code(err) != tt.wantErr {
+				t.Fatalf("NodeGetVolumeHealth() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == codes.OK && resp.GetVolumeHealth().GetVolumeId() != "test-volume" {
+				t.Fatalf("health volume ID = %q, want test-volume", resp.GetVolumeHealth().GetVolumeId())
+			}
+		})
 	}
 }
 

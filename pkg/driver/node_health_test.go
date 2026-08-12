@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
 )
 
 func TestHealthy(t *testing.T) {
@@ -72,16 +74,28 @@ func TestVolumeHealthToCSI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			csiCondition := tt.health.ToCSI()
-			if csiCondition == nil {
+			csiHealth := tt.health.ToCSI("test-volume")
+			if csiHealth == nil {
 				t.Fatal("ToCSI() returned nil")
+			}
+			if csiHealth.VolumeId != "test-volume" {
+				t.Errorf("ToCSI().VolumeId = %q, want test-volume", csiHealth.VolumeId)
+			}
+			if !tt.health.Abnormal {
+				if len(csiHealth.HealthStatuses) != 0 {
+					t.Errorf("healthy volume has %d adverse statuses, want 0", len(csiHealth.HealthStatuses))
+				}
 				return
 			}
-			if csiCondition.Abnormal != tt.health.Abnormal {
-				t.Errorf("ToCSI().Abnormal = %v, want %v", csiCondition.Abnormal, tt.health.Abnormal)
+			if len(csiHealth.HealthStatuses) != 1 {
+				t.Fatalf("unhealthy volume has %d statuses, want 1", len(csiHealth.HealthStatuses))
 			}
-			if csiCondition.Message != tt.health.Message {
-				t.Errorf("ToCSI().Message = %q, want %q", csiCondition.Message, tt.health.Message)
+			entry := csiHealth.HealthStatuses[0]
+			if entry.Status != csi.VolumeHealthErrorType_INACCESSIBLE {
+				t.Errorf("health status = %v, want INACCESSIBLE", entry.Status)
+			}
+			if entry.Message != tt.health.Message {
+				t.Errorf("health message = %q, want %q", entry.Message, tt.health.Message)
 			}
 		})
 	}

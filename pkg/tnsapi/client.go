@@ -81,6 +81,7 @@ var (
 //nolint:govet // fieldalignment: struct field order optimized for readability over memory layout
 type Client struct {
 	mu            sync.Mutex
+	closeOnce     sync.Once
 	conn          *websocket.Conn
 	pending       map[string]chan *Response
 	closeCh       chan struct{}
@@ -93,12 +94,16 @@ type Client struct {
 	closed        bool
 	reconnecting  bool
 	skipTLSVerify bool // Skip TLS certificate verification
+	authGate      chan struct{}
+	reconnectDone chan struct{}
 
-	// reauthMu serializes session re-authentication after ENOTAUTHENTICATED;
-	// lastReauthAt lets concurrent failing calls reuse a just-completed re-auth
-	// instead of each performing its own.
-	reauthMu     sync.Mutex
-	lastReauthAt time.Time
+	// reauthMu coordinates session re-authentication after ENOTAUTHENTICATED.
+	// Concurrent calls wait on reauthDone and reuse a re-authentication that
+	// completed after their request started.
+	reauthMu      sync.Mutex
+	reauthDone    chan struct{}
+	reauthEpoch   uint64
+	lastReauthErr error
 }
 
 // Request represents a storage API WebSocket request (JSON-RPC 2.0 format).
@@ -204,6 +209,7 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 		maxRetries:    5,
 		retryInterval: 5 * time.Second,
 		skipTLSVerify: skipTLSVerify,
+		authGate:      make(chan struct{}, 1),
 	}
 
 	// Connect to WebSocket with retry logic
@@ -228,6 +234,7 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 				maxRetries:    5,
 				retryInterval: 5 * time.Second,
 				skipTLSVerify: skipTLSVerify,
+				authGate:      make(chan struct{}, 1),
 			}
 		}
 
@@ -249,7 +256,7 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 		go c.pingLoop()
 
 		// Authenticate
-		if err := c.authenticate(); err != nil {
+		if err := c.authenticate(context.Background()); err != nil {
 			c.Close()
 			lastConnErr = err
 
@@ -329,8 +336,17 @@ func (c *Client) connect() error {
 	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
 	// We still run our own ping loop for connection health monitoring and metrics.
 
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		if closeErr := conn.Close(websocket.StatusNormalClosure, "client closed while connecting"); closeErr != nil {
+			klog.V(5).Infof("Failed to close connection created during client shutdown: %v", closeErr)
+		}
+		return ErrClientClosed
+	}
 	c.conn = conn
 	c.connectedAt = time.Now()
+	c.mu.Unlock()
 
 	// Update connection metrics
 	metrics.SetWSConnectionStatus(true)
@@ -339,16 +355,24 @@ func (c *Client) connect() error {
 }
 
 // authenticate performs API key authentication using JSON-RPC 2.0.
-func (c *Client) authenticate() error {
+func (c *Client) authenticate(ctx context.Context) error {
+	if err := c.acquireAuthentication(ctx); err != nil {
+		return err
+	}
+	defer c.releaseAuthentication()
+	return c.authenticateLocked(ctx)
+}
+
+func (c *Client) authenticateLocked(ctx context.Context) error {
 	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key")
 
 	// Storage system uses JSON-RPC 2.0 for authentication
 	// Call auth.login_with_api_key with the API key
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	var authResult bool
-	if err := c.Call(ctx, methodAuthLoginWithAPIKey, []interface{}{c.apiKey}, &authResult); err != nil {
+	if err := c.Call(authCtx, methodAuthLoginWithAPIKey, []interface{}{c.apiKey}, &authResult); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
@@ -364,10 +388,17 @@ func (c *Client) authenticate() error {
 // authenticateDirect performs API key authentication by directly reading from WebSocket
 // This is used during reconnection when readLoop is blocked and can't handle responses.
 func (c *Client) authenticateDirect() error {
-	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key (direct mode)")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if err := c.acquireAuthentication(ctx); err != nil {
+		return err
+	}
+	defer c.releaseAuthentication()
+	return c.authenticateDirectLocked(ctx)
+}
+
+func (c *Client) authenticateDirectLocked(ctx context.Context) error {
+	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key (direct mode)")
 
 	c.mu.Lock()
 
@@ -433,6 +464,21 @@ func (c *Client) authenticateDirect() error {
 	return nil
 }
 
+func (c *Client) acquireAuthentication(ctx context.Context) error {
+	select {
+	case c.authGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.closeCh:
+		return ErrClientClosed
+	}
+}
+
+func (c *Client) releaseAuthentication() {
+	<-c.authGate
+}
+
 // isSessionAuthError reports whether err is an ENOTAUTHENTICATED error from
 // the storage API — the WebSocket session lost its authentication while the
 // connection itself stayed alive (observed after storage middleware restarts:
@@ -452,23 +498,71 @@ func isSessionAuthError(err error) bool {
 }
 
 // reauthenticate restores session authentication on the live connection after
-// an ENOTAUTHENTICATED response. Serialized so that many concurrent calls
-// failing at once trigger a single auth.login_with_api_key: callers that
-// arrive right after a completed re-authentication reuse its result.
-func (c *Client) reauthenticate() error {
-	c.reauthMu.Lock()
-	defer c.reauthMu.Unlock()
+// an ENOTAUTHENTICATED response. Concurrent callers reuse a re-authentication
+// completed since their request attempt began.
+func (c *Client) reauthenticate(ctx context.Context, requestEpoch uint64) error {
+	for {
+		c.reauthMu.Lock()
+		if c.reauthEpoch != requestEpoch {
+			err := c.lastReauthErr
+			c.reauthMu.Unlock()
+			return err
+		}
+		if reauthDone := c.reauthDone; reauthDone != nil {
+			c.reauthMu.Unlock()
+			select {
+			case <-reauthDone:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 
-	// Another caller has just re-authenticated this session — reuse it.
-	if time.Since(c.lastReauthAt) < time.Second {
-		return nil
-	}
+		reauthDone := make(chan struct{})
+		c.reauthDone = reauthDone
+		c.reauthMu.Unlock()
 
-	if err := c.authenticate(); err != nil {
+		err := c.acquireAuthentication(ctx)
+		performedAuth := false
+		if err == nil {
+			c.reauthMu.Lock()
+			if c.reauthEpoch != requestEpoch {
+				err = c.lastReauthErr
+			} else {
+				performedAuth = true
+			}
+			c.reauthMu.Unlock()
+			if performedAuth {
+				err = c.authenticateLocked(ctx)
+			}
+			c.releaseAuthentication()
+		}
+
+		c.reauthMu.Lock()
+		// Do not make one caller's cancellation the shared result for callers
+		// that still have time to perform authentication themselves.
+		if performedAuth && ctx.Err() == nil && !isConnectionError(err) {
+			c.reauthEpoch++
+			c.lastReauthErr = err
+		}
+		c.reauthDone = nil
+		close(reauthDone)
+		c.reauthMu.Unlock()
 		return err
 	}
-	c.lastReauthAt = time.Now()
-	return nil
+}
+
+func (c *Client) currentReauthEpoch() uint64 {
+	c.reauthMu.Lock()
+	defer c.reauthMu.Unlock()
+	return c.reauthEpoch
+}
+
+func (c *Client) recordReauthentication(err error) {
+	c.reauthMu.Lock()
+	c.reauthEpoch++
+	c.lastReauthErr = err
+	c.reauthMu.Unlock()
 }
 
 // isConnectionError checks if the error is a connection-related error that should trigger a retry.
@@ -498,7 +592,7 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		err := c.callOnce(ctx, method, params, result)
+		requestEpoch, err := c.callOnce(ctx, method, params, result)
 		if err == nil {
 			return nil
 		}
@@ -512,12 +606,25 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 		// live connection and retry. The auth call itself is excluded to
 		// avoid recursion.
 		if method != methodAuthLoginWithAPIKey && isSessionAuthError(err) {
+			if attempt == maxRetries {
+				break
+			}
 			klog.Warningf("Request %s failed with %s on a live connection (attempt %d/%d), re-authenticating...",
 				method, errNameNotAuthenticated, attempt, maxRetries)
-			if raErr := c.reauthenticate(); raErr != nil {
+			if raErr := c.reauthenticate(ctx, requestEpoch); raErr != nil {
+				if isConnectionError(raErr) {
+					lastErr = raErr
+					continue
+				}
 				return fmt.Errorf("re-authentication after %s failed: %w", errNameNotAuthenticated, raErr)
 			}
 			continue
+		}
+		// Authentication is already wrapped by connection initialization or
+		// live-session reauthentication. Return connection loss immediately so
+		// those coordinators can release the authentication gate.
+		if method == methodAuthLoginWithAPIKey && isConnectionError(err) {
+			return err
 		}
 
 		// Check if this is a retryable connection error
@@ -560,11 +667,30 @@ func (c *Client) Call(ctx context.Context, method string, params []interface{}, 
 }
 
 // callOnce makes a single JSON-RPC 2.0 call attempt.
-func (c *Client) callOnce(ctx context.Context, method string, params []interface{}, result interface{}) error {
-	c.mu.Lock()
-	if c.closed {
+func (c *Client) callOnce(ctx context.Context, method string, params []interface{}, result interface{}) (uint64, error) {
+	for {
+		c.mu.Lock()
+		if c.closed {
+			c.mu.Unlock()
+			return 0, ErrClientClosed
+		}
+		reconnectDone := c.reconnectDone
+		if reconnectDone == nil {
+			break
+		}
 		c.mu.Unlock()
-		return ErrClientClosed
+		if method == methodAuthLoginWithAPIKey {
+			return 0, ErrConnectionClosed
+		}
+
+		select {
+		case <-reconnectDone:
+			continue
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-c.closeCh:
+			return 0, ErrClientClosed
+		}
 	}
 
 	// Generate request ID
@@ -586,12 +712,16 @@ func (c *Client) callOnce(ctx context.Context, method string, params []interface
 	klog.V(5).Infof("Sending request: method=%s, id=%s", method, id)
 	// Use a short timeout for writing to avoid blocking forever
 	writeCtx, writeCancel := context.WithTimeout(ctx, 10*time.Second)
+	// Keep the authentication generation stable from capture through dispatch.
+	c.reauthMu.Lock()
+	requestEpoch := c.reauthEpoch
 	err := wsjson.Write(writeCtx, c.conn, req)
+	c.reauthMu.Unlock()
 	writeCancel()
 	if err != nil {
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return fmt.Errorf("failed to send request: %w", err)
+		return requestEpoch, fmt.Errorf("failed to send request: %w", err)
 	}
 	metrics.RecordWSMessage("sent")
 	c.mu.Unlock()
@@ -601,25 +731,25 @@ func (c *Client) callOnce(ctx context.Context, method string, params []interface
 	case resp, ok := <-respCh:
 		if !ok {
 			// Channel was closed, connection error occurred
-			return ErrConnectionClosed
+			return requestEpoch, ErrConnectionClosed
 		}
 		metrics.RecordWSMessage("received")
 		if resp.Error != nil {
-			return resp.Error
+			return requestEpoch, resp.Error
 		}
 		if result != nil && resp.Result != nil {
 			if err := json.Unmarshal(resp.Result, result); err != nil {
-				return fmt.Errorf("failed to unmarshal result: %w", err)
+				return requestEpoch, fmt.Errorf("failed to unmarshal result: %w", err)
 			}
 		}
-		return nil
+		return requestEpoch, nil
 	case <-ctx.Done():
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return ctx.Err()
+		return requestEpoch, ctx.Err()
 	case <-c.closeCh:
-		return ErrClientClosed
+		return requestEpoch, ErrClientClosed
 	}
 }
 
@@ -653,7 +783,7 @@ func (c *Client) cleanupReadLoop() {
 	}
 	c.pending = make(map[string]chan *Response)
 	c.mu.Unlock()
-	close(c.closeCh)
+	c.signalClose()
 }
 
 // handleReadError handles WebSocket read errors with reconnection logic.
@@ -673,6 +803,10 @@ func (c *Client) handleReadError(err error) bool {
 	if closeStatus != websocket.StatusNormalClosure && closeStatus != websocket.StatusGoingAway {
 		klog.Errorf("WebSocket read error: %v", err)
 	}
+	if !c.beginReconnect() {
+		return false
+	}
+	defer c.endReconnect()
 
 	// Attempt to reconnect
 	if c.reconnect() {
@@ -685,20 +819,21 @@ func (c *Client) handleReadError(err error) bool {
 }
 
 // reinitializeConnection performs full connection reinitialization after reconnect failures.
-// Returns true if reinitialization succeeded, false if it failed.
 func (c *Client) reinitializeConnection() bool {
 	klog.Warning("Failed to reconnect after 5 attempts, will reinitialize connection in 30 seconds...")
-	time.Sleep(30 * time.Second)
-
-	klog.Info("Reinitializing WebSocket connection from scratch...")
-	if err := c.connect(); err != nil {
-		klog.Errorf("Connection reinitialization failed: %v, will retry", err)
-		return true // Continue loop to retry
+	select {
+	case <-time.After(30 * time.Second):
+	case <-c.closeCh:
+		return false
 	}
 
-	if err := c.authenticateDirect(); err != nil {
-		klog.Errorf("Re-authentication after reinitialization failed: %v, will retry", err)
-		return true // Continue loop to retry
+	klog.Info("Reinitializing WebSocket connection from scratch...")
+	if err := c.connectAndAuthenticateDirect(); err != nil {
+		if errors.Is(err, ErrClientClosed) {
+			return false
+		}
+		klog.Errorf("Connection reinitialization failed: %v, will retry", err)
+		return true
 	}
 
 	klog.Info("Successfully reinitialized WebSocket connection")
@@ -728,20 +863,6 @@ func (c *Client) processResponse(rawMsg []byte) {
 
 // reconnect attempts to reconnect to the WebSocket and re-authenticate.
 func (c *Client) reconnect() bool {
-	c.mu.Lock()
-	if c.reconnecting {
-		c.mu.Unlock()
-		return false
-	}
-	c.reconnecting = true
-	c.mu.Unlock()
-
-	defer func() {
-		c.mu.Lock()
-		c.reconnecting = false
-		c.mu.Unlock()
-	}()
-
 	klog.Warning("WebSocket connection lost, attempting to reconnect...")
 
 	// Update metrics - connection lost
@@ -785,14 +906,9 @@ func (c *Client) reconnect() bool {
 		c.pending = make(map[string]chan *Response)
 		c.mu.Unlock()
 
-		// Attempt to reconnect
-		if err := c.connect(); err != nil {
-			klog.Errorf("Reconnection attempt %d failed: %v", attempt, err)
-			continue
-		}
-
-		// Re-authenticate using direct read (since readLoop is blocked here)
-		if err := c.authenticateDirect(); err != nil {
+		// Reconnect and authenticate while live re-authentication is excluded;
+		// readLoop is blocked here, so authentication must read directly.
+		if err := c.connectAndAuthenticateDirect(); err != nil {
 			klog.Errorf("Re-authentication attempt %d failed: %v", attempt, err)
 			continue
 		}
@@ -802,6 +918,45 @@ func (c *Client) reconnect() bool {
 	}
 
 	return false
+}
+
+func (c *Client) beginReconnect() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reconnecting {
+		return false
+	}
+	c.reconnecting = true
+	c.reconnectDone = make(chan struct{})
+	return true
+}
+
+func (c *Client) endReconnect() {
+	c.mu.Lock()
+	c.reconnecting = false
+	close(c.reconnectDone)
+	c.reconnectDone = nil
+	c.mu.Unlock()
+}
+
+func (c *Client) connectAndAuthenticateDirect() error {
+	gateCtx, gateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer gateCancel()
+	if err := c.acquireAuthentication(gateCtx); err != nil {
+		return fmt.Errorf("failed to acquire authentication gate: %w", err)
+	}
+	defer c.releaseAuthentication()
+
+	if err := c.connect(); err != nil {
+		return err
+	}
+	authCtx, authCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer authCancel()
+	if err := c.authenticateDirectLocked(authCtx); err != nil {
+		return err
+	}
+	c.recordReauthentication(nil)
+	return nil
 }
 
 // pingLoop sends periodic pings to keep the connection alive and detect failures.
@@ -851,21 +1006,29 @@ func (c *Client) pingLoop() {
 // Close closes the client connection.
 func (c *Client) Close() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.closed {
+		c.mu.Unlock()
 		return
 	}
 
 	klog.V(4).Info("Closing storage API client")
 	c.closed = true
+	conn := c.conn
+	c.mu.Unlock()
+	c.signalClose()
 
-	if c.conn != nil {
+	if conn != nil {
 		// coder/websocket Close sends close frame and closes the connection
 		// Ignore close error - we're shutting down anyway
 		//nolint:errcheck,gosec // G104: Intentionally ignoring close error during shutdown
-		c.conn.Close(websocket.StatusNormalClosure, "client closing")
+		conn.Close(websocket.StatusNormalClosure, "client closing")
 	}
+}
+
+func (c *Client) signalClose() {
+	c.closeOnce.Do(func() {
+		close(c.closeCh)
+	})
 }
 
 // Pool API methods

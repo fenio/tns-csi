@@ -514,10 +514,6 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 					Available: 968884224,  // ~924MB
 				},
 			},
-			VolumeCondition: &csi.VolumeCondition{
-				Abnormal: false,
-				Message:  "",
-			},
 		}, nil
 	}
 
@@ -575,17 +571,52 @@ func (s *NodeService) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVo
 			volumePath, totalInodes, usedInodes, freeInodes)
 	}
 
-	// Check volume health and add VolumeCondition to response
-	health := s.checkVolumeHealth(ctx, volumePath, req.GetStagingTargetPath())
-	resp.VolumeCondition = health.ToCSI()
+	return resp, nil
+}
 
-	if health.Abnormal {
-		klog.Warningf("Volume %s health check failed: %s", req.GetVolumeId(), health.Message)
-	} else {
-		klog.V(4).Infof("Volume %s health check passed", req.GetVolumeId())
+// NodeGetVolumeHealth reports per-volume health through the CSI 1.13 health API.
+func (s *NodeService) NodeGetVolumeHealth(ctx context.Context, req *csi.NodeGetVolumeHealthRequest) (*csi.NodeGetVolumeHealthResponse, error) {
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, errMsgVolumeIDRequired)
 	}
 
-	return resp, nil
+	volumePath := req.GetVolumePublishPath()
+	if volumePath == "" {
+		volumePath = req.GetStagingTargetPath()
+	}
+	health := Healthy()
+	if !s.testMode {
+		if volumePath == "" {
+			if err := s.verifyVolumeExists(ctx, req.GetVolumeId()); err != nil {
+				return nil, err
+			}
+		} else {
+			health = s.checkVolumeHealth(ctx, volumePath, req.GetStagingTargetPath())
+		}
+	}
+
+	return &csi.NodeGetVolumeHealthResponse{
+		VolumeHealth: health.ToCSI(req.GetVolumeId()),
+	}, nil
+}
+
+func (s *NodeService) verifyVolumeExists(ctx context.Context, volumeID string) error {
+	var (
+		dataset *tnsapi.DatasetWithProperties
+		err     error
+	)
+	if isDatasetPathVolumeID(volumeID) {
+		dataset, err = s.apiClient.GetDatasetWithProperties(ctx, volumeID)
+	} else {
+		dataset, err = s.apiClient.FindDatasetByCSIVolumeName(ctx, "", volumeID)
+	}
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to verify volume %s: %v", volumeID, err)
+	}
+	if dataset == nil {
+		return status.Errorf(codes.NotFound, "Volume %s not found", volumeID)
+	}
+	return nil
 }
 
 // NodeExpandVolume expands a volume on the node.
@@ -704,14 +735,7 @@ func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapab
 			{
 				Type: &csi.NodeServiceCapability_Rpc{
 					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_VOLUME_CONDITION,
-					},
-				},
-			},
-			{
-				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_SINGLE_NODE_MULTI_WRITER,
+						Type: csi.NodeServiceCapability_RPC_GET_VOLUME_HEALTH,
 					},
 				},
 			},

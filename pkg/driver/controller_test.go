@@ -1787,7 +1787,7 @@ func TestControllerGetVolume(t *testing.T) {
 	tests := []struct {
 		req           *csi.ControllerGetVolumeRequest
 		mockSetup     func(*MockAPIClientForSnapshots)
-		checkResponse func(*testing.T, *csi.ControllerGetVolumeResponse)
+		checkResponse func(*testing.T, *csi.ControllerGetVolumeResponse, *csi.ControllerGetVolumeHealthResponse)
 		name          string
 		wantCode      codes.Code
 		wantErr       bool
@@ -1863,7 +1863,7 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
 				if resp.Volume == nil {
 					t.Error("Expected volume to be non-nil")
@@ -1872,15 +1872,8 @@ func TestControllerGetVolume(t *testing.T) {
 				if resp.Volume.VolumeId != nfsVolumeID {
 					t.Errorf("Expected volume ID %s, got %s", nfsVolumeID, resp.Volume.VolumeId)
 				}
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if resp.Status.VolumeCondition.Abnormal {
-					t.Errorf("Expected Abnormal to be false, got true with message: %s", resp.Status.VolumeCondition.Message)
-				}
-				if resp.Status.VolumeCondition.Message != msgVolumeIsHealthy {
-					t.Errorf("Expected message '%s', got '%s'", msgVolumeIsHealthy, resp.Status.VolumeCondition.Message)
+				if len(healthResp.GetVolumeHealth().GetHealthStatuses()) != 0 {
+					t.Error("Expected healthy volume to have no adverse health statuses")
 				}
 			},
 		},
@@ -1918,24 +1911,15 @@ func TestControllerGetVolume(t *testing.T) {
 					}
 					return nil, nil //nolint:nilnil // not found
 				}
-				// Mock Dataset() for getNFSVolumeInfo health check - returns error to simulate missing dataset
+				// Mock Dataset() for getNFSVolumeInfo health check - returns confirmed absence.
 				m.GetDatasetFunc = func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
-					return nil, errors.New("dataset not found")
+					return nil, tnsapi.ErrDatasetNotFound
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if !resp.Status.VolumeCondition.Abnormal {
-					t.Error("Expected Abnormal to be true for missing dataset")
-				}
-				if resp.Status.VolumeCondition.Message == "" {
-					t.Error("Expected non-empty error message")
-				}
+				assertAdverseVolumeHealth(t, healthResp, "missing dataset")
 			},
 		},
 		{
@@ -1983,18 +1967,9 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if !resp.Status.VolumeCondition.Abnormal {
-					t.Error("Expected Abnormal to be true for disabled share")
-				}
-				if resp.Status.VolumeCondition.Message == "" {
-					t.Error("Expected non-empty error message")
-				}
+				assertAdverseVolumeHealth(t, healthResp, "disabled share")
 			},
 		},
 		{
@@ -2057,7 +2032,7 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
 				if resp.Volume == nil {
 					t.Error("Expected volume to be non-nil")
@@ -2066,15 +2041,8 @@ func TestControllerGetVolume(t *testing.T) {
 				if resp.Volume.VolumeId != nvmeofVolumeID {
 					t.Errorf("Expected volume ID %s, got %s", nvmeofVolumeID, resp.Volume.VolumeId)
 				}
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if resp.Status.VolumeCondition.Abnormal {
-					t.Errorf("Expected Abnormal to be false, got true with message: %s", resp.Status.VolumeCondition.Message)
-				}
-				if resp.Status.VolumeCondition.Message != msgVolumeIsHealthy {
-					t.Errorf("Expected message '%s', got '%s'", msgVolumeIsHealthy, resp.Status.VolumeCondition.Message)
+				if len(healthResp.GetVolumeHealth().GetHealthStatuses()) != 0 {
+					t.Error("Expected healthy volume to have no adverse health statuses")
 				}
 			},
 		},
@@ -2124,18 +2092,9 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if !resp.Status.VolumeCondition.Abnormal {
-					t.Error("Expected Abnormal to be true for missing ZVOL")
-				}
-				if resp.Status.VolumeCondition.Message == "" {
-					t.Error("Expected non-empty error message")
-				}
+				assertAdverseVolumeHealth(t, healthResp, "missing ZVOL")
 			},
 		},
 		{
@@ -2165,7 +2124,7 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 				// Mock subsystem not found by NQN
 				m.NVMeOFSubsystemByNQNFunc = func(ctx context.Context, nqn string) (*tnsapi.NVMeOFSubsystem, error) {
-					return nil, errors.New("subsystem not found")
+					return nil, tnsapi.ErrSubsystemNotFound
 				}
 				// Mock ZVOL exists
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
@@ -2179,18 +2138,9 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				if !resp.Status.VolumeCondition.Abnormal {
-					t.Error("Expected Abnormal to be true for missing subsystem")
-				}
-				if resp.Status.VolumeCondition.Message == "" {
-					t.Error("Expected non-empty error message")
-				}
+				assertAdverseVolumeHealth(t, healthResp, "missing subsystem")
 			},
 		},
 		{
@@ -2245,16 +2195,11 @@ func TestControllerGetVolume(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			checkResponse: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			checkResponse: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, healthResp *csi.ControllerGetVolumeHealthResponse) {
 				t.Helper()
 				// This test verifies health check with namespace present
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status with condition to be non-nil")
-					return
-				}
-				// Since the namespace is found in the health check, volume should be healthy
-				if resp.Status.VolumeCondition.Abnormal {
-					t.Errorf("Expected healthy volume but got abnormal: %s", resp.Status.VolumeCondition.Message)
+				if len(healthResp.GetVolumeHealth().GetHealthStatuses()) != 0 {
+					t.Error("Expected healthy volume to have no adverse health statuses")
 				}
 			},
 		},
@@ -2287,7 +2232,98 @@ func TestControllerGetVolume(t *testing.T) {
 			}
 
 			if tt.checkResponse != nil {
-				tt.checkResponse(t, resp)
+				healthResp, healthErr := service.ControllerGetVolumeHealth(ctx, &csi.ControllerGetVolumeHealthRequest{
+					VolumeId: tt.req.GetVolumeId(),
+				})
+				if healthErr != nil {
+					t.Fatalf("ControllerGetVolumeHealth() error = %v", healthErr)
+				}
+				tt.checkResponse(t, resp, healthResp)
+			}
+		})
+	}
+}
+
+func assertAdverseVolumeHealth(t *testing.T, resp *csi.ControllerGetVolumeHealthResponse, scenario string) {
+	t.Helper()
+	statuses := resp.GetVolumeHealth().GetHealthStatuses()
+	if len(statuses) == 0 {
+		t.Fatalf("expected adverse health for %s", scenario)
+	}
+	if statuses[0].GetStatus() != csi.VolumeHealthErrorType_INACCESSIBLE {
+		t.Errorf("health status for %s = %v, want INACCESSIBLE", scenario, statuses[0].GetStatus())
+	}
+	if statuses[0].GetMessage() == "" {
+		t.Errorf("expected non-empty health message for %s", scenario)
+	}
+}
+
+func TestControllerVolumeInfoObservationFailures(t *testing.T) {
+	tests := []struct {
+		check func(context.Context, *ControllerService) error
+		setup func(*MockAPIClientForSnapshots)
+		name  string
+	}{
+		{
+			name: "NFS share query failure",
+			setup: func(m *MockAPIClientForSnapshots) {
+				m.GetDatasetFunc = func(context.Context, string) (*tnsapi.Dataset, error) {
+					return &tnsapi.Dataset{ID: "tank/csi/nfs-volume"}, nil
+				}
+				m.QueryNFSShareByIDFunc = func(context.Context, int) (*tnsapi.NFSShare, error) {
+					return nil, errors.New("backend unavailable")
+				}
+			},
+			check: func(ctx context.Context, service *ControllerService) error {
+				_, _, err := service.getNFSVolumeInfo(ctx, &VolumeMetadata{
+					Name: "nfs-volume", DatasetName: "tank/csi/nfs-volume", NFSShareID: 1,
+				})
+				return err
+			},
+		},
+		{
+			name: "NVMe-oF subsystem query failure",
+			setup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(context.Context, string) ([]tnsapi.Dataset, error) {
+					return []tnsapi.Dataset{{ID: "tank/csi/nvme-volume"}}, nil
+				}
+				m.NVMeOFSubsystemByNQNFunc = func(context.Context, string) (*tnsapi.NVMeOFSubsystem, error) {
+					return nil, errors.New("backend unavailable")
+				}
+			},
+			check: func(ctx context.Context, service *ControllerService) error {
+				_, _, err := service.getNVMeOFVolumeInfo(ctx, &VolumeMetadata{
+					Name: "nvme-volume", DatasetName: "tank/csi/nvme-volume", NVMeOFNQN: "nqn.test:nvme-volume",
+				})
+				return err
+			},
+		},
+		{
+			name: "SMB share query failure",
+			setup: func(m *MockAPIClientForSnapshots) {
+				m.GetDatasetFunc = func(context.Context, string) (*tnsapi.Dataset, error) {
+					return &tnsapi.Dataset{ID: "tank/csi/smb-volume"}, nil
+				}
+				m.QuerySMBShareByIDFunc = func(context.Context, int) (*tnsapi.SMBShare, error) {
+					return nil, errors.New("backend unavailable")
+				}
+			},
+			check: func(ctx context.Context, service *ControllerService) error {
+				_, _, err := service.getSMBVolumeInfo(ctx, &VolumeMetadata{
+					Name: "smb-volume", DatasetName: "tank/csi/smb-volume", SMBShareID: 1,
+				})
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockClient := &MockAPIClientForSnapshots{}
+			tt.setup(mockClient)
+			err := tt.check(context.Background(), NewControllerService(mockClient, NewNodeRegistry(), ""))
+			if status.Code(err) != codes.Internal {
+				t.Fatalf("volume info error = %v, want Internal", err)
 			}
 		})
 	}

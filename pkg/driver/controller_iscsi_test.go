@@ -651,7 +651,7 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 	tests := []struct {
 		meta      *VolumeMetadata
 		mockSetup func(*MockAPIClientForSnapshots)
-		check     func(*testing.T, *csi.ControllerGetVolumeResponse)
+		check     func(*testing.T, *csi.ControllerGetVolumeResponse, VolumeHealth)
 		name      string
 		wantCode  codes.Code
 		wantErr   bool
@@ -683,7 +683,7 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				}
 			},
 			wantErr: false,
-			check: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			check: func(t *testing.T, resp *csi.ControllerGetVolumeResponse, health VolumeHealth) {
 				t.Helper()
 				if resp.Volume == nil {
 					t.Error("Expected volume to be non-nil")
@@ -692,11 +692,7 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				if resp.Volume.VolumeId != "healthy-volume" {
 					t.Errorf("Expected volume ID 'healthy-volume', got %s", resp.Volume.VolumeId)
 				}
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status to be non-nil")
-					return
-				}
-				if resp.Status.VolumeCondition.Abnormal {
+				if health.Abnormal {
 					t.Error("Expected volume to be healthy (not abnormal)")
 				}
 				// Verify VolumeContext is now populated
@@ -721,16 +717,27 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				}
 			},
 			wantErr: false, // Returns abnormal status, not error
-			check: func(t *testing.T, resp *csi.ControllerGetVolumeResponse) {
+			check: func(t *testing.T, _ *csi.ControllerGetVolumeResponse, health VolumeHealth) {
 				t.Helper()
-				if resp.Status == nil || resp.Status.VolumeCondition == nil {
-					t.Error("Expected volume status to be non-nil")
-					return
-				}
-				if !resp.Status.VolumeCondition.Abnormal {
+				if !health.Abnormal {
 					t.Error("Expected volume to be marked abnormal when not found")
 				}
 			},
+		},
+		{
+			name: "ZVOL query failure",
+			meta: &VolumeMetadata{
+				Name:        "unknown-volume",
+				Protocol:    ProtocolISCSI,
+				DatasetName: "tank/csi/unknown-volume",
+			},
+			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
+					return nil, errors.New("backend unavailable")
+				}
+			},
+			wantErr:  true,
+			wantCode: codes.Internal,
 		},
 	}
 
@@ -745,7 +752,7 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				apiClient: mockClient,
 			}
 
-			resp, err := controller.getISCSIVolumeInfo(ctx, tt.meta)
+			resp, health, err := controller.getISCSIVolumeInfo(ctx, tt.meta)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("Expected error but got nil")
@@ -766,7 +773,7 @@ func TestGetISCSIVolumeInfo(t *testing.T) {
 				return
 			}
 			if tt.check != nil {
-				tt.check(t, resp)
+				tt.check(t, resp, health)
 			}
 		})
 	}

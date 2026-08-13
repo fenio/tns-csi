@@ -837,7 +837,7 @@ func (s *ControllerService) expandISCSIVolume(ctx context.Context, meta *VolumeM
 }
 
 // getISCSIVolumeInfo retrieves volume information and health status for an iSCSI volume.
-func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, error) {
+func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *VolumeMetadata) (*csi.ControllerGetVolumeResponse, VolumeHealth, error) {
 	klog.V(4).Infof("Getting iSCSI volume info: %s (dataset: %s, targetID: %d, extentID: %d)",
 		meta.Name, meta.DatasetName, meta.ISCSITargetID, meta.ISCSIExtentID)
 
@@ -849,8 +849,7 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 	datasets, err := s.apiClient.QueryAllDatasets(ctx, meta.DatasetName)
 	switch {
 	case err != nil:
-		abnormal = true
-		messages = append(messages, fmt.Sprintf("ZVOL %s query failed: %v", meta.DatasetName, err))
+		return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query ZVOL %s: %v", meta.DatasetName, err)
 	case len(datasets) == 0:
 		abnormal = true
 		messages = append(messages, fmt.Sprintf("ZVOL %s not found", meta.DatasetName))
@@ -865,8 +864,7 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 		})
 		switch {
 		case err != nil:
-			abnormal = true
-			messages = append(messages, fmt.Sprintf("Failed to query iSCSI targets: %v", err))
+			return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query iSCSI target %d: %v", meta.ISCSITargetID, err)
 		case len(targets) == 0:
 			abnormal = true
 			messages = append(messages, fmt.Sprintf("iSCSI target %d not found", meta.ISCSITargetID))
@@ -882,8 +880,7 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 		})
 		switch {
 		case err != nil:
-			abnormal = true
-			messages = append(messages, fmt.Sprintf("Failed to query iSCSI extents: %v", err))
+			return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query iSCSI extent %d: %v", meta.ISCSIExtentID, err)
 		case len(extents) == 0:
 			abnormal = true
 			messages = append(messages, fmt.Sprintf("iSCSI extent %d not found", meta.ISCSIExtentID))
@@ -918,13 +915,8 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 			CapacityBytes: capacityBytes,
 			VolumeContext: volumeContext,
 		},
-		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{
-			VolumeCondition: &csi.VolumeCondition{
-				Abnormal: abnormal,
-				Message:  message,
-			},
-		},
-	}, nil
+		Status: &csi.ControllerGetVolumeResponse_VolumeStatus{},
+	}, VolumeHealth{Abnormal: abnormal, Message: message}, nil
 }
 
 // setupISCSIVolumeFromClone sets up iSCSI infrastructure (extent, target, target-extent) for a cloned ZVOL.

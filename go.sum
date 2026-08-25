@@ -98,6 +98,8 @@ github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260804174631-d41e43d377e6 h1:sh
 github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260804174631-d41e43d377e6/go.mod h1:KbpAXWcxa1Wy9VBNtc9eQFR/hZmLoiVdbGCzBLKkaUI=
 github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260824191300-f80c1ba713c2 h1:541jcTCif4Gac2xLgOIiZUKbg3vIVUjS+ODPpzrVKI8=
 github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260824191300-f80c1ba713c2/go.mod h1:IXPOop3n6Mlco/6/3nGrE+MTOx3uXiIQVDJh3KBt/DI=
+github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260825075502-95f23ec4c310 h1:bBJnuuliAUf3Pnpvbg51enBGiWB+woq9/i0+8mwx4jw=
+github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260825075502-95f23ec4c310/go.mod h1:IXPOop3n6Mlco/6/3nGrE+MTOx3uXiIQVDJh3KBt/DI=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/maruel/natural v1.1.1 h1:Hja7XhhmvEFhcByqDoHz9QZbkWey+COd9xWfCfn1ioo=

@@ -7,7 +7,7 @@ require (
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/fatih/color v1.19.0
 	github.com/jedib0t/go-pretty/v6 v6.8.3
-	github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260804174631-d41e43d377e6
+	github.com/kubernetes-csi/csi-test/v5 v5.5.1-0.20260824191300-f80c1ba713c2
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.42.1
 	github.com/prometheus/client_golang v1.24.1

@@ -32,7 +32,7 @@ supplementalGroups:
 volumes:
   - "*"
 users:
-  - system:serviceaccount:{{ .Values.namespace }}:{{ include "tns-csi-driver.node.serviceAccountName" . }}
+  - system:serviceaccount:{{ .Release.Namespace }}:{{ include "tns-csi-driver.node.serviceAccountName" . }}
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -61,5 +61,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "tns-csi-driver.node.serviceAccountName" . }}
-    namespace: {{ .Values.namespace }}
+    namespace: {{ .Release.Namespace }}
 {{- end }}

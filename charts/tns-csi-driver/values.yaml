@@ -617,9 +617,6 @@ serviceAccount:
   # Annotations to add to the service accounts
   annotations: {}
 
-# Namespace where the CSI driver will be deployed
-namespace: kube-system
-
 # RBAC configuration
 rbac:
   # Create RBAC resources

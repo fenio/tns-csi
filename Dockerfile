@@ -42,7 +42,7 @@ RUN apk add --no-cache \
     util-linux \
     eudev \
     nvme-cli \
-    open-iscsi \
+    "open-iscsi>=2.1.12-r0" \
     cifs-utils \
     || [ $? -eq 4 ]
 

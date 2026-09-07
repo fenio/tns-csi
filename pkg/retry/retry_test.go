@@ -536,6 +536,11 @@ func TestIsBusyResourceError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "EZFS_BUSY",
+			err:  errors.New("cannot destroy dataset: EZFS_BUSY"),
+			want: true,
+		},
+		{
 			name: "Device or resource busy",
 			err:  errors.New("Device or resource busy"),
 			want: true,
@@ -597,6 +602,11 @@ func TestIsRetryableDeletionError(t *testing.T) {
 		{
 			name: "API 503 error",
 			err:  errors.New("API returned 503"),
+			want: true,
+		},
+		{
+			name: "unconfirmed deletion",
+			err:  errors.New("dataset deletion was not confirmed: tank/vol still exists"),
 			want: true,
 		},
 		{

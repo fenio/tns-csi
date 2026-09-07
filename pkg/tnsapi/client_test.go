@@ -455,6 +455,107 @@ func TestClientCallAfterClose(t *testing.T) {
 	}
 }
 
+func TestDeleteDatasetVerifiesDeletion(t *testing.T) {
+	//nolint:govet // Field order keeps related test inputs and expectations together.
+	tests := []struct {
+		queryError      *Error
+		name            string
+		queryResult     string
+		deleteResult    bool
+		wantErr         error
+		wantErrContains string
+		wantQueryCalls  int
+	}{
+		{
+			name:           "confirmed deleted",
+			deleteResult:   true,
+			queryResult:    `[]`,
+			wantQueryCalls: 1,
+		},
+		{
+			name:           "API reports success but dataset remains",
+			deleteResult:   true,
+			queryResult:    `[{"id":"tank/csi/test-volume","name":"tank/csi/test-volume","type":"VOLUME"}]`,
+			wantErr:        ErrDatasetDeletionUnconfirmed,
+			wantQueryCalls: 1,
+		},
+		{
+			name:           "API reports deletion failure",
+			deleteResult:   false,
+			wantErr:        ErrDatasetDeletionFailed,
+			wantQueryCalls: 0,
+		},
+		{
+			name:            "verification query fails",
+			deleteResult:    true,
+			queryError:      &Error{Code: 500, Message: "query failed"},
+			wantErrContains: "failed to verify deletion",
+			wantQueryCalls:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := newMockWSServer()
+			defer server.Close()
+
+			var mu sync.Mutex
+			queryCalls := 0
+			server.handler = func(conn *websocket.Conn) {
+				serveMockRequests(conn, func(req Request) []Response {
+					resp := Response{ID: req.ID}
+					switch req.Method {
+					case methodAuthLoginWithAPIKey:
+						resp.Result = json.RawMessage(`true`)
+					case "pool.dataset.delete":
+						if tt.deleteResult {
+							resp.Result = json.RawMessage(`true`)
+						} else {
+							resp.Result = json.RawMessage(`false`)
+						}
+					case "pool.dataset.query":
+						mu.Lock()
+						queryCalls++
+						mu.Unlock()
+						if tt.queryError != nil {
+							resp.Error = tt.queryError
+						} else {
+							resp.Result = json.RawMessage(tt.queryResult)
+						}
+					default:
+						resp.Error = &Error{Code: 404, Message: "unexpected method"}
+					}
+					return []Response{resp}
+				})
+			}
+
+			client, err := NewClient(server.URL(), "test-api-key", false)
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+			defer cleanupClient(client)
+
+			err = client.DeleteDataset(context.Background(), "tank/csi/test-volume")
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+				t.Fatalf("DeleteDataset() error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == nil && tt.wantErrContains == "" && err != nil {
+				t.Fatalf("DeleteDataset() unexpected error: %v", err)
+			}
+			if tt.wantErrContains != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErrContains)) {
+				t.Fatalf("DeleteDataset() error = %v, want containing %q", err, tt.wantErrContains)
+			}
+
+			mu.Lock()
+			gotQueryCalls := queryCalls
+			mu.Unlock()
+			if gotQueryCalls != tt.wantQueryCalls {
+				t.Errorf("pool.dataset.query calls = %d, want %d", gotQueryCalls, tt.wantQueryCalls)
+			}
+		})
+	}
+}
+
 func TestCallWaitsForReconnectAuthentication(t *testing.T) {
 	server := newMockWSServer()
 	defer server.Close()

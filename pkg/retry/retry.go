@@ -210,7 +210,7 @@ func IsRetryableAPIError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+	errStr := strings.ToLower(err.Error())
 	return contains(errStr,
 		"500", // Internal server error
 		"502", // Bad gateway
@@ -242,13 +242,14 @@ func IsBusyResourceError(err error) bool {
 	if err == nil {
 		return false
 	}
-	errStr := err.Error()
+	errStr := strings.ToLower(err.Error())
 	return contains(errStr,
 		"dataset is busy",
 		"target is busy",
 		"resource busy",
-		"EBUSY",
-		"Device or resource busy",
+		"ebusy",
+		"ezfs_busy",
+		"device or resource busy",
 		"pool is busy",
 		"filesystem is busy",
 	)
@@ -257,7 +258,11 @@ func IsBusyResourceError(err error) bool {
 // IsRetryableDeletionError returns true if the error during a deletion operation
 // should be retried. This includes busy resource errors and transient API errors.
 func IsRetryableDeletionError(err error) bool {
-	return IsBusyResourceError(err) || IsRetryableError(err)
+	if err == nil {
+		return false
+	}
+	return IsBusyResourceError(err) || IsRetryableError(err) ||
+		strings.Contains(strings.ToLower(err.Error()), "deletion was not confirmed")
 }
 
 // DeletionConfig returns a Config optimized for deletion operations.

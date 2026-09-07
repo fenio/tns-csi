@@ -17,8 +17,9 @@ var _ = Describe("iSCSI ZFS Properties", func() {
 	var err error
 
 	const (
-		pvcTimeout = 360 * time.Second
-		podTimeout = 360 * time.Second
+		pvcTimeout    = 360 * time.Second
+		podTimeout    = 360 * time.Second
+		deleteTimeout = 180 * time.Second
 	)
 
 	BeforeEach(func() {
@@ -36,7 +37,7 @@ var _ = Describe("iSCSI ZFS Properties", func() {
 		}
 	})
 
-	It("should create ZVOL with custom ZFS properties", func() {
+	It("should create ZVOL with custom ZFS properties and delete it cleanly", func() {
 		By("Creating StorageClass with ZFS properties for iSCSI")
 		zfsStorageClass := "tns-csi-iscsi-zfsprops"
 		err = f.K8s.CreateStorageClassWithParamsAndBindingMode(ctx, zfsStorageClass, "tns.csi.io", map[string]string{
@@ -101,5 +102,22 @@ var _ = Describe("iSCSI ZFS Properties", func() {
 		volblocksize, err := f.TrueNAS.GetZFSProperty(ctx, datasetPath, "volblocksize")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(volblocksize).To(Equal("16K"), "volblocksize should be 16K")
+
+		By("Deleting the pod and PVC")
+		err = f.K8s.DeletePod(ctx, podName)
+		Expect(err).NotTo(HaveOccurred())
+		err = f.K8s.WaitForPodDeleted(ctx, podName, deleteTimeout)
+		Expect(err).NotTo(HaveOccurred())
+		err = f.K8s.DeletePVC(ctx, pvcName)
+		Expect(err).NotTo(HaveOccurred())
+		err = f.K8s.WaitForPVCDeleted(ctx, pvcName, deleteTimeout)
+		Expect(err).NotTo(HaveOccurred())
+		err = f.K8s.WaitForPVDeleted(ctx, pvName, deleteTimeout)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Verifying the ZVOL was deleted from TrueNAS")
+		Expect(f.TrueNAS).NotTo(BeNil(), "TrueNAS verifier must be available for cleanup verification")
+		err = f.VerifyTrueNASCleanup(ctx, datasetPath, deleteTimeout)
+		Expect(err).NotTo(HaveOccurred())
 	})
 })

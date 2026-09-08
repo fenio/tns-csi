@@ -66,6 +66,7 @@ var (
 
 	// Deletion operation errors - TrueNAS API returned false (unsuccessful).
 	ErrDatasetDeletionFailed           = errors.New("dataset deletion returned false (unsuccessful)")
+	ErrDatasetDeletionUnconfirmed      = errors.New("dataset deletion was not confirmed")
 	ErrNFSShareDeletionFailed          = errors.New("NFS share deletion returned false (unsuccessful)")
 	ErrSubsystemDeletionFailed         = errors.New("NVMe-oF subsystem deletion returned false (unsuccessful)")
 	ErrNamespaceDeletionFailed         = errors.New("NVMe-oF namespace deletion returned false (unsuccessful)")
@@ -1279,8 +1280,19 @@ func (c *Client) DeleteDataset(ctx context.Context, datasetID string) error {
 		return fmt.Errorf("%w: %s", ErrDatasetDeletionFailed, datasetID)
 	}
 
-	klog.Infof("DeleteDataset: Successfully deleted dataset %s", datasetID)
-	return nil
+	// TrueNAS 26 can return true even when the underlying ZFS destroy failed.
+	// Verify the destructive operation before reporting success to Kubernetes.
+	_, verifyErr := c.Dataset(ctx, datasetID)
+	if errors.Is(verifyErr, ErrDatasetNotFound) {
+		klog.Infof("DeleteDataset: Successfully deleted dataset %s", datasetID)
+		return nil
+	}
+	if verifyErr != nil {
+		return fmt.Errorf("failed to verify deletion of dataset %s: %w", datasetID, verifyErr)
+	}
+
+	klog.Errorf("DeleteDataset: TrueNAS reported success but dataset %s still exists", datasetID)
+	return fmt.Errorf("%w: %s still exists", ErrDatasetDeletionUnconfirmed, datasetID)
 }
 
 // Dataset retrieves dataset information.

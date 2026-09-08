@@ -45,6 +45,13 @@ clusterID: ""
 # CSI Driver name
 csiDriverName: tns.csi.io
 
+# CSI Driver capabilities
+csiDriver:
+  # Allow kubelet to pass mount options derived from explicit pod SELinux contexts.
+  # Requires Kubernetes 1.25+ and a compatible SELinux policy on every node.
+  # Keep disabled unless the behavior has been validated on your platform.
+  seLinuxMount: false
+
 # Controller configuration
 controller:
   # Number of controller replicas (should be 1 for leader election)

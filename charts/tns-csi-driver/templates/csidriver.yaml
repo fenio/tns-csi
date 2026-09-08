@@ -13,5 +13,8 @@ spec:
   podInfoOnMount: true
   storageCapacity: true
   fsGroupPolicy: File
+  {{- if .Values.csiDriver.seLinuxMount }}
+  seLinuxMount: true
+  {{- end }}
   volumeLifecycleModes:
     - Persistent

@@ -2,6 +2,12 @@
 
 package driver
 
+const (
+	nfsMountOptNoShareCache = "nosharecache"
+	nfsMountOptShareCache   = "sharecache"
+	selinuxMountOptContext  = "context"
+)
+
 // Default NFS mount options for Linux.
 // These are used when no mount options are specified in the StorageClass.
 var defaultNFSMountOptions = []string{"vers=4.2", mountOptNolock}
@@ -22,16 +28,28 @@ func getNFSMountOptions(userOptions []string) []string {
 		key := extractOptionKey(opt)
 		userOptionKeys[key] = true
 	}
+	hasSELinuxContext := userOptionKeys[selinuxMountOptContext]
 
 	// Start with user options, then add defaults that don't conflict
-	result := make([]string, 0, len(userOptions)+len(defaultNFSMountOptions))
-	result = append(result, userOptions...)
+	result := make([]string, 0, len(userOptions)+len(defaultNFSMountOptions)+1)
+	for _, opt := range userOptions {
+		// Distinct SELinux contexts require separate NFS superblocks. Do not
+		// allow an explicit sharecache option to weaken that guarantee.
+		if hasSELinuxContext && extractOptionKey(opt) == nfsMountOptShareCache {
+			continue
+		}
+		result = append(result, opt)
+	}
 
 	for _, defaultOpt := range defaultNFSMountOptions {
 		key := extractOptionKey(defaultOpt)
 		if !userOptionKeys[key] {
 			result = append(result, defaultOpt)
 		}
+	}
+
+	if hasSELinuxContext && !userOptionKeys[nfsMountOptNoShareCache] {
+		result = append(result, nfsMountOptNoShareCache)
 	}
 
 	return result

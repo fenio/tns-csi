@@ -127,6 +127,9 @@ Create the CSI driver name
 Validate required TrueNAS configuration
 */}}
 {{- define "tns-csi-driver.validateConfig" -}}
+{{- if and .Values.csiDriver.seLinuxMount (semverCompare "<1.25-0" .Capabilities.KubeVersion.Version) }}
+  {{- fail (printf "\n\nCONFIGURATION ERROR: csiDriver.seLinuxMount requires Kubernetes 1.25 or newer (got %s)." .Capabilities.KubeVersion.Version) }}
+{{- end }}
 {{- if not .Values.truenas.existingSecret }}
   {{- if not .Values.truenas.url }}
     {{- fail "\n\nCONFIGURATION ERROR: truenas.url is required.\nExample: --set truenas.url=\"wss://YOUR-TRUENAS-IP:443/api/current\"" }}

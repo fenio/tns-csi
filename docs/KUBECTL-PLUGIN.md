@@ -46,7 +46,7 @@ The plugin automatically discovers TrueNAS credentials from the installed driver
 
 1. **Explicit flags**: `--url` and `--api-key`
 2. **Explicit secret**: `--secret namespace/name`
-3. **Auto-discovery**: Searches `kube-system` for driver secrets
+3. **Auto-discovery**: Searches the current context namespace, `tns-csi`, then the legacy `kube-system` namespace for driver secrets
 4. **Environment variables**: `TRUENAS_URL` and `TRUENAS_API_KEY`
 
 ### Examples
@@ -59,7 +59,7 @@ kubectl tns-csi list
 kubectl tns-csi list --url wss://truenas:443/api/current --api-key YOUR-API-KEY
 
 # Using a specific secret
-kubectl tns-csi list --secret kube-system/my-truenas-secret
+kubectl tns-csi list --secret tns-csi/my-truenas-secret
 
 # Via environment variables
 export TRUENAS_URL=wss://truenas:443/api/current

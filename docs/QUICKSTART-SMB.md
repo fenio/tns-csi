@@ -95,12 +95,16 @@ The CSI driver automatically creates and deletes SMB shares for each volume. You
 
 Create a Kubernetes Secret with your SMB credentials:
 
+```bash
+kubectl create namespace tns-csi
+```
+
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
   name: smb-credentials
-  namespace: kube-system
+  namespace: tns-csi
 type: Opaque
 stringData:
   username: "csi-smb"
@@ -118,7 +122,7 @@ kubectl apply -f smb-credentials.yaml
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -128,7 +132,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
   --set storageClasses[0].server="YOUR-TRUENAS-IP" \
   --set storageClasses[0].smbCredentialsSecret.name="smb-credentials" \
-  --set storageClasses[0].smbCredentialsSecret.namespace="kube-system"
+  --set storageClasses[0].smbCredentialsSecret.namespace="tns-csi"
 ```
 
 **Replace these values:**
@@ -140,13 +144,13 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ```bash
 # Check pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # Check storage class was created
 kubectl get storageclass tns-csi-smb
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver
 ```
 
 ## Usage
@@ -227,7 +231,7 @@ parameters:
   server: YOUR-TRUENAS-IP
   pool: tank
   csi.storage.k8s.io/node-stage-secret-name: smb-credentials
-  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+  csi.storage.k8s.io/node-stage-secret-namespace: tns-csi
   # ZFS properties
   zfs.compression: lz4
 allowVolumeExpansion: true
@@ -245,7 +249,8 @@ To keep volumes on TrueNAS when PVCs are deleted:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].name="tns-csi-smb" \
@@ -254,7 +259,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
   --set storageClasses[0].server="YOUR-TRUENAS-IP" \
   --set storageClasses[0].smbCredentialsSecret.name="smb-credentials" \
-  --set storageClasses[0].smbCredentialsSecret.namespace="kube-system" \
+  --set storageClasses[0].smbCredentialsSecret.namespace="tns-csi" \
   --set "storageClasses[0].parameters.deleteStrategy=retain"
 ```
 
@@ -273,7 +278,7 @@ parameters:
   server: YOUR-TRUENAS-IP
   pool: tank
   csi.storage.k8s.io/node-stage-secret-name: smb-credentials
-  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+  csi.storage.k8s.io/node-stage-secret-namespace: tns-csi
   encryption: "true"
   encryptionGenerateKey: "true"
 allowVolumeExpansion: true
@@ -345,13 +350,13 @@ spec:
 
 ```bash
 # Check all pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
 
 # View node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver --tail=50
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver --tail=50
 ```
 
 ### PVC Stuck in Pending
@@ -361,7 +366,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-drive
 kubectl describe pvc my-smb-volume
 
 # Check controller logs for errors
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver | grep -i error
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver | grep -i error
 ```
 
 ### Pod Stuck in ContainerCreating
@@ -371,7 +376,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi
 kubectl describe pod my-app
 
 # Check node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver | grep -i error
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver | grep -i error
 
 # Check cifs-utils is installed on the node
 ssh <node> which mount.cifs

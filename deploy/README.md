@@ -10,7 +10,8 @@ Helm is the recommended way to install tns-csi. The raw Kubernetes manifests tha
 # Add the OCI registry (Docker Hub)
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.8.0 \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].name=tns-csi-nfs \
@@ -25,7 +26,8 @@ Or using GitHub Container Registry:
 ```bash
 helm install tns-csi oci://ghcr.io/fenio/charts/tns-csi-driver \
   --version 0.8.0 \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].name=tns-csi-nfs \
@@ -57,7 +59,8 @@ Common configuration:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.8.0 \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set truenas.skipTLSVerify=true \
@@ -75,17 +78,19 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ### Upgrading
 
+Use the namespace that contains the existing Helm release. New installations use `tns-csi`; installations made with older chart versions usually use `kube-system`.
+
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.8.0 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values
 ```
 
 ### Uninstalling
 
 ```bash
-helm uninstall tns-csi --namespace kube-system
+helm uninstall tns-csi --namespace tns-csi
 ```
 
 ## Why Helm?

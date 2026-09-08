@@ -109,7 +109,7 @@ jobs:
       - name: Render plain manifest for Kustomize users
         run: |
           helm template tns-csi charts/tns-csi-driver \
-            --namespace kube-system \
+            --namespace tns-csi \
             --set truenas.url="wss://TRUENAS_IP/api/current" \
             --set truenas.apiKey="REPLACE_WITH_API_KEY" \
             --set storageClasses[0].name=tns-csi-nfs \
@@ -169,16 +169,16 @@ jobs:
 
           ### Using Helm (Docker Hub)
           \`\`\`bash
-          helm install tns-csi oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi-driver --version ${VERSION#v}
+          helm install tns-csi oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi-driver --version ${VERSION#v} --namespace tns-csi --create-namespace
           \`\`\`
 
           ### Using Helm (GitHub Container Registry)
           \`\`\`bash
-          helm install tns-csi oci://ghcr.io/${{ github.repository_owner }}/charts/tns-csi-driver --version ${VERSION#v}
+          helm install tns-csi oci://ghcr.io/${{ github.repository_owner }}/charts/tns-csi-driver --version ${VERSION#v} --namespace tns-csi --create-namespace
           \`\`\`
 
           ### Using Kustomize
-          Download the plain manifest from this release (\`tns-csi-driver-${VERSION}.yaml\`) and use it as a Kustomize base. Replace \`TRUENAS_IP\` and \`REPLACE_WITH_API_KEY\` placeholders with your values, and remove any storage classes you don't need.
+          Create the \`tns-csi\` namespace, then download the plain manifest from this release (\`tns-csi-driver-${VERSION}.yaml\`) and use it as a Kustomize base. Replace \`TRUENAS_IP\` and \`REPLACE_WITH_API_KEY\` placeholders with your values, and remove any storage classes you don't need.
 
           For detailed installation instructions, see the [README](https://github.com/${{ github.repository }}/blob/${VERSION}/README.md).
           EOF
@@ -194,4 +194,3 @@ jobs:
             .helm-releases/*.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

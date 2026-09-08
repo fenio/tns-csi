@@ -33,11 +33,15 @@ A Container Storage Interface (CSI) driver for TrueNAS Scale 25.10+ that enables
 
 ## Installation
 
+The chart installs all namespaced resources into the Helm release namespace. The recommended namespace for new installations is `tns-csi`; every install command should pass `--namespace tns-csi --create-namespace`. The former `namespace` value has been removed and is no longer honored.
+
+When upgrading, always use the namespace that already contains the Helm release. Existing installations usually use `kube-system`; changing the release namespace during an upgrade creates a separate release instead of moving the existing one.
+
 ### Quick Start - NFS (Using OCI Registry)
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -55,7 +59,8 @@ Replace:
 If you've cloned the repository, you can install from the local chart:
 
 ```bash
-helm install tns-csi ./charts/tns-csi-driver -n kube-system \
+helm install tns-csi ./charts/tns-csi-driver -n tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
@@ -90,7 +95,7 @@ storageClasses:
 Install with:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --values my-values.yaml
 ```
@@ -98,7 +103,8 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 Or from local chart:
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --values my-values.yaml
 ```
 
@@ -108,7 +114,7 @@ helm install tns-csi ./charts/tns-csi-driver \
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
@@ -120,7 +126,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
@@ -135,7 +141,7 @@ The driver automatically creates a dedicated NVMe-oF subsystem for each volume. 
 
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="your-api-key" \
@@ -148,7 +154,11 @@ The driver automatically creates a dedicated iSCSI target for each volume. Only 
 
 ### Using Kustomize
 
-Each GitHub release includes a pre-rendered manifest (`tns-csi-driver-<version>.yaml`) with all protocols enabled and placeholder values. Download it and use Kustomize patches to replace `TRUENAS_IP` and `REPLACE_WITH_API_KEY`, and remove storage classes you don't need.
+Each GitHub release includes a pre-rendered manifest (`tns-csi-driver-<version>.yaml`) with all protocols enabled and placeholder values. Create the `tns-csi` namespace before applying it, then use Kustomize patches to replace `TRUENAS_IP` and `REPLACE_WITH_API_KEY`, and remove storage classes you don't need.
+
+```bash
+kubectl create namespace tns-csi
+```
 
 ## Configuration
 
@@ -348,7 +358,7 @@ The controller can serve an in-cluster web dashboard showing volume health, Kube
 | `controller.dashboard.ingress.hosts` | Ingress hostnames | `[]` |
 | `controller.dashboard.ingress.tls` | Ingress TLS configuration | `[]` |
 
-Access via port-forward: `kubectl port-forward -n kube-system svc/tns-csi-driver-dashboard 9090:9090`, then open `http://localhost:9090/dashboard/`.
+Access via port-forward: `kubectl port-forward -n tns-csi svc/tns-csi-driver-dashboard 9090:9090`, then open `http://localhost:9090/dashboard/`.
 
 ### Grafana Dashboard Settings
 
@@ -443,7 +453,7 @@ storageClasses:
     encryption: "true"
     parameters:
       csi.storage.k8s.io/provisioner-secret-name: my-encryption-secret
-      csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+      csi.storage.k8s.io/provisioner-secret-namespace: tns-csi
 ```
 
 The Secret should contain either `encryptionPassphrase` (min 8 chars) or `encryptionKey` (64-char hex for 256-bit).
@@ -452,7 +462,7 @@ The Secret should contain either `encryptionPassphrase` (min 8 chars) or `encryp
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values
 ```
 
@@ -460,7 +470,7 @@ Or with new values:
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --values my-values.yaml
 ```
 
@@ -524,7 +534,7 @@ If you use `--set` flags instead of a values file, update them to use array inde
 
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --values my-values.yaml
 ```
 
@@ -535,7 +545,7 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 To uninstall/delete the `tns-csi` deployment:
 
 ```bash
-helm uninstall tns-csi --namespace kube-system
+helm uninstall tns-csi --namespace tns-csi
 ```
 
 **Note**: This will not delete existing PersistentVolumes. Delete PVCs first if you want to clean up volumes.
@@ -546,10 +556,10 @@ helm uninstall tns-csi --namespace kube-system
 
 ```bash
 # Check controller pod
-kubectl get pods -n kube-system -l app.kubernetes.io/component=controller
+kubectl get pods -n tns-csi -l app.kubernetes.io/component=controller
 
 # Check node pods
-kubectl get pods -n kube-system -l app.kubernetes.io/component=node
+kubectl get pods -n tns-csi -l app.kubernetes.io/component=node
 
 # Verify CSI driver registration
 kubectl get csidrivers
@@ -562,13 +572,13 @@ kubectl get storageclass
 
 ```bash
 # Controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver
 
 # Node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver
 
 # CSI provisioner logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c csi-provisioner
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c csi-provisioner
 ```
 
 ### Common Issues
@@ -615,7 +625,7 @@ The CSI driver uses log levels to control verbosity:
 
 ```bash
 helm upgrade tns-csi ./charts/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values \
   --set controller.debug=true \
   --set node.debug=true

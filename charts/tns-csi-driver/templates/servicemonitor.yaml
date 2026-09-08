@@ -3,7 +3,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: {{ include "tns-csi-driver.fullname" . }}
-  namespace: {{ default .Values.namespace .Values.controller.metrics.serviceMonitor.namespace }}
+  namespace: {{ default .Release.Namespace .Values.controller.metrics.serviceMonitor.namespace }}
   labels:
     {{- include "tns-csi-driver.labels" . | nindent 4 }}
     app.kubernetes.io/component: controller
@@ -21,7 +21,7 @@ spec:
       app.kubernetes.io/component: controller
   namespaceSelector:
     matchNames:
-      - {{ .Values.namespace }}
+      - {{ .Release.Namespace }}
   endpoints:
     - port: metrics
       {{- if .Values.controller.metrics.serviceMonitor.interval }}

@@ -19,6 +19,7 @@ export NC='\033[0m' # No Color
 
 # Test configuration
 export TEST_NAMESPACE="${TEST_NAMESPACE:-test-csi-$(date +%s)-${RANDOM}}"
+export DRIVER_NAMESPACE="${DRIVER_NAMESPACE:-tns-csi}"
 export TIMEOUT_PVC="${TIMEOUT_PVC:-120s}"
 export TIMEOUT_POD="${TIMEOUT_POD:-120s}"
 export TIMEOUT_DRIVER="${TIMEOUT_DRIVER:-120s}"
@@ -127,7 +128,7 @@ show_node_mounts() {
     
     echo ""
     echo "=== CSI Node Driver Logs (mount operations) ==="
-    kubectl logs -n kube-system \
+    kubectl logs -n "${DRIVER_NAMESPACE}" \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
         --tail=50 2>&1 | grep -E "NodeStageVolume|NodePublishVolume|mount|Mount" || echo "No mount-related logs found"
 }
@@ -183,7 +184,7 @@ check_nvmeof_configured() {
         elapsed=$((elapsed + 2))
     done
     
-    local logs=$(kubectl logs -n kube-system \
+    local logs=$(kubectl logs -n "${DRIVER_NAMESPACE}" \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
         --tail=20 2>/dev/null || true)
     
@@ -225,7 +226,7 @@ check_iscsi_configured() {
         elapsed=$((elapsed + 2))
     done
 
-    local logs=$(kubectl logs -n kube-system \
+    local logs=$(kubectl logs -n "${DRIVER_NAMESPACE}" \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
         --tail=20 2>/dev/null || true)
 
@@ -394,7 +395,7 @@ deploy_driver() {
     local kubelet_path="${KUBELET_PATH:-/var/lib/kubelet}"
     
     local base_args=(
-        --namespace kube-system
+        --namespace "${DRIVER_NAMESPACE}"
         --create-namespace
         --set image.repository="${image_repo}"
         --set image.tag="${image_tag}"
@@ -452,10 +453,10 @@ deploy_driver() {
         
         echo ""
         echo "=== Pod Status ==="
-        kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide || true
+        kubectl get pods -n "${DRIVER_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver -o wide || true
         echo ""
         echo "=== Controller Logs ==="
-        kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --all-containers --tail=50 || true
+        kubectl logs -n "${DRIVER_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller --all-containers --tail=50 || true
         false
     fi
     
@@ -472,7 +473,7 @@ wait_for_driver() {
     
     if ! kubectl wait --for=condition=Ready pod \
         -l app.kubernetes.io/name=tns-csi-driver \
-        -n kube-system \
+        -n "${DRIVER_NAMESPACE}" \
         --timeout="${TIMEOUT_DRIVER}"; then
         stop_test_timer "wait_for_driver" "FAILED"
         test_error "CSI driver failed to become ready"
@@ -480,7 +481,7 @@ wait_for_driver() {
     fi
     
     local image_version
-    image_version=$(kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver \
+    image_version=$(kubectl get pods -n "${DRIVER_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver \
         -o jsonpath='{.items[0].spec.containers[?(@.name=="tns-csi-driver")].image}' 2>/dev/null | sed 's/.*://' || echo "unknown")
     test_success "CSI driver is ready (image=${image_version})"
     
@@ -574,7 +575,7 @@ create_test_pod() {
         echo ""
         kubectl describe pod "${pod_name}" -n "${TEST_NAMESPACE}" || true
         echo ""
-        kubectl logs -n kube-system \
+        kubectl logs -n "${DRIVER_NAMESPACE}" \
             -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
             --tail=200 || true
         false
@@ -684,14 +685,14 @@ show_diagnostic_logs() {
     
     echo ""
     echo "=== Controller Logs (last 200 lines) ==="
-    kubectl logs -n kube-system \
+    kubectl logs -n "${DRIVER_NAMESPACE}" \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller \
         -c tns-csi-plugin \
         --tail=200 || true
     
     echo ""
     echo "=== Node Logs (last 200 lines) ==="
-    kubectl logs -n kube-system \
+    kubectl logs -n "${DRIVER_NAMESPACE}" \
         -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node \
         --tail=200 || true
     
@@ -713,7 +714,7 @@ show_diagnostic_logs() {
     
     echo ""
     echo "=== CSI Driver Pods ==="
-    kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver -o wide || true
+    kubectl get pods -n "${DRIVER_NAMESPACE}" -l app.kubernetes.io/name=tns-csi-driver -o wide || true
     
     echo "========================================"
 }

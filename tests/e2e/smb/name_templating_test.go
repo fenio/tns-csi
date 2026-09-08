@@ -43,7 +43,7 @@ var _ = Describe("Name Templating", func() {
 			"server":       f.Config.TrueNASHost,
 			"nameTemplate": "{{ .PVCNamespace }}-{{ .PVCName }}",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		}
 		err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create StorageClass with nameTemplate")
@@ -117,7 +117,7 @@ var _ = Describe("Name Templating", func() {
 			"namePrefix": "prod-",
 			"nameSuffix": "-data",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		}
 		err := f.K8s.CreateStorageClassWithParams(ctx, scName, "tns.csi.io", params)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create StorageClass with prefix/suffix")

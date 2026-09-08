@@ -46,6 +46,25 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Verify Helm release namespace
+        run: |
+          helm lint charts/tns-csi-driver \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set 'storageClasses[0].server=truenas.example'
+          helm template namespace-test charts/tns-csi-driver \
+            --namespace tns-csi \
+            --set namespace=ignored \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set 'storageClasses[0].server=truenas.example' \
+            > /tmp/tns-csi-rendered.yaml
+          grep -q '^  namespace: tns-csi$' /tmp/tns-csi-rendered.yaml
+          ! grep -q '^  namespace: \(ignored\|kube-system\)$' /tmp/tns-csi-rendered.yaml
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

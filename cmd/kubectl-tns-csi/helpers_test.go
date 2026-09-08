@@ -69,22 +69,27 @@ func TestBuildNamespaceSearchOrder(t *testing.T) {
 		{
 			name:             "empty context namespace",
 			contextNamespace: "",
-			want:             []string{"kube-system"},
+			want:             []string{"tns-csi", "kube-system"},
 		},
 		{
 			name:             "default context namespace",
 			contextNamespace: "default",
-			want:             []string{"default", "kube-system"},
+			want:             []string{"default", "tns-csi", "kube-system"},
 		},
 		{
-			name:             "kube-system context namespace is deduplicated",
+			name:             "preferred context namespace is deduplicated",
+			contextNamespace: "tns-csi",
+			want:             []string{"tns-csi", "kube-system"},
+		},
+		{
+			name:             "legacy context namespace is prioritized",
 			contextNamespace: "kube-system",
-			want:             []string{"kube-system"},
+			want:             []string{"kube-system", "tns-csi"},
 		},
 		{
 			name:             "custom namespace",
 			contextNamespace: "my-namespace",
-			want:             []string{"my-namespace", "kube-system"},
+			want:             []string{"my-namespace", "tns-csi", "kube-system"},
 		},
 	}
 

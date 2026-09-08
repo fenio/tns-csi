@@ -134,7 +134,7 @@ scrape_configs:
       - role: service
         namespaces:
           names:
-            - kube-system  # or your CSI driver namespace
+            - tns-csi  # or your CSI driver namespace
     relabel_configs:
       - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
         action: keep
@@ -265,7 +265,7 @@ controller:
 
 ```bash
 # Port-forward to the dashboard service
-kubectl port-forward -n kube-system svc/tns-csi-driver-dashboard 9090:9090
+kubectl port-forward -n tns-csi svc/tns-csi-driver-dashboard 9090:9090
 
 # Open http://localhost:9090/dashboard/
 ```
@@ -319,17 +319,17 @@ The plugin auto-discovers TrueNAS credentials from the installed driver's Secret
 
 1. Check if metrics are enabled:
    ```bash
-   kubectl get svc -n kube-system | grep tns-csi-driver-metrics
+   kubectl get svc -n tns-csi | grep tns-csi-driver-metrics
    ```
 
 2. Check controller pod logs:
    ```bash
-   kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin
+   kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin
    ```
 
 3. Port-forward to test locally:
    ```bash
-   kubectl port-forward -n kube-system svc/tns-csi-driver-metrics 8080:8080
+   kubectl port-forward -n tns-csi svc/tns-csi-driver-metrics 8080:8080
    curl http://localhost:8080/metrics
    ```
 
@@ -337,7 +337,7 @@ The plugin auto-discovers TrueNAS credentials from the installed driver's Secret
 
 1. Verify ServiceMonitor labels match Prometheus selector:
    ```bash
-   kubectl get servicemonitor -n kube-system tns-csi-driver -o yaml
+   kubectl get servicemonitor -n tns-csi tns-csi-driver -o yaml
    ```
 
 2. Check Prometheus serviceMonitorSelector:

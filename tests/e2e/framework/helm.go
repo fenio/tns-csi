@@ -14,7 +14,7 @@ import (
 
 const (
 	helmReleaseName = "tns-csi-driver"
-	helmNamespace   = "kube-system"
+	helmNamespace   = "tns-csi"
 	protocolSMB     = "smb"
 	protocolAll     = "all"
 	protocolBoth    = "both"

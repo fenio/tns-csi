@@ -298,17 +298,20 @@ jobs:
           SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
+          kubectl create namespace tns-csi --dry-run=client -o yaml | kubectl apply -f -
+
           # Create SMB credentials secret if credentials are available
           if [ -n "$SMB_USERNAME" ] && [ -n "$SMB_PASSWORD" ]; then
             kubectl create secret generic tns-csi-smb-creds \
-              --namespace kube-system \
+              --namespace tns-csi \
               --from-literal=username="$SMB_USERNAME" \
               --from-literal=password="$SMB_PASSWORD"
           fi
 
           HELM_ARGS=(
             upgrade --install tns-csi-driver ./charts/tns-csi-driver
-            --namespace kube-system
+            --namespace tns-csi
+            --create-namespace
             --wait --timeout 8m
             --set "truenas.url=wss://${TRUENAS_HOST}/api/current"
             --set "truenas.apiKey=${TRUENAS_API_KEY}"
@@ -348,7 +351,7 @@ jobs:
               --set "storageClasses[3].pool=${TRUENAS_POOL}"
               --set "storageClasses[3].server=${TRUENAS_HOST}"
               --set "storageClasses[3].smbCredentialsSecret.name=tns-csi-smb-creds"
-              --set "storageClasses[3].smbCredentialsSecret.namespace=kube-system"
+              --set "storageClasses[3].smbCredentialsSecret.namespace=tns-csi"
             )
           fi
 
@@ -386,10 +389,10 @@ jobs:
           kubectl get pods -A 2>/dev/null || true
           echo ""
           echo "=== CSI Controller Logs ==="
-          kubectl logs -n kube-system deploy/tns-csi-driver-controller --all-containers --tail=200 2>/dev/null || true
+          kubectl logs -n tns-csi deploy/tns-csi-driver-controller --all-containers --tail=200 2>/dev/null || true
           echo ""
           echo "=== CSI Node Logs ==="
-          kubectl logs -n kube-system ds/tns-csi-driver-node --all-containers --tail=200 2>/dev/null || true
+          kubectl logs -n tns-csi ds/tns-csi-driver-node --all-containers --tail=200 2>/dev/null || true
           echo ""
           echo "=== Events (last 50) ==="
           kubectl get events -A --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true

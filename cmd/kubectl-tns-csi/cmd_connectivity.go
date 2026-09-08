@@ -27,7 +27,7 @@ Examples:
   kubectl tns-csi connectivity --url wss://truenas:443/api/current --api-key <key>
 
   # Test using credentials from secret
-  kubectl tns-csi connectivity --secret kube-system/tns-csi-config
+  kubectl tns-csi connectivity --secret tns-csi/tns-csi-config
 
   # Test with custom timeout
   kubectl tns-csi connectivity --timeout 30s`,

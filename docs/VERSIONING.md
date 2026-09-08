@@ -52,7 +52,7 @@ The driver exposes version info via HTTP:
 
 ```bash
 # Port-forward to the controller pod
-kubectl port-forward -n kube-system deployment/tns-csi-controller 8080:8080
+kubectl port-forward -n tns-csi deployment/tns-csi-controller 8080:8080
 
 # Query version endpoint
 curl http://localhost:8080/version
@@ -80,7 +80,7 @@ Starting TNS CSI Driver v0.17.5 (commit: abc1234, built: 2025-12-21T10:30:00Z)
 
 Check which version is deployed:
 ```bash
-helm list -n kube-system
+helm list -n tns-csi
 ```
 
 ## Docker Image Tags
@@ -128,12 +128,16 @@ The Helm chart resolves the image tag in this order:
 # Install specific chart version (uses matching image tag automatically)
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
+  --namespace tns-csi \
+  --create-namespace \
   ...
 ```
 
 Or explicitly set the image tag:
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
+  --namespace tns-csi \
+  --create-namespace \
   --set image.tag=v0.17.5 \
   ...
 ```
@@ -144,6 +148,8 @@ The `latest` tag and `main` branch builds are fine for development and testing:
 
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
+  --namespace tns-csi \
+  --create-namespace \
   --set image.tag=latest \
   --set image.pullPolicy=Always \
   ...
@@ -151,16 +157,19 @@ helm install tns-csi ./charts/tns-csi-driver \
 
 ### Upgrading
 
+Use the namespace containing the existing release. New installations use `tns-csi`; legacy installations may still use `kube-system`.
+
 Check current version before upgrading:
 ```bash
-helm list -n kube-system
-kubectl logs -n kube-system deployment/tns-csi-controller | head -1
+helm list -n tns-csi
+kubectl logs -n tns-csi deployment/tns-csi-controller | head -1
 ```
 
 Upgrade to a new version:
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
+  --namespace tns-csi \
   --reuse-values
 ```
 
@@ -170,10 +179,10 @@ When reporting issues, always include the full version information:
 
 ```bash
 # Get version from logs
-kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -5
+kubectl logs -n tns-csi deployment/tns-csi-controller 2>&1 | head -5
 
 # Or from the API
-kubectl exec -n kube-system deployment/tns-csi-controller -- \
+kubectl exec -n tns-csi deployment/tns-csi-controller -- \
   /usr/local/bin/tns-csi-driver --show-version
 ```
 

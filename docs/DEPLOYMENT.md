@@ -207,8 +207,10 @@ The CSI driver needs credentials to mount SMB shares on Kubernetes nodes:
 #### Create Kubernetes Secret for SMB Credentials
 
 ```bash
+kubectl create namespace tns-csi
+
 kubectl create secret generic smb-credentials \
-  --namespace kube-system \
+  --namespace tns-csi \
   --from-literal=username=csi-smb \
   --from-literal=password='your-password'
 ```
@@ -290,7 +292,7 @@ The easiest way to deploy the CSI driver is using the Helm chart from Docker Hub
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -305,7 +307,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -323,7 +325,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -340,7 +342,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -350,7 +352,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
   --set storageClasses[0].server="YOUR-TRUENAS-IP" \
   --set storageClasses[0].smbCredentialsSecret.name="smb-credentials" \
-  --set storageClasses[0].smbCredentialsSecret.namespace="kube-system"
+  --set storageClasses[0].smbCredentialsSecret.namespace="tns-csi"
 ```
 
 **Note:** SMB requires the SMB service and user account to be pre-configured. See Step 1.5 for setup instructions.
@@ -362,7 +364,7 @@ When deploying on OpenShift, enable SecurityContextConstraints support:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set openshift.enabled=true \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
@@ -381,7 +383,7 @@ Setting `openshift.enabled=true` creates:
 Without this, the node DaemonSet pods will fail to start on OpenShift due to restricted security policies.
 
 This single command will:
-- Create the kube-system namespace if needed
+- Create the `tns-csi` namespace if needed
 - Deploy the CSI controller and node components
 - Configure TrueNAS connection
 - Create the storage class
@@ -496,7 +498,7 @@ parameters:
   pool: "storage"                                          # Your TrueNAS pool name
   server: "YOUR-TRUENAS-IP"                                # Your TrueNAS IP/hostname
   csi.storage.k8s.io/node-stage-secret-name: smb-credentials
-  csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+  csi.storage.k8s.io/node-stage-secret-namespace: tns-csi
   # Optional parameters:
   # deleteStrategy: "retain"                               # Keep volumes on TrueNAS when PVC deleted
   # zfs.compression: "lz4"                                 # ZFS compression algorithm
@@ -539,10 +541,10 @@ kubectl apply -f deploy/storageclass.yaml
 
 ```bash
 # Check controller pod
-kubectl get pods -n kube-system -l app=tns-csi-controller
+kubectl get pods -n tns-csi -l app=tns-csi-controller
 
 # Check node pods (should be one per node)
-kubectl get pods -n kube-system -l app=tns-csi-node
+kubectl get pods -n tns-csi -l app=tns-csi-node
 
 # Check CSIDriver
 kubectl get csidrivers
@@ -569,7 +571,7 @@ Whether you used Helm or manual deployment, verify everything is working:
 
 ```bash
 # Check controller pod
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # Check CSIDriver
 kubectl get csidrivers
@@ -658,12 +660,12 @@ Verify the dataset and NFS share are removed from TrueNAS (if reclaimPolicy is D
 For Helm deployments:
 ```bash
 # Get controller pod logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin
 ```
 
 For manual (kubectl) deployments:
 ```bash
-kubectl logs -n kube-system tns-csi-controller-0 -c tns-csi-plugin
+kubectl logs -n tns-csi tns-csi-controller-0 -c tns-csi-plugin
 ```
 
 ### Check Node Plugin Logs
@@ -671,19 +673,19 @@ kubectl logs -n kube-system tns-csi-controller-0 -c tns-csi-plugin
 For Helm deployments:
 ```bash
 # Get node plugin pod name
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
 
 # View logs (replace xxxxx with actual pod name)
-kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
+kubectl logs -n tns-csi tns-csi-node-xxxxx -c tns-csi-plugin
 ```
 
 For manual (kubectl) deployments:
 ```bash
 # Get node plugin pod name
-kubectl get pods -n kube-system -l app=tns-csi-node
+kubectl get pods -n tns-csi -l app=tns-csi-node
 
 # View logs
-kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
+kubectl logs -n tns-csi tns-csi-node-xxxxx -c tns-csi-plugin
 ```
 
 ### Common Issues
@@ -730,7 +732,7 @@ kubectl logs -n kube-system tns-csi-node-xxxxx -c tns-csi-plugin
 8. **SMB mount failures**
    - Verify cifs-utils is installed: `which mount.cifs`
    - Check SMB service is enabled on TrueNAS
-   - Verify credentials Secret exists: `kubectl get secret smb-credentials -n kube-system`
+   - Verify credentials Secret exists: `kubectl get secret smb-credentials -n tns-csi`
    - Check firewall allows port 445 (default SMB port)
    - Test connectivity: `smbclient -L //YOUR-TRUENAS-IP -U csi-smb`
    - Check node plugin logs for detailed error messages
@@ -806,16 +808,16 @@ Then restart the pods:
 For Helm deployments:
 ```bash
 # Restart controller
-kubectl rollout restart statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+kubectl rollout restart statefulset -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
 
 # Restart node plugin
-kubectl rollout restart daemonset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+kubectl rollout restart daemonset -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
 ```
 
 For manual (kubectl) deployments:
 ```bash
-kubectl rollout restart statefulset -n kube-system tns-csi-controller
-kubectl rollout restart daemonset -n kube-system tns-csi-node
+kubectl rollout restart statefulset -n tns-csi tns-csi-controller
+kubectl rollout restart daemonset -n tns-csi tns-csi-node
 ```
 
 ## Uninstall
@@ -829,7 +831,7 @@ To uninstall a Helm deployment:
 kubectl delete pvc test-pvc
 
 # Uninstall the Helm release
-helm uninstall tns-csi -n kube-system
+helm uninstall tns-csi -n tns-csi
 ```
 
 ### Manual Installation
@@ -853,6 +855,8 @@ kubectl delete -f deploy/secret.yaml
 
 ## Upgrading
 
+Always pass the namespace containing the existing Helm release. Use `tns-csi` for new installations and `kube-system` for legacy releases installed there; Helm does not move releases between namespaces.
+
 ### Standard Upgrade (Minor Versions)
 
 For minor version upgrades within the same schema version:
@@ -861,7 +865,7 @@ For minor version upgrades within the same schema version:
 # Helm upgrade
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version <NEW_VERSION> \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values
 ```
 
@@ -885,7 +889,7 @@ Volumes created with earlier versions will **not be recognized** by the new driv
    ```bash
    helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
      --version 0.17.5 \
-     --namespace kube-system \
+     --namespace tns-csi \
      --reuse-values
    ```
 
@@ -935,7 +939,7 @@ After upgrading, verify the new driver is working:
 
 ```bash
 # Check driver version
-kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
+kubectl logs -n tns-csi deployment/tns-csi-controller 2>&1 | head -1
 
 # Test creating a new volume
 kubectl apply -f - <<EOF
@@ -1018,7 +1022,7 @@ controller:
 
 Access via port-forward:
 ```bash
-kubectl port-forward -n kube-system svc/tns-csi-driver-dashboard 9090:9090
+kubectl port-forward -n tns-csi svc/tns-csi-driver-dashboard 9090:9090
 # Open http://localhost:9090/dashboard/
 ```
 

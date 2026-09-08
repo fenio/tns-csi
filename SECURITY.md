@@ -70,18 +70,20 @@ We will acknowledge your report within 48 hours and provide a timeline for a fix
 
 **Secrets:**
 ```bash
+kubectl create namespace tns-csi
+
 # Create secret with proper permissions
 kubectl create secret generic truenas-csi-secret \
   --from-literal=api-key=YOUR_API_KEY \
   --from-literal=api-url=wss://YOUR-TRUENAS-IP:443/api/current \
-  --namespace kube-system
+  --namespace tns-csi
 
 # Restrict access
 kubectl create role secret-reader \
   --verb=get \
   --resource=secrets \
   --resource-name=truenas-csi-secret \
-  --namespace kube-system
+  --namespace tns-csi
 ```
 
 ### Data Security
@@ -117,7 +119,7 @@ kubectl create role secret-reader \
 - Enable detailed logging in development/staging
 - Monitor CSI driver logs for unusual activity:
   ```bash
-  kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+  kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
   ```
 
 **TrueNAS Audit:**
@@ -128,7 +130,7 @@ kubectl create role secret-reader \
 **Kubernetes Events:**
 ```bash
 # Watch CSI events
-kubectl get events -n kube-system --field-selector involvedObject.kind=Pod
+kubectl get events -n tns-csi --field-selector involvedObject.kind=Pod
 
 # Check PVC/PV events
 kubectl describe pvc <pvc-name>

@@ -180,7 +180,8 @@ ssh <user>@<vm-ip> 'sudo k3s ctr images import tns-csi-driver.tar.gz'
 # Deploy with Helm
 export KUBECONFIG=~/.kube/utm-nvmeof-test
 helm install tns-csi ./charts/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.host=YOUR-TRUENAS-IP \
   --set truenas.apiKey=<your-api-key> \
   --set storageClasses[0].name=tns-csi-nvmeof \
@@ -249,7 +250,8 @@ kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
 # Deploy CSI driver
 helm install tns-csi ./charts/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.host=YOUR-TRUENAS-IP \
   --set truenas.apiKey=<your-api-key>
 
@@ -278,10 +280,10 @@ ssh <user>@<vm-ip> 'sudo k3s ctr images import tns-csi-driver.tar.gz'
 
 # 3. Restart CSI driver pods
 export KUBECONFIG=~/.kube/utm-nvmeof-test
-kubectl rollout restart -n kube-system daemonset/tns-csi-node
+kubectl rollout restart -n tns-csi daemonset/tns-csi-node
 
 # 4. View logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin -f
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin -f
 ```
 
 ### Working on NFS features:
@@ -295,7 +297,7 @@ make build-image
 kind load docker-image tns-csi-driver:latest --name tns-csi-test
 
 # 3. Restart pods
-kubectl rollout restart -n kube-system deployment/tns-csi-controller
+kubectl rollout restart -n tns-csi deployment/tns-csi-controller
 
 # 4. Test
 kubectl apply -f deploy/example-pvc.yaml
@@ -354,11 +356,11 @@ kubectl apply -f deploy/example-pvc.yaml
 ### Kind Cluster Issues
 - Restart Docker Desktop if cluster won't start
 - Reload image if changes aren't reflected
-- Check logs: `kubectl logs -n kube-system <pod-name>`
+- Check logs: `kubectl logs -n tns-csi <pod-name>`
 
 ### NVMe-oF Volume Issues
 - Verify port exists: Check TrueNAS UI → Shares → NVMe-oF Targets → Ports
-- Check controller logs: `kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin`
+- Check controller logs: `kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin`
 - Verify connectivity: `nvme discover -t tcp -a YOUR-TRUENAS-IP -s 4420`
 
 ---

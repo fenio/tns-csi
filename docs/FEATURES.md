@@ -640,7 +640,7 @@ ZFS native encryption provides transparent, at-rest encryption for your volumes.
    ```yaml
    encryption: "true"
    csi.storage.k8s.io/provisioner-secret-name: encryption-secret
-   csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+   csi.storage.k8s.io/provisioner-secret-namespace: tns-csi
    ```
 
    Secret contents:
@@ -649,7 +649,7 @@ ZFS native encryption provides transparent, at-rest encryption for your volumes.
    kind: Secret
    metadata:
      name: encryption-secret
-     namespace: kube-system
+     namespace: tns-csi
    type: Opaque
    stringData:
      encryptionPassphrase: "my-secret-passphrase"
@@ -659,7 +659,7 @@ ZFS native encryption provides transparent, at-rest encryption for your volumes.
    ```yaml
    encryption: "true"
    csi.storage.k8s.io/provisioner-secret-name: encryption-secret
-   csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+   csi.storage.k8s.io/provisioner-secret-namespace: tns-csi
    ```
 
    Secret contents:
@@ -668,7 +668,7 @@ ZFS native encryption provides transparent, at-rest encryption for your volumes.
    kind: Secret
    metadata:
      name: encryption-secret
-     namespace: kube-system
+     namespace: tns-csi
    type: Opaque
    stringData:
      encryptionKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -707,7 +707,7 @@ parameters:
   encryption: "true"
   encryptionAlgorithm: "AES-256-GCM"
   csi.storage.k8s.io/provisioner-secret-name: encryption-secret
-  csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+  csi.storage.k8s.io/provisioner-secret-namespace: tns-csi
 allowVolumeExpansion: true
 reclaimPolicy: Delete
 ---
@@ -715,7 +715,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: encryption-secret
-  namespace: kube-system
+  namespace: tns-csi
 type: Opaque
 stringData:
   encryptionPassphrase: "my-secret-passphrase-at-least-8-chars"
@@ -1314,7 +1314,7 @@ See [TESTING.md](TESTING.md) for comprehensive testing documentation.
 ### Quick Install (NFS)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -1329,7 +1329,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 # Pre-requisite: Configure NVMe-oF port in TrueNAS first!
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -1344,7 +1344,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 # Pre-requisite: Configure iSCSI portal in TrueNAS and install open-iscsi on nodes!
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \

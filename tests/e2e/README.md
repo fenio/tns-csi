@@ -221,7 +221,7 @@ To run manually:
 
 Check CSI driver logs:
 ```bash
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver -c csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver -c csi-driver
 ```
 
 ### Cleanup not working

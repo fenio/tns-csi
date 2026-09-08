@@ -97,7 +97,7 @@ That's it! Unlike NVMe-oF, iSCSI doesn't require pre-configured portals or targe
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -117,13 +117,13 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 
 ```bash
 # Check pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # Check storage class was created
 kubectl get storageclass tns-csi-iscsi
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver
 ```
 
 ## Usage
@@ -256,7 +256,8 @@ To keep volumes on TrueNAS when PVCs are deleted:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].name="tns-csi-iscsi" \
@@ -340,13 +341,13 @@ spec:
 
 ```bash
 # Check all pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
 
 # View node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver --tail=50
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver --tail=50
 ```
 
 ### PVC Stuck in Pending
@@ -356,7 +357,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-drive
 kubectl describe pvc my-iscsi-volume
 
 # Check controller logs for errors
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver | grep -i error
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver | grep -i error
 ```
 
 ### Pod Stuck in ContainerCreating
@@ -366,7 +367,7 @@ kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi
 kubectl describe pod my-app
 
 # Check node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver | grep -i error
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver | grep -i error
 
 # Check iscsid is running on the node
 ssh <node> sudo systemctl status iscsid

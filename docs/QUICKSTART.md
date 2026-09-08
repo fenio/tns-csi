@@ -23,7 +23,7 @@ The fastest way to get started is using Helm from the OCI registry:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -45,13 +45,13 @@ That's it! The driver is now installed and ready to use.
 
 ```bash
 # Check pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # Check storage class created
 kubectl get storageclass tns-csi-nfs
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver
 ```
 
 ### Alternative: Install from Local Chart
@@ -60,7 +60,8 @@ If you've cloned the repository:
 
 ```bash
 helm install tns-csi ./charts/tns-csi-driver \
-  --namespace kube-system \
+  --namespace tns-csi \
+  --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
   --set storageClasses[0].name="tns-csi-nfs" \
@@ -162,16 +163,16 @@ spec:
 ### Check Driver Status
 ```bash
 # Check controller pod
-kubectl get pods -n kube-system | grep tns-csi-controller
+kubectl get pods -n tns-csi | grep tns-csi-controller
 
 # Check node pods
-kubectl get pods -n kube-system | grep tns-csi-node
+kubectl get pods -n tns-csi | grep tns-csi-node
 
 # View controller logs
-kubectl logs -n kube-system tns-csi-controller-0 -c tns-csi-plugin
+kubectl logs -n tns-csi tns-csi-controller-0 -c tns-csi-plugin
 
 # View node logs
-kubectl logs -n kube-system <node-pod-name> -c tns-csi-plugin
+kubectl logs -n tns-csi <node-pod-name> -c tns-csi-plugin
 ```
 
 ### Check Volumes
@@ -208,13 +209,13 @@ kubectl exec <pod-name> -- cat /data/test.txt
 ### Check Driver Status
 ```bash
 # Check all pods are running
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 
 # View controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver
 
 # View node logs
-kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver
+kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver
 
 # Check storage classes
 kubectl get storageclass
@@ -235,7 +236,7 @@ kubectl get storageclass
 kubectl get storageclass
 
 # Check controller logs for errors
-kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
+kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-driver --tail=50
 
 # Describe PVC for events
 kubectl describe pvc <pvc-name>
@@ -247,7 +248,7 @@ kubectl describe pvc <pvc-name>
 - Verify `nfs-common` package is installed on nodes: `dpkg -l | grep nfs-common`
 - Check node driver logs:
   ```bash
-  kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-driver
+  kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-driver
   ```
 
 #### "zpool (parentDataset) does not exist" Error
@@ -259,7 +260,7 @@ kubectl describe pvc <pvc-name>
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values \
   --set controller.extraArgs="{--v=5}" \
   --set node.extraArgs="{--v=5}"
@@ -317,7 +318,7 @@ Install with values file:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --values my-values.yaml
 ```
@@ -329,7 +330,7 @@ To keep volumes on TrueNAS even when PVCs are deleted (useful for data protectio
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -359,7 +360,7 @@ To use NVMe-oF instead of NFS:
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -387,7 +388,7 @@ To use SMB instead of NFS (requires credentials Secret):
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -397,7 +398,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
   --set storageClasses[0].server="YOUR-TRUENAS-IP" \
   --set storageClasses[0].smbCredentialsSecret.name="smb-credentials" \
-  --set storageClasses[0].smbCredentialsSecret.namespace="kube-system"
+  --set storageClasses[0].smbCredentialsSecret.namespace="tns-csi"
 ```
 
 **Requirements:**
@@ -441,7 +442,7 @@ See [QUICKSTART-SMB.md](QUICKSTART-SMB.md) for detailed SMB setup instructions.
 kubectl get csidrivers
 
 # Check pod health
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 ```
 
 ### Metrics
@@ -457,7 +458,7 @@ To upgrade to a newer version:
 ```bash
 helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --reuse-values
 ```
 
@@ -470,7 +471,7 @@ To remove the driver (this will NOT delete existing PVs):
 kubectl delete pvc --all -A
 
 # Uninstall the driver
-helm uninstall tns-csi --namespace kube-system
+helm uninstall tns-csi --namespace tns-csi
 ```
 
 ## Snapshots and Cloning

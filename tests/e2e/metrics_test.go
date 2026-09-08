@@ -38,7 +38,7 @@ var _ = Describe("Metrics and Observability", func() {
 		ctx := context.Background()
 
 		By("Getting controller POD")
-		pods, err := f.K8s.GetPodsWithLabel(ctx, "kube-system", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller")
+		pods, err := f.K8s.GetPodsWithLabel(ctx, "tns-csi", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller")
 		Expect(err).NotTo(HaveOccurred(), "Failed to get controller pods")
 		Expect(pods).NotTo(BeEmpty(), "No controller pods found")
 
@@ -96,16 +96,16 @@ var _ = Describe("Metrics and Observability", func() {
 		ctx := context.Background()
 
 		By("Getting node PODs")
-		pods, err := f.K8s.GetPodsWithLabel(ctx, "kube-system", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node")
+		pods, err := f.K8s.GetPodsWithLabel(ctx, "tns-csi", "app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node")
 		Expect(err).NotTo(HaveOccurred(), "Failed to get node PODs")
 		Expect(pods).NotTo(BeEmpty(), "No node pods found")
 
 		By("Checking node POD logs")
 		nodePod := pods[0]
-		_, err = f.K8s.GetPodLogs(ctx, "kube-system", nodePod.Name, "tns-csi-driver", 100)
+		_, err = f.K8s.GetPodLogs(ctx, "tns-csi", nodePod.Name, "tns-csi-driver", 100)
 		if err != nil {
 			// Container might have different name
-			_, err = f.K8s.GetPodLogs(ctx, "kube-system", nodePod.Name, "", 100)
+			_, err = f.K8s.GetPodLogs(ctx, "tns-csi", nodePod.Name, "", 100)
 		}
 		Expect(err).NotTo(HaveOccurred(), "Failed to get node logs")
 

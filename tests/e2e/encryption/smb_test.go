@@ -29,7 +29,7 @@ var _ = Describe("SMB Encryption", func() {
 			"encryption":            "true",
 			"encryptionGenerateKey": "true",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		}
 	}
 

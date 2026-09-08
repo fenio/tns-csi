@@ -283,8 +283,8 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
         run: |
           mkdir -p /tmp/test-logs
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           kubectl get pv -o wide > /tmp/test-logs/pvs.log 2>&1 || true
@@ -382,8 +382,8 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
         run: |
           mkdir -p /tmp/test-logs
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
@@ -463,8 +463,8 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
         run: |
           mkdir -p /tmp/test-logs
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true
@@ -592,8 +592,8 @@ jobs:
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
         run: |
           mkdir -p /tmp/test-logs
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           smbclient -L "//${TRUENAS_HOST}" -U "${SMB_USERNAME}%${SMB_PASSWORD}" --option="client min protocol=SMB3" > /tmp/test-logs/smb-diag.log 2>&1 || true
@@ -692,8 +692,8 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
         run: |
           mkdir -p /tmp/test-logs
-          kubectl logs -n kube-system -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
-          kubectl logs -n kube-system -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c tns-csi-plugin --tail=-1 > /tmp/test-logs/controller.log 2>&1 || true
+          kubectl logs -n tns-csi -l app.kubernetes.io/component=node -c tns-csi-plugin --tail=-1 > /tmp/test-logs/node.log 2>&1 || true
           kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/test-logs/events.log 2>&1 || true
           kubectl get pvc --all-namespaces -o wide > /tmp/test-logs/pvcs.log 2>&1 || true
           ssh $SSH_OPTS ci@localhost "sudo dmesg | tail -100" > /tmp/test-logs/vm-dmesg.log 2>&1 || true

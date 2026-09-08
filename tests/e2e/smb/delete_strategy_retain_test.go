@@ -49,7 +49,7 @@ var _ = Describe("SMB Delete Strategy Retain", func() {
 			"pool":           f.Config.TrueNASPool,
 			"deleteStrategy": "retain",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {

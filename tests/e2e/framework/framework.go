@@ -135,25 +135,6 @@ func SetupSuite(protocol string) error {
 	}
 	klog.Infof("Pre-flight: TrueNAS is reachable")
 
-	// Create SMB credentials secret before Helm deploy (StorageClass references it)
-	if (protocol == protocolSMB || protocol == protocolAll || protocol == protocolBoth) && config.SMBUsername != "" {
-		klog.Infof("Creating SMB credentials secret in %s", helmNamespace)
-		k8s, k8sErr := NewKubernetesClient(config.Kubeconfig, helmNamespace)
-		if k8sErr != nil {
-			return fmt.Errorf("failed to create k8s client for SMB secret: %w", k8sErr)
-		}
-		secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		secretErr := k8s.CreateSecret(secretCtx, helmNamespace, "tns-csi-smb-creds", map[string]string{
-			"username": config.SMBUsername,
-			"password": config.SMBPassword,
-		})
-		secretCancel()
-		if secretErr != nil {
-			return fmt.Errorf("failed to create SMB credentials secret: %w", secretErr)
-		}
-		klog.Infof("SMB credentials secret created")
-	}
-
 	// Create Helm deployer
 	suite.helm = NewHelmDeployer(config)
 
@@ -193,6 +174,25 @@ func SetupSuite(protocol string) error {
 	}
 	if lastDeployErr != nil {
 		return fmt.Errorf("failed to deploy CSI driver after %d attempts: %w", maxDeployAttempts, lastDeployErr)
+	}
+
+	// Helm creates the release namespace; create SMB credentials after deployment.
+	if (protocol == protocolSMB || protocol == protocolAll || protocol == protocolBoth) && config.SMBUsername != "" {
+		klog.Infof("Creating SMB credentials secret in %s", helmNamespace)
+		k8s, k8sErr := NewKubernetesClient(config.Kubeconfig, helmNamespace)
+		if k8sErr != nil {
+			return fmt.Errorf("failed to create k8s client for SMB secret: %w", k8sErr)
+		}
+		secretCtx, secretCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		secretErr := k8s.CreateSecret(secretCtx, helmNamespace, "tns-csi-smb-creds", map[string]string{
+			"username": config.SMBUsername,
+			"password": config.SMBPassword,
+		})
+		secretCancel()
+		if secretErr != nil {
+			return fmt.Errorf("failed to create SMB credentials secret: %w", secretErr)
+		}
+		klog.Infof("SMB credentials secret created")
 	}
 
 	// Log driver version info

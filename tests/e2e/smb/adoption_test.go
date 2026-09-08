@@ -50,7 +50,7 @@ var _ = Describe("SMB Volume Adoption", func() {
 			"deleteStrategy": "retain",
 			"markAdoptable":  "true",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {
@@ -156,7 +156,7 @@ var _ = Describe("SMB Volume Adoption", func() {
 			"pool":          f.Config.TrueNASPool,
 			"adoptExisting": "true",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {
@@ -234,7 +234,7 @@ var _ = Describe("SMB Volume Adoption", func() {
 			"markAdoptable": "true",
 			// adoptExisting defaults to false
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {
@@ -286,7 +286,7 @@ var _ = Describe("SMB Volume Adoption", func() {
 			"deleteStrategy": "retain",
 			"markAdoptable":  "true",
 			"csi.storage.k8s.io/node-stage-secret-name":      "tns-csi-smb-creds",
-			"csi.storage.k8s.io/node-stage-secret-namespace": "kube-system",
+			"csi.storage.k8s.io/node-stage-secret-namespace": "tns-csi",
 		})
 		Expect(err).NotTo(HaveOccurred())
 		f.Cleanup.Add(func() error {

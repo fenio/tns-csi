@@ -39,7 +39,7 @@ docker exec truenas-csi-test-worker apt-get install -y nfs-common
 # Install from OCI registry
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -50,7 +50,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].server="YOUR-TRUENAS-IP"
 
 # Verify deployment
-kubectl get pods -n kube-system -l app.kubernetes.io/name=tns-csi-driver
+kubectl get pods -n tns-csi -l app.kubernetes.io/name=tns-csi-driver
 ```
 
 ### 4. Test the Driver
@@ -142,7 +142,7 @@ source .tns-credentials
 
 # Create secret
 kubectl create secret generic tns-csi-secret \
-  --namespace=kube-system \
+  --namespace=tns-csi \
   --from-literal=url="$TRUENAS_URL" \
   --from-literal=api-key="$TRUENAS_API_KEY"
 ```
@@ -161,11 +161,11 @@ kubectl apply -f deploy/storageclass.yaml
 
 ```bash
 # Check pods
-kubectl get pods -n kube-system -l 'app in (tns-csi-controller,tns-csi-node)'
+kubectl get pods -n tns-csi -l 'app in (tns-csi-controller,tns-csi-node)'
 
 # Check logs
-kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin
-kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin
+kubectl logs -n tns-csi -l app=tns-csi-controller -c tns-csi-plugin
+kubectl logs -n tns-csi -l app=tns-csi-node -c tns-csi-plugin
 ```
 
 </details>
@@ -203,12 +203,12 @@ Check node plugin logs:
 
 For Helm deployments:
 ```bash
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node -c tns-csi-plugin --tail=100
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node -c tns-csi-plugin --tail=100
 ```
 
 For manual/script deployments:
 ```bash
-kubectl logs -n kube-system -l app=tns-csi-node -c tns-csi-plugin --tail=100
+kubectl logs -n tns-csi -l app=tns-csi-node -c tns-csi-plugin --tail=100
 ```
 
 Common issues:
@@ -222,12 +222,12 @@ Check controller logs:
 
 For Helm deployments:
 ```bash
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin --tail=100
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller -c tns-csi-plugin --tail=100
 ```
 
 For manual/script deployments:
 ```bash
-kubectl logs -n kube-system -l app=tns-csi-controller -c tns-csi-plugin --tail=100
+kubectl logs -n tns-csi -l app=tns-csi-controller -c tns-csi-plugin --tail=100
 ```
 
 Common issues:
@@ -249,14 +249,14 @@ Then restart:
 
 For Helm deployments:
 ```bash
-kubectl rollout restart statefulset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
-kubectl rollout restart daemonset -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+kubectl rollout restart statefulset -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+kubectl rollout restart daemonset -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
 ```
 
 For manual/script deployments:
 ```bash
-kubectl rollout restart statefulset -n kube-system tns-csi-controller
-kubectl rollout restart daemonset -n kube-system tns-csi-node
+kubectl rollout restart statefulset -n tns-csi tns-csi-controller
+kubectl rollout restart daemonset -n tns-csi tns-csi-node
 ```
 
 ## Testing Scenarios
@@ -319,7 +319,7 @@ kubectl delete pod test-pod
 
 For Helm installations:
 ```bash
-helm uninstall tns-csi -n kube-system
+helm uninstall tns-csi -n tns-csi
 ```
 
 For manual/script deployments:
@@ -329,7 +329,7 @@ kubectl delete -f deploy/node.yaml
 kubectl delete -f deploy/controller.yaml
 kubectl delete -f deploy/csidriver.yaml
 kubectl delete -f deploy/rbac.yaml
-kubectl delete secret tns-csi-secret -n kube-system
+kubectl delete secret tns-csi-secret -n tns-csi
 ```
 
 ### Delete Kind cluster:

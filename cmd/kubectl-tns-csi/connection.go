@@ -22,7 +22,8 @@ var (
 
 // Constants for auto-discovery.
 const (
-	defaultDriverNamespace = "kube-system"
+	defaultDriverNamespace = "tns-csi"
+	legacyDriverNamespace  = "kube-system"
 	driverLabelSelector    = "app.kubernetes.io/name=tns-csi-driver"
 )
 
@@ -171,8 +172,8 @@ func connectToTrueNAS(_ context.Context, cfg *connectionConfig) (*TrueNASClient,
 }
 
 // autoDiscoverDriverSecret attempts to find the tns-csi driver secret automatically.
-// It searches in the current kubectl context namespace first, then kube-system,
-// then all namespaces as a fallback.
+// It searches in the current kubectl context namespace first, then the current
+// and legacy driver namespaces, then all namespaces as a fallback.
 func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
 	// Build Kubernetes client
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -190,7 +191,7 @@ func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
 	}
 
 	// Determine which namespaces to search and in what order.
-	// Current context namespace first, then kube-system, then all namespaces.
+	// Current context namespace first, then preferred and legacy driver namespaces.
 	contextNamespace, _, nsErr := kubeConfig.Namespace()
 	if nsErr != nil {
 		contextNamespace = ""
@@ -224,11 +225,11 @@ func autoDiscoverDriverSecret(ctx context.Context) *connectionConfig {
 }
 
 // buildNamespaceSearchOrder returns deduplicated namespaces to search, prioritizing
-// the current kubectl context namespace, then the default driver namespace.
+// the current kubectl context namespace, then preferred and legacy driver namespaces.
 func buildNamespaceSearchOrder(contextNamespace string) []string {
 	namespaces := []string{}
 	seen := map[string]bool{}
-	for _, ns := range []string{contextNamespace, defaultDriverNamespace} {
+	for _, ns := range []string{contextNamespace, defaultDriverNamespace, legacyDriverNamespace} {
 		if ns != "" && !seen[ns] {
 			namespaces = append(namespaces, ns)
 			seen[ns] = true
@@ -262,8 +263,9 @@ func tryCommonSecretNames(ctx context.Context, clientset *kubernetes.Clientset, 
 }
 
 // discoverDriverNamespace finds the namespace where the tns-csi controller is running.
-// It searches the current kubectl context namespace first, then kube-system,
-// then all namespaces. Returns defaultDriverNamespace if nothing is found.
+// It searches the current kubectl context namespace first, then the current
+// and legacy driver namespaces, then all namespaces. Returns
+// defaultDriverNamespace if nothing is found.
 func discoverDriverNamespace(ctx context.Context) string {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	configOverrides := &clientcmd.ConfigOverrides{}

@@ -180,7 +180,7 @@ The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -195,7 +195,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -214,7 +214,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -231,7 +231,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --version 0.17.5 \
-  --namespace kube-system \
+  --namespace tns-csi \
   --create-namespace \
   --set truenas.url="wss://YOUR-TRUENAS-IP:443/api/current" \
   --set truenas.apiKey="YOUR-API-KEY" \
@@ -241,7 +241,7 @@ helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --set storageClasses[0].pool="YOUR-POOL-NAME" \
   --set storageClasses[0].server="YOUR-TRUENAS-IP" \
   --set storageClasses[0].smbCredentialsSecret.name=smb-credentials \
-  --set storageClasses[0].smbCredentialsSecret.namespace=kube-system
+  --set storageClasses[0].smbCredentialsSecret.namespace=tns-csi
 ```
 
 **Note:** SMB requires a credentials Secret and the SMB service enabled in TrueNAS. See [QUICKSTART-SMB.md](docs/QUICKSTART-SMB.md) for setup instructions.
@@ -354,13 +354,13 @@ See [DEPLOYMENT.md](docs/DEPLOYMENT.md#troubleshooting) for detailed troubleshoo
 
 ```bash
 # Controller logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=controller
 
 # Node logs
-kubectl logs -n kube-system -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
+kubectl logs -n tns-csi -l app.kubernetes.io/name=tns-csi-driver,app.kubernetes.io/component=node
 
 # Check version
-kubectl logs -n kube-system deployment/tns-csi-controller 2>&1 | head -1
+kubectl logs -n tns-csi deployment/tns-csi-controller 2>&1 | head -1
 ```
 
 ## Documentation

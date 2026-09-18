@@ -319,6 +319,8 @@ func (s *ControllerService) validateCloneParameters(req *csi.CreateVolumeRequest
 				klog.V(4).Infof("Using pool %q as parentDataset", pool)
 			}
 		}
+	} else {
+		parentDataset = resolveParentDataset(pool, parentDataset)
 	}
 
 	newVolumeName := req.GetName()

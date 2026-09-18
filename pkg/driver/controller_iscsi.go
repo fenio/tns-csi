@@ -58,10 +58,7 @@ func validateISCSIParams(req *csi.CreateVolumeRequest) (*iscsiVolumeParams, erro
 		return nil, status.Error(codes.InvalidArgument, "server parameter is required for iSCSI volumes")
 	}
 
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	// Extract portal ID if specified (optional - will use first available if not specified)
 	var portalID int

@@ -138,10 +138,7 @@ func validateNVMeOFParams(req *csi.CreateVolumeRequest) (*nvmeofVolumeParams, er
 		return nil, status.Error(codes.InvalidArgument, "server parameter is required for NVMe-oF volumes")
 	}
 
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
 	if requestedCapacity == 0 {

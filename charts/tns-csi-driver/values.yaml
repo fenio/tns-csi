@@ -303,7 +303,7 @@ storageClasses:
     # TrueNAS server IP/hostname for NFS mounts
     # Replace with your TrueNAS server IP
     server: ""
-    # Optional: Parent dataset (defaults to pool name if not specified)
+    # Optional: Pool-relative parent dataset; pool-qualified paths are also accepted
     parentDataset: ""
     # Reclaim policy: Delete or Retain
     reclaimPolicy: Delete
@@ -378,7 +378,7 @@ storageClasses:
     pool: "storage"
     # TrueNAS server IP/hostname for NVMe-oF target
     server: ""
-    # Optional: Parent dataset
+    # Optional: Pool-relative parent dataset; pool-qualified paths are also accepted
     parentDataset: ""
     # NVMe-oF transport: tcp or rdma
     transport: "tcp"
@@ -456,7 +456,7 @@ storageClasses:
     pool: "storage"
     # TrueNAS server IP/hostname for iSCSI target
     server: ""
-    # Optional: Parent dataset
+    # Optional: Pool-relative parent dataset; pool-qualified paths are also accepted
     parentDataset: ""
     # iSCSI port number
     port: "3260"
@@ -530,7 +530,7 @@ storageClasses:
     pool: "storage"
     # TrueNAS server IP/hostname for SMB shares
     server: ""
-    # Optional: Parent dataset
+    # Optional: Pool-relative parent dataset; pool-qualified paths are also accepted
     parentDataset: ""
     reclaimPolicy: Delete
     volumeBindingMode: Immediate

@@ -50,10 +50,7 @@ func validateSMBParams(req *csi.CreateVolumeRequest) (*smbVolumeParams, error) {
 		klog.V(4).Infof("No server parameter provided, using default: %s", defaultServerAddress)
 	}
 
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()
 	if requestedCapacity == 0 {

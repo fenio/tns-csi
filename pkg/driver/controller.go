@@ -86,6 +86,17 @@ var (
 	ErrDatasetNotFound = errors.New("dataset not found for share")
 )
 
+// resolveParentDataset accepts both pool-relative and pool-qualified dataset paths.
+func resolveParentDataset(pool, parentDataset string) string {
+	if parentDataset == "" {
+		return pool
+	}
+	if pool == "" || parentDataset == pool || strings.HasPrefix(parentDataset, pool+"/") {
+		return parentDataset
+	}
+	return pool + "/" + parentDataset
+}
+
 // capacityErrorSubstrings are error message patterns that indicate insufficient pool capacity.
 // TrueNAS returns these when a pool or dataset doesn't have enough free space.
 var errNoDeferredClonesToPromote = errors.New("no deferred-destroy snapshot clones to promote")
@@ -786,10 +797,7 @@ func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi
 // Returns ErrVolumeNotFound if the volume doesn't exist, or error if the volume exists but with incompatible parameters.
 func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) (*csi.CreateVolumeResponse, error) {
 	pool := params["pool"]
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	if parentDataset == "" {
 		return nil, ErrVolumeNotFound
@@ -966,10 +974,7 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	// The sourceVolumeID is now just the volume name, we need to find its dataset
 	params := req.GetParameters()
 	pool := params["pool"]
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	// Determine protocol from parameters (default to NFS)
 	protocol := params["protocol"]

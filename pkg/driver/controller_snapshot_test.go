@@ -618,11 +618,15 @@ func TestCreateSnapshot(t *testing.T) {
 				SourceVolumeId: volumeID,
 				Parameters: map[string]string{
 					"protocol":      ProtocolNFS,
-					"parentDataset": "tank/csi",
+					"pool":          "tank",
+					"parentDataset": "csi",
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
 				m.GetDatasetWithPropertiesFunc = func(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {
+					if datasetID != "tank/csi/test-volume" {
+						t.Errorf("Expected dataset ID tank/csi/test-volume, got %s", datasetID)
+					}
 					return &tnsapi.DatasetWithProperties{
 						Dataset: tnsapi.Dataset{ID: "tank/csi/test-volume", Name: "tank/csi/test-volume"},
 						UserProperties: map[string]tnsapi.UserProperty{
@@ -1313,6 +1317,21 @@ func TestValidateCloneParameters(t *testing.T) {
 			wantPool:    "mypool",
 			wantParent:  "mypool/csi",
 			wantDataset: "mypool/csi/test-volume",
+			wantErr:     false,
+		},
+		{
+			name: "pool-relative parentDataset provided explicitly",
+			params: map[string]string{
+				"pool":          "mypool",
+				"parentDataset": "csi/nested",
+			},
+			snapshotMeta: &SnapshotMetadata{
+				DatasetName: "tank/csi/pvc-source",
+				Protocol:    ProtocolNFS,
+			},
+			wantPool:    "mypool",
+			wantParent:  "mypool/csi/nested",
+			wantDataset: "mypool/csi/nested/test-volume",
 			wantErr:     false,
 		},
 		{

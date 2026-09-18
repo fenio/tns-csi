@@ -237,10 +237,7 @@ func (s *ControllerService) CreateSnapshot(ctx context.Context, req *csi.CreateS
 	// We need to find the dataset name and protocol for the source volume.
 	params := req.GetParameters()
 	pool := params["pool"]
-	parentDataset := params["parentDataset"]
-	if parentDataset == "" {
-		parentDataset = pool
-	}
+	parentDataset := resolveParentDataset(pool, params["parentDataset"])
 
 	// Determine protocol from parameters (default to NFS)
 	protocol := params["protocol"]

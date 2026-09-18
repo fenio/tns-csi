@@ -12,6 +12,85 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+func TestResolveParentDataset(t *testing.T) {
+	tests := []struct {
+		name          string
+		pool          string
+		parentDataset string
+		want          string
+	}{
+		{name: "empty parent uses pool", pool: "tank", want: "tank"},
+		{name: "relative parent", pool: "tank", parentDataset: "csi", want: "tank/csi"},
+		{name: "nested relative parent", pool: "main", parentDataset: "infrastructure/k8s/prod", want: "main/infrastructure/k8s/prod"},
+		{name: "pool-qualified parent", pool: "tank", parentDataset: "tank/csi", want: "tank/csi"},
+		{name: "pool itself", pool: "tank", parentDataset: "tank", want: "tank"},
+		{name: "pool name requires component boundary", pool: "tank", parentDataset: "tank2/csi", want: "tank/tank2/csi"},
+		{name: "parent without pool is unchanged", parentDataset: "tank/csi", want: "tank/csi"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveParentDataset(tt.pool, tt.parentDataset); got != tt.want {
+				t.Fatalf("resolveParentDataset(%q, %q) = %q, want %q", tt.pool, tt.parentDataset, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProtocolValidatorsResolveRelativeParentDataset(t *testing.T) {
+	req := &csi.CreateVolumeRequest{
+		Name: "test-volume",
+		Parameters: map[string]string{
+			"pool":          "tank",
+			"parentDataset": "csi/nested",
+			"server":        "192.168.1.100",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: MinVolumeSize},
+	}
+	const wantParent = "tank/csi/nested"
+	const wantDataset = wantParent + "/test-volume"
+
+	t.Run("NFS", func(t *testing.T) {
+		params, err := validateNFSParams(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if params.parentDataset != wantParent || params.datasetName != wantDataset {
+			t.Fatalf("parentDataset = %q, datasetName = %q; want %q and %q", params.parentDataset, params.datasetName, wantParent, wantDataset)
+		}
+	})
+
+	t.Run("SMB", func(t *testing.T) {
+		params, err := validateSMBParams(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if params.parentDataset != wantParent || params.datasetName != wantDataset {
+			t.Fatalf("parentDataset = %q, datasetName = %q; want %q and %q", params.parentDataset, params.datasetName, wantParent, wantDataset)
+		}
+	})
+
+	t.Run("iSCSI", func(t *testing.T) {
+		params, err := validateISCSIParams(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if params.parentDataset != wantParent || params.zvolName != wantDataset {
+			t.Fatalf("parentDataset = %q, zvolName = %q; want %q and %q", params.parentDataset, params.zvolName, wantParent, wantDataset)
+		}
+	})
+
+	t.Run("NVMe-oF", func(t *testing.T) {
+		params, err := validateNVMeOFParams(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if params.parentDataset != wantParent || params.zvolName != wantDataset {
+			t.Fatalf("parentDataset = %q, zvolName = %q; want %q and %q", params.parentDataset, params.zvolName, wantParent, wantDataset)
+		}
+	})
+}
+
 func TestControllerGetCapabilities(t *testing.T) {
 	service := NewControllerService(nil, NewNodeRegistry(), "")
 
@@ -1405,17 +1484,26 @@ func TestCreateVolumeRPC(t *testing.T) {
 					"protocol":      "nfs",
 					"pool":          "tank",
 					"server":        "192.168.1.100",
-					"parentDataset": "tank/csi",
+					"parentDataset": "csi",
 				},
 				CapacityRange: &csi.CapacityRange{
 					RequiredBytes: 1 * 1024 * 1024 * 1024,
 				},
 			},
 			mockSetup: func(m *MockAPIClientForSnapshots) {
+				m.GetDatasetFunc = func(ctx context.Context, datasetID string) (*tnsapi.Dataset, error) {
+					if datasetID != "tank/csi/test-rpc-volume" {
+						t.Errorf("Expected idempotency lookup for tank/csi/test-rpc-volume, got %s", datasetID)
+					}
+					return nil, errors.New("dataset not found")
+				}
 				m.QueryAllDatasetsFunc = func(ctx context.Context, prefix string) ([]tnsapi.Dataset, error) {
 					return []tnsapi.Dataset{}, nil
 				}
 				m.CreateDatasetFunc = func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
+					if params.Name != "tank/csi/test-rpc-volume" {
+						t.Errorf("Expected dataset name tank/csi/test-rpc-volume, got %s", params.Name)
+					}
 					return &tnsapi.Dataset{
 						ID:         "tank/csi/test-rpc-volume",
 						Name:       "tank/csi/test-rpc-volume",

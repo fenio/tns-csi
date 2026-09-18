@@ -221,7 +221,7 @@ Keep this setting disabled on platforms whose SELinux policy does not support ku
 | `enabled` | Create this StorageClass | `true` |
 | `pool` | ZFS pool name on TrueNAS (required) | `"storage"` |
 | `server` | TrueNAS server IP/hostname (required) | `""` |
-| `parentDataset` | Parent dataset (optional, must exist) | `""` |
+| `parentDataset` | Pool-relative parent dataset (pool-qualified also accepted; must exist) | `""` |
 | `isDefault` | Set as default storage class | `false` |
 | `reclaimPolicy` | Reclaim policy (Delete/Retain) | `Delete` |
 | `volumeBindingMode` | Binding mode | `Immediate` |
@@ -270,7 +270,8 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 
 **Important Note on `parentDataset`:**
 - If `parentDataset` is specified, it must already exist on TrueNAS
-- The full path would be `pool/parentDataset` (e.g., `tank/k8s-volumes`)
+- Pool-relative paths are recommended (e.g., `k8s-volumes` with `pool: tank` resolves to `tank/k8s-volumes`)
+- Pool-qualified paths remain supported (e.g., `tank/k8s-volumes`)
 - If empty or omitted, volumes will be created directly in the pool
 
 #### Multiple Storage Classes per Protocol
@@ -594,6 +595,7 @@ kubectl logs -n tns-csi -l app.kubernetes.io/component=controller -c csi-provisi
 - The `parentDataset` value must point to an existing dataset on TrueNAS
 - Either create the dataset on TrueNAS first, or remove the `parentDataset` parameter
 - Example: If using `parentDataset: kubevols` and `pool: tank`, create `tank/kubevols` first
+- A pool-qualified value such as `parentDataset: tank/kubevols` is also accepted
 
 #### Volume Mount Failed (NFS)
 - Verify NFS service is enabled on TrueNAS

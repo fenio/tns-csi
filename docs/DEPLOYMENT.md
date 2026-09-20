@@ -455,7 +455,7 @@ Edit `deploy/storageclass.yaml` and configure parameters:
 parameters:
   protocol: "nfs"
   pool: "pool1"              # Your TrueNAS pool name
-  # parentDataset: "pool1/k8s"  # Optional parent dataset
+  # parentDataset: "k8s"        # Optional; relative to pool ("pool1/k8s" also accepted)
   server: "YOUR-TRUENAS-IP"     # Your TrueNAS IP/hostname
   # Optional parameters:
   # deleteStrategy: "retain"     # Keep volumes on TrueNAS when PVC deleted

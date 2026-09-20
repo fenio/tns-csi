@@ -40,7 +40,7 @@ func TestCreateNFSVolume(t *testing.T) {
 					"protocol":      "nfs",
 					"pool":          "tank",
 					"server":        "192.168.1.100",
-					"parentDataset": "tank/csi",
+					"parentDataset": "csi",
 				},
 				CapacityRange: &csi.CapacityRange{
 					RequiredBytes: 1 * 1024 * 1024 * 1024, // 1GB
@@ -52,6 +52,9 @@ func TestCreateNFSVolume(t *testing.T) {
 					return []tnsapi.Dataset{}, nil
 				}
 				m.CreateDatasetFunc = func(ctx context.Context, params tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) {
+					if params.Name != "tank/csi/test-nfs-volume" {
+						t.Errorf("Expected dataset name tank/csi/test-nfs-volume, got %s", params.Name)
+					}
 					return &tnsapi.Dataset{
 						ID:         "tank/csi/test-nfs-volume",
 						Name:       "tank/csi/test-nfs-volume",

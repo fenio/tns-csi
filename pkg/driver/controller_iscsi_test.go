@@ -227,7 +227,7 @@ func TestCreateISCSIVolume(t *testing.T) {
 					"protocol":      "iscsi",
 					"pool":          "tank",
 					"server":        "192.168.1.100",
-					"parentDataset": "tank/csi",
+					"parentDataset": "csi",
 				},
 				CapacityRange: &csi.CapacityRange{
 					RequiredBytes: 5 * 1024 * 1024 * 1024, // 5GB
@@ -238,6 +238,9 @@ func TestCreateISCSIVolume(t *testing.T) {
 					return []tnsapi.Dataset{}, nil
 				}
 				m.CreateZvolFunc = func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error) {
+					if params.Name != "tank/csi/test-iscsi-volume" {
+						t.Errorf("Expected ZVOL name tank/csi/test-iscsi-volume, got %s", params.Name)
+					}
 					return &tnsapi.Dataset{
 						ID:   "tank/csi/test-iscsi-volume",
 						Name: "tank/csi/test-iscsi-volume",

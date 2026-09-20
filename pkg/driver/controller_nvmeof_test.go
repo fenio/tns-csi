@@ -40,7 +40,7 @@ func TestCreateNVMeOFVolume(t *testing.T) {
 					"protocol":      "nvmeof",
 					"pool":          "tank",
 					"server":        "192.168.1.100",
-					"parentDataset": "tank/nvme",
+					"parentDataset": "nvme",
 					// Note: subsystemNQN is NO LONGER required - generated automatically
 				},
 				CapacityRange: &csi.CapacityRange{

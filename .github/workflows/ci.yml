@@ -49,7 +49,7 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v5
 
-      - name: Verify Helm release namespace
+      - name: Verify Helm rendering
         run: |
           helm lint charts/tns-csi-driver \
             --set truenas.url=wss://truenas.example/api/current \
@@ -63,7 +63,25 @@ jobs:
             --set 'storageClasses[0].server=truenas.example' \
             > /tmp/tns-csi-rendered.yaml
           grep -q '^  namespace: tns-csi$' /tmp/tns-csi-rendered.yaml
-          ! grep -q '^  namespace: \(ignored\|kube-system\)$' /tmp/tns-csi-rendered.yaml
+          if grep -q '^  namespace: \(ignored\|kube-system\)$' /tmp/tns-csi-rendered.yaml; then
+            exit 1
+          fi
+
+          helm template expansion-false charts/tns-csi-driver \
+            --show-only templates/storageclass.yaml \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set-json 'storageClasses=[{"name":"expansion-test","enabled":true,"protocol":"nfs","pool":"tank","server":"truenas.example","allowVolumeExpansion":false}]' \
+            > /tmp/tns-csi-expansion-false.yaml
+          grep -q '^allowVolumeExpansion: false$' /tmp/tns-csi-expansion-false.yaml
+
+          helm template expansion-default charts/tns-csi-driver \
+            --show-only templates/storageclass.yaml \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set-json 'storageClasses=[{"name":"expansion-test","enabled":true,"protocol":"nfs","pool":"tank","server":"truenas.example"}]' \
+            > /tmp/tns-csi-expansion-default.yaml
+          grep -q '^allowVolumeExpansion: true$' /tmp/tns-csi-expansion-default.yaml
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9

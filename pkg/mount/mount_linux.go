@@ -19,6 +19,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var (
+	errInvalidSourceDevice = errors.New("invalid source device")
+	errInvalidMountInfo    = errors.New("invalid mount information")
+)
+
 // IsMounted checks if a path is mounted.
 func IsMounted(ctx context.Context, targetPath string) (bool, error) {
 	// Use findmnt to check if path is mounted with timeout
@@ -70,20 +75,26 @@ func IsSourceMounted(ctx context.Context, sourcePath string) (bool, error) {
 		return false, fmt.Errorf("failed to stat source device: %w", err)
 	}
 	if info.Mode()&os.ModeDevice == 0 {
-		return false, fmt.Errorf("source path %s is not a device", sourcePath)
+		return false, fmt.Errorf("%w: path %s is not a device", errInvalidSourceDevice, sourcePath)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return false, fmt.Errorf("failed to read device metadata for %s", sourcePath)
+		return false, fmt.Errorf("%w: failed to read metadata for %s", errInvalidSourceDevice, sourcePath)
 	}
 
 	mountInfo, err := os.Open("/proc/1/mountinfo")
 	if err != nil {
 		return false, fmt.Errorf("failed to open host mount information: %w", err)
 	}
-	defer mountInfo.Close()
-
-	return isDeviceInMountInfo(unix.Major(uint64(stat.Rdev)), unix.Minor(uint64(stat.Rdev)), mountInfo)
+	mounted, parseErr := isDeviceInMountInfo(unix.Major(stat.Rdev), unix.Minor(stat.Rdev), mountInfo)
+	closeErr := mountInfo.Close()
+	if parseErr != nil {
+		return false, parseErr
+	}
+	if closeErr != nil {
+		return false, fmt.Errorf("failed to close host mount information: %w", closeErr)
+	}
+	return mounted, nil
 }
 
 func isDeviceInMountInfo(deviceMajor, deviceMinor uint32, mountInfo io.Reader) (bool, error) {
@@ -92,11 +103,11 @@ func isDeviceInMountInfo(deviceMajor, deviceMinor uint32, mountInfo io.Reader) (
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		if len(fields) < 3 {
-			return false, fmt.Errorf("invalid mountinfo entry %q", scanner.Text())
+			return false, fmt.Errorf("%w: entry %q", errInvalidMountInfo, scanner.Text())
 		}
 		deviceNumbers := strings.Split(fields[2], ":")
 		if len(deviceNumbers) != 2 {
-			return false, fmt.Errorf("invalid mountinfo device number %q", fields[2])
+			return false, fmt.Errorf("%w: device number %q", errInvalidMountInfo, fields[2])
 		}
 		major, err := strconv.ParseUint(deviceNumbers[0], 10, 32)
 		if err != nil {
@@ -106,7 +117,7 @@ func isDeviceInMountInfo(deviceMajor, deviceMinor uint32, mountInfo io.Reader) (
 		if err != nil {
 			return false, fmt.Errorf("invalid mountinfo minor number %q: %w", deviceNumbers[1], err)
 		}
-		if uint32(major) == deviceMajor && uint32(minor) == deviceMinor {
+		if major == uint64(deviceMajor) && minor == uint64(deviceMinor) {
 			return true, nil
 		}
 	}

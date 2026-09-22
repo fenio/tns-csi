@@ -53,6 +53,18 @@ func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
 	return IsMounted(ctx, targetPath)
 }
 
+// IsSourceMounted checks whether a source device is mounted anywhere on macOS.
+func IsSourceMounted(ctx context.Context, sourcePath string) (bool, error) {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(checkCtx, "mount")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("failed to check source mount: %w", err)
+	}
+	return strings.Contains(string(output), sourcePath+" on "), nil
+}
+
 // Unmount unmounts a path on macOS.
 // For testing purposes, this is a no-op if the path is not actually mounted.
 func Unmount(ctx context.Context, targetPath string) error {

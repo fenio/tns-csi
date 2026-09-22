@@ -57,9 +57,17 @@ func TestHandleFinalResult(t *testing.T) {
 		devicePath string
 		lastOutput []byte
 		maxRetries int
+		isClone    bool
 		wantFmt    bool
 		wantErr    bool
 	}{
+		{
+			name:       "clone without detected filesystem fails closed",
+			devicePath: "/dev/sda",
+			maxRetries: 25,
+			isClone:    true,
+			wantErr:    true,
+		},
 		{
 			name:       "no error empty output means needs format",
 			devicePath: "/dev/sda",
@@ -109,7 +117,7 @@ func TestHandleFinalResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotFmt, gotErr := handleFinalResult(tt.devicePath, tt.maxRetries, tt.lastOutput, tt.lastErr)
+			gotFmt, gotErr := handleFinalResult(tt.devicePath, tt.maxRetries, tt.lastOutput, tt.lastErr, tt.isClone)
 			if gotFmt != tt.wantFmt {
 				t.Errorf("handleFinalResult() needsFormat = %v, want %v", gotFmt, tt.wantFmt)
 			}

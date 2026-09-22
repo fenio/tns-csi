@@ -50,8 +50,14 @@ const (
 	VolumeContextKeySMBShareID        = "smbShareID"
 	VolumeContextKeyExpectedCapacity  = "expectedCapacity"
 	VolumeContextKeyClonedFromSnap    = "clonedFromSnapshot"
+	VolumeContextKeyFilesystemCheck   = "filesystemCheckMode"
 	VolumeContextValueTrue            = "true"
 	VolumeContextValueFalse           = "false"
+)
+
+const (
+	filesystemCheckModeNone  = "none"
+	filesystemCheckModePreen = "preen"
 )
 
 // TrueNAS dataset/zfs type values and kubectl verbs used across the driver package.
@@ -630,14 +636,19 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if err := validateAccessModeForProtocol(req.GetVolumeCapabilities(), protocol); err != nil {
 		return nil, err
 	}
+	filesystemCheckMode, modeErr := validateFilesystemCheckMode(params[VolumeContextKeyFilesystemCheck], protocol, req.GetVolumeCapabilities())
+	if modeErr != nil {
+		return nil, modeErr
+	}
 
 	// Check for idempotency: if volume with same name already exists
-	existingVolume, err := s.checkExistingVolume(ctx, req, params, protocol)
-	if err != nil && !errors.Is(err, ErrVolumeNotFound) {
-		return nil, err
+	existingVolume, existingErr := s.checkExistingVolume(ctx, req, params, protocol)
+	if existingErr != nil && !errors.Is(existingErr, ErrVolumeNotFound) {
+		return nil, existingErr
 	}
 	if existingVolume != nil {
 		klog.V(4).Infof("Returning existing volume for idempotency: %s", req.GetName())
+		applyCreateVolumeContext(req, existingVolume, filesystemCheckMode)
 		return existingVolume, nil
 	}
 
@@ -647,17 +658,46 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 			return nil, err
 		}
 		klog.Infof("Successfully adopted orphaned volume: %s", req.GetName())
+		applyCreateVolumeContext(req, resp, filesystemCheckMode)
 		return resp, nil
 	}
 
 	// Check if creating from snapshot or volume clone
 	if resp, handled, err := s.handleVolumeContentSource(ctx, req, protocol); handled {
-		return resp, err
+		if err != nil {
+			return nil, err
+		}
+		applyCreateVolumeContext(req, resp, filesystemCheckMode)
+		return resp, nil
 	}
 
 	klog.V(4).Infof("Creating volume %s with protocol %s", req.GetName(), protocol)
 
-	return s.createVolumeByProtocol(ctx, req, protocol)
+	resp, createErr := s.createVolumeByProtocol(ctx, req, protocol)
+	if createErr != nil {
+		return nil, createErr
+	}
+	applyCreateVolumeContext(req, resp, filesystemCheckMode)
+	return resp, nil
+}
+
+func applyCreateVolumeContext(req *csi.CreateVolumeRequest, resp *csi.CreateVolumeResponse, filesystemCheckMode string) {
+	if resp == nil || resp.Volume == nil {
+		return
+	}
+	isClone := req != nil && req.GetVolumeContentSource() != nil
+	if filesystemCheckMode != filesystemCheckModePreen && !isClone {
+		return
+	}
+	if resp.Volume.VolumeContext == nil {
+		resp.Volume.VolumeContext = make(map[string]string)
+	}
+	if filesystemCheckMode == filesystemCheckModePreen {
+		resp.Volume.VolumeContext[VolumeContextKeyFilesystemCheck] = filesystemCheckMode
+	}
+	if isClone {
+		resp.Volume.VolumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
+	}
 }
 
 // logCreateVolumeDebugInfo logs detailed debug information for CreateVolume troubleshooting.
@@ -732,6 +772,39 @@ func validateAccessModeForProtocol(caps []*csi.VolumeCapability, protocol string
 		}
 	}
 	return nil
+}
+
+func validateFilesystemCheckMode(rawMode, protocol string, caps []*csi.VolumeCapability) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(rawMode))
+	if mode == "" || mode == filesystemCheckModeNone {
+		return filesystemCheckModeNone, nil
+	}
+	if mode != filesystemCheckModePreen {
+		return "", status.Errorf(codes.InvalidArgument,
+			"unsupported filesystemCheckMode %q (supported: none, preen)", rawMode)
+	}
+	if protocol != ProtocolNVMeOF && protocol != ProtocolISCSI {
+		return "", status.Errorf(codes.InvalidArgument,
+			"filesystemCheckMode %q is only supported for NVMe-oF and iSCSI volumes", mode)
+	}
+
+	for _, cap := range caps {
+		mnt := cap.GetMount()
+		if mnt == nil {
+			return "", status.Errorf(codes.InvalidArgument,
+				"filesystemCheckMode %q requires filesystem volume mode", mode)
+		}
+		fsType := strings.ToLower(strings.TrimSpace(mnt.GetFsType()))
+		if fsType == "" {
+			fsType = fsTypeExt4
+		}
+		if fsType != fsTypeExt3 && fsType != fsTypeExt4 {
+			return "", status.Errorf(codes.InvalidArgument,
+				"filesystemCheckMode %q is only supported for ext3 and ext4 filesystems, got %q", mode, fsType)
+		}
+	}
+
+	return mode, nil
 }
 
 // handleVolumeContentSource handles creating volumes from snapshots or clones.

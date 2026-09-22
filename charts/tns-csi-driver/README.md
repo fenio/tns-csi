@@ -265,6 +265,7 @@ Keep this setting disabled on platforms whose SELinux policy does not support ku
 | `zfs.recordsize` | ZFS record size | nfs |
 | `zfs.volblocksize` | ZVOL block size (e.g., `16K`, `64K`) | nvmeof, iscsi |
 | `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | nvmeof |
+| `filesystemCheckMode` | Pre-mount filesystem check: `none` or `preen` | nvmeof, iscsi |
 
 See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentation.
 
@@ -273,6 +274,25 @@ See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentatio
 - Pool-relative paths are recommended (e.g., `k8s-volumes` with `pool: tank` resolves to `tank/k8s-volumes`)
 - Pool-qualified paths remain supported (e.g., `tank/k8s-volumes`)
 - If empty or omitted, volumes will be created directly in the pool
+
+**Optional ext3/ext4 filesystem checks:**
+
+Set `filesystemCheckMode: preen` in the StorageClass `parameters` map to run `e2fsck -p` before mounting an existing ext3/ext4 NVMe-oF or iSCSI filesystem:
+
+```yaml
+storageClasses:
+  - name: tns-csi-nvmeof
+    protocol: nvmeof
+    pool: "tank"
+    server: "10.0.0.1"
+    fsType: ext4
+    parameters:
+      filesystemCheckMode: preen
+```
+
+The default is `none`. Preen mode repairs only problems that `e2fsck` considers safe to fix without interaction. If manual repair is required, staging fails instead of mounting the filesystem. Checks are skipped for newly formatted filesystems and idempotent retries whose staging target is already mounted. If the source device is mounted anywhere else, staging fails rather than checking a live filesystem. Raw Block, XFS, NFS, and SMB volumes are not supported.
+
+For a static PV, set `filesystemCheckMode: preen` in `spec.csi.volumeAttributes`; static volumes do not use StorageClass parameters during `CreateVolume`.
 
 #### Multiple Storage Classes per Protocol
 

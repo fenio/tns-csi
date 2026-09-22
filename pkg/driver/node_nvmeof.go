@@ -568,6 +568,15 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	klog.V(4).Infof("Formatting and mounting NVMe device: device=%s, path=%s, volume=%s, dataset=%s, NQN=%s",
 		devicePath, stagingTargetPath, volumeID, datasetName, nqn)
 
+	mounted, mountErr := ensureStagingTarget(ctx, stagingTargetPath)
+	if mountErr != nil {
+		return nil, mountErr
+	}
+	if mounted {
+		klog.V(4).Infof("Staging path %s is already mounted", stagingTargetPath)
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
 	// Verify device still exists before proceeding (it may have disappeared due to race conditions
 	// with previous volume cleanup or controller reconnection)
 	if _, err := os.Stat(devicePath); err != nil {
@@ -605,24 +614,12 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	// Check if device needs formatting (will detect existing filesystem or format if needed)
-	if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, isClone); err != nil {
-		return nil, err
+	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, isClone)
+	if formatErr != nil {
+		return nil, formatErr
 	}
-
-	// Create staging target path if it doesn't exist
-	if mkdirErr := os.MkdirAll(stagingTargetPath, 0o750); mkdirErr != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", mkdirErr)
-	}
-
-	// Check if already mounted
-	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
-	}
-
-	if mounted {
-		klog.V(4).Infof("Staging path %s is already mounted", stagingTargetPath)
-		return &csi.NodeStageVolumeResponse{}, nil
+	if checkErr := s.checkFilesystemBeforeMount(ctx, devicePath, volumeContext[VolumeContextKeyFilesystemCheck], newlyFormatted); checkErr != nil {
+		return nil, checkErr
 	}
 
 	// Mount the device

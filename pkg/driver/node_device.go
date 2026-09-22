@@ -275,7 +275,7 @@ func needsFormatWithRetries(ctx context.Context, devicePath string, isClone bool
 	lastOutput, lastErr := retryFilesystemCheck(ctx, devicePath, maxRetries, initialBackoff, maxBackoff, isClone)
 
 	// After all retries, handle the final result
-	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr)
+	return handleFinalResult(devicePath, maxRetries, lastOutput, lastErr, isClone)
 }
 
 // waitForNVMeStabilization adds stabilization delay for NVMe devices.
@@ -453,12 +453,18 @@ func isDeviceNotReady(output []byte) bool {
 }
 
 // handleFinalResult processes the final result after all retries.
-func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, lastErr error) (bool, error) {
+func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, lastErr error, isClone bool) (bool, error) {
+	noFilesystemDetected := len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain")
+	if isClone && noFilesystemDetected {
+		return false, fmt.Errorf("%w: refusing to format cloned device %s because no filesystem was detected after %d retries",
+			ErrDeviceNotReady, devicePath, maxRetries)
+	}
+
 	// If blkid check succeeded (lastErr == nil), we need to determine if filesystem was detected
 	// based on the output. Empty output or "does not contain" means no filesystem detected.
 	if lastErr == nil {
 		// Check if no filesystem was detected
-		if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
+		if noFilesystemDetected {
 			klog.Infof("Device %s has no filesystem - needs formatting", devicePath)
 			return true, nil
 		}
@@ -471,7 +477,7 @@ func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, las
 	// This is standard CSI behavior - new volumes should be formatted automatically.
 	// The extensive retry logic (15 attempts with cache invalidation) protects against
 	// temporary detection issues during device reconnection/clone completion.
-	if len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain") {
+	if noFilesystemDetected {
 		klog.Infof("Device %s has no filesystem after %d retries - needs formatting", devicePath, maxRetries)
 		return true, nil
 	}

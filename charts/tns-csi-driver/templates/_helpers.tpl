@@ -268,7 +268,7 @@ parameters:
   {{- end }}
   {{- end }}
   {{- end }}
-allowVolumeExpansion: {{ $sc.allowVolumeExpansion | default true }}
+allowVolumeExpansion: {{ dig "allowVolumeExpansion" true $sc }}
 reclaimPolicy: {{ $sc.reclaimPolicy | default "Delete" }}
 volumeBindingMode: {{ $sc.volumeBindingMode | default "Immediate" }}
 {{- if $sc.mountOptions }}

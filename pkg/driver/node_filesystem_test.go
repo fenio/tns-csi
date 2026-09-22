@@ -3,6 +3,8 @@ package driver
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +142,178 @@ func TestCheckFilesystemBeforeMountFailsClosedOnMountProbeError(t *testing.T) {
 	}
 }
 
+func TestCheckFilesystemBeforeMountUsesDefaultMountProbe(t *testing.T) {
+	service := &NodeService{}
+	err := service.checkFilesystemBeforeMount(context.Background(), "/dev/tns-csi-does-not-exist", filesystemCheckModePreen, false)
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("checkFilesystemBeforeMount() code = %v, want Internal", status.Code(err))
+	}
+}
+
+func TestCheckFilesystemBeforeMountRunsPreen(t *testing.T) {
+	runs := 0
+	service := &NodeService{
+		isSourceMountedFn: func(context.Context, string) (bool, error) {
+			return false, nil
+		},
+		detectFilesystemFn: func(context.Context, string) (string, error) {
+			return fsTypeExt4, nil
+		},
+		runFilesystemCheckFn: func(context.Context, string) ([]byte, error) {
+			runs++
+			return nil, nil
+		},
+	}
+
+	if err := service.checkFilesystemBeforeMount(context.Background(), "/dev/test", filesystemCheckModePreen, false); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Fatalf("filesystem check runs = %d, want 1", runs)
+	}
+}
+
+func TestCheckFilesystemBeforeMountPropagatesDetectionError(t *testing.T) {
+	wantErr := status.Error(codes.FailedPrecondition, "detection failed")
+	service := &NodeService{
+		isSourceMountedFn: func(context.Context, string) (bool, error) {
+			return false, nil
+		},
+		detectFilesystemFn: func(context.Context, string) (string, error) {
+			return "", wantErr
+		},
+	}
+
+	if err := service.checkFilesystemBeforeMount(context.Background(), "/dev/test", filesystemCheckModePreen, false); !errors.Is(err, wantErr) {
+		t.Fatalf("checkFilesystemBeforeMount() error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestEnsureStagingTarget(t *testing.T) {
+	stagingPath := filepath.Join(t.TempDir(), "stage")
+	mounted, err := ensureStagingTarget(context.Background(), stagingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mounted {
+		t.Fatal("new staging target must not be mounted")
+	}
+	if _, statErr := os.Stat(stagingPath); statErr != nil {
+		t.Fatalf("staging target was not created: %v", statErr)
+	}
+
+	parentFile := filepath.Join(t.TempDir(), "file")
+	if writeErr := os.WriteFile(parentFile, []byte("test"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	_, err = ensureStagingTarget(context.Background(), filepath.Join(parentFile, "child"))
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("ensureStagingTarget() code = %v, want Internal", status.Code(err))
+	}
+}
+
+func TestDetectBlockFilesystemTypeCommandFailure(t *testing.T) {
+	_, err := detectBlockFilesystemType(context.Background(), "/dev/tns-csi-does-not-exist")
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("detectBlockFilesystemType() code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
+func TestCheckFilesystemBeforeMountUsesDefaultDetector(t *testing.T) {
+	service := &NodeService{
+		isSourceMountedFn: func(context.Context, string) (bool, error) {
+			return false, nil
+		},
+	}
+	err := service.checkFilesystemBeforeMount(context.Background(), "/dev/tns-csi-does-not-exist", filesystemCheckModePreen, false)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("checkFilesystemBeforeMount() code = %v, want FailedPrecondition", status.Code(err))
+	}
+}
+
+func TestRunE2FSCKCanceledBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := runE2FSCK(ctx, "/dev/test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("runE2FSCK() error = %v, want context canceled", err)
+	}
+}
+
+func TestRunE2FSCKCapturesCommandFailure(t *testing.T) {
+	devicePath := filepath.Join(t.TempDir(), "not-a-filesystem")
+	if err := os.WriteFile(devicePath, []byte("not a filesystem"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runE2FSCK(context.Background(), devicePath); err == nil {
+		t.Fatal("runE2FSCK() error = nil, want command failure")
+	}
+}
+
+func TestHandleDeviceFormattingOutcomes(t *testing.T) {
+	tests := []struct {
+		checkErr       error
+		name           string
+		needsFormat    bool
+		wantFormatted  bool
+		wantErr        bool
+		wantFormatRuns int
+	}{
+		{name: "existing filesystem", wantFormatted: false},
+		{name: "new filesystem", needsFormat: true, wantFormatted: true, wantFormatRuns: 1},
+		{name: "detection failure", checkErr: errors.New("detection failed"), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			formatRuns := 0
+			service := &NodeService{
+				needsFormatFn: func(context.Context, string, bool) (bool, error) {
+					return tt.needsFormat, tt.checkErr
+				},
+				formatDeviceFn: func(context.Context, string, string, string) error {
+					formatRuns++
+					return nil
+				},
+			}
+			formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false)
+			if formatted != tt.wantFormatted {
+				t.Fatalf("formatted = %v, want %v", formatted, tt.wantFormatted)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if formatRuns != tt.wantFormatRuns {
+				t.Fatalf("format runs = %d, want %d", formatRuns, tt.wantFormatRuns)
+			}
+		})
+	}
+}
+
+func TestHandleDeviceFormattingDefaultHooks(t *testing.T) {
+	t.Run("default formatter", func(t *testing.T) {
+		service := &NodeService{
+			needsFormatFn: func(context.Context, string, bool) (bool, error) {
+				return false, nil
+			},
+		}
+		formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false)
+		if err != nil || formatted {
+			t.Fatalf("handleDeviceFormatting() = %v, %v; want false, nil", formatted, err)
+		}
+	})
+
+	t.Run("default detector", func(t *testing.T) {
+		service := &NodeService{
+			formatDeviceFn: func(context.Context, string, string, string) error {
+				return errors.New("format blocked")
+			},
+		}
+		if _, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/tns-csi-does-not-exist", fsTypeExt4, "dataset", "target", false); err == nil {
+			t.Fatal("handleDeviceFormatting() error = nil, want formatting failure")
+		}
+	})
+}
+
 func TestKeyedMutexSerializesSameKey(t *testing.T) {
 	var locks keyedMutex
 	unlockFirst, err := locks.lock(context.Background(), "volume")
@@ -198,6 +372,15 @@ func TestKeyedMutexWaitHonorsContext(t *testing.T) {
 	}
 }
 
+func TestKeyedMutexRejectsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var locks keyedMutex
+	if _, err := locks.lock(ctx, "volume"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("lock() error = %v, want context canceled", err)
+	}
+}
+
 func TestCappedCommandOutput(t *testing.T) {
 	var output cappedCommandOutput
 	input := []byte(strings.Repeat("x", 10000))
@@ -206,6 +389,9 @@ func TestCappedCommandOutput(t *testing.T) {
 	}
 	if got := len(output.Bytes()); got != 4097 {
 		t.Fatalf("captured output length = %d, want 4097", got)
+	}
+	if written, err := output.Write([]byte("ignored")); err != nil || written != len("ignored") {
+		t.Fatalf("second Write() = %d, %v; want %d, nil", written, err, len("ignored"))
 	}
 }
 

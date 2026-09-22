@@ -6,6 +6,7 @@ package mount
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,15 +55,8 @@ func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
 }
 
 // IsSourceMounted checks whether a source device is mounted anywhere on macOS.
-func IsSourceMounted(ctx context.Context, sourcePath string) (bool, error) {
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "mount")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, fmt.Errorf("failed to check source mount: %w", err)
-	}
-	return strings.Contains(string(output), sourcePath+" on "), nil
+func IsSourceMounted(context.Context, string) (bool, error) {
+	return false, errors.New("source mount checks are unsupported on macOS")
 }
 
 // Unmount unmounts a path on macOS.

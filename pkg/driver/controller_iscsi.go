@@ -1084,14 +1084,11 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 	// Update volume capacity metric
 	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolISCSI, requestedCapacity)
 
-	volumeContext := buildVolumeContext(meta)
-	volumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
-
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      zvol.ID,
 			CapacityBytes: requestedCapacity,
-			VolumeContext: volumeContext,
+			VolumeContext: buildVolumeContext(meta),
 			ContentSource: &csi.VolumeContentSource{
 				Type: &csi.VolumeContentSource_Snapshot{
 					Snapshot: &csi.VolumeContentSource_SnapshotSource{

@@ -788,8 +788,8 @@ func validateFilesystemCheckMode(rawMode, protocol string, caps []*csi.VolumeCap
 			"filesystemCheckMode %q is only supported for NVMe-oF and iSCSI volumes", mode)
 	}
 
-	for _, cap := range caps {
-		mnt := cap.GetMount()
+	for _, capability := range caps {
+		mnt := capability.GetMount()
 		if mnt == nil {
 			return "", status.Errorf(codes.InvalidArgument,
 				"filesystemCheckMode %q requires filesystem volume mode", mode)

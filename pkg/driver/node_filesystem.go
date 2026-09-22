@@ -16,6 +16,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+const (
+	blkidPath  = "/sbin/blkid"
+	e2fsckPath = "/sbin/e2fsck"
+)
+
 type keyedMutexEntry struct {
 	token chan struct{}
 	refs  int
@@ -86,7 +91,7 @@ func detectBlockFilesystemType(ctx context.Context, devicePath string) (string, 
 	detectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(detectCtx, "blkid", "-s", "TYPE", "-o", "value", devicePath)
+	cmd := exec.CommandContext(detectCtx, blkidPath, "-s", "TYPE", "-o", "value", devicePath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", status.Errorf(codes.FailedPrecondition,
@@ -118,7 +123,11 @@ func (s *NodeService) checkFilesystemBeforeMount(ctx context.Context, devicePath
 			"refusing to check filesystem on mounted device %s", devicePath)
 	}
 
-	fsType, err := detectBlockFilesystemType(ctx, devicePath)
+	detectFilesystem := s.detectFilesystemFn
+	if detectFilesystem == nil {
+		detectFilesystem = detectBlockFilesystemType
+	}
+	fsType, err := detectFilesystem(ctx, devicePath)
 	if err != nil {
 		return err
 	}
@@ -171,7 +180,7 @@ func runE2FSCK(ctx context.Context, devicePath string) ([]byte, error) {
 
 	// Do not bind process lifetime to the RPC context. Killing e2fsck during a repair
 	// can leave the filesystem in a worse state; let an in-progress check finish safely.
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), "e2fsck", "-p", devicePath)
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), e2fsckPath, "-p", devicePath)
 	var output cappedCommandOutput
 	cmd.Stdout = &output
 	cmd.Stderr = &output

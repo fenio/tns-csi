@@ -47,7 +47,10 @@ type NodeService struct {
 	// runISCSIAdmFn is overridden by focused command-result tests.
 	runISCSIAdmFn        func(context.Context, ...string) ([]byte, error)
 	runFilesystemCheckFn func(context.Context, string) ([]byte, error)
+	detectFilesystemFn   func(context.Context, string) (string, error)
 	isSourceMountedFn    func(context.Context, string) (bool, error)
+	needsFormatFn        func(context.Context, string, bool) (bool, error)
+	formatDeviceFn       func(context.Context, string, string, string) error
 	volumeLifecycleLocks keyedMutex
 	nodeID               string
 	nvmeLifecycleMu      sync.Mutex

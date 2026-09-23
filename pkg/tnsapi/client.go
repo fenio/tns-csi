@@ -2913,7 +2913,7 @@ func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params Replic
 func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error) {
 	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %q", propertyName, propertyValue, prefix)
 
-	// Query all datasets under the prefix with user properties included
+	// Query datasets under the prefix that carry the property, with user properties included
 	// Note: retrieve_children must NOT be false here - this is a scan across all
 	// datasets under the prefix, so we need child datasets to be included.
 	var result []DatasetWithProperties
@@ -2924,21 +2924,8 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 		},
 	}
 
-	// Build the query - if prefix is empty, query all datasets without filter
-	// The TrueNAS API may not handle ["id", "^", ""] correctly, so we omit the filter entirely
-	var queryFilters []interface{}
-	if prefix != "" {
-		// Use "id" with "^" (starts with) filter to get all datasets under the prefix
-		queryFilters = []interface{}{
-			[]interface{}{"id", "^", prefix},
-		}
-	} else {
-		// Empty filter array to get all datasets
-		queryFilters = []interface{}{}
-	}
-
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
-		queryFilters,
+		propertyQueryFilters(prefix, propertyName, propertyValue),
 		queryOpts,
 	}, &result)
 	if err != nil {
@@ -2946,7 +2933,9 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 	}
 	klog.V(4).Infof("Query returned %d datasets (prefix: %q)", len(result), prefix)
 
-	// Filter datasets that have the matching property value
+	// Re-check the match client-side. The server-side filter already did this, but the
+	// check is cheap and keeps results correct if a property name had to fall back to
+	// prefix-only filtering (see propertyQueryFilters).
 	// If propertyValue is empty, match any dataset that has the property (regardless of value)
 	var matched []DatasetWithProperties
 	for _, ds := range result {
@@ -2961,8 +2950,38 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 		}
 	}
 
-	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d total)", len(matched), propertyName, propertyValue, len(result))
+	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d returned)", len(matched), propertyName, propertyValue, len(result))
 	return matched, nil
+}
+
+// propertyQueryFilters builds the pool.dataset.query filters for FindDatasetsByProperty.
+//
+// The user-property match is done server-side so TrueNAS returns only matching
+// datasets. Filtering client-side instead means fetching every dataset under the
+// prefix (with an empty prefix: every dataset on the system) together with all of its
+// properties, which on a NAS with a few thousand datasets is tens of MB — more than
+// the WebSocket read limit, so the connection drops and the call fails.
+//
+//   - propertyValue set:   ["user_properties.<name>.value", "=", value]
+//   - propertyValue empty: ["user_properties.<name>", "!=", null] (property exists)
+//
+// The middleware splits filter paths on ".", so a property name containing "." cannot
+// be addressed and falls back to prefix-only filtering (callers re-check client-side).
+// An empty prefix adds no id filter: ["id", "^", ""] is not reliably handled.
+func propertyQueryFilters(prefix, propertyName, propertyValue string) []interface{} {
+	filters := []interface{}{}
+	if prefix != "" {
+		filters = append(filters, []interface{}{"id", "^", prefix})
+	}
+	if propertyName == "" || strings.Contains(propertyName, ".") {
+		return filters
+	}
+
+	path := "user_properties." + propertyName
+	if propertyValue == "" {
+		return append(filters, []interface{}{path, "!=", nil})
+	}
+	return append(filters, []interface{}{path + ".value", "=", propertyValue})
 }
 
 // FindManagedDatasets finds all datasets managed by tns-csi under the given prefix.

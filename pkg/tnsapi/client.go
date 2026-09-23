@@ -97,6 +97,7 @@ type Client struct {
 	skipTLSVerify bool // Skip TLS certificate verification
 	authGate      chan struct{}
 	reconnectDone chan struct{}
+	readLimit     int64 // Max WebSocket message size accepted from TrueNAS, in bytes
 
 	// reauthMu coordinates session re-authentication after ENOTAUTHENTICATED.
 	// Concurrent calls wait on reauthDone and reuse a re-authentication that
@@ -193,25 +194,52 @@ func isAuthenticationError(err error) bool {
 		(strings.Contains(errMsg, "authentication failed") && strings.Contains(errMsg, "500"))
 }
 
+// DefaultReadLimit is the default maximum size, in bytes, of a single WebSocket message
+// (one JSON-RPC response) the client accepts from TrueNAS. Larger responses fail the read
+// and drop the connection.
+const DefaultReadLimit int64 = 10 * 1024 * 1024
+
+// ClientOption configures optional Client behavior.
+type ClientOption func(*Client)
+
+// WithReadLimit sets the maximum WebSocket message size, in bytes, accepted from TrueNAS.
+// Raise it when legitimately large responses (e.g. ListVolumes/ListSnapshots across many
+// volumes) exceed DefaultReadLimit. Values <= 0 keep the default.
+func WithReadLimit(n int64) ClientOption {
+	return func(c *Client) {
+		if n > 0 {
+			c.readLimit = n
+		}
+	}
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
-func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
+func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*Client, error) {
 	klog.V(4).Infof("Creating new storage API client for %s (skipTLSVerify=%v)", url, skipTLSVerify)
 
 	// Trim whitespace from API key (common issue with secrets)
 	apiKey = strings.TrimSpace(apiKey)
 	klog.V(5).Infof("API key length after trim: %d characters", len(apiKey))
 
-	c := &Client{
-		url:           url,
-		apiKey:        apiKey,
-		pending:       make(map[string]chan *Response),
-		closeCh:       make(chan struct{}),
-		maxRetries:    5,
-		retryInterval: 5 * time.Second,
-		skipTLSVerify: skipTLSVerify,
-		authGate:      make(chan struct{}, 1),
+	newClientState := func() *Client {
+		c := &Client{
+			url:           url,
+			apiKey:        apiKey,
+			pending:       make(map[string]chan *Response),
+			closeCh:       make(chan struct{}),
+			maxRetries:    5,
+			retryInterval: 5 * time.Second,
+			skipTLSVerify: skipTLSVerify,
+			authGate:      make(chan struct{}, 1),
+			readLimit:     DefaultReadLimit,
+		}
+		for _, opt := range opts {
+			opt(c)
+		}
+		return c
 	}
+	c := newClientState()
 
 	// Connect to WebSocket with retry logic
 	// This is critical for driver initialization in environments with intermittent network connectivity
@@ -227,16 +255,7 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 			time.Sleep(delay)
 
 			// Create a fresh client instance for retry to avoid goroutine conflicts
-			c = &Client{
-				url:           url,
-				apiKey:        apiKey,
-				pending:       make(map[string]chan *Response),
-				closeCh:       make(chan struct{}),
-				maxRetries:    5,
-				retryInterval: 5 * time.Second,
-				skipTLSVerify: skipTLSVerify,
-				authGate:      make(chan struct{}, 1),
-			}
+			c = newClientState()
 		}
 
 		klog.V(4).Infof("Attempting to connect to TrueNAS (attempt %d/%d)", attempt, maxAttempts)
@@ -329,10 +348,14 @@ func (c *Client) connect() error {
 		return fmt.Errorf("failed to dial: %w", err)
 	}
 
-	// Set read limit to 10MB as safety net for large TrueNAS responses.
-	// Most queries now use server-side filters, but ListVolumes/ListSnapshots may still
-	// return large payloads on clusters with many volumes.
-	conn.SetReadLimit(10 * 1024 * 1024)
+	// Read limit (DefaultReadLimit unless set via WithReadLimit) as a safety net for large
+	// TrueNAS responses. Most queries use server-side filters, but ListVolumes/ListSnapshots
+	// may still return large payloads on clusters with many volumes.
+	readLimit := c.readLimit
+	if readLimit <= 0 {
+		readLimit = DefaultReadLimit
+	}
+	conn.SetReadLimit(readLimit)
 
 	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
 	// We still run our own ping loop for connection health monitoring and metrics.

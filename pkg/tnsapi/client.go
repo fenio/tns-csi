@@ -36,6 +36,7 @@ const (
 	queryOptUserPropsUpdate  = "user_properties_update"
 	queryOptFlat             = "flat"
 	queryOptRetrieveChildren = "retrieve_children"
+	queryOptProperties       = "properties"
 	queryOptKey              = "key"
 
 	aclTagKey      = "tag"
@@ -1329,6 +1330,7 @@ func (c *Client) Dataset(ctx context.Context, datasetID string) (*Dataset, error
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
 		},
+		datasetQueryOptions(false, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dataset: %w", err)
@@ -2378,36 +2380,19 @@ func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
 	return nil
 }
 
-// queryWithOptionalFilter is a helper function to reduce duplication in query methods.
-// The operator parameter specifies the filter operator:
-// - "^" for starts-with (prefix match).
-// - "~" for regex/contains match.
-// - "$" for ends-with (suffix match).
-func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, operator, resourceType string, result interface{}) error {
-	klog.V(5).Infof("Querying all %s with filter: %s (operator: %s)", resourceType, filterValue, operator)
-
-	var filters []interface{}
-
-	// If filter value is specified, apply the filter
-	if filterValue != "" {
-		filters = []interface{}{
-			[]interface{}{filterField, operator, filterValue},
-		}
-	}
-
-	err := c.Call(ctx, method, []interface{}{filters}, result)
-	if err != nil {
-		return fmt.Errorf("failed to query %s: %w", resourceType, err)
-	}
-
-	return nil
-}
-
 // QueryAllDatasets queries all datasets with optional prefix filter.
 func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
+	filters := []interface{}{}
+	if prefix != "" {
+		filters = append(filters, []interface{}{"id", "^", prefix})
+	}
+
 	var result []Dataset
-	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "^", "datasets", &result); err != nil {
-		return nil, err
+	if err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		filters,
+		datasetQueryOptions(false, datasetDecodedProperties),
+	}, &result); err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
 	}
 
 	klog.V(5).Infof("Found %d datasets", len(result))
@@ -2480,6 +2465,7 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 		[]interface{}{
 			[]interface{}{"id", "=", datasetName},
 		},
+		datasetQueryOptions(false, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query datasets: %w", err)
@@ -2591,13 +2577,7 @@ func (c *Client) GetDatasetWithProperties(ctx context.Context, datasetID string)
 	klog.V(4).Infof("GetDatasetWithProperties: querying dataset %s", datasetID)
 
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, datasetDecodedProperties)
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2629,15 +2609,10 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 	// - "retrieve_children": false - don't retrieve child datasets
 	// - "user_properties": true - include user-defined ZFS properties
 	// Note: "properties": true was causing TypeError in TrueNAS because it expects
-	// a list of ZFS property names, not a boolean. We only need user_properties.
+	// a list of ZFS property names, not a boolean. We only need user_properties, so
+	// an empty list skips loading ZFS properties entirely.
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, []string{})
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2682,15 +2657,9 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
 	klog.V(4).Infof("Getting all user properties from dataset: %s", datasetID)
 
-	// Query the dataset with extra options to include user_properties
+	// Query the dataset with user_properties only (no ZFS properties are read here)
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, []string{})
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2936,20 +2905,13 @@ func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params Replic
 func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error) {
 	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %q", propertyName, propertyValue, prefix)
 
-	// Query datasets under the prefix that carry the property, with user properties included
-	// Note: retrieve_children must NOT be false here - this is a scan across all
-	// datasets under the prefix, so we need child datasets to be included.
+	// Query datasets under the prefix that carry the property, with user properties included.
+	// With flat=true the id/property filters still match every descendant under the prefix;
+	// retrieve_children=false only drops the nested "children" copies (see datasetQueryOptions).
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:           true,
-			queryOptUserProperties: true,
-		},
-	}
-
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		propertyQueryFilters(prefix, propertyName, propertyValue),
-		queryOpts,
+		datasetQueryOptions(true, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query datasets with properties: %w", err)
@@ -2975,6 +2937,33 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 
 	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d returned)", len(matched), propertyName, propertyValue, len(result))
 	return matched, nil
+}
+
+// datasetDecodedProperties are the ZFS properties the Dataset struct decodes (Used,
+// Available, Volsize). Requesting only these keeps pool.dataset.query from loading and
+// serializing every ZFS property of every matching dataset, which the client would discard
+// during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are always
+// returned. Keep this in sync with the Dataset struct.
+var datasetDecodedProperties = []string{"used", "available", "volsize"}
+
+// datasetQueryOptions builds pool.dataset.query options that return only what the client
+// decodes:
+//   - flat=true, retrieve_children=false: one flat entry per matching dataset. The
+//     middleware's defaults also embed each dataset's whole child tree in a nested
+//     "children" field, duplicating descendants that an "id ^ prefix" scan already
+//     returns as their own entries (and returning an entire subtree for an exact-id
+//     lookup of a parent). With flat=true, filters still match descendants.
+//   - properties: the ZFS properties to load; pass an empty (non-nil) slice when only
+//     user properties are needed.
+func datasetQueryOptions(userProperties bool, properties []string) map[string]interface{} {
+	return map[string]interface{}{
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:             true,
+			queryOptRetrieveChildren: false,
+			queryOptUserProperties:   userProperties,
+			queryOptProperties:       properties,
+		},
+	}
 }
 
 // propertyQueryFilters builds the pool.dataset.query filters for FindDatasetsByProperty.

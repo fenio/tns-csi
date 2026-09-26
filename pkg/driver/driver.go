@@ -35,6 +35,7 @@ type Config struct {
 	SkipTLSVerify             bool   // Skip TLS certificate verification (for self-signed certs)
 	EnableNVMeDiscovery       bool   // Run nvme discover before nvme connect (default: false)
 	MaxConcurrentNVMeConnects int    // Max concurrent NVMe-oF connect operations per node (default: 5)
+	MaxResponseSizeMB         int    // Max TrueNAS API response size in MiB (<= 0 = tnsapi.DefaultReadLimit)
 }
 
 // Driver is the TNS CSI driver.
@@ -56,7 +57,8 @@ func NewDriver(cfg Config) (*Driver, error) {
 		cfg.DriverName, cfg.NodeID, cfg.Endpoint, cfg.APIURL, cfg.MetricsAddr, cfg.TestMode, cfg.SkipTLSVerify)
 
 	// Create API client
-	apiClient, err := tnsapi.NewClient(cfg.APIURL, cfg.APIKey, cfg.SkipTLSVerify)
+	apiClient, err := tnsapi.NewClient(cfg.APIURL, cfg.APIKey, cfg.SkipTLSVerify,
+		tnsapi.WithReadLimit(int64(cfg.MaxResponseSizeMB)*1024*1024))
 	if err != nil {
 		return nil, err
 	}

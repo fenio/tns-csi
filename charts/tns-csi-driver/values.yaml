@@ -23,6 +23,11 @@ truenas:
   # WARNING: Only enable this in trusted networks
   skipTLSVerify: false
 
+  # Maximum size (MiB) of a single TrueNAS API response the driver accepts.
+  # Larger responses fail the call and drop the WebSocket connection. Raise it if
+  # calls fail with "websocket: message too big" on systems with very many volumes.
+  maxResponseSizeMB: 10
+
 # Image configuration
 image:
   repository: bfenski/tns-csi

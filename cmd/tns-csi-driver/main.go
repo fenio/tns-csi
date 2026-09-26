@@ -34,6 +34,7 @@ var (
 	dashboardAddr             = flag.String("dashboard-addr", "", "Address for in-cluster web dashboard (e.g., ':2137', empty = disabled)")
 	dashboardPool             = flag.String("dashboard-pool", "", "ZFS pool for unmanaged volume discovery in dashboard")
 	clusterID                 = flag.String("cluster-id", "", "Unique identifier for this cluster (for multi-cluster TrueNAS sharing)")
+	maxResponseSizeMB         = flag.Int("max-response-size-mb", 10, "Maximum size in MiB of a single TrueNAS API response (WebSocket message); larger responses fail the call")
 )
 
 func main() {
@@ -89,6 +90,7 @@ func main() {
 		DashboardAddr:             *dashboardAddr,
 		DashboardPool:             *dashboardPool,
 		ClusterID:                 *clusterID,
+		MaxResponseSizeMB:         *maxResponseSizeMB,
 	})
 	if err != nil {
 		klog.Fatalf("Failed to create driver: %v", err)

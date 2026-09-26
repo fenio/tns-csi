@@ -170,6 +170,7 @@ kubectl create namespace tns-csi
 | `truenas.apiKey` | TrueNAS API key | `""` (required) |
 | `truenas.existingSecret` | Name of existing Secret with `url` and `api-key` keys | `""` |
 | `truenas.skipTLSVerify` | Skip TLS certificate verification | `false` |
+| `truenas.maxResponseSizeMB` | Maximum size (MiB) of a single TrueNAS API response; raise if calls fail with `websocket: message too big` | `10` |
 
 ### CSI Driver Settings
 

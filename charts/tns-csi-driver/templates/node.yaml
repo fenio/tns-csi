@@ -53,6 +53,9 @@ spec:
             - "--api-url=$(TNS_URL)"
             - "--api-key=$(TNS_API_KEY)"
             - "--v={{ .Values.node.logLevel }}"
+            {{- with .Values.truenas.maxResponseSizeMB }}
+            - "--max-response-size-mb={{ . }}"
+            {{- end }}
             {{- if .Values.truenas.skipTLSVerify }}
             - "--skip-tls-verify"
             {{- end }}

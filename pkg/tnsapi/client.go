@@ -36,6 +36,7 @@ const (
 	queryOptUserPropsUpdate  = "user_properties_update"
 	queryOptFlat             = "flat"
 	queryOptRetrieveChildren = "retrieve_children"
+	queryOptProperties       = "properties"
 	queryOptKey              = "key"
 
 	aclTagKey      = "tag"
@@ -97,6 +98,7 @@ type Client struct {
 	skipTLSVerify bool // Skip TLS certificate verification
 	authGate      chan struct{}
 	reconnectDone chan struct{}
+	readLimit     int64 // Max WebSocket message size accepted from TrueNAS, in bytes
 
 	// reauthMu coordinates session re-authentication after ENOTAUTHENTICATED.
 	// Concurrent calls wait on reauthDone and reuse a re-authentication that
@@ -193,25 +195,52 @@ func isAuthenticationError(err error) bool {
 		(strings.Contains(errMsg, "authentication failed") && strings.Contains(errMsg, "500"))
 }
 
+// DefaultReadLimit is the default maximum size, in bytes, of a single WebSocket message
+// (one JSON-RPC response) the client accepts from TrueNAS. Larger responses fail the read
+// and drop the connection.
+const DefaultReadLimit int64 = 10 * 1024 * 1024
+
+// ClientOption configures optional Client behavior.
+type ClientOption func(*Client)
+
+// WithReadLimit sets the maximum WebSocket message size, in bytes, accepted from TrueNAS.
+// Raise it when legitimately large responses (e.g. ListVolumes/ListSnapshots across many
+// volumes) exceed DefaultReadLimit. Values <= 0 keep the default.
+func WithReadLimit(n int64) ClientOption {
+	return func(c *Client) {
+		if n > 0 {
+			c.readLimit = n
+		}
+	}
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
-func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
+func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*Client, error) {
 	klog.V(4).Infof("Creating new storage API client for %s (skipTLSVerify=%v)", url, skipTLSVerify)
 
 	// Trim whitespace from API key (common issue with secrets)
 	apiKey = strings.TrimSpace(apiKey)
 	klog.V(5).Infof("API key length after trim: %d characters", len(apiKey))
 
-	c := &Client{
-		url:           url,
-		apiKey:        apiKey,
-		pending:       make(map[string]chan *Response),
-		closeCh:       make(chan struct{}),
-		maxRetries:    5,
-		retryInterval: 5 * time.Second,
-		skipTLSVerify: skipTLSVerify,
-		authGate:      make(chan struct{}, 1),
+	newClientState := func() *Client {
+		c := &Client{
+			url:           url,
+			apiKey:        apiKey,
+			pending:       make(map[string]chan *Response),
+			closeCh:       make(chan struct{}),
+			maxRetries:    5,
+			retryInterval: 5 * time.Second,
+			skipTLSVerify: skipTLSVerify,
+			authGate:      make(chan struct{}, 1),
+			readLimit:     DefaultReadLimit,
+		}
+		for _, opt := range opts {
+			opt(c)
+		}
+		return c
 	}
+	c := newClientState()
 
 	// Connect to WebSocket with retry logic
 	// This is critical for driver initialization in environments with intermittent network connectivity
@@ -227,16 +256,7 @@ func NewClient(url, apiKey string, skipTLSVerify bool) (*Client, error) {
 			time.Sleep(delay)
 
 			// Create a fresh client instance for retry to avoid goroutine conflicts
-			c = &Client{
-				url:           url,
-				apiKey:        apiKey,
-				pending:       make(map[string]chan *Response),
-				closeCh:       make(chan struct{}),
-				maxRetries:    5,
-				retryInterval: 5 * time.Second,
-				skipTLSVerify: skipTLSVerify,
-				authGate:      make(chan struct{}, 1),
-			}
+			c = newClientState()
 		}
 
 		klog.V(4).Infof("Attempting to connect to TrueNAS (attempt %d/%d)", attempt, maxAttempts)
@@ -329,10 +349,14 @@ func (c *Client) connect() error {
 		return fmt.Errorf("failed to dial: %w", err)
 	}
 
-	// Set read limit to 10MB as safety net for large TrueNAS responses.
-	// Most queries now use server-side filters, but ListVolumes/ListSnapshots may still
-	// return large payloads on clusters with many volumes.
-	conn.SetReadLimit(10 * 1024 * 1024)
+	// Read limit (DefaultReadLimit unless set via WithReadLimit) as a safety net for large
+	// TrueNAS responses. Most queries use server-side filters, but ListVolumes/ListSnapshots
+	// may still return large payloads on clusters with many volumes.
+	readLimit := c.readLimit
+	if readLimit <= 0 {
+		readLimit = DefaultReadLimit
+	}
+	conn.SetReadLimit(readLimit)
 
 	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
 	// We still run our own ping loop for connection health monitoring and metrics.
@@ -1306,6 +1330,7 @@ func (c *Client) Dataset(ctx context.Context, datasetID string) (*Dataset, error
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
 		},
+		datasetQueryOptions(false, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dataset: %w", err)
@@ -2355,36 +2380,19 @@ func (c *Client) PromoteDataset(ctx context.Context, datasetID string) error {
 	return nil
 }
 
-// queryWithOptionalFilter is a helper function to reduce duplication in query methods.
-// The operator parameter specifies the filter operator:
-// - "^" for starts-with (prefix match).
-// - "~" for regex/contains match.
-// - "$" for ends-with (suffix match).
-func (c *Client) queryWithOptionalFilter(ctx context.Context, method, filterField, filterValue, operator, resourceType string, result interface{}) error {
-	klog.V(5).Infof("Querying all %s with filter: %s (operator: %s)", resourceType, filterValue, operator)
-
-	var filters []interface{}
-
-	// If filter value is specified, apply the filter
-	if filterValue != "" {
-		filters = []interface{}{
-			[]interface{}{filterField, operator, filterValue},
-		}
-	}
-
-	err := c.Call(ctx, method, []interface{}{filters}, result)
-	if err != nil {
-		return fmt.Errorf("failed to query %s: %w", resourceType, err)
-	}
-
-	return nil
-}
-
 // QueryAllDatasets queries all datasets with optional prefix filter.
 func (c *Client) QueryAllDatasets(ctx context.Context, prefix string) ([]Dataset, error) {
+	filters := []interface{}{}
+	if prefix != "" {
+		filters = append(filters, []interface{}{"id", "^", prefix})
+	}
+
 	var result []Dataset
-	if err := c.queryWithOptionalFilter(ctx, "pool.dataset.query", "id", prefix, "^", "datasets", &result); err != nil {
-		return nil, err
+	if err := c.Call(ctx, "pool.dataset.query", []interface{}{
+		filters,
+		datasetQueryOptions(false, datasetDecodedProperties),
+	}, &result); err != nil {
+		return nil, fmt.Errorf("failed to query datasets: %w", err)
 	}
 
 	klog.V(5).Infof("Found %d datasets", len(result))
@@ -2457,6 +2465,7 @@ func (c *Client) queryDatasets(ctx context.Context, datasetName string) ([]Datas
 		[]interface{}{
 			[]interface{}{"id", "=", datasetName},
 		},
+		datasetQueryOptions(false, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query datasets: %w", err)
@@ -2568,13 +2577,7 @@ func (c *Client) GetDatasetWithProperties(ctx context.Context, datasetID string)
 	klog.V(4).Infof("GetDatasetWithProperties: querying dataset %s", datasetID)
 
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, datasetDecodedProperties)
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2606,15 +2609,10 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 	// - "retrieve_children": false - don't retrieve child datasets
 	// - "user_properties": true - include user-defined ZFS properties
 	// Note: "properties": true was causing TypeError in TrueNAS because it expects
-	// a list of ZFS property names, not a boolean. We only need user_properties.
+	// a list of ZFS property names, not a boolean. We only need user_properties, so
+	// an empty list skips loading ZFS properties entirely.
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, []string{})
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2659,15 +2657,9 @@ func (c *Client) GetDatasetProperties(ctx context.Context, datasetID string, pro
 func (c *Client) GetAllDatasetProperties(ctx context.Context, datasetID string) (map[string]string, error) {
 	klog.V(4).Infof("Getting all user properties from dataset: %s", datasetID)
 
-	// Query the dataset with extra options to include user_properties
+	// Query the dataset with user_properties only (no ZFS properties are read here)
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:             true,
-			queryOptRetrieveChildren: false,
-			queryOptUserProperties:   true,
-		},
-	}
+	queryOpts := datasetQueryOptions(true, []string{})
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", datasetID},
@@ -2913,40 +2905,22 @@ func (c *Client) RunOnetimeReplicationAndWait(ctx context.Context, params Replic
 func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]DatasetWithProperties, error) {
 	klog.V(4).Infof("Finding datasets with property %s=%s under prefix: %q", propertyName, propertyValue, prefix)
 
-	// Query all datasets under the prefix with user properties included
-	// Note: retrieve_children must NOT be false here - this is a scan across all
-	// datasets under the prefix, so we need child datasets to be included.
+	// Query datasets under the prefix that carry the property, with user properties included.
+	// With flat=true the id/property filters still match every descendant under the prefix;
+	// retrieve_children=false only drops the nested "children" copies (see datasetQueryOptions).
 	var result []DatasetWithProperties
-	queryOpts := map[string]interface{}{
-		queryOptExtra: map[string]interface{}{
-			queryOptFlat:           true,
-			queryOptUserProperties: true,
-		},
-	}
-
-	// Build the query - if prefix is empty, query all datasets without filter
-	// The TrueNAS API may not handle ["id", "^", ""] correctly, so we omit the filter entirely
-	var queryFilters []interface{}
-	if prefix != "" {
-		// Use "id" with "^" (starts with) filter to get all datasets under the prefix
-		queryFilters = []interface{}{
-			[]interface{}{"id", "^", prefix},
-		}
-	} else {
-		// Empty filter array to get all datasets
-		queryFilters = []interface{}{}
-	}
-
 	err := c.Call(ctx, "pool.dataset.query", []interface{}{
-		queryFilters,
-		queryOpts,
+		propertyQueryFilters(prefix, propertyName, propertyValue),
+		datasetQueryOptions(true, datasetDecodedProperties),
 	}, &result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query datasets with properties: %w", err)
 	}
 	klog.V(4).Infof("Query returned %d datasets (prefix: %q)", len(result), prefix)
 
-	// Filter datasets that have the matching property value
+	// Re-check the match client-side. The server-side filter already did this, but the
+	// check is cheap and keeps results correct if a property name had to fall back to
+	// prefix-only filtering (see propertyQueryFilters).
 	// If propertyValue is empty, match any dataset that has the property (regardless of value)
 	var matched []DatasetWithProperties
 	for _, ds := range result {
@@ -2961,8 +2935,65 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 		}
 	}
 
-	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d total)", len(matched), propertyName, propertyValue, len(result))
+	klog.V(4).Infof("Found %d datasets with property %s=%s (out of %d returned)", len(matched), propertyName, propertyValue, len(result))
 	return matched, nil
+}
+
+// datasetDecodedProperties are the ZFS properties the Dataset struct decodes (Used,
+// Available, Volsize). Requesting only these keeps pool.dataset.query from loading and
+// serializing every ZFS property of every matching dataset, which the client would discard
+// during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are always
+// returned. Keep this in sync with the Dataset struct.
+var datasetDecodedProperties = []string{"used", "available", "volsize"}
+
+// datasetQueryOptions builds pool.dataset.query options that return only what the client
+// decodes:
+//   - flat=true, retrieve_children=false: one flat entry per matching dataset. The
+//     middleware's defaults also embed each dataset's whole child tree in a nested
+//     "children" field, duplicating descendants that an "id ^ prefix" scan already
+//     returns as their own entries (and returning an entire subtree for an exact-id
+//     lookup of a parent). With flat=true, filters still match descendants.
+//   - properties: the ZFS properties to load; pass an empty (non-nil) slice when only
+//     user properties are needed.
+func datasetQueryOptions(userProperties bool, properties []string) map[string]interface{} {
+	return map[string]interface{}{
+		queryOptExtra: map[string]interface{}{
+			queryOptFlat:             true,
+			queryOptRetrieveChildren: false,
+			queryOptUserProperties:   userProperties,
+			queryOptProperties:       properties,
+		},
+	}
+}
+
+// propertyQueryFilters builds the pool.dataset.query filters for FindDatasetsByProperty.
+//
+// The user-property match is done server-side so TrueNAS returns only matching
+// datasets. Filtering client-side instead means fetching every dataset under the
+// prefix (with an empty prefix: every dataset on the system) together with all of its
+// properties, which on a NAS with a few thousand datasets is tens of MB — more than
+// the WebSocket read limit, so the connection drops and the call fails.
+//
+//   - propertyValue set:   ["user_properties.<name>.value", "=", value]
+//   - propertyValue empty: ["user_properties.<name>", "!=", null] (property exists)
+//
+// The middleware splits filter paths on ".", so a property name containing "." cannot
+// be addressed and falls back to prefix-only filtering (callers re-check client-side).
+// An empty prefix adds no id filter: ["id", "^", ""] is not reliably handled.
+func propertyQueryFilters(prefix, propertyName, propertyValue string) []interface{} {
+	filters := []interface{}{}
+	if prefix != "" {
+		filters = append(filters, []interface{}{"id", "^", prefix})
+	}
+	if propertyName == "" || strings.Contains(propertyName, ".") {
+		return filters
+	}
+
+	path := "user_properties." + propertyName
+	if propertyValue == "" {
+		return append(filters, []interface{}{path, "!=", nil})
+	}
+	return append(filters, []interface{}{path + ".value", "=", propertyValue})
 }
 
 // FindManagedDatasets finds all datasets managed by tns-csi under the given prefix.

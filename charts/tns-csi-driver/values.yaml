@@ -444,6 +444,7 @@ storageClasses:
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
     #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
     #   portID: TrueNAS NVMe-oF port ID (auto-detected if not specified)
+    #   filesystemCheckMode: "preen" runs e2fsck -p before mounting existing ext3/ext4 filesystems
     # Parameters can be specified flat or nested:
     #   Flat:   { "zfs.sparse": "true", "zfs.compression": "lz4" }
     #   Nested: { zfs: { sparse: "true", compression: "lz4" } }
@@ -519,6 +520,7 @@ storageClasses:
     #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
     #   zfs.volblocksize: ZVOL block size (e.g., "16K", "64K")
+    #   filesystemCheckMode: "preen" runs e2fsck -p before mounting existing ext3/ext4 filesystems
     # Parameters can be specified flat or nested:
     #   Flat:   { "zfs.sparse": "true", "zfs.compression": "lz4" }
     #   Nested: { zfs: { sparse: "true", compression: "lz4" } }

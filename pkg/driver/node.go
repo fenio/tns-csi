@@ -45,11 +45,17 @@ type NodeService struct {
 	// logoutISCSITargetFn is overridden by focused node-service tests.
 	logoutISCSITargetFn func(context.Context, *iscsiConnectionParams) error
 	// runISCSIAdmFn is overridden by focused command-result tests.
-	runISCSIAdmFn   func(context.Context, ...string) ([]byte, error)
-	nodeID          string
-	nvmeLifecycleMu sync.Mutex
-	testMode        bool
-	enableDiscovery bool
+	runISCSIAdmFn        func(context.Context, ...string) ([]byte, error)
+	runFilesystemCheckFn func(context.Context, string) ([]byte, error)
+	detectFilesystemFn   func(context.Context, string) (string, error)
+	isSourceMountedFn    func(context.Context, string) (bool, error)
+	needsFormatFn        func(context.Context, string, bool) (bool, error)
+	formatDeviceFn       func(context.Context, string, string, string) error
+	volumeLifecycleLocks keyedMutex
+	nodeID               string
+	nvmeLifecycleMu      sync.Mutex
+	testMode             bool
+	enableDiscovery      bool
 }
 
 // NewNodeService creates a new node service.
@@ -94,6 +100,24 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	// Determine protocol from VolumeContext
 	// With plain volume IDs (just the volume name), all metadata is passed via VolumeContext
 	protocol := getProtocolFromVolumeContext(volumeContext)
+	if err := validateAccessModeForProtocol([]*csi.VolumeCapability{req.GetVolumeCapability()}, protocol); err != nil {
+		timer.ObserveError()
+		return nil, err
+	}
+	filesystemCheckMode, modeErr := validateFilesystemCheckMode(volumeContext[VolumeContextKeyFilesystemCheck], protocol, []*csi.VolumeCapability{req.GetVolumeCapability()})
+	if modeErr != nil {
+		timer.ObserveError()
+		return nil, modeErr
+	}
+	if filesystemCheckMode == filesystemCheckModePreen {
+		volumeContext[VolumeContextKeyFilesystemCheck] = filesystemCheckMode
+	}
+	unlock, lockErr := s.volumeLifecycleLocks.lock(ctx, volumeID)
+	if lockErr != nil {
+		timer.ObserveError()
+		return nil, status.FromContextError(lockErr).Err()
+	}
+	defer unlock()
 
 	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", volumeID, protocol, stagingTargetPath)
 
@@ -158,6 +182,12 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 	volumeID := req.GetVolumeId()
 	stagingTargetPath := req.GetStagingTargetPath()
+	unlock, lockErr := s.volumeLifecycleLocks.lock(ctx, volumeID)
+	if lockErr != nil {
+		timer.ObserveError()
+		return nil, status.FromContextError(lockErr).Err()
+	}
+	defer unlock()
 
 	// With independent subsystems, we determine the protocol by checking the staging path
 	// NVMe-oF volumes use block devices, NFS volumes use NFS mounts

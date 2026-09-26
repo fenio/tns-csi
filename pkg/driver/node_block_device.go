@@ -124,16 +124,25 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 // detection, and retry. We deliberately do not pass mke2fs a second -F to bypass that
 // check — if udev's scan eventually surfaces a filesystem we initially missed, we
 // preserve it instead of destroying data.
-func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool) error {
-	needsFormat, err := needsFormatWithRetries(ctx, devicePath, isClone)
-	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
+func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool) (bool, error) {
+	needsFormat := s.needsFormatFn
+	if needsFormat == nil {
+		needsFormat = needsFormatWithRetries
+	}
+	format := s.formatDeviceFn
+	if format == nil {
+		format = formatDevice
 	}
 
-	if !needsFormat {
+	requiresFormat, err := needsFormat(ctx, devicePath, isClone)
+	if err != nil {
+		return false, status.Errorf(codes.Internal, "Failed to check if device needs formatting: %v", err)
+	}
+
+	if !requiresFormat {
 		klog.V(4).Infof("Device %s is already formatted, preserving existing filesystem (dataset: %s, NQN: %s)",
 			devicePath, datasetName, nqn)
-		return nil
+		return false, nil
 	}
 
 	klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
@@ -142,13 +151,13 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 	backoff := 2 * time.Second
 	var lastErr error
 	for attempt := 1; attempt <= maxFormatAttempts; attempt++ {
-		formatErr := formatDevice(ctx, volumeID, devicePath, fsType)
+		formatErr := format(ctx, volumeID, devicePath, fsType)
 		if formatErr == nil {
-			return nil
+			return true, nil
 		}
 		lastErr = formatErr
 		if !isDeviceBusyError(formatErr) {
-			return status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
+			return false, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)
 		}
 
 		klog.Warningf("Format attempt %d/%d for %s hit transient device-busy, waiting %v then re-checking filesystem",
@@ -156,17 +165,17 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 		backoff *= 2
 
-		recheck, recheckErr := needsFormatWithRetries(ctx, devicePath, isClone)
+		recheck, recheckErr := needsFormat(ctx, devicePath, isClone)
 		if recheckErr == nil && !recheck {
 			klog.Infof("Device %s detected as already formatted on recheck after busy error — preserving existing filesystem", devicePath)
-			return nil
+			return false, nil
 		}
 	}
-	return status.Errorf(codes.Internal, "Failed to format device after %d attempts: %v", maxFormatAttempts, lastErr)
+	return false, status.Errorf(codes.Internal, "Failed to format device after %d attempts: %v", maxFormatAttempts, lastErr)
 }
 
 // logDeviceInfo logs detailed information about a block device for troubleshooting.

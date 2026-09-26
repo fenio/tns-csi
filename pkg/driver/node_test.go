@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -184,6 +185,58 @@ func TestNodeStageVolume_Validation(t *testing.T) {
 			wantErr:  true,
 			wantCode: codes.InvalidArgument,
 		},
+		{
+			name: "filesystem check on raw block volume",
+			req: &csi.NodeStageVolumeRequest{
+				VolumeId:          "test-volume",
+				StagingTargetPath: "/staging/path",
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+				},
+				VolumeContext: map[string]string{
+					VolumeContextKeyProtocol:        ProtocolNVMeOF,
+					VolumeContextKeyFilesystemCheck: filesystemCheckModePreen,
+				},
+			},
+			wantErr:  true,
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "filesystem check on NFS volume",
+			req: &csi.NodeStageVolumeRequest{
+				VolumeId:          "test-volume",
+				StagingTargetPath: "/staging/path",
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{FsType: fsTypeExt4},
+					},
+				},
+				VolumeContext: map[string]string{
+					VolumeContextKeyProtocol:        ProtocolNFS,
+					VolumeContextKeyFilesystemCheck: filesystemCheckModePreen,
+				},
+			},
+			wantErr:  true,
+			wantCode: codes.InvalidArgument,
+		},
+		{
+			name: "multi-node mounted block protocol volume",
+			req: &csi.NodeStageVolumeRequest{
+				VolumeId:          "test-volume",
+				StagingTargetPath: "/staging/path",
+				VolumeCapability: &csi.VolumeCapability{
+					AccessType: &csi.VolumeCapability_Mount{
+						Mount: &csi.VolumeCapability_MountVolume{FsType: fsTypeExt4},
+					},
+					AccessMode: &csi.VolumeCapability_AccessMode{
+						Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+					},
+				},
+				VolumeContext: map[string]string{VolumeContextKeyProtocol: ProtocolNVMeOF},
+			},
+			wantErr:  true,
+			wantCode: codes.InvalidArgument,
+		},
 	}
 
 	for _, tt := range tests {
@@ -259,6 +312,56 @@ func TestNodeUnstageVolume_Validation(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestNodeVolumeLifecycleLockHonorsContext(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	unlock, err := service.volumeLifecycleLocks.lock(context.Background(), "test-volume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+
+	tests := []struct {
+		call func(context.Context) error
+		name string
+	}{
+		{
+			name: "stage",
+			call: func(ctx context.Context) error {
+				_, stageErr := service.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{
+					VolumeId:          "test-volume",
+					StagingTargetPath: "/staging/path",
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: fsTypeExt4}},
+						AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+					},
+					VolumeContext: map[string]string{VolumeContextKeyProtocol: ProtocolNVMeOF},
+				})
+				return stageErr
+			},
+		},
+		{
+			name: "unstage",
+			call: func(ctx context.Context) error {
+				_, unstageErr := service.NodeUnstageVolume(ctx, &csi.NodeUnstageVolumeRequest{
+					VolumeId:          "test-volume",
+					StagingTargetPath: "/staging/path",
+				})
+				return unstageErr
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+			defer cancel()
+			if got := status.Code(tt.call(ctx)); got != codes.DeadlineExceeded {
+				t.Fatalf("operation code = %v, want DeadlineExceeded", got)
 			}
 		})
 	}

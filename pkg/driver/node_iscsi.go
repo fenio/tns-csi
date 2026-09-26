@@ -535,6 +535,15 @@ func (s *NodeService) formatAndMountISCSIDevice(ctx context.Context, volumeID, d
 	klog.V(4).Infof("Formatting and mounting iSCSI device: device=%s, path=%s, volume=%s, dataset=%s, IQN=%s",
 		devicePath, stagingTargetPath, volumeID, datasetName, iqn)
 
+	mounted, mountErr := ensureStagingTarget(ctx, stagingTargetPath)
+	if mountErr != nil {
+		return nil, mountErr
+	}
+	if mounted {
+		klog.V(4).Infof("Staging path %s is already mounted", stagingTargetPath)
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
 	// Log device information
 	s.logDeviceInfo(ctx, devicePath)
 
@@ -561,23 +570,12 @@ func (s *NodeService) formatAndMountISCSIDevice(ctx context.Context, volumeID, d
 	}
 
 	// Handle formatting
-	if err := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, iqn, isClone); err != nil {
-		return nil, err
+	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, iqn, isClone)
+	if formatErr != nil {
+		return nil, formatErr
 	}
-
-	// Create staging target path
-	if err := os.MkdirAll(stagingTargetPath, 0o750); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", err)
-	}
-
-	// Check if already mounted
-	mounted, err := mount.IsMounted(ctx, stagingTargetPath)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to check if staging path is mounted: %v", err)
-	}
-	if mounted {
-		klog.V(4).Infof("Staging path %s is already mounted", stagingTargetPath)
-		return &csi.NodeStageVolumeResponse{}, nil
+	if checkErr := s.checkFilesystemBeforeMount(ctx, devicePath, volumeContext[VolumeContextKeyFilesystemCheck], newlyFormatted); checkErr != nil {
+		return nil, checkErr
 	}
 
 	// Mount the device

@@ -91,6 +91,82 @@ func TestProtocolValidatorsResolveRelativeParentDataset(t *testing.T) {
 	})
 }
 
+func TestValidateFilesystemCheckMode(t *testing.T) {
+	mountCapability := func(fsType string) []*csi.VolumeCapability {
+		return []*csi.VolumeCapability{{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{FsType: fsType},
+			},
+		}}
+	}
+	rawBlockCapability := []*csi.VolumeCapability{{
+		AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+	}}
+
+	tests := []struct {
+		name     string
+		rawMode  string
+		protocol string
+		want     string
+		caps     []*csi.VolumeCapability
+		wantErr  bool
+	}{
+		{name: "empty defaults to none", protocol: ProtocolNFS, caps: mountCapability(""), want: filesystemCheckModeNone},
+		{name: "explicit none", rawMode: filesystemCheckModeNone, protocol: ProtocolNFS, caps: mountCapability(""), want: filesystemCheckModeNone},
+		{name: "NVMe-oF ext4 preen", rawMode: filesystemCheckModePreen, protocol: ProtocolNVMeOF, caps: mountCapability(fsTypeExt4), want: filesystemCheckModePreen},
+		{name: "iSCSI ext3 preen", rawMode: " PREEN ", protocol: ProtocolISCSI, caps: mountCapability(fsTypeExt3), want: filesystemCheckModePreen},
+		{name: "empty filesystem defaults to ext4", rawMode: filesystemCheckModePreen, protocol: ProtocolNVMeOF, caps: mountCapability(""), want: filesystemCheckModePreen},
+		{name: "unknown mode", rawMode: "repair", protocol: ProtocolNVMeOF, caps: mountCapability(fsTypeExt4), wantErr: true},
+		{name: "file protocol", rawMode: filesystemCheckModePreen, protocol: ProtocolNFS, caps: mountCapability(fsTypeExt4), wantErr: true},
+		{name: "raw block", rawMode: filesystemCheckModePreen, protocol: ProtocolNVMeOF, caps: rawBlockCapability, wantErr: true},
+		{name: "XFS", rawMode: filesystemCheckModePreen, protocol: ProtocolNVMeOF, caps: mountCapability(fsTypeXFS), wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateFilesystemCheckMode(tt.rawMode, tt.protocol, tt.caps)
+			if tt.wantErr {
+				if status.Code(err) != codes.InvalidArgument {
+					t.Fatalf("validateFilesystemCheckMode() error = %v, want InvalidArgument", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("validateFilesystemCheckMode() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyCreateVolumeContext(t *testing.T) {
+	resp := &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
+	applyCreateVolumeContext(nil, resp, filesystemCheckModePreen)
+	if got := resp.Volume.VolumeContext[VolumeContextKeyFilesystemCheck]; got != filesystemCheckModePreen {
+		t.Fatalf("filesystemCheckMode = %q, want %q", got, filesystemCheckModePreen)
+	}
+
+	resp = &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
+	applyCreateVolumeContext(nil, resp, filesystemCheckModeNone)
+	if _, exists := resp.Volume.VolumeContext[VolumeContextKeyFilesystemCheck]; exists {
+		t.Fatal("filesystemCheckMode should not be propagated when disabled")
+	}
+
+	resp = &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
+	applyCreateVolumeContext(&csi.CreateVolumeRequest{
+		VolumeContentSource: &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{Snapshot: &csi.VolumeContentSource_SnapshotSource{SnapshotId: "snapshot"}},
+		},
+	}, resp, filesystemCheckModeNone)
+	if got := resp.Volume.VolumeContext[VolumeContextKeyClonedFromSnap]; got != VolumeContextValueTrue {
+		t.Fatalf("clonedFromSnapshot = %q, want %q", got, VolumeContextValueTrue)
+	}
+
+	applyCreateVolumeContext(nil, nil, filesystemCheckModePreen)
+}
+
 func TestControllerGetCapabilities(t *testing.T) {
 	service := NewControllerService(nil, NewNodeRegistry(), "")
 

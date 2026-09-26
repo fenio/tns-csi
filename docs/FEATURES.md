@@ -143,6 +143,23 @@ reclaimPolicy: Delete
   - SMB: CIFS mount with configurable SMB version and options
   - Proper cleanup on unmount
 
+#### Optional Filesystem Checks
+- **Status**: Implemented
+- **Protocols**: NVMe-oF and iSCSI filesystem volumes
+- **Filesystems**: ext3 and ext4
+- **Configuration**: Set `filesystemCheckMode: preen` in the StorageClass `parameters` map. For a static PV, set it in `spec.csi.volumeAttributes` instead.
+- **Behavior**: Runs `e2fsck -p` on an existing, unmounted filesystem before mounting it. Problems that can be repaired safely without interaction are corrected automatically; staging fails when manual repair is required.
+- **Mount safety**: An idempotent retry whose staging target is already mounted skips the check. If the source device is mounted anywhere else, staging fails rather than checking a live filesystem.
+- **Excluded**: Newly formatted filesystems, raw Block volumes, XFS, NFS, and SMB
+
+```yaml
+parameters:
+  protocol: nvmeof
+  pool: tank
+  server: truenas.local
+  filesystemCheckMode: preen
+```
+
 ### Configurable Mount Options
 - **Status**: ✅ Implemented
 - **Protocols**: NFS, NVMe-oF, iSCSI, SMB

@@ -16,6 +16,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var errSourceMountUnsupported = errors.New("source mount checks are unsupported on macOS")
+
 // IsMounted checks if a path is mounted on macOS.
 // Uses 'mount' command to check mount status since findmnt doesn't exist on macOS.
 func IsMounted(ctx context.Context, targetPath string) (bool, error) {
@@ -56,7 +58,7 @@ func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
 
 // IsSourceMounted checks whether a source device is mounted anywhere on macOS.
 func IsSourceMounted(context.Context, string) (bool, error) {
-	return false, errors.New("source mount checks are unsupported on macOS")
+	return false, errSourceMountUnsupported
 }
 
 // Unmount unmounts a path on macOS.

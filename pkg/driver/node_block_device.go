@@ -170,7 +170,10 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 		backoff *= 2
 
 		recheck, recheckErr := needsFormat(ctx, devicePath, isClone)
-		if recheckErr == nil && !recheck {
+		if recheckErr != nil {
+			return false, status.Errorf(codes.Internal, "Failed to recheck device before retrying format: %v", recheckErr)
+		}
+		if !recheck {
 			klog.Infof("Device %s detected as already formatted on recheck after busy error — preserving existing filesystem", devicePath)
 			return false, nil
 		}

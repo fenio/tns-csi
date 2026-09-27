@@ -352,8 +352,8 @@ func shouldStopRetrying(needsFmt bool, err error, devicePath string, attempt, ma
 				devicePath, attempt+1, maxRetries)
 			return false // Continue retrying
 		}
-		// Reached max retries for clone - stop and warn
-		klog.Warningf("Cloned volume %s still shows no filesystem after %d attempts - will fail unless force-format annotation is set",
+		// Reached max retries for clone - refuse to format inherited data.
+		klog.Warningf("Cloned volume %s still shows no filesystem after %d attempts - refusing to format",
 			devicePath, attempt+1)
 		return true
 	}
@@ -394,9 +394,17 @@ func waitWithBackoff(ctx context.Context, devicePath string, attempt, maxRetries
 	}
 }
 
-// checkDeviceFilesystem checks if a device has a filesystem using blkid and lsblk.
+// checkDeviceFilesystem checks for filesystem and partition signatures. An empty
+// lsblk FSTYPE is not proof that the device is blank: udev may not have scanned it.
+// Only blkid's explicit "nothing found" exit code authorizes formatting.
 // Returns (needsFormat, output, error).
 func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat bool, output []byte, err error) {
+	return checkDeviceFilesystemWithProbe(ctx, devicePath, func(probeCtx context.Context, path string) ([]byte, error) {
+		return exec.CommandContext(probeCtx, blkidPath, "-p", "-s", "TYPE", "-s", "PTTYPE", "-o", "export", path).CombinedOutput()
+	})
+}
+
+func checkDeviceFilesystemWithProbe(ctx context.Context, devicePath string, probe func(context.Context, string) ([]byte, error)) (needsFormat bool, output []byte, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -414,20 +422,13 @@ func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat 
 	fstype := strings.TrimSpace(string(lsblkOutput))
 	if fstype == "" {
 		klog.V(4).Infof("lsblk shows device %s has no filesystem (FSTYPE empty)", devicePath)
-		// Verify with blkid for consistency
-		blkidCmd := exec.CommandContext(checkCtx, "blkid", devicePath)
-		blkidOutput, blkidErr := blkidCmd.CombinedOutput()
-
-		if blkidErr != nil || len(blkidOutput) == 0 || strings.Contains(string(blkidOutput), "does not contain") {
-			klog.Infof("Device %s confirmed to have no filesystem (lsblk FSTYPE='', blkid confirms)", devicePath)
-			// Return empty output to indicate no filesystem detected (handleFinalResult expects this)
-			return true, nil, nil
+		// Probe the device directly, bypassing potentially stale udev metadata.
+		// PTTYPE prevents formatting a disk with an existing partition table.
+		blkidOutput, blkidErr := probe(checkCtx, devicePath)
+		if err := checkCtx.Err(); err != nil {
+			return false, blkidOutput, err
 		}
-
-		// Conflicting information - blkid found filesystem but lsblk didn't
-		klog.Warningf("Device %s: lsblk shows no FSTYPE but blkid found filesystem: %s - trusting blkid",
-			devicePath, string(blkidOutput))
-		return false, blkidOutput, nil
+		return interpretEmptyFilesystemProbe(blkidOutput, blkidErr)
 	}
 
 	// lsblk shows a filesystem type - verify with blkid
@@ -447,6 +448,23 @@ func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat 
 	return false, lsblkOutput, nil
 }
 
+// interpretEmptyFilesystemProbe classifies the direct probe only when lsblk had
+// no filesystem metadata. Exit 2 with no output means no signature was found;
+// all other errors or ambiguous responses must not permit formatting.
+func interpretEmptyFilesystemProbe(output []byte, probeErr error) (needsFormat bool, probeOutput []byte, err error) {
+	var exitErr *exec.ExitError
+	if errors.As(probeErr, &exitErr) && exitErr.ExitCode() == 2 && strings.TrimSpace(string(output)) == "" {
+		return true, nil, nil
+	}
+	if probeErr != nil {
+		return false, output, fmt.Errorf("%w: blkid probe failed: %w", ErrDeviceNotReady, probeErr)
+	}
+	if strings.TrimSpace(string(output)) == "" {
+		return false, output, fmt.Errorf("%w: blkid succeeded without reporting a signature", ErrDeviceNotReady)
+	}
+	return false, output, nil
+}
+
 // isDeviceNotReady checks if blkid output indicates device is not ready.
 func isDeviceNotReady(output []byte) bool {
 	return strings.Contains(string(output), "No such device") || strings.Contains(string(output), "No such file")
@@ -454,37 +472,24 @@ func isDeviceNotReady(output []byte) bool {
 
 // handleFinalResult processes the final result after all retries.
 func handleFinalResult(devicePath string, maxRetries int, lastOutput []byte, lastErr error, isClone bool) (bool, error) {
-	noFilesystemDetected := len(lastOutput) == 0 || strings.Contains(string(lastOutput), "does not contain")
-	if isClone && noFilesystemDetected {
+	// A failed probe can never justify formatting, regardless of its output.
+	if lastErr != nil {
+		return false, fmt.Errorf("%w: device %s not ready after %d retries: %w (output: %s)",
+			ErrDeviceNotReady, devicePath, maxRetries, lastErr, string(lastOutput))
+	}
+	if isClone && len(lastOutput) == 0 {
 		return false, fmt.Errorf("%w: refusing to format cloned device %s because no filesystem was detected after %d retries",
 			ErrDeviceNotReady, devicePath, maxRetries)
 	}
 
-	// If blkid check succeeded (lastErr == nil), we need to determine if filesystem was detected
-	// based on the output. Empty output or "does not contain" means no filesystem detected.
-	if lastErr == nil {
-		// Check if no filesystem was detected
-		if noFilesystemDetected {
-			klog.Infof("Device %s has no filesystem - needs formatting", devicePath)
-			return true, nil
-		}
-		// Filesystem was detected, no formatting needed
-		klog.V(4).Infof("Device %s has existing filesystem, skipping format", devicePath)
-		return false, nil
-	}
-
-	// After all retries, if blkid failed but output suggests no filesystem, device needs formatting.
-	// This is standard CSI behavior - new volumes should be formatted automatically.
-	// The extensive retry logic (15 attempts with cache invalidation) protects against
-	// temporary detection issues during device reconnection/clone completion.
-	if noFilesystemDetected {
-		klog.Infof("Device %s has no filesystem after %d retries - needs formatting", devicePath, maxRetries)
+	// Only a confirmed no-signature result has empty output and no error.
+	if len(lastOutput) == 0 {
+		klog.Infof("Device %s has no filesystem - needs formatting", devicePath)
 		return true, nil
 	}
 
-	// Device still not ready - this is unexpected
-	return false, fmt.Errorf("%w: device %s not ready after %d retries: %w (output: %s)",
-		ErrDeviceNotReady, devicePath, maxRetries, lastErr, string(lastOutput))
+	klog.V(4).Infof("Device %s has an existing signature, skipping format", devicePath)
+	return false, nil
 }
 
 // getLogicalSectorSize reads the logical block size for a device from sysfs.

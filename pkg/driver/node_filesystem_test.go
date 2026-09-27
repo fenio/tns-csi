@@ -289,6 +289,27 @@ func TestHandleDeviceFormattingOutcomes(t *testing.T) {
 	}
 }
 
+func TestHandleDeviceFormattingStopsAfterFailedBusyRecheck(t *testing.T) {
+	checks, formats := 0, 0
+	service := &NodeService{
+		needsFormatFn: func(context.Context, string, bool) (bool, error) {
+			checks++
+			if checks == 1 {
+				return true, nil
+			}
+			return false, errors.New("recheck failed")
+		},
+		formatDeviceFn: func(context.Context, string, string, string) error {
+			formats++
+			return errors.New("device is apparently in use by the system")
+		},
+	}
+	formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false)
+	if formatted || status.Code(err) != codes.Internal || formats != 1 || checks != 2 {
+		t.Fatalf("handleDeviceFormatting() = %v, %v; checks=%d formats=%d; want false, Internal, 2, 1", formatted, err, checks, formats)
+	}
+}
+
 func TestHandleDeviceFormattingDefaultHooks(t *testing.T) {
 	t.Run("default formatter", func(t *testing.T) {
 		service := &NodeService{

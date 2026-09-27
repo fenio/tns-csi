@@ -172,7 +172,9 @@ func TestCheckDeviceFilesystemFailedProbeCannotFormat(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	format, _, err := checkDeviceFilesystem(context.Background(), "/dev/test")
+	format, _, err := checkDeviceFilesystemWithProbe(context.Background(), "/dev/test", func(probeCtx context.Context, path string) ([]byte, error) {
+		return exec.CommandContext(probeCtx, filepath.Join(binDir, "blkid"), path).CombinedOutput()
+	})
 	if format || err == nil {
 		t.Fatalf("checkDeviceFilesystem() = %v, %v; want false, error", format, err)
 	}
@@ -191,7 +193,9 @@ func TestCheckDeviceFilesystemCanceledProbeCannotFormat(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	format, _, err := checkDeviceFilesystem(ctx, "/dev/test")
+	format, _, err := checkDeviceFilesystemWithProbe(ctx, "/dev/test", func(probeCtx context.Context, path string) ([]byte, error) {
+		return exec.CommandContext(probeCtx, filepath.Join(binDir, "blkid"), path).CombinedOutput()
+	})
 	if format || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("checkDeviceFilesystem() = %v, %v; want false, deadline exceeded", format, err)
 	}

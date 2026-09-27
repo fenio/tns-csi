@@ -399,6 +399,12 @@ func waitWithBackoff(ctx context.Context, devicePath string, attempt, maxRetries
 // Only blkid's explicit "nothing found" exit code authorizes formatting.
 // Returns (needsFormat, output, error).
 func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat bool, output []byte, err error) {
+	return checkDeviceFilesystemWithProbe(ctx, devicePath, func(probeCtx context.Context, path string) ([]byte, error) {
+		return exec.CommandContext(probeCtx, blkidPath, "-p", "-s", "TYPE", "-s", "PTTYPE", "-o", "export", path).CombinedOutput()
+	})
+}
+
+func checkDeviceFilesystemWithProbe(ctx context.Context, devicePath string, probe func(context.Context, string) ([]byte, error)) (needsFormat bool, output []byte, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -418,8 +424,7 @@ func checkDeviceFilesystem(ctx context.Context, devicePath string) (needsFormat 
 		klog.V(4).Infof("lsblk shows device %s has no filesystem (FSTYPE empty)", devicePath)
 		// Probe the device directly, bypassing potentially stale udev metadata.
 		// PTTYPE prevents formatting a disk with an existing partition table.
-		blkidCmd := exec.CommandContext(checkCtx, "blkid", "-p", "-s", "TYPE", "-s", "PTTYPE", "-o", "export", devicePath)
-		blkidOutput, blkidErr := blkidCmd.CombinedOutput()
+		blkidOutput, blkidErr := probe(checkCtx, devicePath)
 		if err := checkCtx.Err(); err != nil {
 			return false, blkidOutput, err
 		}

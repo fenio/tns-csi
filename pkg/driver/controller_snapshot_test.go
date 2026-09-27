@@ -49,6 +49,13 @@ type MockAPIClientForSnapshots struct {
 	GetDatasetWithPropertiesFunc   func(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error)
 	QueryISCSITargetsFunc          func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSITarget, error)
 	QueryISCSIExtentsFunc          func(ctx context.Context, filters []interface{}) ([]tnsapi.ISCSIExtent, error)
+	ISCSITargetByNameFunc          func(ctx context.Context, name string) (*tnsapi.ISCSITarget, error)
+	ISCSIExtentByNameFunc          func(ctx context.Context, name string) (*tnsapi.ISCSIExtent, error)
+	ISCSITargetExtentByTargetFunc  func(ctx context.Context, targetID int) ([]tnsapi.ISCSITargetExtent, error)
+	CreateISCSITargetFunc          func(ctx context.Context, params tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error)
+	CreateISCSIExtentFunc          func(ctx context.Context, params tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error)
+	CreateISCSITargetExtentFunc    func(ctx context.Context, params tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error)
+	DeleteISCSIExtentFunc          func(ctx context.Context, id int) error
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -407,7 +414,10 @@ func (m *MockAPIClientForSnapshots) QueryISCSIInitiators(_ context.Context) ([]t
 	}, nil
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSITarget(_ context.Context, params tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+func (m *MockAPIClientForSnapshots) CreateISCSITarget(ctx context.Context, params tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+	if m.CreateISCSITargetFunc != nil {
+		return m.CreateISCSITargetFunc(ctx, params)
+	}
 	return &tnsapi.ISCSITarget{
 		ID:     1,
 		Name:   params.Name,
@@ -428,11 +438,18 @@ func (m *MockAPIClientForSnapshots) QueryISCSITargets(ctx context.Context, filte
 	return []tnsapi.ISCSITarget{}, nil
 }
 
-func (m *MockAPIClientForSnapshots) ISCSITargetByName(_ context.Context, name string) (*tnsapi.ISCSITarget, error) {
-	return nil, errors.New("iSCSI target not found: " + name)
+// ISCSITargetByName mirrors the real client: (nil, nil) means "not found".
+func (m *MockAPIClientForSnapshots) ISCSITargetByName(ctx context.Context, name string) (*tnsapi.ISCSITarget, error) {
+	if m.ISCSITargetByNameFunc != nil {
+		return m.ISCSITargetByNameFunc(ctx, name)
+	}
+	return nil, nil //nolint:nilnil // matches tnsapi.Client: nil, nil indicates "not found"
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSIExtent(_ context.Context, params tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+func (m *MockAPIClientForSnapshots) CreateISCSIExtent(ctx context.Context, params tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+	if m.CreateISCSIExtentFunc != nil {
+		return m.CreateISCSIExtentFunc(ctx, params)
+	}
 	return &tnsapi.ISCSIExtent{
 		ID:        1,
 		Name:      params.Name,
@@ -443,7 +460,10 @@ func (m *MockAPIClientForSnapshots) CreateISCSIExtent(_ context.Context, params 
 	}, nil
 }
 
-func (m *MockAPIClientForSnapshots) DeleteISCSIExtent(_ context.Context, _ int, _, _ bool) error {
+func (m *MockAPIClientForSnapshots) DeleteISCSIExtent(ctx context.Context, id int, _, _ bool) error {
+	if m.DeleteISCSIExtentFunc != nil {
+		return m.DeleteISCSIExtentFunc(ctx, id)
+	}
 	return nil
 }
 
@@ -454,11 +474,18 @@ func (m *MockAPIClientForSnapshots) QueryISCSIExtents(ctx context.Context, filte
 	return []tnsapi.ISCSIExtent{}, nil
 }
 
-func (m *MockAPIClientForSnapshots) ISCSIExtentByName(_ context.Context, name string) (*tnsapi.ISCSIExtent, error) {
-	return nil, errors.New("iSCSI extent not found: " + name)
+// ISCSIExtentByName mirrors the real client: (nil, nil) means "not found".
+func (m *MockAPIClientForSnapshots) ISCSIExtentByName(ctx context.Context, name string) (*tnsapi.ISCSIExtent, error) {
+	if m.ISCSIExtentByNameFunc != nil {
+		return m.ISCSIExtentByNameFunc(ctx, name)
+	}
+	return nil, nil //nolint:nilnil // matches tnsapi.Client: nil, nil indicates "not found"
 }
 
-func (m *MockAPIClientForSnapshots) CreateISCSITargetExtent(_ context.Context, params tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+func (m *MockAPIClientForSnapshots) CreateISCSITargetExtent(ctx context.Context, params tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+	if m.CreateISCSITargetExtentFunc != nil {
+		return m.CreateISCSITargetExtentFunc(ctx, params)
+	}
 	return &tnsapi.ISCSITargetExtent{
 		ID:     1,
 		Target: params.Target,
@@ -475,7 +502,10 @@ func (m *MockAPIClientForSnapshots) QueryISCSITargetExtents(_ context.Context, _
 	return []tnsapi.ISCSITargetExtent{}, nil
 }
 
-func (m *MockAPIClientForSnapshots) ISCSITargetExtentByTarget(_ context.Context, _ int) ([]tnsapi.ISCSITargetExtent, error) {
+func (m *MockAPIClientForSnapshots) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([]tnsapi.ISCSITargetExtent, error) {
+	if m.ISCSITargetExtentByTargetFunc != nil {
+		return m.ISCSITargetExtentByTargetFunc(ctx, targetID)
+	}
 	return []tnsapi.ISCSITargetExtent{}, nil
 }
 

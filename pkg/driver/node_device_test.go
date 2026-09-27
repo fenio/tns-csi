@@ -2,9 +2,12 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestIsDeviceNotReady(t *testing.T) {
@@ -78,12 +81,12 @@ func TestHandleFinalResult(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name:       "no error with does not contain means needs format",
+			name:       "ambiguous output does not authorize formatting",
 			devicePath: "/dev/sda",
 			maxRetries: 3,
 			lastOutput: []byte("/dev/sda: does not contain a valid filesystem"),
 			lastErr:    nil,
-			wantFmt:    true,
+			wantFmt:    false,
 			wantErr:    false,
 		},
 		{
@@ -96,13 +99,13 @@ func TestHandleFinalResult(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name:       "error with empty output means needs format",
+			name:       "error with empty output must not format",
 			devicePath: "/dev/sda",
 			maxRetries: 3,
 			lastOutput: []byte(""),
 			lastErr:    context.DeadlineExceeded,
-			wantFmt:    true,
-			wantErr:    false,
+			wantFmt:    false,
+			wantErr:    true,
 		},
 		{
 			name:       "error with device not ready output returns error",
@@ -125,6 +128,72 @@ func TestHandleFinalResult(t *testing.T) {
 				t.Errorf("handleFinalResult() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestInterpretEmptyFilesystemProbe(t *testing.T) {
+	exitTwo := exec.CommandContext(context.Background(), "/bin/sh", "-c", "exit 2").Run()
+	exitFour := exec.CommandContext(context.Background(), "/bin/sh", "-c", "exit 4").Run()
+	//nolint:govet // Field alignment is not relevant to a small test table.
+	tests := []struct {
+		name       string
+		output     []byte
+		probeErr   error
+		wantFormat bool
+		wantErr    bool
+	}{
+		{name: "no signatures", probeErr: exitTwo, wantFormat: true},
+		{name: "filesystem detected", output: []byte("TYPE=ext4\n")},
+		{name: "partition table detected", output: []byte("PTTYPE=gpt\n")},
+		{name: "successful empty response is ambiguous", wantErr: true},
+		{name: "exit two with output is ambiguous", output: []byte("I/O error"), probeErr: exitTwo, wantErr: true},
+		{name: "operational error", probeErr: exitFour, wantErr: true},
+		{name: "execution failure", probeErr: errors.New("blkid unavailable"), wantErr: true},
+		{name: "deadline exceeded", probeErr: context.DeadlineExceeded, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format, _, err := interpretEmptyFilesystemProbe(tt.output, tt.probeErr)
+			if format != tt.wantFormat || (err != nil) != tt.wantErr {
+				t.Fatalf("interpretEmptyFilesystemProbe() = %v, %v; want format=%v err=%v", format, err, tt.wantFormat, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckDeviceFilesystemFailedProbeCannotFormat(t *testing.T) {
+	binDir := t.TempDir()
+	for name, script := range map[string]string{
+		"lsblk": "#!/bin/sh\nprintf '\\n'\n",
+		"blkid": "#!/bin/sh\nexit 4\n",
+	} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	format, _, err := checkDeviceFilesystem(context.Background(), "/dev/test")
+	if format || err == nil {
+		t.Fatalf("checkDeviceFilesystem() = %v, %v; want false, error", format, err)
+	}
+}
+
+func TestCheckDeviceFilesystemCanceledProbeCannotFormat(t *testing.T) {
+	binDir := t.TempDir()
+	for name, script := range map[string]string{
+		"lsblk": "#!/bin/sh\nprintf '\\n'\n",
+		"blkid": "#!/bin/sh\nsleep 1\nexit 2\n",
+	} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	format, _, err := checkDeviceFilesystem(ctx, "/dev/test")
+	if format || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("checkDeviceFilesystem() = %v, %v; want false, deadline exceeded", format, err)
 	}
 }
 

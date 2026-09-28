@@ -198,6 +198,24 @@ runs:
         echo "Loaded kernel modules:"
         ssh $SSH_OPTS ci@localhost "lsmod | grep -E 'nvme_tcp|iscsi_tcp|nfs|cifs' || echo 'WARNING: some modules not loaded'"
 
+    - name: Preload E2E test pod image
+      shell: bash
+      run: |
+        SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i /tmp/vm-key -p 2222)
+        # Keep this tag in sync with framework.TestPodImage. Pull once per VM;
+        # pod specs use IfNotPresent to avoid repeated registry requests.
+        IMAGE="registry.k8s.io/e2e-test-images/busybox:1.29-4"
+        for attempt in 1 2 3; do
+          if timeout 120 ssh "${SSH_OPTS[@]}" ci@localhost "sudo k3s ctr -n k8s.io images pull $IMAGE"; then
+            echo "E2E pod image ready: $IMAGE"
+            exit 0
+          fi
+          echo "::warning::Image preload attempt $attempt/3 failed"
+          sleep 5
+        done
+        echo "::error::Unable to preload the E2E pod image into K3S"
+        exit 1
+
     - name: Connect host to Tailscale
       if: inputs.tailscale_authkey != ''
       shell: bash

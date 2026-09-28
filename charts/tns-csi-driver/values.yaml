@@ -369,6 +369,8 @@ storageClasses:
     #   zfs.dedup: ZFS deduplication (e.g., "on", "off", "verify")
     #   zfs.atime: Access time updates (e.g., "on", "off")
     #   zfs.sync: Sync writes (e.g., "standard", "always", "disabled")
+    #   nfsHosts: Comma-separated hostnames/IPs allowed to mount new NFS shares
+    #   nfsNetworks: Comma-separated CIDR networks allowed to mount new NFS shares
     parameters: {}
 
   # NVMe-oF storage class (requires Linux with nvme-tcp kernel module)

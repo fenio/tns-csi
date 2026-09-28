@@ -15,6 +15,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
 - **Access Modes**: ReadWriteMany (RWX), ReadWriteOnce (RWO), ReadWriteOncePod (RWOP)
 - **Use Case**: Shared filesystem storage, multi-pod access
 - **Mount Protocol**: NFSv4.2 with nolock option
+- **Share access controls**: Optional StorageClass `nfsHosts` (comma-separated hostnames/IPs) and `nfsNetworks` (comma-separated CIDRs) restrict new NFS shares to the specified clients. Unset parameters retain the unrestricted default. Existing shares are not changed automatically; a share that does not match an explicitly requested allowlist must be updated in TrueNAS before it can be reused or adopted.
 - **TrueNAS Requirements**: 
   - TrueNAS Scale 25.10+
   - NFS service enabled

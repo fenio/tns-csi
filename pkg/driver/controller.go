@@ -631,6 +631,13 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if protocol == "" {
 		protocol = ProtocolNFS
 	}
+	if protocol == ProtocolNFS {
+		if _, err := parseNFSShareAccess(params); err != nil {
+			return nil, err
+		}
+	} else if params["nfsHosts"] != "" || params["nfsNetworks"] != "" {
+		return nil, status.Error(codes.InvalidArgument, "nfsHosts and nfsNetworks are only supported for NFS volumes")
+	}
 
 	// Validate access modes are safe for this protocol
 	if err := validateAccessModeForProtocol(req.GetVolumeCapabilities(), protocol); err != nil {
@@ -955,6 +962,13 @@ func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi
 	if len(shares) == 0 {
 		klog.Errorf("No NFS share found for dataset %s (mountpoint: %s)", expectedDatasetName, existingDataset.Mountpoint)
 		return VolumeMetadata{}, nil, ErrVolumeNotFound
+	}
+	access, accessErr := parseNFSShareAccess(params)
+	if accessErr != nil {
+		return VolumeMetadata{}, nil, accessErr
+	}
+	if err := checkExistingNFSShareAccess(access, &shares[0]); err != nil {
+		return VolumeMetadata{}, nil, err
 	}
 
 	// Parse capacity from NFS share comment and validate compatibility

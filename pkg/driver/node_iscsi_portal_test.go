@@ -4,10 +4,62 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func TestResolveISCSIServerIPs(t *testing.T) {
+	//nolint:govet // Field alignment is not relevant for this small test table.
+	for _, tt := range []struct {
+		server string
+		want   netip.Addr
+	}{
+		{server: "192.0.2.10", want: netip.MustParseAddr("192.0.2.10")},
+		{server: "[2001:db8::10]", want: netip.MustParseAddr("2001:db8::10")},
+	} {
+		t.Run(tt.server, func(t *testing.T) {
+			got, err := resolveISCSIServerIPs(context.Background(), tt.server)
+			if err != nil || len(got) != 1 || got[0] != tt.want {
+				t.Fatalf("resolveISCSIServerIPs() = %v, %v; want [%s]", got, err, tt.want)
+			}
+		})
+	}
+	got, err := resolveISCSIServerIPs(context.Background(), "localhost")
+	if err != nil || len(got) == 0 {
+		t.Fatalf("localhost resolution = %v, %v; want at least one address", got, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolveISCSIServerIPs(ctx, "unresolvable.invalid"); !errors.Is(err, errISCSIPortalResolution) {
+		t.Fatalf("canceled lookup error = %v; want portal resolution failure", err)
+	}
+}
+
+func TestPortalMatchesServerRejectsWrongAddressAndPort(t *testing.T) {
+	ips := []netip.Addr{netip.MustParseAddr("192.0.2.10")}
+	for _, tt := range []struct {
+		portal string
+		server string
+		port   string
+		want   bool
+	}{
+		{portal: "truenas.local:3260,1", server: "truenas.local", port: "3260", want: true},
+		{portal: "192.0.2.10:3260,1", server: "truenas.local", port: "3260", want: true},
+		{portal: "100.64.0.5:3260,1", server: "truenas.local", port: "3260"},
+		{portal: "192.0.2.10:3261,1", server: "truenas.local", port: "3260"},
+		{portal: "not-a-portal", server: "truenas.local", port: "3260"},
+	} {
+		if got := portalMatchesServer(tt.portal, tt.server, tt.port, ips); got != tt.want {
+			t.Errorf("portalMatchesServer(%q) = %v, want %v", tt.portal, got, tt.want)
+		}
+	}
+}
 
 func TestSelectISCSINodePortal(t *testing.T) {
 	//nolint:govet // Field alignment is not relevant for this small test table.
@@ -139,5 +191,34 @@ func TestFindISCSIDeviceSkipsWrongPortal(t *testing.T) {
 	path, err = service.findISCSIDevice(context.Background(), params)
 	if path != "" || !errors.Is(err, ErrISCSIDeviceNotFound) {
 		t.Fatalf("wrong-portal-only device = %q, %v; want no device", path, err)
+	}
+}
+
+func TestFindISCSIDeviceRefusesAmbiguousMatchingSessions(t *testing.T) {
+	service := NewNodeService("node", nil, true, nil, false, 5)
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	service.runISCSIAdmFn = func(context.Context, ...string) ([]byte, error) {
+		return []byte("Target: " + testISCSIIQN + "\n    Current Portal: 192.0.2.10:3260,1\n    Attached scsi disk sdb State: running\n" +
+			"Target: " + testISCSIIQN + "\n    Current Portal: 192.0.2.10:3260,1\n    Attached scsi disk sdc State: running\n"), nil
+	}
+	if _, err := service.findISCSIDevice(context.Background(), params); !errors.Is(err, errISCSIAmbiguousDevice) {
+		t.Fatalf("findISCSIDevice() error = %v, want ambiguous device", err)
+	}
+}
+
+func TestStageISCSIVolumeRefusesAmbiguousExistingSession(t *testing.T) {
+	service := NewNodeService("node", nil, true, nil, false, 5)
+	service.runISCSIAdmFn = func(context.Context, ...string) ([]byte, error) {
+		return []byte("Target: " + testISCSIIQN + "\n    Current Portal: 192.0.2.10:3260,1\n    Attached scsi disk sdb State: running\n" +
+			"Target: " + testISCSIIQN + "\n    Current Portal: 192.0.2.10:3260,1\n    Attached scsi disk sdc State: running\n"), nil
+	}
+	request := &csi.NodeStageVolumeRequest{
+		VolumeId: "tank/csi/volume", StagingTargetPath: filepath.Join(t.TempDir(), "globalmount"),
+		VolumeCapability: &csi.VolumeCapability{AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{}}},
+		VolumeContext:    map[string]string{VolumeContextKeyProtocol: ProtocolISCSI, VolumeContextKeyISCSIIQN: testISCSIIQN, "server": "192.0.2.10", "port": "3260"},
+	}
+	_, err := service.NodeStageVolume(context.Background(), request)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("NodeStageVolume() error = %v, want FailedPrecondition", err)
 	}
 }

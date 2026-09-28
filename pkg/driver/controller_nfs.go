@@ -27,9 +27,12 @@ type encryptionConfig struct {
 }
 
 // nfsVolumeParams holds validated parameters for NFS volume creation.
+//
+//nolint:govet // Keep fields in logical groups alongside existing parameter fields.
 type nfsVolumeParams struct {
 	zfsProps          *zfsDatasetProperties
 	encryption        *encryptionConfig
+	shareAccess       nfsShareAccess
 	parentDataset     string
 	volumeName        string
 	datasetName       string
@@ -177,6 +180,10 @@ func parseEncryptionConfig(params, secrets map[string]string) *encryptionConfig 
 // validateNFSParams validates and extracts NFS volume parameters from the request.
 func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	params := req.GetParameters()
+	shareAccess, accessErr := parseNFSShareAccess(params)
+	if accessErr != nil {
+		return nil, accessErr
+	}
 
 	pool := params["pool"]
 	if pool == "" {
@@ -231,6 +238,7 @@ func validateNFSParams(req *csi.CreateVolumeRequest) (*nfsVolumeParams, error) {
 	storageClass := params["csi.storage.k8s.io/sc/name"]
 
 	return &nfsVolumeParams{
+		shareAccess:       shareAccess,
 		pool:              pool,
 		server:            server,
 		parentDataset:     parentDataset,
@@ -317,6 +325,10 @@ func (s *ControllerService) handleExistingNFSVolume(ctx context.Context, params 
 	if existingShare == nil {
 		// Dataset exists but no NFS share for this mountpoint - continue with share creation
 		return nil, false, nil
+	}
+	if err := checkExistingNFSShareAccess(params.shareAccess, existingShare); err != nil {
+		timer.ObserveError()
+		return nil, false, err
 	}
 	klog.V(4).Infof("NFS volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
 
@@ -472,6 +484,8 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 		Comment:      comment,
 		MaprootUser:  zfsACLModeRoot,
 		MaprootGroup: zfsACLModeWheel,
+		Hosts:        params.shareAccess.hosts,
+		Networks:     params.shareAccess.networks,
 		Enabled:      true,
 	})
 	if err != nil {
@@ -744,6 +758,10 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 // setupNFSVolumeFromClone sets up an NFS share for a cloned dataset.
 func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.Dataset, server string, info *cloneInfo) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("Setting up NFS share for cloned dataset: %s (cloneMode: %s)", dataset.Name, info.Mode)
+	access, accessErr := parseNFSShareAccess(req.GetParameters())
+	if accessErr != nil {
+		return nil, accessErr
+	}
 
 	volumeName := req.GetName()
 
@@ -753,6 +771,8 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 		Comment:      "CSI Volume (from snapshot): " + volumeName,
 		MaprootUser:  zfsACLModeRoot,
 		MaprootGroup: zfsACLModeWheel,
+		Hosts:        access.hosts,
+		Networks:     access.networks,
 		Enabled:      true,
 	})
 	if err != nil {
@@ -855,6 +875,11 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 // This is called when a volume is found by CSI name but needs to be adopted into a new cluster.
 func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest, dataset *tnsapi.DatasetWithProperties, params map[string]string) (*csi.CreateVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolNFS, "adopt")
+	access, accessErr := parseNFSShareAccess(params)
+	if accessErr != nil {
+		timer.ObserveError()
+		return nil, accessErr
+	}
 	volumeName := req.GetName()
 	klog.Infof("Adopting NFS volume: %s (dataset=%s)", volumeName, dataset.ID)
 
@@ -886,6 +911,10 @@ func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateV
 	if len(existingShares) > 0 {
 		// NFS share already exists - use it
 		nfsShare = &existingShares[0]
+		if err := checkExistingNFSShareAccess(access, nfsShare); err != nil {
+			timer.ObserveError()
+			return nil, err
+		}
 		klog.Infof("Found existing NFS share for adopted volume: ID=%d, path=%s", nfsShare.ID, nfsShare.Path)
 	} else {
 		// Create new NFS share
@@ -896,6 +925,8 @@ func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateV
 			Comment:      comment,
 			MaprootUser:  zfsACLModeRoot,
 			MaprootGroup: zfsACLModeWheel,
+			Hosts:        access.hosts,
+			Networks:     access.networks,
 			Enabled:      true,
 		})
 		if createErr != nil {

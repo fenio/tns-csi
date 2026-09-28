@@ -1359,11 +1359,12 @@ type NFSShareCreateParams struct {
 
 // NFSShare represents an NFS share.
 type NFSShare struct {
-	Path    string   `json:"path"`
-	Comment string   `json:"comment"`
-	Hosts   []string `json:"hosts"`
-	ID      int      `json:"id"`
-	Enabled bool     `json:"enabled"`
+	Path     string   `json:"path"`
+	Comment  string   `json:"comment"`
+	Hosts    []string `json:"hosts"`
+	Networks []string `json:"networks"`
+	ID       int      `json:"id"`
+	Enabled  bool     `json:"enabled"`
 }
 
 // CreateNFSShare creates a new NFS share.

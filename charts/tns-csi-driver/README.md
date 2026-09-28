@@ -267,8 +267,26 @@ Keep this setting disabled on platforms whose SELinux policy does not support ku
 | `zfs.volblocksize` | ZVOL block size (e.g., `16K`, `64K`) | nvmeof, iscsi |
 | `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | nvmeof |
 | `filesystemCheckMode` | Pre-mount filesystem check: `none` or `preen` | nvmeof, iscsi |
+| `nfsHosts` | Comma-separated client hostnames/IPs allowed to mount new NFS shares | nfs |
+| `nfsNetworks` | Comma-separated client CIDR networks allowed to mount new NFS shares | nfs |
 
 See [FEATURES.md](../../docs/FEATURES.md) for complete ZFS property documentation.
+
+**Restricting NFS clients:** Add either or both optional parameters to the NFS StorageClass. The Helm chart passes entries from `parameters` to the driver:
+
+```yaml
+storageClasses:
+  - name: tns-csi-nfs
+    enabled: true
+    protocol: nfs
+    pool: tank
+    server: 10.0.0.1
+    parameters:
+      nfsNetworks: "10.10.20.0/24,10.10.21.0/24"
+      nfsHosts: "node1.example.com,192.0.2.6"
+```
+
+Use the node addresses as seen by TrueNAS (which may differ from pod addresses behind NAT). Blank parameters preserve the existing unrestricted default. Invalid or empty list entries fail provisioning. The restrictions apply to newly created shares, including snapshot clones and shares created during adoption; an existing share is never modified automatically. If it does not already match an explicit allowlist, provisioning fails until you update that share in TrueNAS. Changing a StorageClass does not retroactively restrict existing NFS shares.
 
 **Important Note on `parentDataset`:**
 - If `parentDataset` is specified, it must already exist on TrueNAS

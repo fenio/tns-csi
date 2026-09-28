@@ -63,6 +63,9 @@ func TestCreateNFSVolume(t *testing.T) {
 					}, nil
 				}
 				m.CreateNFSShareFunc = func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
+					if len(params.Hosts) != 0 || len(params.Networks) != 0 {
+						t.Errorf("default NFS share access changed: hosts=%v networks=%v", params.Hosts, params.Networks)
+					}
 					return &tnsapi.NFSShare{
 						ID:      1,
 						Path:    "/mnt/tank/csi/test-nfs-volume",

@@ -277,10 +277,11 @@ func createMultiMountPod(ctx context.Context, f *framework.Framework, name, nfsP
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:         "test",
-					Image:        "public.ecr.aws/docker/library/busybox:latest",
-					Command:      []string{"sleep", "3600"},
-					VolumeMounts: volumeMounts,
+					Name:            "test",
+					Image:           framework.TestPodImage,
+					ImagePullPolicy: corev1.PullIfNotPresent,
+					Command:         []string{"sleep", "3600"},
+					VolumeMounts:    volumeMounts,
 				},
 			},
 			Volumes:       volumes,

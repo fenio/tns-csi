@@ -255,6 +255,8 @@ Keep this setting disabled on platforms whose SELinux policy does not support ku
 | `port` | iSCSI port | `3260` |
 | `fsType` | Filesystem type (ext4/xfs) | `ext4` |
 
+For iSCSI, `server` must identify one advertised TrueNAS portal address. If a hostname resolves to several advertised interfaces, configure a specific IP instead; the node refuses an ambiguous portal rather than creating multiple sessions. Existing sessions on other interfaces are not removed automatically.
+
 **Additional Parameters (via `parameters` map):**
 
 | Parameter | Description | Protocols |

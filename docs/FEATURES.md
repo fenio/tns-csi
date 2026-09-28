@@ -43,6 +43,7 @@ The TNS CSI Driver is a Kubernetes Container Storage Interface (CSI) driver that
   - Pre-configured iSCSI portal
 - **Architecture**: Dedicated target model (1 target per volume with 1 extent)
 - **Node Requirements**: `open-iscsi` package installed on Kubernetes nodes
+- **Portal selection**: Node login and restaging use only the portal matching the StorageClass `server` and `port`. If a hostname resolves to multiple advertised portal addresses, select one IP explicitly; the node will not log in through every discovered interface.
 
 ### SMB/CIFS (Server Message Block)
 - **Status**: ✅ Functional, testing in progress

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,10 +73,11 @@ func (s *NodeService) runISCSIAdm(ctx context.Context, args ...string) ([]byte, 
 
 // iscsiConnectionParams holds validated iSCSI connection parameters.
 type iscsiConnectionParams struct {
-	iqn    string
-	server string
-	port   string
-	lun    int
+	iqn       string
+	server    string
+	port      string
+	serverIPs []netip.Addr
+	lun       int
 }
 
 // stageISCSIVolume stages an iSCSI volume by logging into the target.
@@ -89,6 +92,10 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	if err != nil {
 		return nil, err
 	}
+	params.serverIPs, err = resolveISCSIServerIPs(ctx, params.server)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "cannot resolve iSCSI server %s: %v", params.server, err)
+	}
 	if err := writeISCSIStagingIQN(stagingTargetPath, params.iqn); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to persist iSCSI staging metadata: %v", err)
 	}
@@ -102,6 +109,8 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	if devicePath, findErr := s.findISCSIDevice(ctx, params); findErr == nil && devicePath != "" {
 		klog.V(4).Infof("iSCSI device already connected at %s - reusing existing connection", devicePath)
 		return s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	} else if findErr != nil && !errors.Is(findErr, ErrISCSIDeviceNotFound) {
+		return nil, status.Errorf(codes.FailedPrecondition, "cannot safely select an iSCSI device for %s: %v", params.iqn, findErr)
 	}
 
 	// Check if iscsiadm is installed
@@ -218,15 +227,21 @@ func (s *NodeService) checkISCSIAdm(ctx context.Context) error {
 
 // loginISCSITarget discovers and logs into an iSCSI target.
 func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnectionParams) error {
-	portal := params.server + ":" + params.port
+	portal := net.JoinHostPort(strings.Trim(params.server, "[]"), params.port)
+	if len(params.serverIPs) == 0 {
+		ips, err := resolveISCSIServerIPs(ctx, params.server)
+		if err != nil {
+			return err
+		}
+		params.serverIPs = ips
+	}
 
 	// Step 1: Discovery
 	klog.Infof("iSCSI: Discovering targets at portal %s for IQN %s", portal, params.iqn)
 	discoverCtx, discoverCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer discoverCancel()
 
-	discoverCmd := iscsiadmCmd(discoverCtx, "-m", "discovery", "-t", "sendtargets", "-p", portal)
-	output, err := discoverCmd.CombinedOutput()
+	output, err := s.runISCSIAdm(discoverCtx, "-m", "discovery", "-t", "sendtargets", "-p", portal)
 	if err != nil {
 		// Log the discovery error - this is critical for debugging
 		klog.Errorf("iSCSI discovery failed at %s: %v, output: %s", portal, err, string(output))
@@ -241,30 +256,30 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	}
 
 	// Step 2: Check if target is in node database
-	// Note: Don't specify portal here because TrueNAS may report a different portal IP
-	// than the hostname we used for discovery (e.g., discovery with hostname, but TrueNAS
-	// reports its IP). The node database stores the portal from the discovery response.
+	// TrueNAS may return multiple interfaces for one IQN. Select the record on
+	// the configured server (resolving hostnames to the advertised IP), not all records.
 	klog.Infof("iSCSI: Checking if target '%s' is in node database", params.iqn)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer checkCancel()
-	checkCmd := iscsiadmCmd(checkCtx, "-m", "node", "-T", params.iqn)
 	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -T %s", params.iqn)
-	checkOutput, checkErr := checkCmd.CombinedOutput()
+	checkOutput, checkErr := s.runISCSIAdm(checkCtx, "-m", "node", "-T", params.iqn)
 	if checkErr != nil {
 		klog.Errorf("iSCSI target '%s' not found in node database: %v, output: %s",
 			params.iqn, checkErr, string(checkOutput))
 		return fmt.Errorf("%w - check that TrueNAS iSCSI service is running and target is properly configured: %s", ErrISCSITargetNotInDB, string(checkOutput))
 	}
 	klog.Infof("iSCSI target '%s' found in node database: %s", params.iqn, string(checkOutput))
+	selectedPortal, selectErr := selectISCSINodePortal(string(checkOutput), params.iqn, params.server, params.port, params.serverIPs)
+	if selectErr != nil {
+		return selectErr
+	}
 
 	// Step 3: Login
-	// Don't specify portal - login to the target on whatever portal it was discovered
-	klog.Infof("Logging into iSCSI target: %s", params.iqn)
+	klog.Infof("Logging into iSCSI target %s through %s", params.iqn, selectedPortal)
 	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer loginCancel()
 
-	loginCmd := iscsiadmCmd(loginCtx, "-m", "node", "-T", params.iqn, "--login")
-	output, err = loginCmd.CombinedOutput()
+	output, err = s.runISCSIAdm(loginCtx, "-m", "node", "-T", params.iqn, "-p", selectedPortal, "--login")
 	if err != nil {
 		// Check if already logged in
 		alreadyLoggedIn := strings.Contains(string(output), "already present") ||
@@ -410,8 +425,7 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	cmd := iscsiadmCmd(sessionCtx, "-m", "session", "-P", "3")
-	output, err := cmd.CombinedOutput()
+	output, err := s.runISCSIAdm(sessionCtx, "-m", "session", "-P", "3")
 
 	// Always log the output for debugging
 	klog.Infof("iscsiadm -m session -P 3: err=%v, output:\n%s", err, string(output))
@@ -420,7 +434,17 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 		return "", ErrISCSIDeviceNotFound
 	}
 
-	deviceName := parseISCSISessionDevice(string(output), params.iqn)
+	addresses := params.serverIPs
+	if len(addresses) == 0 {
+		addresses, err = resolveISCSIServerIPs(ctx, params.server)
+		if err != nil {
+			return "", err
+		}
+	}
+	deviceName, parseErr := parseISCSISessionDeviceForPortal(string(output), params.iqn, params.server, params.port, addresses)
+	if parseErr != nil {
+		return "", parseErr
+	}
 	if deviceName == "" {
 		klog.Infof("parseISCSISessionDevice found no device for IQN: %s", params.iqn)
 		return "", ErrISCSIDeviceNotFound
@@ -431,39 +455,6 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	return devicePath, nil
 }
 
-// parseISCSISessionDevice parses iscsiadm -m session -P 3 output to find
-// the attached disk for a specific IQN.
-func parseISCSISessionDevice(output, targetIQN string) string {
-	lines := strings.Split(output, "\n")
-	inTargetSection := false
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Check if we're entering a target section
-		// Format: "Target: iqn.2005-10.org.freenas.ctl:pvc-xxx (non-flash)"
-		// The IQN might be followed by extra text like "(non-flash)"
-		if strings.HasPrefix(line, iscsiTargetPrefix) {
-			targetFields := strings.Fields(strings.TrimSpace(strings.TrimPrefix(line, iscsiTargetPrefix)))
-			inTargetSection = len(targetFields) > 0 && targetFields[0] == targetIQN
-			continue
-		}
-
-		// If we're in the right target section, look for attached disk
-		if inTargetSection && strings.Contains(line, "Attached scsi disk") {
-			// Line format: "Attached scsi disk sda	State: running"
-			parts := strings.Fields(line)
-			for i, part := range parts {
-				if part == "disk" && i+1 < len(parts) {
-					return parts[i+1] // Return device name like "sda"
-				}
-			}
-		}
-	}
-
-	return ""
-}
-
 // waitForISCSIDevice waits for the iSCSI device to appear after login.
 func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConnectionParams, timeout time.Duration) (string, error) {
 	klog.Infof("Waiting for iSCSI device for IQN %s (timeout: %v)", params.iqn, timeout)
@@ -471,6 +462,9 @@ func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConne
 	deadline := time.Now().Add(timeout)
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
 		devicePath, err := s.findISCSIDevice(ctx, params)
+		if err != nil && !errors.Is(err, ErrISCSIDeviceNotFound) {
+			return "", err
+		}
 		if err == nil && devicePath != "" {
 			if _, statErr := os.Stat(devicePath); statErr == nil {
 				klog.Infof("iSCSI device ready: %s (attempt %d)", devicePath, attempt)

@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -49,13 +50,16 @@ Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume-longer (non-flash)
 func TestParseISCSISessionDeviceUsesExactIQN(t *testing.T) {
 	output := `
 Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume-longer (non-flash)
+    Current Portal: 192.0.2.10:3260,1
     Attached scsi disk sdb State: running
 Target: iqn.2005-10.org.freenas.ctl:pvc-test-volume (non-flash)
+    Current Portal: 192.0.2.10:3260,1
     Attached scsi disk sdc State: running
 `
 
-	if got := parseISCSISessionDevice(output, testISCSIIQN); got != "sdc" {
-		t.Fatalf("parseISCSISessionDevice() = %q, want %q", got, "sdc")
+	got, err := parseISCSISessionDeviceForPortal(output, testISCSIIQN, "192.0.2.10", "3260", []netip.Addr{netip.MustParseAddr("192.0.2.10")})
+	if err != nil || got != "sdc" {
+		t.Fatalf("parseISCSISessionDeviceForPortal() = %q, %v; want sdc, nil", got, err)
 	}
 }
 

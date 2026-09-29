@@ -157,8 +157,9 @@ func TestLoginISCSITargetSelectsOnePortal(t *testing.T) {
 		t.Fatal(err)
 	}
 	discoveryMatches := len(calls) == 3 && slices.Equal(calls[0], []string{"-m", "discovery", "-t", "sendtargets", "-p", "truenas.local:3260"})
+	nodeListingMatches := len(calls) == 3 && slices.Equal(calls[1], []string{"-m", "node", "-P", "0"})
 	loginMatches := len(calls) == 3 && slices.Equal(calls[2], []string{"-m", "node", "-T", testISCSIIQN, "-p", "192.0.2.10:3260,1", "--login"})
-	if !discoveryMatches || !loginMatches {
+	if !discoveryMatches || !nodeListingMatches || !loginMatches {
 		t.Fatalf("iscsiadm calls = %v; login must specify only the LAN portal", calls)
 	}
 
@@ -172,6 +173,46 @@ func TestLoginISCSITargetSelectsOnePortal(t *testing.T) {
 	}
 	if err := service.loginISCSITarget(context.Background(), params); !errors.Is(err, errISCSIPortalNotFound) || len(calls) != 2 {
 		t.Fatalf("missing configured portal = %v, calls %v; must fail without login", err, calls)
+	}
+}
+
+func TestLoginISCSITargetUsesCompactListingNotFilteredConfiguration(t *testing.T) {
+	// The failure in run 36613808566 showed configuration blocks from a node
+	// query with -T. Adding -P 0 to that filtered query would still print blocks.
+	configuration := "# BEGIN RECORD 2.1.9\n" +
+		"node.name = " + testISCSIIQN + "\n" +
+		"node.tpgt = 1\n" +
+		"node.conn[0].address = 192.0.2.10\n" +
+		"node.conn[0].port = 3260\n# END RECORD\n"
+	service := NewNodeService("node", nil, true, nil, false, 5)
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	logins := 0
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		switch {
+		case slices.Contains(args, "--login"):
+			if !slices.Equal(args, []string{"-m", "node", "-T", testISCSIIQN, "-p", "192.0.2.10:3260,1", "--login"}) {
+				t.Fatalf("unsafe login arguments: %v", args)
+			}
+			logins++
+			return []byte("Login successful"), nil
+		case slices.Contains(args, "sendtargets"):
+			return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+		case slices.Contains(args, "-T"):
+			return []byte(configuration), nil
+		default:
+			if !slices.Equal(args, []string{"-m", "node", "-P", "0"}) {
+				t.Fatalf("unexpected node query: %v", args)
+			}
+			return []byte("192.0.2.10:3260,1 " + testISCSIIQN + "-other\n" +
+				"100.64.0.5:3260,1 " + testISCSIIQN + "\n" +
+				"192.0.2.10:3260,1 " + testISCSIIQN + "\n"), nil
+		}
+	}
+	if err := service.loginISCSITarget(context.Background(), params); err != nil {
+		t.Fatalf("login using compact node listing failed: %v", err)
+	}
+	if logins != 1 {
+		t.Fatalf("login calls = %d, want exactly one", logins)
 	}
 }
 

@@ -258,11 +258,13 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 	// Step 2: Check if target is in node database
 	// TrueNAS may return multiple interfaces for one IQN. Select the record on
 	// the configured server (resolving hostnames to the advertised IP), not all records.
+	// Do not pass -T here: open-iscsi prints configuration blocks for a filtered
+	// node query, even with -P 0. List compact records and filter the IQN in Go.
 	klog.Infof("iSCSI: Checking if target '%s' is in node database", params.iqn)
 	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer checkCancel()
-	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -T %s", params.iqn)
-	checkOutput, checkErr := s.runISCSIAdm(checkCtx, "-m", "node", "-T", params.iqn)
+	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -P 0")
+	checkOutput, checkErr := s.runISCSIAdm(checkCtx, "-m", "node", "-P", "0")
 	if checkErr != nil {
 		klog.Errorf("iSCSI target '%s' not found in node database: %v, output: %s",
 			params.iqn, checkErr, string(checkOutput))

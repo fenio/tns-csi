@@ -178,6 +178,15 @@ func buildISCSIVolumeResponse(volumeName, server, targetIQN string, zvol *tnsapi
 
 // createISCSIVolume creates an iSCSI volume (ZVOL + extent + target + target-extent).
 func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	// The provisioner retries once its deadline expires, possibly while the timed-out call
+	// is still running here. Two overlapping calls would reuse each other's objects, and the
+	// one that fails could clean up an extent or target the other has just returned. Refuse
+	// the overlap; Aborted tells the provisioner to back off and retry.
+	if _, running := s.iscsiCreatesInFlight.LoadOrStore(req.GetName(), struct{}{}); running {
+		return nil, status.Errorf(codes.Aborted, "CreateVolume for %s is already in progress", req.GetName())
+	}
+	defer s.iscsiCreatesInFlight.Delete(req.GetName())
+
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, "create")
 	klog.V(4).Info("Creating iSCSI volume")
 
@@ -357,32 +366,9 @@ func (s *ControllerService) handleExistingISCSIVolume(ctx context.Context, param
 	if err != nil || target == nil {
 		// Target lookup by name failed — try property-based fallback (handles name changes across clusters)
 		klog.V(4).Infof("iSCSI target not found by name %s, trying property-based fallback", params.volumeName)
-		storedProps, propErr := s.apiClient.GetDatasetProperties(ctx, existingZvol.ID, []string{
-			tnsapi.PropertyISCSITargetID,
-			tnsapi.PropertyISCSIExtentID,
-			tnsapi.PropertyISCSIIQN,
-		})
-		if propErr == nil {
-			storedTargetID := tnsapi.StringToInt(storedProps[tnsapi.PropertyISCSITargetID])
-			storedExtentID := tnsapi.StringToInt(storedProps[tnsapi.PropertyISCSIExtentID])
-			storedIQN := storedProps[tnsapi.PropertyISCSIIQN]
-			if storedTargetID > 0 && storedExtentID > 0 && storedIQN != "" {
-				klog.Infof("Found stored iSCSI properties: targetID=%d, extentID=%d, IQN=%s — verifying resources exist",
-					storedTargetID, storedExtentID, storedIQN)
-				// Verify the stored target and extent still exist on TrueNAS
-				targets, targetErr := s.apiClient.QueryISCSITargets(ctx, []interface{}{[]interface{}{"id", "=", storedTargetID}})
-				extents, extentErr := s.apiClient.QueryISCSIExtents(ctx, []interface{}{[]interface{}{"id", "=", storedExtentID}})
-				if targetErr == nil && len(targets) > 0 && extentErr == nil && len(extents) > 0 {
-					klog.Infof("iSCSI volume found via stored properties (target=%d, extent=%d, IQN=%s)",
-						storedTargetID, storedExtentID, storedIQN)
-
-					s.ensureISCSIProperties(ctx, existingZvol.ID, params, &targets[0], &extents[0], storedIQN)
-
-					resp := buildISCSIVolumeResponse(params.volumeName, params.server, storedIQN, existingZvol, &targets[0], &extents[0], existingCapacity)
-					timer.ObserveSuccess()
-					return resp, true, nil
-				}
-			}
+		resp, done, fallbackErr := s.findISCSIVolumeByStoredProperties(ctx, params, existingZvol, existingCapacity, timer)
+		if fallbackErr != nil || done {
+			return resp, done, fallbackErr
 		}
 		// Property fallback failed too — continue to create
 		klog.V(4).Infof("iSCSI target not found for existing ZVOL (including property fallback), will create: %v", err)
@@ -431,6 +417,77 @@ func (s *ControllerService) handleExistingISCSIVolume(ctx context.Context, param
 	s.ensureISCSIProperties(ctx, existingZvol.ID, params, target, extent, fullIQN)
 
 	resp := buildISCSIVolumeResponse(params.volumeName, params.server, fullIQN, existingZvol, target, extent, existingCapacity)
+	timer.ObserveSuccess()
+	return resp, true, nil
+}
+
+// storedISCSIIDs reads the target ID, extent ID and IQN recorded on the ZVOL. Unreadable
+// properties count as absent: the create path then looks the objects up by name.
+func (s *ControllerService) storedISCSIIDs(ctx context.Context, zvolID string) (targetID, extentID int, iqn string) {
+	props, err := s.apiClient.GetDatasetProperties(ctx, zvolID, []string{
+		tnsapi.PropertyISCSITargetID,
+		tnsapi.PropertyISCSIExtentID,
+		tnsapi.PropertyISCSIIQN,
+	})
+	if err != nil {
+		klog.V(4).Infof("Could not read stored iSCSI properties on %s: %v", zvolID, err)
+		return 0, 0, ""
+	}
+	return tnsapi.StringToInt(props[tnsapi.PropertyISCSITargetID]),
+		tnsapi.StringToInt(props[tnsapi.PropertyISCSIExtentID]),
+		props[tnsapi.PropertyISCSIIQN]
+}
+
+// findISCSIVolumeByStoredProperties looks up the target and extent recorded in the ZVOL's
+// ZFS properties (handles target names that changed across clusters). It returns the
+// volume only after the same checks as the name-based path: the extent backs this ZVOL and
+// the target maps it alone at LUN 0. Otherwise it reports not-done so the create path runs.
+func (s *ControllerService) findISCSIVolumeByStoredProperties(ctx context.Context, params *iscsiVolumeParams, existingZvol *tnsapi.Dataset, existingCapacity int64, timer *metrics.OperationTimer) (*csi.CreateVolumeResponse, bool, error) {
+	storedTargetID, storedExtentID, storedIQN := s.storedISCSIIDs(ctx, existingZvol.ID)
+	if storedTargetID <= 0 || storedExtentID <= 0 || storedIQN == "" {
+		return nil, false, nil
+	}
+	klog.Infof("Found stored iSCSI properties: targetID=%d, extentID=%d, IQN=%s — verifying resources",
+		storedTargetID, storedExtentID, storedIQN)
+
+	// Verify the stored target and extent still exist on TrueNAS. A failed query is
+	// returned rather than treated as "gone": creating anew would duplicate a live volume.
+	targets, err := s.apiClient.QueryISCSITargets(ctx, []interface{}{[]interface{}{"id", "=", storedTargetID}})
+	if err != nil {
+		timer.ObserveError()
+		return nil, false, status.Errorf(codes.Internal, "Failed to query stored iSCSI target %d: %v", storedTargetID, err)
+	}
+	extents, err := s.apiClient.QueryISCSIExtents(ctx, []interface{}{[]interface{}{"id", "=", storedExtentID}})
+	if err != nil {
+		timer.ObserveError()
+		return nil, false, status.Errorf(codes.Internal, "Failed to query stored iSCSI extent %d: %v", storedExtentID, err)
+	}
+	if len(targets) == 0 || len(extents) == 0 {
+		return nil, false, nil
+	}
+	target, extent := &targets[0], &extents[0]
+
+	if extent.Disk != "zvol/"+params.zvolName {
+		// Stale properties: never report a volume backed by another disk.
+		klog.Warningf("Stored iSCSI extent %d backs %s, not zvol/%s — ignoring stored properties",
+			extent.ID, extent.Disk, params.zvolName)
+		return nil, false, nil
+	}
+	mapped, err := s.iscsiTargetMapsExtent(ctx, target.ID, extent.ID)
+	if err != nil {
+		timer.ObserveError()
+		return nil, false, err
+	}
+	if !mapped {
+		klog.Warningf("Stored iSCSI target %d does not map extent %d — ignoring stored properties", target.ID, extent.ID)
+		return nil, false, nil
+	}
+
+	klog.Infof("iSCSI volume found via stored properties (target=%d, extent=%d, IQN=%s)",
+		storedTargetID, storedExtentID, storedIQN)
+	s.ensureISCSIProperties(ctx, existingZvol.ID, params, target, extent, storedIQN)
+
+	resp := buildISCSIVolumeResponse(params.volumeName, params.server, storedIQN, existingZvol, target, extent, existingCapacity)
 	timer.ObserveSuccess()
 	return resp, true, nil
 }
@@ -642,24 +699,28 @@ func (s *ControllerService) getOrCreateISCSITarget(ctx context.Context, params *
 	return target, true, nil
 }
 
-// iscsiTargetMapsExtent reports whether the target already maps the extent as a LUN.
-// It returns AlreadyExists if the target maps a different extent: that target belongs to
-// another volume.
+// iscsiTargetMapsExtent reports whether the target maps exactly the extent as LUN 0 and
+// nothing else — the layout CreateVolume builds, and the one the node relies on since it
+// does not check the LUN when it picks the device. (false, nil) means nothing is mapped
+// yet. Any other layout (another extent, this extent at a non-zero LUN, or extra LUNs)
+// returns AlreadyExists: the target was not built by this driver for this volume.
 func (s *ControllerService) iscsiTargetMapsExtent(ctx context.Context, targetID, extentID int) (bool, error) {
 	associations, err := s.apiClient.ISCSITargetExtentByTarget(ctx, targetID)
 	if err != nil {
 		return false, status.Errorf(codes.Internal, "Failed to query iSCSI target-extent associations for target %d: %v", targetID, err)
 	}
+	switch {
+	case len(associations) == 0:
+		return false, nil
+	case len(associations) == 1 && associations[0].Extent == extentID && associations[0].LunID == 0:
+		return true, nil
+	}
+	mappings := make([]string, 0, len(associations))
 	for _, te := range associations {
-		if te.Extent == extentID {
-			return true, nil
-		}
+		mappings = append(mappings, fmt.Sprintf("extent %d at LUN %d", te.Extent, te.LunID))
 	}
-	if len(associations) > 0 {
-		return false, status.Errorf(codes.AlreadyExists,
-			"iSCSI target %d already maps extent %d, not %d", targetID, associations[0].Extent, extentID)
-	}
-	return false, nil
+	return false, status.Errorf(codes.AlreadyExists,
+		"iSCSI target %d must map only extent %d at LUN 0, but maps %s", targetID, extentID, strings.Join(mappings, ", "))
 }
 
 // ensureISCSITargetExtent maps the extent to the target as LUN 0 unless it already is.

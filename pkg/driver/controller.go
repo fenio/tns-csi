@@ -250,9 +250,12 @@ type ControllerService struct {
 	// publishedVolumes tracks volumes published to nodes with their readonly state.
 	// Key format: "volumeID:nodeID", value: readonly state.
 	// Used to detect incompatible re-publish attempts per CSI spec.
-	publishedVolumes   map[string]bool
-	clusterID          string
-	publishedVolumesMu sync.RWMutex
+	publishedVolumes map[string]bool
+	// iscsiCreatesInFlight holds the names of volumes an iSCSI CreateVolume is running for,
+	// so a retry cannot overlap the attempt it is retrying (see createISCSIVolume).
+	iscsiCreatesInFlight sync.Map
+	clusterID            string
+	publishedVolumesMu   sync.RWMutex
 }
 
 // NewControllerService creates a new controller service.

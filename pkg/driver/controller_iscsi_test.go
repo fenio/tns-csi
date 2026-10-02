@@ -1037,13 +1037,25 @@ func TestCreateISCSIVolumeResumesPartialCreate(t *testing.T) {
 			wantCreated: []string{"extent", "target", "targetextent"},
 		},
 		{
+			// A stored target is only a hint: a wrong layout means the ID is stale, so it is
+			// ignored (not fatal) and the volume gets its own target.
 			name: "stored target maps the extent at a non-zero LUN",
 			nas: &partialISCSINAS{
 				storedExtent:  &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
-				storedTarget:  &tnsapi.ISCSITarget{ID: 42, Name: "old-" + volName},
-				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 7, Target: 42, Extent: 730, LunID: 3}},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 50, Name: "old-" + volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 9, Target: 50, Extent: 730, LunID: 3}},
 			},
-			wantCode: codes.AlreadyExists,
+			wantCreated: []string{"extent", "target", "targetextent"},
+		},
+		{
+			// TrueNAS reused the stored target ID for another volume's target.
+			name: "stored target ID now belongs to another volume",
+			nas: &partialISCSINAS{
+				storedExtent:  &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 50, Name: "pvc-someone-else"},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 9, Target: 50, Extent: 99}},
+			},
+			wantCreated: []string{"extent", "target", "targetextent"},
 		},
 		{
 			// Cleanup must not delete an extent this call did not create.
@@ -1102,13 +1114,12 @@ func TestCreateISCSIVolumeResumesPartialCreate(t *testing.T) {
 	}
 }
 
-// TestCreateISCSIVolumeRejectsOverlappingCreate covers the provisioner retrying while the
+// TestCreateVolumeRejectsOverlappingCreate covers the provisioner retrying while the
 // attempt it gave up on is still running: the overlap is refused, so a failing call can
 // never clean up objects the other one has reused and returned.
-func TestCreateISCSIVolumeRejectsOverlappingCreate(t *testing.T) {
-	const volName = "pvc-overlap"
+func TestCreateVolumeRejectsOverlappingCreate(t *testing.T) {
 	req := &csi.CreateVolumeRequest{
-		Name: volName,
+		Name: "pvc-overlap",
 		VolumeCapabilities: []*csi.VolumeCapability{{
 			AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
 			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
@@ -1118,38 +1129,44 @@ func TestCreateISCSIVolumeRejectsOverlappingCreate(t *testing.T) {
 		},
 		CapacityRange: &csi.CapacityRange{RequiredBytes: 1 << 30},
 	}
+	controller := &ControllerService{apiClient: &MockAPIClientForSnapshots{}}
 
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	m := &MockAPIClientForSnapshots{}
-	m.QueryAllDatasetsFunc = func(_ context.Context, _ string) ([]tnsapi.Dataset, error) {
-		close(entered)
-		<-release
-		return nil, errors.New("slow NAS gave up")
-	}
-	controller := &ControllerService{apiClient: m}
-
-	firstErr := make(chan error, 1)
-	go func() {
-		_, err := controller.createISCSIVolume(context.Background(), req)
-		firstErr <- err
-	}()
-	<-entered
-
-	if _, err := controller.createISCSIVolume(context.Background(), req); status.Code(err) != codes.Aborted {
+	// A call for this name is still running.
+	controller.createsInFlight.Store(req.GetName(), struct{}{})
+	if _, err := controller.CreateVolume(context.Background(), req); status.Code(err) != codes.Aborted {
 		t.Fatalf("overlapping create: want Aborted, got %v", err)
 	}
 
-	close(release)
-	if err := <-firstErr; status.Code(err) != codes.Internal {
-		t.Fatalf("first create: want Internal, got %v", err)
+	// Once it returns, the name is free again, and every call releases it however it ends.
+	controller.createsInFlight.Delete(req.GetName())
+	if _, err := controller.CreateVolume(context.Background(), req); status.Code(err) == codes.Aborted {
+		t.Fatalf("create with no call in flight was rejected as in progress: %v", err)
 	}
+	if _, running := controller.createsInFlight.Load(req.GetName()); running {
+		t.Fatal("CreateVolume returned without releasing the volume name")
+	}
+}
 
-	// Once the first call returns, the name is free again.
-	m.QueryAllDatasetsFunc = func(_ context.Context, _ string) ([]tnsapi.Dataset, error) {
-		return nil, errors.New("still down")
+// TestCleanupISCSICreateOutlivesRequestDeadline covers cleanup after the provisioner's
+// deadline expired: the request context is already canceled, but cleanup must still run.
+func TestCleanupISCSICreateOutlivesRequestDeadline(t *testing.T) {
+	var deleteCtxErr error
+	deleted := false
+	m := &MockAPIClientForSnapshots{}
+	m.DeleteISCSIExtentFunc = func(ctx context.Context, _ int) error {
+		deleted, deleteCtxErr = true, ctx.Err()
+		return nil
 	}
-	if _, err := controller.createISCSIVolume(context.Background(), req); status.Code(err) == codes.Aborted {
-		t.Fatalf("create after the first finished was still rejected as in progress: %v", err)
+	controller := &ControllerService{apiClient: m}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	controller.cleanupISCSICreate(ctx, iscsiCreated{extentID: 730})
+
+	if !deleted {
+		t.Fatal("extent was not deleted")
+	}
+	if deleteCtxErr != nil {
+		t.Fatalf("cleanup ran with a dead context: %v", deleteCtxErr)
 	}
 }

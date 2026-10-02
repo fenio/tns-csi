@@ -251,11 +251,11 @@ type ControllerService struct {
 	// Key format: "volumeID:nodeID", value: readonly state.
 	// Used to detect incompatible re-publish attempts per CSI spec.
 	publishedVolumes map[string]bool
-	// iscsiCreatesInFlight holds the names of volumes an iSCSI CreateVolume is running for,
-	// so a retry cannot overlap the attempt it is retrying (see createISCSIVolume).
-	iscsiCreatesInFlight sync.Map
-	clusterID            string
-	publishedVolumesMu   sync.RWMutex
+	// createsInFlight holds the names of volumes a CreateVolume is running for, so a
+	// retry cannot overlap the attempt it is retrying (see CreateVolume).
+	createsInFlight    sync.Map
+	clusterID          string
+	publishedVolumesMu sync.RWMutex
 }
 
 // NewControllerService creates a new controller service.
@@ -622,6 +622,15 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if err := validateCreateVolumeRequest(req); err != nil {
 		return nil, err
 	}
+
+	// The provisioner retries once its deadline expires, possibly while the timed-out call
+	// is still running here. Overlapping calls would reuse each other's half-built objects,
+	// and the one that fails could clean up what the other has just returned. Refuse the
+	// overlap; Aborted tells the provisioner to back off and retry.
+	if _, running := s.createsInFlight.LoadOrStore(req.GetName(), struct{}{}); running {
+		return nil, status.Errorf(codes.Aborted, "CreateVolume for %s is already in progress", req.GetName())
+	}
+	defer s.createsInFlight.Delete(req.GetName())
 
 	// Parse storage class parameters
 	params := req.GetParameters()

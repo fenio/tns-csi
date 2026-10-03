@@ -3,6 +3,10 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -832,5 +836,370 @@ func TestBuildISCSIVolumeResponse(t *testing.T) {
 	}
 	if ctx[VolumeContextKeyISCSIIQN] != targetIQN {
 		t.Errorf("Expected IQN %q, got %q", targetIQN, ctx[VolumeContextKeyISCSIIQN])
+	}
+}
+
+// partialISCSINAS is a stateful fake for the iSCSI objects CreateVolume builds, so a
+// test can start from whatever an interrupted earlier attempt left on the NAS.
+type partialISCSINAS struct {
+	extent        *tnsapi.ISCSIExtent
+	target        *tnsapi.ISCSITarget
+	targetExtents []tnsapi.ISCSITargetExtent
+	// storedExtent and storedTarget are what the ZVOL's ZFS properties point at (the
+	// fallback lookup used when no target carries the volume's name).
+	storedExtent *tnsapi.ISCSIExtent
+	storedTarget *tnsapi.ISCSITarget
+	created      []string
+	deleted      []string
+	failTarget   bool
+}
+
+func (n *partialISCSINAS) wire(m *MockAPIClientForSnapshots, zvol tnsapi.Dataset) {
+	m.QueryAllDatasetsFunc = func(_ context.Context, _ string) ([]tnsapi.Dataset, error) {
+		return []tnsapi.Dataset{zvol}, nil
+	}
+	m.ISCSIExtentByNameFunc = func(_ context.Context, _ string) (*tnsapi.ISCSIExtent, error) {
+		return n.extent, nil
+	}
+	m.ISCSITargetByNameFunc = func(_ context.Context, _ string) (*tnsapi.ISCSITarget, error) {
+		return n.target, nil
+	}
+	if n.storedTarget != nil && n.storedExtent != nil {
+		m.GetDatasetPropertiesFunc = func(_ context.Context, _ string, _ []string) (map[string]string, error) {
+			return map[string]string{
+				tnsapi.PropertyISCSITargetID: strconv.Itoa(n.storedTarget.ID),
+				tnsapi.PropertyISCSIExtentID: strconv.Itoa(n.storedExtent.ID),
+				tnsapi.PropertyISCSIIQN:      "iqn.2005-10.org.freenas.ctl:" + zvol.Name[strings.LastIndex(zvol.Name, "/")+1:],
+			}, nil
+		}
+		m.QueryISCSITargetsFunc = func(_ context.Context, _ []interface{}) ([]tnsapi.ISCSITarget, error) {
+			return []tnsapi.ISCSITarget{*n.storedTarget}, nil
+		}
+		m.QueryISCSIExtentsFunc = func(_ context.Context, _ []interface{}) ([]tnsapi.ISCSIExtent, error) {
+			return []tnsapi.ISCSIExtent{*n.storedExtent}, nil
+		}
+	}
+	m.ISCSITargetExtentByTargetFunc = func(_ context.Context, targetID int) ([]tnsapi.ISCSITargetExtent, error) {
+		var out []tnsapi.ISCSITargetExtent
+		for _, te := range n.targetExtents {
+			if te.Target == targetID {
+				out = append(out, te)
+			}
+		}
+		return out, nil
+	}
+	m.CreateISCSIExtentFunc = func(_ context.Context, p tnsapi.ISCSIExtentCreateParams) (*tnsapi.ISCSIExtent, error) {
+		if n.extent != nil {
+			return nil, errors.New("[EEXIST] iscsi_extent_create.name: Extent name must be unique")
+		}
+		n.created = append(n.created, "extent")
+		n.extent = &tnsapi.ISCSIExtent{ID: 730, Name: p.Name, Disk: p.Disk}
+		return n.extent, nil
+	}
+	m.CreateISCSITargetFunc = func(_ context.Context, p tnsapi.ISCSITargetCreateParams) (*tnsapi.ISCSITarget, error) {
+		if n.failTarget {
+			return nil, errors.New("target create failed")
+		}
+		if n.target != nil {
+			return nil, errors.New("[EEXIST] iscsi_target_create.name: Target name already exists")
+		}
+		n.created = append(n.created, "target")
+		n.target = &tnsapi.ISCSITarget{ID: 42, Name: p.Name}
+		return n.target, nil
+	}
+	m.CreateISCSITargetExtentFunc = func(_ context.Context, p tnsapi.ISCSITargetExtentCreateParams) (*tnsapi.ISCSITargetExtent, error) {
+		n.created = append(n.created, "targetextent")
+		te := tnsapi.ISCSITargetExtent{ID: 7, Target: p.Target, Extent: p.Extent, LunID: p.LunID}
+		n.targetExtents = append(n.targetExtents, te)
+		return &te, nil
+	}
+	m.DeleteISCSIExtentFunc = func(_ context.Context, id int) error {
+		n.deleted = append(n.deleted, fmt.Sprintf("extent/%d", id))
+		return nil
+	}
+}
+
+// TestCreateISCSIVolumeResumesPartialCreate covers a retry after CreateVolume was
+// interrupted (e.g. the external-provisioner deadline expired) part-way through, which
+// leaves some of zvol / extent / target / target-extent on the NAS. The retry must finish
+// the job from whatever exists instead of panicking or failing on the duplicates.
+func TestCreateISCSIVolumeResumesPartialCreate(t *testing.T) {
+	const (
+		volName = "pvc-2b4e450c"
+		zvolID  = "tank/csi/" + volName
+		ourDisk = "zvol/" + zvolID
+	)
+	zvol := tnsapi.Dataset{
+		ID: zvolID, Name: zvolID, Type: "VOLUME",
+		Volsize: map[string]interface{}{"parsed": float64(1 << 30)},
+	}
+	req := &csi.CreateVolumeRequest{
+		Name: volName,
+		VolumeCapabilities: []*csi.VolumeCapability{{
+			AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+		}},
+		Parameters: map[string]string{
+			"protocol": "iscsi", "pool": "tank", "server": "192.168.1.100", "parentDataset": "csi",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1 << 30},
+	}
+
+	tests := []struct {
+		nas         *partialISCSINAS
+		name        string
+		wantCreated []string
+		wantDeleted []string
+		wantCode    codes.Code
+	}{
+		{
+			name:        "zvol only",
+			nas:         &partialISCSINAS{},
+			wantCreated: []string{"extent", "target", "targetextent"},
+		},
+		{
+			// The case seen in production: nil target dereferenced in handleExistingISCSIVolume.
+			name:        "zvol and extent, no target",
+			nas:         &partialISCSINAS{extent: &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk}},
+			wantCreated: []string{"target", "targetextent"},
+		},
+		{
+			// Previously reported success for a target with no LUN mapped.
+			name: "zvol, extent and target, no target-extent",
+			nas: &partialISCSINAS{
+				extent: &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				target: &tnsapi.ISCSITarget{ID: 42, Name: volName},
+			},
+			wantCreated: []string{"targetextent"},
+		},
+		{
+			name: "fully created",
+			nas: &partialISCSINAS{
+				extent:        &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				target:        &tnsapi.ISCSITarget{ID: 42, Name: volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 7, Target: 42, Extent: 730}},
+			},
+		},
+		{
+			// Never attach an extent that backs a different disk.
+			name:     "extent name taken by another disk",
+			nas:      &partialISCSINAS{extent: &tnsapi.ISCSIExtent{ID: 99, Name: volName, Disk: "zvol/tank/other"}},
+			wantCode: codes.AlreadyExists,
+		},
+		{
+			name: "target already maps a different extent",
+			nas: &partialISCSINAS{
+				extent:        &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				target:        &tnsapi.ISCSITarget{ID: 42, Name: volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 7, Target: 42, Extent: 99}},
+			},
+			wantCode: codes.AlreadyExists,
+		},
+		{
+			// The node does not check the LUN, so the extent must be LUN 0.
+			name: "target maps the extent at a non-zero LUN",
+			nas: &partialISCSINAS{
+				extent:        &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				target:        &tnsapi.ISCSITarget{ID: 42, Name: volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 7, Target: 42, Extent: 730, LunID: 1}},
+			},
+			wantCode: codes.AlreadyExists,
+		},
+		{
+			name: "target maps the extent plus another LUN",
+			nas: &partialISCSINAS{
+				extent: &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				target: &tnsapi.ISCSITarget{ID: 42, Name: volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{
+					{ID: 7, Target: 42, Extent: 730, LunID: 0},
+					{ID: 8, Target: 42, Extent: 99, LunID: 1},
+				},
+			},
+			wantCode: codes.AlreadyExists,
+		},
+		{
+			// Target renamed (e.g. imported from another cluster): found via ZFS properties.
+			name: "stored properties point at a complete volume",
+			nas: &partialISCSINAS{
+				storedExtent:  &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 42, Name: "old-" + volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 7, Target: 42, Extent: 730}},
+			},
+		},
+		{
+			// Stale properties must not hand out another disk; build this volume's own objects.
+			name: "stored extent backs another disk",
+			nas: &partialISCSINAS{
+				storedExtent:  &tnsapi.ISCSIExtent{ID: 99, Name: "other", Disk: "zvol/tank/other"},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 50, Name: "other"},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 9, Target: 50, Extent: 99}},
+			},
+			wantCreated: []string{"extent", "target", "targetextent"},
+		},
+		{
+			// A stored target is only a hint: a wrong layout means the ID is stale, so it is
+			// ignored (not fatal) and the volume gets its own target.
+			name: "stored target maps the extent at a non-zero LUN",
+			nas: &partialISCSINAS{
+				storedExtent:  &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 50, Name: "old-" + volName},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 9, Target: 50, Extent: 730, LunID: 3}},
+			},
+			wantCreated: []string{"extent", "target", "targetextent"},
+		},
+		{
+			// TrueNAS reused the stored target ID for another volume's target.
+			name: "stored target ID now belongs to another volume",
+			nas: &partialISCSINAS{
+				storedExtent:  &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				storedTarget:  &tnsapi.ISCSITarget{ID: 50, Name: "pvc-someone-else"},
+				targetExtents: []tnsapi.ISCSITargetExtent{{ID: 9, Target: 50, Extent: 99}},
+			},
+			wantCreated: []string{"extent", "target", "targetextent"},
+		},
+		{
+			// Cleanup must not delete an extent this call did not create.
+			name: "target create fails with a reused extent",
+			nas: &partialISCSINAS{
+				extent:     &tnsapi.ISCSIExtent{ID: 730, Name: volName, Disk: ourDisk},
+				failTarget: true,
+			},
+			wantCode: codes.Internal,
+		},
+		{
+			name:        "target create fails with a new extent",
+			nas:         &partialISCSINAS{failTarget: true},
+			wantCreated: []string{"extent"},
+			wantDeleted: []string{"extent/730"},
+			wantCode:    codes.Internal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &MockAPIClientForSnapshots{}
+			tt.nas.wire(m, zvol)
+			controller := &ControllerService{apiClient: m}
+
+			resp, err := controller.createISCSIVolume(context.Background(), req)
+
+			if tt.wantCode != codes.OK {
+				if status.Code(err) != tt.wantCode {
+					t.Fatalf("want code %v, got err %v", tt.wantCode, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.Volume.VolumeContext[VolumeContextKeyISCSIIQN]; got != "iqn.2005-10.org.freenas.ctl:"+volName {
+					t.Errorf("iqn = %q", got)
+				}
+				var lunsOf42 []tnsapi.ISCSITargetExtent
+				for _, te := range tt.nas.targetExtents {
+					if te.Target == 42 {
+						lunsOf42 = append(lunsOf42, te)
+					}
+				}
+				if len(lunsOf42) != 1 || lunsOf42[0].Extent != 730 || lunsOf42[0].LunID != 0 {
+					t.Errorf("want target 42 to map only extent 730 at LUN 0, got %+v", tt.nas.targetExtents)
+				}
+			}
+			if !slices.Equal(tt.nas.created, tt.wantCreated) {
+				t.Errorf("created = %v, want %v", tt.nas.created, tt.wantCreated)
+			}
+			if !slices.Equal(tt.nas.deleted, tt.wantDeleted) {
+				t.Errorf("deleted = %v, want %v", tt.nas.deleted, tt.wantDeleted)
+			}
+		})
+	}
+}
+
+// A renamed target may only be discoverable through stored IDs. A failed property
+// query must not be mistaken for absent metadata and create duplicate resources.
+func TestCreateISCSIVolumeStopsOnStoredPropertyQueryFailure(t *testing.T) {
+	const volName = "pvc-property-query-failure"
+	m := &MockAPIClientForSnapshots{}
+	nas := &partialISCSINAS{}
+	nas.wire(m, tnsapi.Dataset{
+		ID: "tank/csi/" + volName, Name: "tank/csi/" + volName, Type: "VOLUME",
+		Volsize: map[string]interface{}{"parsed": float64(1 << 30)},
+	})
+	m.GetDatasetPropertiesFunc = func(context.Context, string, []string) (map[string]string, error) {
+		return nil, errors.New("temporary property query failure")
+	}
+	controller := &ControllerService{apiClient: m}
+	resp, err := controller.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: volName,
+		VolumeCapabilities: []*csi.VolumeCapability{{
+			AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+		}},
+		Parameters: map[string]string{
+			"protocol": "iscsi", "pool": "tank", "parentDataset": "csi", "server": "192.0.2.10",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1 << 30},
+	})
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "temporary property query failure") {
+		t.Fatalf("want Internal with property query failure, got %v", err)
+	}
+	if resp != nil || len(nas.created) != 0 || len(nas.deleted) != 0 {
+		t.Fatalf("failed property query changed resources: response=%v, created=%v, deleted=%v", resp, nas.created, nas.deleted)
+	}
+}
+
+// TestCreateVolumeRejectsOverlappingCreate covers the provisioner retrying while the
+// attempt it gave up on is still running: the overlap is refused, so a failing call can
+// never clean up objects the other one has reused and returned.
+func TestCreateVolumeRejectsOverlappingCreate(t *testing.T) {
+	req := &csi.CreateVolumeRequest{
+		Name: "pvc-overlap",
+		VolumeCapabilities: []*csi.VolumeCapability{{
+			AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+		}},
+		Parameters: map[string]string{
+			"protocol": "iscsi", "pool": "tank", "server": "192.168.1.100", "parentDataset": "csi",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1 << 30},
+	}
+	controller := &ControllerService{apiClient: &MockAPIClientForSnapshots{}}
+
+	// A call for this name is still running.
+	controller.createsInFlight.Store(req.GetName(), struct{}{})
+	if _, err := controller.CreateVolume(context.Background(), req); status.Code(err) != codes.Aborted {
+		t.Fatalf("overlapping create: want Aborted, got %v", err)
+	}
+
+	// Once it returns, the name is free again, and every call releases it however it ends.
+	controller.createsInFlight.Delete(req.GetName())
+	if _, err := controller.CreateVolume(context.Background(), req); status.Code(err) == codes.Aborted {
+		t.Fatalf("create with no call in flight was rejected as in progress: %v", err)
+	}
+	if _, running := controller.createsInFlight.Load(req.GetName()); running {
+		t.Fatal("CreateVolume returned without releasing the volume name")
+	}
+}
+
+// TestCleanupISCSICreateOutlivesRequestDeadline covers cleanup after the provisioner's
+// deadline expired: the request context is already canceled, but cleanup must still run.
+func TestCleanupISCSICreateOutlivesRequestDeadline(t *testing.T) {
+	var deleteCtxErr error
+	deleted := false
+	m := &MockAPIClientForSnapshots{}
+	m.DeleteISCSIExtentFunc = func(ctx context.Context, _ int) error {
+		deleted, deleteCtxErr = true, ctx.Err()
+		return nil
+	}
+	controller := &ControllerService{apiClient: m}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	controller.cleanupISCSICreate(ctx, iscsiCreated{extentID: 730})
+
+	if !deleted {
+		t.Fatal("extent was not deleted")
+	}
+	if deleteCtxErr != nil {
+		t.Fatalf("cleanup ran with a dead context: %v", deleteCtxErr)
 	}
 }

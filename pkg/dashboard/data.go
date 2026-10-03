@@ -18,6 +18,7 @@ var (
 	errNoSMBShare     = errors.New("no SMB share found")
 	errNoSubsystemNQN = errors.New("no subsystem NQN found")
 	errNoISCSIIQN     = errors.New("no iSCSI IQN found")
+	errNoISCSITarget  = errors.New("no iSCSI target found")
 )
 
 // FindManagedVolumes finds all datasets managed by tns-csi.
@@ -427,6 +428,9 @@ func getISCSITargetDetails(ctx context.Context, client tnsapi.ClientInterface, d
 	target, err := client.ISCSITargetByName(ctx, targetName)
 	if err != nil {
 		return nil, err
+	}
+	if target == nil { // ISCSITargetByName returns (nil, nil) when not found
+		return nil, fmt.Errorf("%w: %s", errNoISCSITarget, targetName)
 	}
 
 	return &ISCSITargetDetails{

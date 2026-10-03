@@ -1114,6 +1114,39 @@ func TestCreateISCSIVolumeResumesPartialCreate(t *testing.T) {
 	}
 }
 
+// A renamed target may only be discoverable through stored IDs. A failed property
+// query must not be mistaken for absent metadata and create duplicate resources.
+func TestCreateISCSIVolumeStopsOnStoredPropertyQueryFailure(t *testing.T) {
+	const volName = "pvc-property-query-failure"
+	m := &MockAPIClientForSnapshots{}
+	nas := &partialISCSINAS{}
+	nas.wire(m, tnsapi.Dataset{
+		ID: "tank/csi/" + volName, Name: "tank/csi/" + volName, Type: "VOLUME",
+		Volsize: map[string]interface{}{"parsed": float64(1 << 30)},
+	})
+	m.GetDatasetPropertiesFunc = func(context.Context, string, []string) (map[string]string, error) {
+		return nil, errors.New("temporary property query failure")
+	}
+	controller := &ControllerService{apiClient: m}
+	resp, err := controller.CreateVolume(context.Background(), &csi.CreateVolumeRequest{
+		Name: volName,
+		VolumeCapabilities: []*csi.VolumeCapability{{
+			AccessType: &csi.VolumeCapability_Block{Block: &csi.VolumeCapability_BlockVolume{}},
+			AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
+		}},
+		Parameters: map[string]string{
+			"protocol": "iscsi", "pool": "tank", "parentDataset": "csi", "server": "192.0.2.10",
+		},
+		CapacityRange: &csi.CapacityRange{RequiredBytes: 1 << 30},
+	})
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "temporary property query failure") {
+		t.Fatalf("want Internal with property query failure, got %v", err)
+	}
+	if resp != nil || len(nas.created) != 0 || len(nas.deleted) != 0 {
+		t.Fatalf("failed property query changed resources: response=%v, created=%v, deleted=%v", resp, nas.created, nas.deleted)
+	}
+}
+
 // TestCreateVolumeRejectsOverlappingCreate covers the provisioner retrying while the
 // attempt it gave up on is still running: the overlap is refused, so a failing call can
 // never clean up objects the other one has reused and returned.

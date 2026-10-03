@@ -431,21 +431,21 @@ func (s *ControllerService) handleExistingISCSIVolume(ctx context.Context, param
 	return resp, true, nil
 }
 
-// storedISCSIIDs reads the target ID, extent ID and IQN recorded on the ZVOL. Unreadable
-// properties count as absent: the create path then looks the objects up by name.
-func (s *ControllerService) storedISCSIIDs(ctx context.Context, zvolID string) (targetID, extentID int, iqn string) {
+// storedISCSIIDs reads the target ID, extent ID and IQN recorded on the ZVOL.
+// Failed reads must not count as absent metadata: the stored IDs may be the only
+// way to find existing resources whose names have changed.
+func (s *ControllerService) storedISCSIIDs(ctx context.Context, zvolID string) (targetID, extentID int, iqn string, err error) {
 	props, err := s.apiClient.GetDatasetProperties(ctx, zvolID, []string{
 		tnsapi.PropertyISCSITargetID,
 		tnsapi.PropertyISCSIExtentID,
 		tnsapi.PropertyISCSIIQN,
 	})
 	if err != nil {
-		klog.V(4).Infof("Could not read stored iSCSI properties on %s: %v", zvolID, err)
-		return 0, 0, ""
+		return 0, 0, "", status.Errorf(codes.Internal, "Failed to read stored iSCSI properties on %s: %v", zvolID, err)
 	}
 	return tnsapi.StringToInt(props[tnsapi.PropertyISCSITargetID]),
 		tnsapi.StringToInt(props[tnsapi.PropertyISCSIExtentID]),
-		props[tnsapi.PropertyISCSIIQN]
+		props[tnsapi.PropertyISCSIIQN], nil
 }
 
 // findISCSIVolumeByStoredProperties looks up the target and extent recorded in the ZVOL's
@@ -453,7 +453,11 @@ func (s *ControllerService) storedISCSIIDs(ctx context.Context, zvolID string) (
 // volume only after the same checks as the name-based path: the extent backs this ZVOL and
 // the target maps it alone at LUN 0. Otherwise it reports not-done so the create path runs.
 func (s *ControllerService) findISCSIVolumeByStoredProperties(ctx context.Context, params *iscsiVolumeParams, existingZvol *tnsapi.Dataset, existingCapacity int64, timer *metrics.OperationTimer) (*csi.CreateVolumeResponse, bool, error) {
-	storedTargetID, storedExtentID, storedIQN := s.storedISCSIIDs(ctx, existingZvol.ID)
+	storedTargetID, storedExtentID, storedIQN, err := s.storedISCSIIDs(ctx, existingZvol.ID)
+	if err != nil {
+		timer.ObserveError()
+		return nil, false, err
+	}
 	if storedTargetID <= 0 || storedExtentID <= 0 || storedIQN == "" {
 		return nil, false, nil
 	}

@@ -448,7 +448,7 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 		params.volumeName, params.requestedCapacity, params.subsystemNQN)
 
 	// Check if ZVOL already exists (idempotency)
-	existingZvols, err := s.apiClient.QueryAllDatasets(ctx, params.zvolName)
+	existingZvols, err := s.queryExactDataset(ctx, params.zvolName)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to query existing ZVOLs: %v", err)

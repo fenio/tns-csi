@@ -545,7 +545,7 @@ func (s *ControllerService) createNFSVolume(ctx context.Context, req *csi.Create
 	klog.V(4).Infof("Creating dataset: %s with capacity: %d bytes", params.datasetName, params.requestedCapacity)
 
 	// Check if dataset already exists (idempotency)
-	existingDatasets, err := s.apiClient.QueryAllDatasets(ctx, params.datasetName)
+	existingDatasets, err := s.queryExactDataset(ctx, params.datasetName)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to query existing datasets: %v", err)

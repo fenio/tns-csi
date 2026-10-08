@@ -204,7 +204,7 @@ func (s *ControllerService) createISCSIVolume(ctx context.Context, req *csi.Crea
 		params.volumeName, params.requestedCapacity, globalConfig.Basename)
 
 	// Check if ZVOL already exists (idempotency)
-	existingZvols, err := s.apiClient.QueryAllDatasets(ctx, params.zvolName)
+	existingZvols, err := s.queryExactDataset(ctx, params.zvolName)
 	if err != nil {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to query existing ZVOLs: %v", err)
@@ -1019,7 +1019,7 @@ func (s *ControllerService) getISCSIVolumeInfo(ctx context.Context, meta *Volume
 
 	// Check 1: Verify ZVOL exists
 	var datasets []tnsapi.Dataset
-	datasets, err := s.apiClient.QueryAllDatasets(ctx, meta.DatasetName)
+	datasets, err := s.queryExactDataset(ctx, meta.DatasetName)
 	switch {
 	case err != nil:
 		return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query ZVOL %s: %v", meta.DatasetName, err)

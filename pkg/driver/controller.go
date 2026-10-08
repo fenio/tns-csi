@@ -2057,7 +2057,7 @@ func (s *ControllerService) getNVMeOFVolumeInfo(ctx context.Context, meta *Volum
 
 	// Check 1: Verify ZVOL exists
 	var datasets []tnsapi.Dataset
-	datasets, err := s.apiClient.QueryAllDatasets(ctx, meta.DatasetName)
+	datasets, err := s.queryExactDataset(ctx, meta.DatasetName)
 	switch {
 	case err != nil:
 		return nil, VolumeHealth{}, status.Errorf(codes.Internal, "Failed to query ZVOL %s: %v", meta.DatasetName, err)

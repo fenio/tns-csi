@@ -565,7 +565,7 @@ func (s *ControllerService) discoverVolumeBySearching(ctx context.Context, volum
 		for _, share := range shares {
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
 				datasetID := mountpointToDatasetID(share.Path)
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
+				datasets, dsErr := s.queryExactDataset(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					return &volumeDiscoveryResult{datasetName: datasets[0].Name, protocol: ProtocolNFS}
 				}
@@ -578,7 +578,7 @@ func (s *ControllerService) discoverVolumeBySearching(ctx context.Context, volum
 		for _, share := range smbShares {
 			if strings.HasSuffix(share.Path, "/"+volumeID) {
 				datasetID := mountpointToDatasetID(share.Path)
-				datasets, dsErr := s.apiClient.QueryAllDatasets(ctx, datasetID)
+				datasets, dsErr := s.queryExactDataset(ctx, datasetID)
 				if dsErr == nil && len(datasets) > 0 {
 					return &volumeDiscoveryResult{datasetName: datasets[0].Name, protocol: ProtocolSMB}
 				}

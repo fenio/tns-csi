@@ -90,10 +90,7 @@ spec:
             httpGet:
               path: /healthz
               port: healthz
-            initialDelaySeconds: 10
-            timeoutSeconds: 3
-            periodSeconds: 10
-            failureThreshold: 5
+            {{- toYaml .Values.node.livenessProbe | nindent 12 }}
           securityContext:
             privileged: true
             capabilities:
@@ -131,6 +128,9 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
             - "--v={{ .Values.node.logLevel }}"
+            {{- with .Values.sidecars.nodeDriverRegistrar.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /csi/csi.sock
@@ -151,6 +151,9 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--health-port=9808"
+            {{- with .Values.sidecars.livenessprobe.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /csi/csi.sock

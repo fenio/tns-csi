@@ -134,6 +134,14 @@ controller:
       #   hosts:
       #     - tns-csi.example.com
 
+  # Liveness probe for the controller plugin container (the /healthz endpoint is
+  # served by the liveness-probe sidecar)
+  livenessProbe:
+    initialDelaySeconds: 10
+    timeoutSeconds: 3
+    periodSeconds: 10
+    failureThreshold: 5
+
   # Resource requests and limits
   resources:
     requests:
@@ -171,6 +179,14 @@ node:
   # Enable debug mode (sets DEBUG_CSI=true, equivalent to logLevel 4+)
   debug: false
   
+  # Liveness probe for the node plugin container (the /healthz endpoint is
+  # served by the liveness-probe sidecar)
+  livenessProbe:
+    initialDelaySeconds: 10
+    timeoutSeconds: 3
+    periodSeconds: 10
+    failureThreshold: 5
+
   # Resource requests and limits for node plugin
   resources:
     requests:
@@ -212,8 +228,16 @@ node:
     rollingUpdate:
       maxUnavailable: 1
 
-# CSI sidecar images
+# CSI sidecar configuration
 sidecars:
+  # Leader-election timing shared by the controller sidecars (provisioner,
+  # attacher, resizer, snapshotter). Must satisfy
+  # leaseDuration > renewDeadline > retryPeriod.
+  leaderElection:
+    leaseDuration: 30s
+    renewDeadline: 20s
+    retryPeriod: 5s
+
   provisioner:
     image:
       repository: registry.k8s.io/sig-storage/csi-provisioner
@@ -226,6 +250,13 @@ sidecars:
       limits:
         cpu: 300m
         memory: 300Mi
+    # Timeout for a single CreateVolume/DeleteVolume call to the driver. On a slow
+    # TrueNAS (iSCSI creates several objects in sequence) a call can outlive it; the
+    # sidecar then retries and the driver adopts the partly created volume, which
+    # works but takes several timeout windows. Raise it to provision in one attempt.
+    timeout: 120s
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
   
   attacher:
     image:
@@ -239,6 +270,11 @@ sidecars:
       limits:
         cpu: 300m
         memory: 300Mi
+    # Timeout for ControllerPublish/Unpublish calls. Empty uses the sidecar's
+    # built-in default (15s).
+    timeout: ""
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
   
   resizer:
     image:
@@ -252,6 +288,10 @@ sidecars:
       limits:
         cpu: 300m
         memory: 300Mi
+    # Timeout for a single ControllerExpandVolume call to the driver
+    timeout: 120s
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
   
   nodeDriverRegistrar:
     image:
@@ -265,6 +305,8 @@ sidecars:
       limits:
         cpu: 100m
         memory: 100Mi
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
   
   snapshotter:
     image:
@@ -278,6 +320,10 @@ sidecars:
       limits:
         cpu: 200m
         memory: 200Mi
+    # Timeout for a single CreateSnapshot/DeleteSnapshot call to the driver
+    timeout: 120s
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
 
   livenessprobe:
     image:
@@ -291,6 +337,8 @@ sidecars:
       limits:
         cpu: 100m
         memory: 100Mi
+    # Additional command-line flags appended to the sidecar
+    extraArgs: []
 
 # Storage class configuration
 # Each entry creates a Kubernetes StorageClass. You can have multiple classes

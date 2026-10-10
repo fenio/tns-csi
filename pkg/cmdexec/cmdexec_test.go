@@ -56,7 +56,7 @@ func TestCombinedOutputHonoursCallerCancellation(t *testing.T) {
 	cancel()
 	_, err := CombinedOutput(ctx, time.Minute, "sleep", "10")
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("CombinedOutput() on a cancelled context = %v, want context.Canceled", err)
+		t.Fatalf("CombinedOutput() on a canceled context = %v, want context.Canceled", err)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -45,6 +46,39 @@ func TestUnstageShareVolumesNeverDeleteContents(t *testing.T) {
 			}
 			if _, statErr := os.Stat(data); statErr != nil {
 				t.Fatalf("unstage() deleted file inside staging path: %v", statErr)
+			}
+		})
+	}
+}
+
+// rmdir failing with EBUSY means the staging path is still a mount point, i.e. the mount
+// check said "not mounted" and was wrong. Reporting success would leave the share
+// mounted with nothing left to unmount it; the error makes kubelet retry, and the next
+// attempt's mount check drives a real umount.
+func TestUnstageShareVolumesFailWhenStagingDirIsStillAMountPoint(t *testing.T) {
+	service := NewNodeService("test-node", nil, false, nil, false, 5)
+
+	orig := removeStagingDir
+	removeStagingDir = func(name string) error {
+		return &os.PathError{Op: "remove", Path: name, Err: syscall.EBUSY}
+	}
+	t.Cleanup(func() { removeStagingDir = orig })
+
+	unstagers := map[string]func(context.Context, *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error){
+		"nfs": service.unstageNFSVolume,
+		"smb": service.unstageSMBVolume,
+	}
+	for name, unstage := range unstagers {
+		t.Run(name, func(t *testing.T) {
+			staging := filepath.Join(t.TempDir(), "globalmount")
+			if err := os.Mkdir(staging, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			_, err := unstage(context.Background(), &csi.NodeUnstageVolumeRequest{
+				VolumeId: "pvc-1", StagingTargetPath: staging,
+			})
+			if status.Code(err) != codes.Internal {
+				t.Fatalf("unstage() code = %v (err %v), want Internal so kubelet retries", status.Code(err), err)
 			}
 		})
 	}

@@ -185,7 +185,9 @@ func (s *NodeService) unstageSMBVolume(ctx context.Context, req *csi.NodeUnstage
 		klog.V(4).Infof("Staging path %s is not mounted, skipping unmount", stagingTargetPath)
 	}
 
-	removeEmptyStagingDir(stagingTargetPath)
+	if err := removeEmptyStagingDir(stagingTargetPath); err != nil {
+		return nil, err
+	}
 
 	klog.V(4).Infof("Unstaged SMB volume %s from %s", volumeID, stagingTargetPath)
 	return &csi.NodeUnstageVolumeResponse{}, nil

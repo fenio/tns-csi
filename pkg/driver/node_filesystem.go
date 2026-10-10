@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fenio/tns-csi/pkg/mount"
@@ -75,17 +76,30 @@ func (m *keyedMutex) release(key string, entry *keyedMutexEntry) {
 	m.mu.Unlock()
 }
 
+// removeStagingDir is os.Remove; tests replace it to simulate EBUSY without privileges.
+var removeStagingDir = os.Remove
+
 // removeEmptyStagingDir removes a share staging directory after unmount, but only if it
 // is empty. It never deletes contents: leftover files mean either the share is still
 // mounted (a mount check was wrong) or data landed on the node's disk, and neither may be
-// deleted by the driver. A non-empty or busy directory is left in place with a warning;
-// kubelet also attempts to remove the staging directory after a successful unstage.
-func removeEmptyStagingDir(stagingTargetPath string) {
-	err := os.Remove(stagingTargetPath)
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		return
+// deleted by the driver. A non-empty directory is left in place with a warning; kubelet
+// also attempts to remove the staging directory after a successful unstage.
+//
+// EBUSY is different: it means the path is still a mount point, so the preceding mount
+// check was wrong. That is returned as an error (Internal) so kubelet retries the
+// unstage and the next mount check drives a real unmount, instead of reporting success
+// and leaving the share mounted with nothing left to unmount it.
+func removeEmptyStagingDir(stagingTargetPath string) error {
+	err := removeStagingDir(stagingTargetPath)
+	switch {
+	case err == nil, errors.Is(err, os.ErrNotExist):
+		return nil
+	case errors.Is(err, syscall.EBUSY):
+		return status.Errorf(codes.Internal, "staging path %s is still a mount point: %v", stagingTargetPath, err)
+	default:
+		klog.Warningf("Leaving staging path %s in place: %v (not removing contents)", stagingTargetPath, err)
+		return nil
 	}
-	klog.Warningf("Leaving staging path %s in place: %v (not removing contents)", stagingTargetPath, err)
 }
 
 func ensureStagingTarget(ctx context.Context, stagingTargetPath string) (bool, error) {

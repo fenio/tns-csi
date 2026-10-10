@@ -713,7 +713,7 @@ func (s *NodeService) findISCSIIQNForDevice(ctx context.Context, devicePath stri
 
 func getStagedISCSIDevicePath(ctx context.Context, stagingTargetPath string) (string, error) {
 	if mounted, err := mount.IsMounted(ctx, stagingTargetPath); err == nil && mounted {
-		cmd := exec.CommandContext(ctx, "/usr/bin/findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
+		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
 		output, cmdErr := cmd.CombinedOutput()
 		if cmdErr != nil {
 			return "", fmt.Errorf("findmnt source lookup failed for %s: %w", stagingTargetPath, cmdErr)

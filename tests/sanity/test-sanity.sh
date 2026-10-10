@@ -14,7 +14,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-BASELINE_PASS_COUNT=75
+BASELINE_PASS_COUNT=80
 
 # sanity_verdict PASSED FAILED GO_TEST_EXIT BASELINE
 # Prints the verdict and returns 0 when the run is acceptable, 1 otherwise.

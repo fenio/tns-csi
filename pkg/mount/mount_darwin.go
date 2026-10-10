@@ -56,6 +56,13 @@ func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
 	return IsMounted(ctx, targetPath)
 }
 
+// MountedEntry reports whether path is mounted on macOS. Source and filesystem type are
+// not resolved on macOS (development only), so the returned entry is empty.
+func MountedEntry(ctx context.Context, path string) (Entry, bool, error) {
+	mounted, err := IsMounted(ctx, path)
+	return Entry{}, mounted, err
+}
+
 // IsSourceMounted checks whether a source device is mounted anywhere on macOS.
 func IsSourceMounted(context.Context, string) (bool, error) {
 	return false, errSourceMountUnsupported

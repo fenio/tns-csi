@@ -25,12 +25,12 @@
 **Test environment:**
 - Kubernetes version:
 - TrueNAS version:
-- Protocol tested: [ ] NFS [ ] NVMe-oF [ ] Both
+- Protocol tested: [ ] NFS [ ] SMB [ ] iSCSI [ ] NVMe-oF
 
 **Tests run:**
-- [ ] Unit tests (`make test`)
+- [ ] Unit tests (`make test-unit`)
 - [ ] Linting (`make lint`)
-- [ ] Sanity tests
+- [ ] Sanity tests (`make test-sanity`)
 - [ ] Integration tests (manual or CI)
 
 ## Documentation

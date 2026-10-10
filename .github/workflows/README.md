@@ -1,30 +1,22 @@
 # GitHub Actions workflows
 
-## Active
-
 | Workflow | Runner | Trigger | Purpose |
 |---|---|---|---|
-| `ci.yml` | `ubuntu-latest` | push, PR | Lint, unit tests, sanity tests, build |
-| `sanity.yml` | `ubuntu-latest` | push, PR | CSI specification compliance tests |
-| `integration.yml` | `ubuntu-24.04` (QEMU + k3s VM via `.github/actions/qemu-vm`) | push to main, PR, dispatch | Full E2E suite: NFS, NVMe-oF, iSCSI, SMB, Shared |
-| `qemu-e2e.yml` | `ubuntu-24.04` (QEMU + k3s VM) | dispatch | NFS-only QEMU smoke test (predates the per-protocol split in `integration.yml`; kept as a minimal repro path) |
+| `ci.yml` | `ubuntu-latest` | push, PR, dispatch | Helm render checks, golangci-lint, unit tests (`make test-unit`), govulncheck, image build (push on branches, build-only on PRs), kubectl plugin build |
+| `sanity.yml` | `ubuntu-latest` | push to main, PR (driver paths), dispatch | CSI specification compliance tests (`make test-sanity`) |
+| `integration.yml` | `ubuntu-26.04` (QEMU + k3s VM via `.github/actions/qemu-vm`) | `workflow_run` after CI/Release on `main`, dispatch (with `pr` input) | Full E2E suite: NFS, NVMe-oF, iSCSI, SMB, Shared. Does not run automatically on PRs; dispatch it with the PR number to test a branch |
+| `qemu-e2e.yml` | `ubuntu-26.04` (QEMU + k3s VM) | dispatch | NFS-only QEMU smoke test (predates the per-protocol split in `integration.yml`; kept as a minimal repro path) |
 | `release.yml` | `ubuntu-latest` | tag push | Build & push multi-arch image, publish Helm chart |
 | `release-plugin.yml` | `ubuntu-latest` | tag push | Build & release the kubectl plugin |
 | `dashboard.yml` | `ubuntu-latest` | schedule, push | Generate the test results dashboard |
-| `sonarqube.yml` | `ubuntu-latest` | push | SonarQube analysis |
+| `sonarqube.yml` | `ubuntu-latest` | push, PR | SonarQube analysis |
 
-## Disabled — pending QEMU migration
+## Removed workflows
 
-The following workflows used to run on a self-hosted GitHub Actions runner labelled `new`. That runner has been retired. They are renamed with a `.yml.disabled` suffix so GitHub Actions ignores them; they remain in the repo as a record of intent and so the migration work has a clear inventory.
-
-| File | Jobs | Notes |
-|---|---|---|
-| `encryption.yml.disabled` | 7 | Per-protocol encryption tests — same shape as `integration.yml`, should port cleanly to the QEMU composite action |
-| `scale.yml.disabled` | 2 | Synthetic load against TrueNAS |
-| `snapclone-stress.yml.disabled` | 2 | 120-min snapshot/clone stress; was the only auto-firing one (workflow_run after Integration) |
-| `snapshot-clone-matrix.yml.disabled` | 13 | Matrix of snapshot/clone scenarios across protocols |
-| `snapshot-debug.yml.disabled` | 1 | Single focused snapshot debug run |
-| `compatibility.yml.disabled` | 1 | Helm upgrade-compatibility test (old release → new release) |
-| `distro-compatibility.yml.disabled` | 19 | K8s distros × protocols matrix (K3s, K0s, KubeSolo, Minikube, Talos, MicroK8s) — hardest to port because each distro needs its own cloud-init installer; will likely need per-distro composite actions |
-
-To re-enable any of these once migrated to the QEMU pattern: rename `.yml.disabled` → `.yml` and replace `runs-on: new` with `runs-on: ubuntu-24.04` plus a `uses: ./.github/actions/qemu-vm` step (see `integration.yml` for the canonical pattern).
+Seven workflows that depended on a retired self-hosted runner (`encryption`, `scale`,
+`snapclone-stress`, `snapshot-clone-matrix`, `snapshot-debug`, `compatibility`,
+`distro-compatibility`) were kept for a while as `*.yml.disabled` files and have since been
+deleted. They remain in git history (`git log --all -- '.github/workflows/*.disabled'`) if
+any of them is ported to the QEMU pattern: restore the file, drop the `.disabled` suffix,
+replace `runs-on: new` with `runs-on: ubuntu-26.04`, and add a
+`uses: ./.github/actions/qemu-vm` step (see `integration.yml` for the canonical pattern).

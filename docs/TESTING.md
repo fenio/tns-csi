@@ -9,7 +9,7 @@ The TNS CSI Driver is tested comprehensively using **real infrastructure** - not
 ### Real Hardware, Real Tests
 
 **Main integration suite — GitHub-hosted runners with QEMU:**
-- `integration.yml` runs on GitHub Actions `ubuntu-24.04` runners
+- `integration.yml` runs on GitHub Actions `ubuntu-26.04` runners
 - Each protocol job boots its own Ubuntu Noble cloud-image VM via QEMU/KVM (`.github/actions/qemu-vm` composite action)
 - k3s is installed inside the VM with full kernel-module support (`nvme-tcp`, `iscsi_tcp`, `nfs`, `cifs`)
 - The host runner and VM both join a Tailscale tailnet so they can reach the private TrueNAS
@@ -154,7 +154,7 @@ Each test run:
 
 ### CI/CD Badges
 
-- [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml) - Unit tests and sanity tests
+- [![CI](https://github.com/fenio/tns-csi/actions/workflows/ci.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/ci.yml) - Lint, unit tests, build
 - [![Integration Tests](https://github.com/fenio/tns-csi/actions/workflows/integration.yml/badge.svg)](https://github.com/fenio/tns-csi/actions/workflows/integration.yml) - Full Ginkgo E2E test suite
 
 ### Test Dashboard

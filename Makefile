@@ -110,14 +110,13 @@ test-scripts:
 	@echo "Running script tests..."
 	bash tests/sanity/sanity-script_test.sh
 
-# Fail if go.mod/go.sum are not tidy.
+# Fail if go.mod/go.sum are not tidy. Read-only: prints the needed diff, never edits files.
 mod-tidy-check:
 	@echo "Checking go.mod/go.sum are tidy..."
-	$(GOMOD) tidy
-	@git diff --exit-code -- go.mod go.sum || (echo "go.mod/go.sum not tidy: run 'go mod tidy'" && exit 1)
+	@$(GOMOD) tidy -diff || (echo "go.mod/go.sum not tidy: run 'go mod tidy'" && exit 1)
 
-# Everything a PR must pass. CI runs exactly these targets.
-check: lint mod-tidy-check test-unit test-scripts test-sanity build
+# Everything a PR must pass. CI runs the same checks (lint via golangci-lint-action).
+check: build lint mod-tidy-check test-unit test-scripts test-sanity
 	@echo "All checks passed"
 
 test-coverage:

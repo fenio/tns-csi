@@ -101,10 +101,7 @@ spec:
             httpGet:
               path: /healthz
               port: healthz
-            initialDelaySeconds: 10
-            timeoutSeconds: 3
-            periodSeconds: 10
-            failureThreshold: 5
+            {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/sockets/pluginproxy/
@@ -118,15 +115,20 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
-            - "--timeout=120s"
-            - "--leader-election-lease-duration=30s"
-            - "--leader-election-renew-deadline=20s"
-            - "--leader-election-retry-period=5s"
+            {{- with .Values.sidecars.provisioner.timeout }}
+            - "--timeout={{ . }}"
+            {{- end }}
+            - "--leader-election-lease-duration={{ .Values.sidecars.leaderElection.leaseDuration }}"
+            - "--leader-election-renew-deadline={{ .Values.sidecars.leaderElection.renewDeadline }}"
+            - "--leader-election-retry-period={{ .Values.sidecars.leaderElection.retryPeriod }}"
             - "--leader-election"
             - "--default-fstype=nfs"
             - "--extra-create-metadata"
             - "--enable-capacity"
             - "--capacity-ownerref-level=2"
+            {{- with .Values.sidecars.provisioner.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -152,9 +154,15 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
-            - "--leader-election-lease-duration=30s"
-            - "--leader-election-renew-deadline=20s"
-            - "--leader-election-retry-period=5s"
+            {{- with .Values.sidecars.attacher.timeout }}
+            - "--timeout={{ . }}"
+            {{- end }}
+            - "--leader-election-lease-duration={{ .Values.sidecars.leaderElection.leaseDuration }}"
+            - "--leader-election-renew-deadline={{ .Values.sidecars.leaderElection.renewDeadline }}"
+            - "--leader-election-retry-period={{ .Values.sidecars.leaderElection.retryPeriod }}"
+            {{- with .Values.sidecars.attacher.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -172,11 +180,16 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
-            - "--timeout=120s"
-            - "--leader-election-lease-duration=30s"
-            - "--leader-election-renew-deadline=20s"
-            - "--leader-election-retry-period=5s"
+            {{- with .Values.sidecars.resizer.timeout }}
+            - "--timeout={{ . }}"
+            {{- end }}
+            - "--leader-election-lease-duration={{ .Values.sidecars.leaderElection.leaseDuration }}"
+            - "--leader-election-renew-deadline={{ .Values.sidecars.leaderElection.renewDeadline }}"
+            - "--leader-election-retry-period={{ .Values.sidecars.leaderElection.retryPeriod }}"
             - "--handle-volume-inuse-error=true"
+            {{- with .Values.sidecars.resizer.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -195,10 +208,15 @@ spec:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
             - "--leader-election"
-            - "--timeout=120s"
-            - "--leader-election-lease-duration=30s"
-            - "--leader-election-renew-deadline=20s"
-            - "--leader-election-retry-period=5s"
+            {{- with .Values.sidecars.snapshotter.timeout }}
+            - "--timeout={{ . }}"
+            {{- end }}
+            - "--leader-election-lease-duration={{ .Values.sidecars.leaderElection.leaseDuration }}"
+            - "--leader-election-renew-deadline={{ .Values.sidecars.leaderElection.renewDeadline }}"
+            - "--leader-election-retry-period={{ .Values.sidecars.leaderElection.retryPeriod }}"
+            {{- with .Values.sidecars.snapshotter.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock
@@ -216,6 +234,9 @@ spec:
           args:
             - "--csi-address=$(ADDRESS)"
             - "--health-port=9808"
+            {{- with .Values.sidecars.livenessprobe.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ADDRESS
               value: /var/lib/csi/sockets/pluginproxy/csi.sock

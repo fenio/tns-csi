@@ -368,6 +368,7 @@ Detached snapshots use `zfs send/receive` to create independent dataset copies t
 | `controller.resources.limits.memory` | Memory limit | `200Mi` |
 | `controller.resources.requests.cpu` | CPU request | `10m` |
 | `controller.resources.requests.memory` | Memory request | `20Mi` |
+| `controller.livenessProbe` | Liveness probe timing for the controller plugin container | `initialDelaySeconds: 10`, `timeoutSeconds: 3`, `periodSeconds: 10`, `failureThreshold: 5` |
 
 ### Node Settings
 
@@ -381,6 +382,22 @@ Detached snapshots use `zfs send/receive` to create independent dataset copies t
 | `node.resources.limits.memory` | Memory limit | `200Mi` |
 | `node.resources.requests.cpu` | CPU request | `10m` |
 | `node.resources.requests.memory` | Memory request | `20Mi` |
+| `node.livenessProbe` | Liveness probe timing for the node plugin container | `initialDelaySeconds: 10`, `timeoutSeconds: 3`, `periodSeconds: 10`, `failureThreshold: 5` |
+
+### Sidecar Settings
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `sidecars.provisioner.timeout` | Timeout for one CreateVolume/DeleteVolume call. Raise it on slow TrueNAS systems where iSCSI provisioning needs several retries before the PVC binds | `120s` |
+| `sidecars.attacher.timeout` | Timeout for ControllerPublish/Unpublish calls (empty = sidecar default, 15s) | `""` |
+| `sidecars.resizer.timeout` | Timeout for one ControllerExpandVolume call | `120s` |
+| `sidecars.snapshotter.timeout` | Timeout for one CreateSnapshot/DeleteSnapshot call | `120s` |
+| `sidecars.leaderElection.leaseDuration` | Leader-election lease duration for the controller sidecars | `30s` |
+| `sidecars.leaderElection.renewDeadline` | Leader-election renew deadline (must be less than `leaseDuration`) | `20s` |
+| `sidecars.leaderElection.retryPeriod` | Leader-election retry period (must be less than `renewDeadline`) | `5s` |
+| `sidecars.<name>.extraArgs` | Extra command-line flags appended to a sidecar (`provisioner`, `attacher`, `resizer`, `snapshotter`, `nodeDriverRegistrar`, `livenessprobe`) | `[]` |
+
+An empty `timeout` omits the flag, so the sidecar falls back to its own default.
 
 ### Dashboard Settings
 

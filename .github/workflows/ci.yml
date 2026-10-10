@@ -83,6 +83,38 @@ jobs:
             > /tmp/tns-csi-expansion-default.yaml
           grep -q '^allowVolumeExpansion: true$' /tmp/tns-csi-expansion-default.yaml
 
+          # Sidecar timing defaults must keep rendering the previously hard-coded values
+          helm template timing-default charts/tns-csi-driver \
+            --show-only templates/controller.yaml \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set 'storageClasses[0].server=truenas.example' \
+            > /tmp/tns-csi-timing-default.yaml
+          test "$(grep -c -- '"--timeout=120s"' /tmp/tns-csi-timing-default.yaml)" -eq 2
+          test "$(grep -c -- '"--leader-election-lease-duration=30s"' /tmp/tns-csi-timing-default.yaml)" -eq 3
+          if grep -A12 'name: csi-attacher' /tmp/tns-csi-timing-default.yaml | grep -q -- '--timeout='; then
+            exit 1
+          fi
+
+          helm template timing-override charts/tns-csi-driver \
+            --show-only templates/controller.yaml \
+            --set truenas.url=wss://truenas.example/api/current \
+            --set truenas.apiKey=test \
+            --set 'storageClasses[0].server=truenas.example' \
+            --set sidecars.provisioner.timeout=600s \
+            --set sidecars.resizer.timeout= \
+            --set sidecars.leaderElection.leaseDuration=60s \
+            --set 'sidecars.provisioner.extraArgs[0]=--worker-threads=4' \
+            --set controller.livenessProbe.failureThreshold=9 \
+            > /tmp/tns-csi-timing-override.yaml
+          grep -q -- '"--timeout=600s"' /tmp/tns-csi-timing-override.yaml
+          grep -q -- '- --worker-threads=4' /tmp/tns-csi-timing-override.yaml
+          grep -q -- '"--leader-election-lease-duration=60s"' /tmp/tns-csi-timing-override.yaml
+          grep -q 'failureThreshold: 9' /tmp/tns-csi-timing-override.yaml
+          if grep -A12 'name: csi-resizer' /tmp/tns-csi-timing-override.yaml | grep -q -- '--timeout='; then
+            exit 1
+          fi
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

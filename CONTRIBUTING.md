@@ -163,6 +163,10 @@ ginkgo -v --focus="expand" ./tests/e2e/nfs/...
 
 See [tests/e2e/README.md](tests/e2e/README.md) for detailed E2E test documentation.
 
+### `//nolint` budget
+
+`nolint-budget.txt` records how many `//nolint` directives each linter has under `pkg/` and `cmd/`. CI (`make nolint-budget`) fails if a count grows or a new linter is suppressed. Fix the code instead. It also fails if a count shrinks without the budget being lowered. When you remove directives, run `make nolint-budget-update` and commit the new budget so it cannot creep back.
+
 ### Linting
 
 ```bash

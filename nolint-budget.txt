@@ -1,0 +1,15 @@
+contextcheck 14
+dupl 27
+errcheck 62
+errchkjson 2
+gocognit 4
+gocritic 2
+gocyclo 4
+gosec 56
+govet 60
+interfacebloat 1
+mnd 1
+nilerr 1
+nilnil 52
+noctx 1
+unparam 1

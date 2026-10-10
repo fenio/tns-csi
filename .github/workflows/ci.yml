@@ -123,6 +123,9 @@ jobs:
           version: v2.14.0
           args: --config .golangci.yml
 
+      - name: nolint budget
+        run: make nolint-budget
+
   test:
     name: Unit Tests
     runs-on: ubuntu-latest

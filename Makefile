@@ -1,4 +1,4 @@
-.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone changelog
+.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix nolint-budget nolint-budget-update test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone changelog
 
 DRIVER_NAME=tns-csi-driver
 PLUGIN_NAME=kubectl-tns_csi
@@ -61,6 +61,15 @@ lint-fix:
 lint-verbose:
 	@echo "Running golangci-lint (verbose)..."
 	$(GOLANGCI_LINT) run --config .golangci.yml -v ./...
+
+# Ratchet on //nolint directives (see nolint-budget.txt). After removing directives,
+# run `make nolint-budget-update` and commit the lowered budget.
+nolint-budget:
+	bash scripts/ci/nolint-budget_test.sh >/dev/null
+	bash scripts/ci/nolint-budget.sh
+
+nolint-budget-update:
+	bash scripts/ci/nolint-budget.sh --update
 
 deps:
 	@echo "Downloading dependencies..."

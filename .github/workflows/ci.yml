@@ -115,13 +115,38 @@ jobs:
             exit 1
           fi
 
+      - name: Read pinned golangci-lint version
+        id: lintver
+        # Single source of truth is GOLANGCI_LINT_VERSION in the Makefile.
+        # Fail loudly if the line is not found: an empty version makes the action use "latest".
+        run: |
+          v=$(sed -n 's/^GOLANGCI_LINT_VERSION *?= *//p' Makefile)
+          test -n "$v" || { echo "GOLANGCI_LINT_VERSION not found in Makefile"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned to avoid CI churn when upstream bumps default rule strictness.
-          # Bump deliberately and fix any new warnings in the same PR.
-          version: v2.14.0
+          version: ${{ steps.lintver.outputs.version }}
           args: --config .golangci.yml
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          # Scan with the Go version that builds the shipped image (Dockerfile builder),
+          # not go.mod's minimum language version: stdlib advisories depend on it.
+          go-version: '1.27.2'
+
+      # Plain `go run` with a pinned version instead of a third-party action, so the
+      # job works under any repository Actions allowlist.
+      - name: Run govulncheck
+        run: make vulncheck
 
   test:
     name: Unit Tests
@@ -136,6 +161,9 @@ jobs:
 
       - name: Download dependencies
         run: go mod download
+
+      - name: Check go.mod/go.sum are tidy
+        run: make mod-tidy-check
 
       - name: Run tests
         run: make test-unit

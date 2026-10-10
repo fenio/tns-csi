@@ -262,8 +262,10 @@ func TestNewClient(t *testing.T) {
 }
 
 func TestNewClientConnectionFailure(t *testing.T) {
-	// Try to connect to non-existent server
-	_, err := NewClient("ws://localhost:99999/invalid", "test-api-key", false)
+	// Try to connect to non-existent server. Zero retry delays keep the test fast;
+	// the default 0/5/10/20/40s schedule is covered by the option's default value.
+	_, err := NewClient("ws://localhost:99999/invalid", "test-api-key", false,
+		WithConnectRetryDelays(0, 0))
 	if err == nil {
 		t.Error("Expected connection error but got nil")
 	}
@@ -404,9 +406,11 @@ func TestClientCallTimeout(t *testing.T) {
 			}
 		}
 
-		// Don't respond to next request - simulate timeout
+		// Don't respond to next request - simulate timeout. Hold 10x past the client's
+		// 100ms deadline so a starved -race runner still sees DeadlineExceeded rather than
+		// a connection close; keep it short because httptest.Server.Close waits for it.
 		conn.Read(ctx)
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 	}
 	defer server.Close()
 
@@ -1668,5 +1672,22 @@ func TestWaitForCallRetry(t *testing.T) {
 				t.Fatalf("waitForCallRetry() error = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNewClientConnectionFailureUsesConfiguredRetryDelays(t *testing.T) {
+	start := time.Now()
+	_, err := NewClient("ws://localhost:99999/invalid", "test-api-key", false,
+		WithConnectRetryDelays(0, 0, 0))
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Expected connection error but got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to connect after 3 attempts") {
+		t.Errorf("Expected failure after 3 attempts (one per configured delay), got: %v", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("Expected zero delays between attempts, took %v", elapsed)
 	}
 }

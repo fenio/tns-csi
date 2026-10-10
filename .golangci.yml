@@ -44,6 +44,7 @@ linters:
     - predeclared     # Finds code that shadows predeclared identifiers
     - whitespace      # Checks for unnecessary whitespace
     - errorlint       # Find misuses of errors
+    - forbidigo       # Bans identifiers/patterns listed under settings.forbidigo (ratchet: add a rule when a pattern is removed)
     - forcetypeassert # Finds forced type assertions
     - gomoddirectives # Manage use of replace, retract directives in go.mod
     - nilnil          # Checks returning nil even if nil is a valid value
@@ -218,6 +219,14 @@ linters:
         - FIXME
         - HACK
 
+    # Each rule here is a ratchet: once a pattern is removed from the codebase,
+    # add a rule so it cannot come back. Keep the message actionable.
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^time\.Tick$
+          msg: time.Tick leaks its ticker; use time.NewTicker and Stop it
+
   exclusions:
     generated: lax
     rules:
@@ -247,11 +256,6 @@ linters:
       - text: "printf-like formatting function"
         linters:
           - revive
-          
-      # Known TODO items are tracked, not immediate problems
-      - text: "Line contains TODO/BUG/FIXME"
-        linters:
-          - godox
 
 formatters:
   enable:

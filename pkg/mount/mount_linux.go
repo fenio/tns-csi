@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fenio/tns-csi/pkg/cmdexec"
 	"golang.org/x/sys/unix"
 )
 
@@ -129,10 +130,7 @@ func isDeviceInMountInfo(deviceMajor, deviceMinor uint32, mountInfo io.Reader) (
 
 // Unmount unmounts a path.
 func Unmount(ctx context.Context, targetPath string) error {
-	umountCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(umountCtx, "umount", targetPath)
-	output, err := cmd.CombinedOutput()
+	output, err := cmdexec.CombinedOutput(ctx, 30*time.Second, "umount", targetPath)
 	if err != nil {
 		return fmt.Errorf("failed to unmount: %w, output: %s", err, string(output))
 	}

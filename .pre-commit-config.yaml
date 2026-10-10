@@ -1,6 +1,7 @@
 repos:
   - repo: https://github.com/golangci/golangci-lint
-    rev: v2.1.0
+    # Keep in sync with GOLANGCI_LINT_VERSION in the Makefile (CI reads that line).
+    rev: v2.14.0
     hooks:
       - id: golangci-lint
         args: ['--timeout=5m', '--config=.golangci.yml']

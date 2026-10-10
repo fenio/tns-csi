@@ -43,5 +43,5 @@ jobs:
       - name: Run CSI sanity tests
         run: make test-sanity
 
-      - name: Run unit tests
-        run: make test-unit
+      - name: Run script tests
+        run: make test-scripts

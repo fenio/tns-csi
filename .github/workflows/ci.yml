@@ -115,13 +115,26 @@ jobs:
             exit 1
           fi
 
+      - name: Read pinned golangci-lint version
+        id: lintver
+        # Single source of truth is GOLANGCI_LINT_VERSION in the Makefile.
+        run: echo "version=$(sed -n 's/^GOLANGCI_LINT_VERSION *?= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned to avoid CI churn when upstream bumps default rule strictness.
-          # Bump deliberately and fix any new warnings in the same PR.
-          version: v2.14.0
+          version: ${{ steps.lintver.outputs.version }}
           args: --config .golangci.yml
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
+          go-package: ./...
 
   test:
     name: Unit Tests

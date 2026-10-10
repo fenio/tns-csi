@@ -37,10 +37,15 @@ jobs:
       - name: Run tests
         run: make test-unit
 
+      - name: Read pinned golangci-lint version
+        id: lintver
+        # Same pin as CI; single source of truth is GOLANGCI_LINT_VERSION in the Makefile.
+        run: echo "version=$(sed -n 's/^GOLANGCI_LINT_VERSION *?= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+
       - name: Run linter
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: ${{ steps.lintver.outputs.version }}
           args: --config .golangci.yml
 
       - name: Set up Docker Buildx

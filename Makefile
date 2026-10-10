@@ -1,9 +1,17 @@
-.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone changelog
+.PHONY: all build build-plugin clean deps install test test-unit test-scripts test-sanity test-all test-coverage \
+	docker-build docker-push lint lint-fix lint-verbose mod-tidy-check check \
+	test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone \
+	changelog changelog-unreleased
 
 DRIVER_NAME=tns-csi-driver
 PLUGIN_NAME=kubectl-tns_csi
 IMAGE_NAME=bfenski/tns-csi
 REGISTRY?=docker.io
+
+# Single source of truth for the golangci-lint version. CI workflows read this line
+# (see .github/workflows/ci.yml and release.yml); keep .pre-commit-config.yaml in sync.
+# Bump deliberately and fix any new warnings in the same PR.
+GOLANGCI_LINT_VERSION ?= v2.14.0
 
 # Version information - derived from git tags
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo "dev")
@@ -51,7 +59,9 @@ test:
 	$(GOTEST) -v ./...
 
 lint:
-	@echo "Running golangci-lint..."
+	@echo "Running golangci-lint (CI pins $(GOLANGCI_LINT_VERSION))..."
+	@$(GOLANGCI_LINT) version 2>/dev/null | grep -q "$(GOLANGCI_LINT_VERSION:v%=%)" || \
+		echo "warning: local golangci-lint is not $(GOLANGCI_LINT_VERSION); results may differ from CI"
 	$(GOLANGCI_LINT) run --config .golangci.yml ./...
 
 lint-fix:
@@ -90,9 +100,25 @@ test-sanity:
 	@echo "Running CSI sanity tests..."
 	./tests/sanity/test-sanity.sh
 
+# Unit tests: race detector on, randomized order, driver + CLI packages (what CI runs).
 test-unit:
 	@echo "Running unit tests..."
-	$(GOTEST) -v -short ./pkg/...
+	$(GOTEST) -v -short -race -shuffle=on ./pkg/... ./cmd/...
+
+# Shell-script unit tests (test runners live in tests/sanity).
+test-scripts:
+	@echo "Running script tests..."
+	bash tests/sanity/sanity-script_test.sh
+
+# Fail if go.mod/go.sum are not tidy.
+mod-tidy-check:
+	@echo "Checking go.mod/go.sum are tidy..."
+	$(GOMOD) tidy
+	@git diff --exit-code -- go.mod go.sum || (echo "go.mod/go.sum not tidy: run 'go mod tidy'" && exit 1)
+
+# Everything a PR must pass. CI runs exactly these targets.
+check: lint mod-tidy-check test-unit test-scripts test-sanity build
+	@echo "All checks passed"
 
 test-coverage:
 	@echo "Running tests with coverage (for SonarQube)..."

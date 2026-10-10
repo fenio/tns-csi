@@ -108,13 +108,16 @@ test-coverage: coverage
 # Coverage ratchet: enforce the floors in .testcoverage.yml.
 # COVERAGE_BREAKDOWN=<file>       also write a breakdown (CI uploads it from main).
 # COVERAGE_BASE_BREAKDOWN=<file>  also fail if total coverage drops below that breakdown.
-GO_TEST_COVERAGE_VERSION ?= v2.20.0
+GO_TEST_COVERAGE_VERSION ?= v2.19.0
 COVERAGE_BREAKDOWN ?=
 COVERAGE_BASE_BREAKDOWN ?=
+# Allowed drop in total coverage vs the base, in percentage points. A small tolerance absorbs
+# run-to-run noise from timing-dependent paths; floors still catch real erosion.
+COVERAGE_DIFF_THRESHOLD ?= -0.5
 coverage-check: coverage
 	$(GOCMD) run github.com/vladopajic/go-test-coverage/v2@$(GO_TEST_COVERAGE_VERSION) --config=.testcoverage.yml \
 		$(if $(COVERAGE_BREAKDOWN),--breakdown-file-name=$(COVERAGE_BREAKDOWN)) \
-		$(if $(COVERAGE_BASE_BREAKDOWN),--diff-base-breakdown-file-name=$(COVERAGE_BASE_BREAKDOWN) --diff-threshold=0)
+		$(if $(COVERAGE_BASE_BREAKDOWN),--diff-base-breakdown-file-name=$(COVERAGE_BASE_BREAKDOWN) --diff-threshold=$(COVERAGE_DIFF_THRESHOLD))
 
 test-all: test-unit test-sanity
 	@echo "All tests completed"

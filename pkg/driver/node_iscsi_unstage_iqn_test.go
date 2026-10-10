@@ -19,6 +19,48 @@ func stubMountedEntry(t *testing.T, fn func(context.Context, string) (mount.Entr
 	t.Cleanup(func() { lookupMountedEntry = orig })
 }
 
+// The NVMe twin of the iSCSI recovery below: a filesystem-mode staging path resolves
+// to the NVMe device mounted there, read from the mount table, and an unreadable table
+// fails closed instead of guessing a device to disconnect.
+func TestGetStagedNVMeDevicePathUsesMountTable(t *testing.T) {
+	stagingPath := filepath.Join(t.TempDir(), "globalmount")
+	if err := os.Mkdir(stagingPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+
+	stubMountedEntry(t, func(context.Context, string) (mount.Entry, bool, error) {
+		return mount.Entry{Source: "/dev/nvme3n1", FSType: "ext4"}, true, nil
+	})
+	got, err := service.getStagedNVMeDevicePath(context.Background(), stagingPath)
+	if err != nil || got != "/dev/nvme3n1" {
+		t.Fatalf("getStagedNVMeDevicePath() = %q, %v; want /dev/nvme3n1, nil", got, err)
+	}
+
+	stubMountedEntry(t, func(context.Context, string) (mount.Entry, bool, error) {
+		return mount.Entry{}, false, errors.New("mount table unreadable")
+	})
+	if got, err := service.getStagedNVMeDevicePath(context.Background(), stagingPath); err == nil {
+		t.Fatalf("getStagedNVMeDevicePath() with an unreadable mount table = %q, nil; want an error", got)
+	}
+}
+
+func TestDetectBlockProtocolFromMountUsesMountTable(t *testing.T) {
+	service := NewNodeService("test-node", nil, true, nil, false, 5)
+	var looked []string
+	stubMountedEntry(t, func(_ context.Context, path string) (mount.Entry, bool, error) {
+		looked = append(looked, path)
+		return mount.Entry{Source: "/dev/nvme0n1", FSType: "ext4"}, true, nil
+	})
+	if got := service.detectBlockProtocolFromMount(context.Background(), "/staging"); got != ProtocolNVMeOF {
+		t.Fatalf("detectBlockProtocolFromMount() = %q, want %q", got, ProtocolNVMeOF)
+	}
+	// NVMe-oF is also the fallback, so assert the answer came from the mount table.
+	if len(looked) != 1 || looked[0] != "/staging" {
+		t.Fatalf("mount table lookups = %v, want [/staging]", looked)
+	}
+}
+
 // Legacy staged volumes have no metadata file; the IQN is recovered from the device
 // mounted at the staging path. The lookup must use the mount table, and any failure
 // to read it must fail closed rather than guess an IQN (which could log out a

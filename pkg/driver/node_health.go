@@ -21,6 +21,7 @@ var (
 	errReadTimeout       = errors.New("timeout reading directory")
 	errNotNVMeDevice     = errors.New("not an NVMe device")
 	errISCSIStateUnknown = errors.New("could not determine iSCSI session state")
+	errNotMounted        = errors.New("not mounted")
 )
 
 // sysClassNVMePath is the sysfs directory exposing NVMe controllers.
@@ -90,7 +91,7 @@ func (s *NodeService) checkVolumeHealth(ctx context.Context, volumePath, _ strin
 
 // detectProtocolFromVolumePath detects the protocol from the volume path.
 func (s *NodeService) detectProtocolFromVolumePath(ctx context.Context, volumePath string) string {
-	// Check the filesystem type using findmnt
+	// Check the filesystem type from the mount table
 	fsType, err := detectFilesystemType(ctx, volumePath)
 	if err != nil {
 		klog.V(4).Infof("Failed to detect filesystem type for %s: %v", volumePath, err)
@@ -272,12 +273,14 @@ func checkDirectoryReadable(ctx context.Context, path string) error {
 
 // getSourceDevice gets the source device for a mount point.
 func getSourceDevice(ctx context.Context, mountPath string) (string, error) {
-	cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
-	output, err := cmd.CombinedOutput()
+	entry, mounted, err := lookupMountedEntry(ctx, mountPath)
 	if err != nil {
-		return "", fmt.Errorf("findmnt failed: %w", err)
+		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+	if !mounted {
+		return "", fmt.Errorf("%s: %w", mountPath, errNotMounted)
+	}
+	return entry.Source, nil
 }
 
 // getNVMeControllerState reads the NVMe controller state from sysfs.

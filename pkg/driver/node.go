@@ -284,7 +284,7 @@ func (s *NodeService) detectProtocolFromStagingPath(ctx context.Context, staging
 		return ProtocolNFS
 	}
 
-	// It's mounted - check the filesystem type using findmnt
+	// It's mounted - check the filesystem type from the mount table
 	fsType, err := detectFilesystemType(ctx, stagingPath)
 	if err != nil {
 		// Default to NFS if we can't detect
@@ -322,15 +322,11 @@ func (s *NodeService) detectBlockProtocolFromDevice(devicePath string) string {
 
 // detectBlockProtocolFromMount determines the block protocol from a mounted path.
 func (s *NodeService) detectBlockProtocolFromMount(ctx context.Context, mountPath string) string {
-	// Get the source device from findmnt
-	cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", mountPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	entry, mounted, err := lookupMountedEntry(ctx, mountPath)
+	if err != nil || !mounted {
 		return ProtocolNVMeOF // Default to NVMe-oF
 	}
-
-	devicePath := strings.TrimSpace(string(output))
-	return s.detectBlockProtocolFromDevice(devicePath)
+	return s.detectBlockProtocolFromDevice(entry.Source)
 }
 
 // isISCSIDevice checks if a device is an iSCSI device by looking for iSCSI by-path symlinks.

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fenio/tns-csi/pkg/cmdexec"
 	"github.com/fenio/tns-csi/pkg/mount"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -88,11 +89,7 @@ func ensureStagingTarget(ctx context.Context, stagingTargetPath string) (bool, e
 }
 
 func detectBlockFilesystemType(ctx context.Context, devicePath string) (string, error) {
-	detectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(detectCtx, blkidPath, "-s", "TYPE", "-o", "value", devicePath)
-	output, err := cmd.CombinedOutput()
+	output, err := cmdexec.CombinedOutput(ctx, 10*time.Second, blkidPath, "-s", "TYPE", "-o", "value", devicePath)
 	if err != nil {
 		return "", status.Errorf(codes.FailedPrecondition,
 			"failed to detect filesystem type on %s: %v, output: %s", devicePath, err, truncateCommandOutput(output))

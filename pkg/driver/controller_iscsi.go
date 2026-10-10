@@ -778,58 +778,27 @@ func (s *ControllerService) createISCSITargetExtent(ctx context.Context, targetI
 // Returns the deleteStrategy and a "not found" flag. If the ZVOL doesn't exist, returns ("", true, nil)
 // so the caller can handle idempotent deletion. Also reconciles stored target/extent IDs with metadata.
 func (s *ControllerService) verifyISCSIOwnership(ctx context.Context, meta *VolumeMetadata) (deleteStrategy string, notFound bool, err error) {
-	deleteStrategy = tnsapi.DeleteStrategyDelete
-
-	props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
-		tnsapi.PropertyManagedBy,
-		tnsapi.PropertyCSIVolumeName,
-		tnsapi.PropertyISCSITargetID,
-		tnsapi.PropertyISCSIExtentID,
-		tnsapi.PropertyDeleteStrategy,
-	})
+	ownership, err := s.readVolumeOwnership(ctx, meta, tnsapi.PropertyISCSITargetID, tnsapi.PropertyISCSIExtentID)
 	if err != nil {
-		if isNotFoundError(err) {
-			return "", true, nil
-		}
-		klog.Warningf("Failed to verify dataset ownership via ZFS properties: %v (continuing with deletion)", err)
-		return deleteStrategy, false, nil
+		return "", false, err
+	}
+	if ownership.notFound {
+		return "", true, nil
 	}
 
-	if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
-		return "", false, status.Errorf(codes.FailedPrecondition,
-			"Dataset %s is not managed by tns-csi (managed_by=%s)", meta.DatasetID, managedBy)
+	storedTargetID := tnsapi.StringToInt(ownership.props[tnsapi.PropertyISCSITargetID])
+	if storedTargetID > 0 && meta.ISCSITargetID > 0 && storedTargetID != meta.ISCSITargetID {
+		klog.Warningf("iSCSI target ID mismatch: stored=%d, metadata=%d (using stored ID)", storedTargetID, meta.ISCSITargetID)
+		meta.ISCSITargetID = storedTargetID
 	}
-
-	if volumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
-		nameMatches := volumeName == meta.Name || (isDatasetPathVolumeID(meta.Name) && strings.HasSuffix(meta.Name, "/"+volumeName))
-		if !nameMatches {
-			return "", false, status.Errorf(codes.FailedPrecondition,
-				"Dataset %s volume name mismatch (stored=%s, requested=%s)", meta.DatasetID, volumeName, meta.Name)
-		}
-	}
-
-	if targetIDStr, ok := props[tnsapi.PropertyISCSITargetID]; ok {
-		storedTargetID := tnsapi.StringToInt(targetIDStr)
-		if storedTargetID > 0 && meta.ISCSITargetID > 0 && storedTargetID != meta.ISCSITargetID {
-			klog.Warningf("iSCSI target ID mismatch: stored=%d, metadata=%d (using stored ID)", storedTargetID, meta.ISCSITargetID)
-			meta.ISCSITargetID = storedTargetID
-		}
-	}
-
-	if extentIDStr, ok := props[tnsapi.PropertyISCSIExtentID]; ok {
-		storedExtentID := tnsapi.StringToInt(extentIDStr)
-		if storedExtentID > 0 && meta.ISCSIExtentID > 0 && storedExtentID != meta.ISCSIExtentID {
-			klog.Warningf("iSCSI extent ID mismatch: stored=%d, metadata=%d (using stored ID)", storedExtentID, meta.ISCSIExtentID)
-			meta.ISCSIExtentID = storedExtentID
-		}
-	}
-
-	if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
-		deleteStrategy = strategy
+	storedExtentID := tnsapi.StringToInt(ownership.props[tnsapi.PropertyISCSIExtentID])
+	if storedExtentID > 0 && meta.ISCSIExtentID > 0 && storedExtentID != meta.ISCSIExtentID {
+		klog.Warningf("iSCSI extent ID mismatch: stored=%d, metadata=%d (using stored ID)", storedExtentID, meta.ISCSIExtentID)
+		meta.ISCSIExtentID = storedExtentID
 	}
 
 	klog.V(4).Infof("Ownership verified for ZVOL %s (volume: %s)", meta.DatasetID, meta.Name)
-	return deleteStrategy, false, nil
+	return ownership.deleteStrategy, false, nil
 }
 
 // deleteISCSIVolume deletes an iSCSI volume and all associated resources.

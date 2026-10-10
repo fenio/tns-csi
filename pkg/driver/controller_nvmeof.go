@@ -716,65 +716,33 @@ func (s *ControllerService) createNVMeOFNamespaceForZVOL(ctx context.Context, zv
 // If verification passes, it may update meta with stored IDs from ZFS properties.
 // Also returns the deleteStrategy from ZFS properties (defaults to "delete" if not found).
 func (s *ControllerService) verifyNVMeOFOwnership(ctx context.Context, meta *VolumeMetadata) (string, error) {
-	deleteStrategy := tnsapi.DeleteStrategyDelete // Default to delete
-
 	if meta.DatasetID == "" {
-		return deleteStrategy, nil
+		return tnsapi.DeleteStrategyDelete, nil
 	}
 
-	props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
-		tnsapi.PropertyManagedBy,
-		tnsapi.PropertyCSIVolumeName,
-		tnsapi.PropertyNVMeSubsystemID,
-		tnsapi.PropertyNVMeNamespaceID,
-		tnsapi.PropertyNVMeSubsystemNQN,
-		tnsapi.PropertyDeleteStrategy,
-	})
+	ownership, err := s.readVolumeOwnership(ctx, meta,
+		tnsapi.PropertyNVMeSubsystemID, tnsapi.PropertyNVMeNamespaceID, tnsapi.PropertyNVMeSubsystemNQN)
 	if err != nil {
-		// Properties not found - could be old volume or manual creation
-		klog.V(4).Infof("Could not read ZFS properties for %s: %v (proceeding with metadata-based deletion)", meta.DatasetID, err)
-		return deleteStrategy, nil
+		return "", err
 	}
-
-	// Verify managed_by property
-	if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
-		return "", status.Errorf(codes.FailedPrecondition,
-			"ZVOL %s is not managed by tns-csi (managed_by=%s), refusing to delete",
-			meta.DatasetID, managedBy)
-	}
-
-	// Verify volume name matches
-	// For dataset-path volume IDs (e.g., "tank/pvc-xxx"), the stored property is just the PVC name ("pvc-xxx")
-	if storedVolumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
-		nameMatches := storedVolumeName == meta.Name || (isDatasetPathVolumeID(meta.Name) && strings.HasSuffix(meta.Name, "/"+storedVolumeName))
-		if !nameMatches {
-			return "", status.Errorf(codes.FailedPrecondition,
-				"Volume name mismatch: ZVOL %s belongs to volume '%s', not '%s' (possible ID reuse)",
-				meta.DatasetID, storedVolumeName, meta.Name)
-		}
+	if ownership.notFound {
+		// The ZVOL is already gone; keep going so an orphaned namespace/subsystem is still cleaned up.
+		klog.V(4).Infof("ZVOL %s not found; proceeding with metadata-based cleanup", meta.DatasetID)
+		return tnsapi.DeleteStrategyDelete, nil
 	}
 
 	// Use stored IDs if available (more reliable than metadata after TrueNAS restart)
-	if storedSubsystemID, ok := props[tnsapi.PropertyNVMeSubsystemID]; ok {
-		if parsedID := tnsapi.StringToInt(storedSubsystemID); parsedID > 0 && parsedID != meta.NVMeOFSubsystemID {
-			klog.Infof("Using stored subsystem ID %d instead of metadata ID %d", parsedID, meta.NVMeOFSubsystemID)
-			meta.NVMeOFSubsystemID = parsedID
-		}
+	if parsedID := tnsapi.StringToInt(ownership.props[tnsapi.PropertyNVMeSubsystemID]); parsedID > 0 && parsedID != meta.NVMeOFSubsystemID {
+		klog.Infof("Using stored subsystem ID %d instead of metadata ID %d", parsedID, meta.NVMeOFSubsystemID)
+		meta.NVMeOFSubsystemID = parsedID
 	}
-	if storedNamespaceID, ok := props[tnsapi.PropertyNVMeNamespaceID]; ok {
-		if parsedID := tnsapi.StringToInt(storedNamespaceID); parsedID > 0 && parsedID != meta.NVMeOFNamespaceID {
-			klog.Infof("Using stored namespace ID %d instead of metadata ID %d", parsedID, meta.NVMeOFNamespaceID)
-			meta.NVMeOFNamespaceID = parsedID
-		}
-	}
-
-	// Get deleteStrategy from properties
-	if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
-		deleteStrategy = strategy
+	if parsedID := tnsapi.StringToInt(ownership.props[tnsapi.PropertyNVMeNamespaceID]); parsedID > 0 && parsedID != meta.NVMeOFNamespaceID {
+		klog.Infof("Using stored namespace ID %d instead of metadata ID %d", parsedID, meta.NVMeOFNamespaceID)
+		meta.NVMeOFNamespaceID = parsedID
 	}
 
 	klog.V(4).Infof("Ownership verified for ZVOL %s (volume: %s)", meta.DatasetID, meta.Name)
-	return deleteStrategy, nil
+	return ownership.deleteStrategy, nil
 }
 
 // deleteNVMeOFVolume deletes an NVMe-oF volume.

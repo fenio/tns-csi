@@ -91,14 +91,17 @@ type Client struct {
 	apiKey        string
 	connectedAt   time.Time // Track connection start time for metrics
 	retryInterval time.Duration
-	reqID         uint64
-	maxRetries    int
-	closed        bool
-	reconnecting  bool
-	skipTLSVerify bool // Skip TLS certificate verification
-	authGate      chan struct{}
-	reconnectDone chan struct{}
-	readLimit     int64 // Max WebSocket message size accepted from TrueNAS, in bytes
+	// connectRetryDelays holds the wait before each NewClient connection attempt
+	// (one entry per attempt; the first is normally 0). Tests shorten it.
+	connectRetryDelays []time.Duration
+	reqID              uint64
+	maxRetries         int
+	closed             bool
+	reconnecting       bool
+	skipTLSVerify      bool // Skip TLS certificate verification
+	authGate           chan struct{}
+	reconnectDone      chan struct{}
+	readLimit          int64 // Max WebSocket message size accepted from TrueNAS, in bytes
 
 	// reauthMu coordinates session re-authentication after ENOTAUTHENTICATED.
 	// Concurrent calls wait on reauthDone and reuse a re-authentication that
@@ -214,6 +217,21 @@ func WithReadLimit(n int64) ClientOption {
 	}
 }
 
+// defaultConnectRetryDelays is the wait before each initial connection attempt.
+// Five attempts over ~75s tolerate TrueNAS or the network coming up after the driver.
+var defaultConnectRetryDelays = []time.Duration{0, 5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second}
+
+// WithConnectRetryDelays overrides the per-attempt waits used while establishing the
+// initial connection in NewClient. The number of attempts equals len(delays); an empty
+// list keeps the default.
+func WithConnectRetryDelays(delays ...time.Duration) ClientOption {
+	return func(c *Client) {
+		if len(delays) > 0 {
+			c.connectRetryDelays = delays
+		}
+	}
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
 func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*Client, error) {
@@ -225,15 +243,16 @@ func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*C
 
 	newClientState := func() *Client {
 		c := &Client{
-			url:           url,
-			apiKey:        apiKey,
-			pending:       make(map[string]chan *Response),
-			closeCh:       make(chan struct{}),
-			maxRetries:    5,
-			retryInterval: 5 * time.Second,
-			skipTLSVerify: skipTLSVerify,
-			authGate:      make(chan struct{}, 1),
-			readLimit:     DefaultReadLimit,
+			url:                url,
+			apiKey:             apiKey,
+			pending:            make(map[string]chan *Response),
+			closeCh:            make(chan struct{}),
+			maxRetries:         5,
+			retryInterval:      5 * time.Second,
+			connectRetryDelays: defaultConnectRetryDelays,
+			skipTLSVerify:      skipTLSVerify,
+			authGate:           make(chan struct{}, 1),
+			readLimit:          DefaultReadLimit,
 		}
 		for _, opt := range opts {
 			opt(c)
@@ -244,8 +263,8 @@ func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*C
 
 	// Connect to WebSocket with retry logic
 	// This is critical for driver initialization in environments with intermittent network connectivity
-	maxAttempts := 5
-	retryDelays := []time.Duration{0, 5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second}
+	retryDelays := c.connectRetryDelays
+	maxAttempts := len(retryDelays)
 
 	var lastConnErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {

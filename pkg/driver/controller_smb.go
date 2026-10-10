@@ -312,54 +312,29 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 
 // deleteSMBVolume deletes an SMB volume with ownership verification.
 //
-//nolint:dupl,gocyclo,gocognit // Intentionally similar dataset deletion pattern as NFS/iSCSI; complexity from ownership checks + CSI snapshot guard + dependent clones guard
+//nolint:dupl // Intentionally similar dataset deletion pattern as NFS
 func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMetadata) (*csi.DeleteVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolSMB, verbDelete)
 	klog.V(4).Infof("Deleting SMB volume: %s (dataset: %s, share ID: %d)", meta.Name, meta.DatasetName, meta.SMBShareID)
 
 	deleteStrategy := tnsapi.DeleteStrategyDelete
 	if meta.DatasetID != "" {
-		props, err := s.apiClient.GetDatasetProperties(ctx, meta.DatasetID, []string{
-			tnsapi.PropertyManagedBy,
-			tnsapi.PropertyCSIVolumeName,
-			tnsapi.PropertySMBShareID,
-			tnsapi.PropertyDeleteStrategy,
-		})
+		ownership, err := s.readVolumeOwnership(ctx, meta, tnsapi.PropertySMBShareID)
 		if err != nil {
-			if isNotFoundError(err) {
-				klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
-				timer.ObserveSuccess()
-				return &csi.DeleteVolumeResponse{}, nil
-			}
-			klog.Warningf("Failed to verify dataset ownership via ZFS properties: %v (continuing with deletion)", err)
-		} else {
-			if managedBy, ok := props[tnsapi.PropertyManagedBy]; ok && managedBy != tnsapi.ManagedByValue {
-				timer.ObserveError()
-				return nil, status.Errorf(codes.FailedPrecondition,
-					"Dataset %s is not managed by tns-csi (managed_by=%s)", meta.DatasetID, managedBy)
-			}
-
-			if volumeName, ok := props[tnsapi.PropertyCSIVolumeName]; ok {
-				nameMatches := volumeName == meta.Name || (isDatasetPathVolumeID(meta.Name) && strings.HasSuffix(meta.Name, "/"+volumeName))
-				if !nameMatches {
-					timer.ObserveError()
-					return nil, status.Errorf(codes.FailedPrecondition,
-						"Dataset %s volume name mismatch (stored=%s, requested=%s)", meta.DatasetID, volumeName, meta.Name)
-				}
-			}
-
-			if shareIDStr, ok := props[tnsapi.PropertySMBShareID]; ok {
-				storedShareID := tnsapi.StringToInt(shareIDStr)
-				if storedShareID > 0 && meta.SMBShareID > 0 && storedShareID != meta.SMBShareID {
-					klog.Warningf("SMB share ID mismatch: stored=%d, metadata=%d (using stored ID)", storedShareID, meta.SMBShareID)
-					meta.SMBShareID = storedShareID
-				}
-			}
-
-			if strategy, ok := props[tnsapi.PropertyDeleteStrategy]; ok && strategy != "" {
-				deleteStrategy = strategy
-			}
+			timer.ObserveError()
+			return nil, err
 		}
+		if ownership.notFound {
+			klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
+			timer.ObserveSuccess()
+			return &csi.DeleteVolumeResponse{}, nil
+		}
+		storedShareID := tnsapi.StringToInt(ownership.props[tnsapi.PropertySMBShareID])
+		if storedShareID > 0 && meta.SMBShareID > 0 && storedShareID != meta.SMBShareID {
+			klog.Warningf("SMB share ID mismatch: stored=%d, metadata=%d (using stored ID)", storedShareID, meta.SMBShareID)
+			meta.SMBShareID = storedShareID
+		}
+		deleteStrategy = ownership.deleteStrategy
 	}
 
 	if deleteStrategy == tnsapi.DeleteStrategyRetain {

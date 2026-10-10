@@ -1204,6 +1204,9 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	}
 
 	if volumeMeta == nil {
+		if err := s.checkUnmanagedDatasetAtVolumeID(ctx, volumeID); err != nil {
+			return nil, err
+		}
 		// Volume not found - return success per CSI spec (idempotent delete)
 		klog.V(4).Infof("Volume %s not found, returning success (idempotent)", volumeID)
 		return &csi.DeleteVolumeResponse{}, nil

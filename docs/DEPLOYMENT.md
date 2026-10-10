@@ -751,6 +751,16 @@ kubectl logs -n tns-csi tns-csi-node-xxxxx -c tns-csi-plugin
    - List active sessions: `sudo iscsiadm -m session`
    - Check /dev/disk/by-path for iSCSI entries
 
+10. **PV stuck in `Released` with a DeleteVolume error**
+
+    The driver deletes storage only after it has read the dataset's ownership properties. It does not guess.
+    - `Unavailable: cannot read ownership properties ...`: TrueNAS could not be queried, for example because it was restarting or the API timed out. Nothing was deleted. The provisioner retries with backoff, so check TrueNAS connectivity and wait.
+    - `FailedPrecondition: dataset ... exists but is not managed by tns-csi`: the dataset at the volume's path exists but has no `tns-csi:managed_by=tns-csi` property. Older releases could leave a volume in this state if a property write failed during creation. Before this check existed, the deletion was reported as successful and the dataset leaked. If the volume was created by tns-csi, mark it and the deletion will be retried:
+      ```bash
+      zfs set tns-csi:managed_by=tns-csi <pool/path/pvc-...>
+      ```
+      If you want to keep the data, delete the PV object without deleting the storage.
+
 ### kubectl Plugin for Troubleshooting
 
 The `kubectl tns-csi` plugin provides powerful troubleshooting capabilities:

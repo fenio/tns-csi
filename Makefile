@@ -1,4 +1,4 @@
-.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix test-coverage test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone changelog
+.PHONY: all build build-plugin clean test docker-build docker-push lint lint-fix test-coverage coverage coverage-check test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone changelog
 
 DRIVER_NAME=tns-csi-driver
 PLUGIN_NAME=kubectl-tns_csi
@@ -94,12 +94,27 @@ test-unit:
 	@echo "Running unit tests..."
 	$(GOTEST) -v -short ./pkg/...
 
-test-coverage:
-	@echo "Running tests with coverage (for SonarQube)..."
-	$(GOTEST) -v -short -coverprofile=coverage.out -covermode=atomic ./pkg/...
-	$(GOTEST) -v -short -json ./pkg/... > test-report.json || true
+# Coverage profile for the driver and CLI packages (consumed by coverage-check and SonarQube).
+coverage:
+	@echo "Running tests with coverage..."
+	$(GOTEST) -short -coverprofile=coverage.out -covermode=atomic ./pkg/... ./cmd/...
 	@echo "Coverage report: coverage.out"
+
+# Coverage + JSON test report for SonarQube.
+test-coverage: coverage
+	$(GOTEST) -v -short -json ./pkg/... > test-report.json || true
 	@echo "Test report: test-report.json"
+
+# Coverage ratchet: enforce the floors in .testcoverage.yml.
+# COVERAGE_BREAKDOWN=<file>       also write a breakdown (CI uploads it from main).
+# COVERAGE_BASE_BREAKDOWN=<file>  also fail if total coverage drops below that breakdown.
+GO_TEST_COVERAGE_VERSION ?= v2.20.0
+COVERAGE_BREAKDOWN ?=
+COVERAGE_BASE_BREAKDOWN ?=
+coverage-check: coverage
+	$(GOCMD) run github.com/vladopajic/go-test-coverage/v2@$(GO_TEST_COVERAGE_VERSION) --config=.testcoverage.yml \
+		$(if $(COVERAGE_BREAKDOWN),--breakdown-file-name=$(COVERAGE_BREAKDOWN)) \
+		$(if $(COVERAGE_BASE_BREAKDOWN),--diff-base-breakdown-file-name=$(COVERAGE_BASE_BREAKDOWN) --diff-threshold=0)
 
 test-all: test-unit test-sanity
 	@echo "All tests completed"

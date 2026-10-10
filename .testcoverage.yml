@@ -1,0 +1,43 @@
+# Coverage ratchet for vladopajic/go-test-coverage (run locally: make coverage-check).
+#
+# Two gates:
+#   1. Floors below: total and per-package minimums. They only ever go UP.
+#      When a package's coverage rises, raise its floor to (new value - 1) in the
+#      same PR. Never lower a floor; add tests instead.
+#   2. Diff vs main (CI only): a PR may not reduce total coverage relative to the
+#      latest main build (diff-threshold 0 in .github/workflows/ci.yml).
+#
+# Baseline measured 2026-10-10 with `make test-coverage` (./pkg/... ./cmd/...):
+#   total 32.4%, pkg/driver 45.4%, pkg/tnsapi 41.5%, pkg/retry 94.7%,
+#   pkg/metrics 71.4%, pkg/mount 58.7%, cmd/kubectl-tns-csi 2.3%,
+#   pkg/dashboard 0%, cmd/tns-csi-driver 0%.
+# Floors sit ~1 point below to absorb noise.
+
+profile: coverage.out
+
+threshold:
+  # Per-file floors are not enforced yet (many small files are untested).
+  file: 0
+  # Packages not listed under override (pkg/dashboard, cmd/tns-csi-driver) have no floor yet.
+  package: 0
+  total: 31
+
+override:
+  # First match wins, so keep specific paths before general ones.
+  - path: ^pkg/driver$
+    threshold: 44
+  - path: ^pkg/tnsapi$
+    threshold: 40
+  - path: ^pkg/retry$
+    threshold: 93
+  - path: ^pkg/metrics$
+    threshold: 70
+  - path: ^pkg/mount$
+    threshold: 57
+  - path: ^cmd/kubectl-tns-csi$
+    threshold: 2
+
+exclude:
+  paths:
+    - _test\.go$
+    - ^tests/

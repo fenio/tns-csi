@@ -63,3 +63,5 @@ yarn-error.log*
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+coverage.breakdown
+.coverage-base/

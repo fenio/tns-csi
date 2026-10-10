@@ -163,6 +163,15 @@ ginkgo -v --focus="expand" ./tests/e2e/nfs/...
 
 See [tests/e2e/README.md](tests/e2e/README.md) for detailed E2E test documentation.
 
+### Coverage ratchet
+
+CI enforces test coverage with [go-test-coverage](https://github.com/vladopajic/go-test-coverage), configured in `.testcoverage.yml`:
+
+- **Floors:** total and per-package minimums. They only move up.
+- **No decrease:** a PR may not lower total coverage relative to the latest `main` build.
+
+Run it locally with `make coverage-check`. When your change raises a package's coverage, raise its floor in `.testcoverage.yml` to the new value minus one point in the same PR. Never lower a floor; add tests instead.
+
 ### Linting
 
 ```bash

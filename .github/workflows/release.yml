@@ -40,7 +40,10 @@ jobs:
       - name: Read pinned golangci-lint version
         id: lintver
         # Same pin as CI; single source of truth is GOLANGCI_LINT_VERSION in the Makefile.
-        run: echo "version=$(sed -n 's/^GOLANGCI_LINT_VERSION *?= *//p' Makefile)" >> "$GITHUB_OUTPUT"
+        run: |
+          v=$(sed -n 's/^GOLANGCI_LINT_VERSION *?= *//p' Makefile)
+          test -n "$v" || { echo "GOLANGCI_LINT_VERSION not found in Makefile"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Run linter
         uses: golangci/golangci-lint-action@v9

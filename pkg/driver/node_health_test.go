@@ -238,9 +238,6 @@ func TestNVMeControllerNameExtraction(t *testing.T) {
 
 func TestStaticErrors(t *testing.T) {
 	// Verify static errors are properly defined
-	if errMountTimeout == nil {
-		t.Error("errMountTimeout should not be nil")
-	}
 	if errReadTimeout == nil {
 		t.Error("errReadTimeout should not be nil")
 	}
@@ -252,9 +249,6 @@ func TestStaticErrors(t *testing.T) {
 	}
 
 	// Verify error messages are useful
-	if errMountTimeout.Error() == "" {
-		t.Error("errMountTimeout should have a non-empty message")
-	}
 	if errReadTimeout.Error() == "" {
 		t.Error("errReadTimeout should have a non-empty message")
 	}

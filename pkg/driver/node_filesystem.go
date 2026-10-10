@@ -75,6 +75,19 @@ func (m *keyedMutex) release(key string, entry *keyedMutexEntry) {
 	m.mu.Unlock()
 }
 
+// removeEmptyStagingDir removes a share staging directory after unmount, but only if it
+// is empty. It never deletes contents: leftover files mean either the share is still
+// mounted (a mount check was wrong) or data landed on the node's disk, and neither may be
+// deleted by the driver. A non-empty or busy directory is left in place with a warning;
+// kubelet also attempts to remove the staging directory after a successful unstage.
+func removeEmptyStagingDir(stagingTargetPath string) {
+	err := os.Remove(stagingTargetPath)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	klog.Warningf("Leaving staging path %s in place: %v (not removing contents)", stagingTargetPath, err)
+}
+
 func ensureStagingTarget(ctx context.Context, stagingTargetPath string) (bool, error) {
 	if err := os.MkdirAll(stagingTargetPath, 0o750); err != nil {
 		return false, status.Errorf(codes.Internal, "failed to create staging target path: %v", err)

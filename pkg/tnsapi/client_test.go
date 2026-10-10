@@ -406,10 +406,11 @@ func TestClientCallTimeout(t *testing.T) {
 			}
 		}
 
-		// Don't respond to next request - simulate timeout. Keep the hold well past the
-		// client's 100ms deadline but short: httptest.Server.Close waits for this handler.
+		// Don't respond to next request - simulate timeout. Hold 10x past the client's
+		// 100ms deadline so a starved -race runner still sees DeadlineExceeded rather than
+		// a connection close; keep it short because httptest.Server.Close waits for it.
 		conn.Read(ctx)
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(1 * time.Second)
 	}
 	defer server.Close()
 

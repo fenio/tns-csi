@@ -143,6 +143,49 @@ jobs:
       - name: Build
         run: make build
 
+  coverage:
+    name: Coverage Ratchet
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # download the main-branch breakdown artifact
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # PRs compare against the breakdown uploaded by the latest successful CI run on main.
+      # Floors in .testcoverage.yml are enforced either way; only the no-decrease diff
+      # is skipped when no main breakdown exists yet (e.g. the first run after this lands).
+      - name: Fetch main coverage breakdown
+        id: base
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          run_id=$(gh run list -R "$REPO" --workflow ci.yml --branch main --event push \
+            --status success --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ -n "$run_id" ] && gh run download "$run_id" -R "$REPO" -n coverage-breakdown -D .coverage-base; then
+            echo "file=.coverage-base/coverage.breakdown" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No coverage breakdown from main found; skipping the no-decrease check (floors still enforced)."
+          fi
+
+      - name: Coverage gate
+        run: make coverage-check COVERAGE_BREAKDOWN=coverage.breakdown COVERAGE_BASE_BREAKDOWN="${{ steps.base.outputs.file }}"
+
+      - name: Upload coverage breakdown (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-breakdown
+          path: coverage.breakdown
+          retention-days: 90
+
   build-and-push:
     name: Build and Push Image
     runs-on: ubuntu-latest

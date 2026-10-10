@@ -1,5 +1,5 @@
 .PHONY: all build build-plugin clean deps install test test-unit test-scripts test-sanity test-all test-coverage \
-	docker-build docker-push lint lint-fix lint-verbose mod-tidy-check check \
+	docker-build docker-push lint lint-fix lint-verbose mod-tidy-check vulncheck check \
 	test-e2e test-e2e-nfs test-e2e-nvmeof test-e2e-iscsi test-e2e-smb test-e2e-scale test-e2e-snapclone \
 	changelog changelog-unreleased
 
@@ -114,6 +114,12 @@ test-scripts:
 mod-tidy-check:
 	@echo "Checking go.mod/go.sum are tidy..."
 	@$(GOMOD) tidy -diff || (echo "go.mod/go.sum not tidy: run 'go mod tidy'" && exit 1)
+
+# Known-vulnerability scan of reachable code (needs network for the vuln DB; not part of check).
+GOVULNCHECK_VERSION ?= v1.8.0
+vulncheck:
+	@echo "Running govulncheck $(GOVULNCHECK_VERSION)..."
+	$(GOCMD) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 # Everything a PR must pass. CI runs the same checks (lint via golangci-lint-action).
 check: build lint mod-tidy-check test-unit test-scripts test-sanity

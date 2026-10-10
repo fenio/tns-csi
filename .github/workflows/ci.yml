@@ -135,14 +135,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: golang/govulncheck-action@v1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
         with:
           # Scan with the Go version that builds the shipped image (Dockerfile builder),
-          # not go.mod's minimum language version. The action ignores go-version-file
-          # when go-version-input is set, so pin it here explicitly.
-          go-version-input: '1.27.2'
-          go-package: ./...
-          repo-checkout: false
+          # not go.mod's minimum language version: stdlib advisories depend on it.
+          go-version: '1.27.2'
+
+      # Plain `go run` with a pinned version instead of a third-party action, so the
+      # job works under any repository Actions allowlist.
+      - name: Run govulncheck
+        run: make vulncheck
 
   test:
     name: Unit Tests

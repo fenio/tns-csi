@@ -46,9 +46,6 @@ RUN apk add --no-cache \
     cifs-utils \
     || [ $? -eq 4 ]
 
-# Legacy iSCSI unstage recovers the mounted device using findmnt through PATH.
-RUN command -v findmnt >/dev/null
-
 # Copy the driver binary
 COPY --from=builder /workspace/bin/tns-csi-driver /usr/local/bin/
 

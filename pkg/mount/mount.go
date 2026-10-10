@@ -3,6 +3,12 @@ package mount
 
 import "strings"
 
+// Entry describes the filesystem mounted at a mount point.
+type Entry struct {
+	Source string // e.g. "10.0.0.5:/mnt/tank/pvc-1" or "/dev/nvme0n1"
+	FSType string // e.g. "nfs4", "ext4"
+}
+
 // JoinMountOptions joins mount options with commas.
 // This function is platform-independent.
 func JoinMountOptions(options []string) string {

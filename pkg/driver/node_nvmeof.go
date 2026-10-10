@@ -521,17 +521,14 @@ func removeNVMeStagingNQN(stagingTargetPath string) error {
 
 // getStagedNVMeDevicePath resolves the NVMe device backing a staging path.
 func (s *NodeService) getStagedNVMeDevicePath(ctx context.Context, stagingTargetPath string) (string, error) {
-	// Filesystem mode: mounted path, source comes from findmnt.
-	if mounted, err := mount.IsMounted(ctx, stagingTargetPath); err == nil && mounted {
-		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
-		output, cmdErr := cmd.CombinedOutput()
-		if cmdErr != nil {
-			return "", fmt.Errorf("findmnt source lookup failed for %s: %w", stagingTargetPath, cmdErr)
-		}
-		source := strings.TrimSpace(string(output))
-		if source != "" && strings.HasPrefix(filepath.Base(source), "nvme") {
-			return source, nil
-		}
+	// Filesystem mode: the device mounted at the staging path, from the mount table.
+	entry, mounted, err := lookupMountedEntry(ctx, stagingTargetPath)
+	if err != nil {
+		// Fail closed: guessing a device here could disconnect another volume.
+		return "", fmt.Errorf("mount table lookup failed for %s: %w", stagingTargetPath, err)
+	}
+	if mounted && strings.HasPrefix(filepath.Base(entry.Source), "nvme") {
+		return entry.Source, nil
 	}
 
 	// Block mode: staging path is a symlink to /dev/nvmeXnY.

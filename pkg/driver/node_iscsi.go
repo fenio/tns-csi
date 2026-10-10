@@ -711,17 +711,17 @@ func (s *NodeService) findISCSIIQNForDevice(ctx context.Context, devicePath stri
 	return iqn, nil
 }
 
+// lookupMountedEntry is mount.MountedEntry; tests replace it to simulate mounts without privileges.
+var lookupMountedEntry = mount.MountedEntry
+
 func getStagedISCSIDevicePath(ctx context.Context, stagingTargetPath string) (string, error) {
-	if mounted, err := mount.IsMounted(ctx, stagingTargetPath); err == nil && mounted {
-		cmd := exec.CommandContext(ctx, "findmnt", "-n", "-o", "SOURCE", stagingTargetPath)
-		output, cmdErr := cmd.CombinedOutput()
-		if cmdErr != nil {
-			return "", fmt.Errorf("findmnt source lookup failed for %s: %w", stagingTargetPath, cmdErr)
-		}
-		devicePath := strings.TrimSpace(string(output))
-		if strings.HasPrefix(devicePath, "/dev/") {
-			return devicePath, nil
-		}
+	entry, mounted, err := lookupMountedEntry(ctx, stagingTargetPath)
+	if err != nil {
+		// Fail closed: guessing a device here could log out another volume's session.
+		return "", fmt.Errorf("mount table lookup failed for %s: %w", stagingTargetPath, err)
+	}
+	if mounted && strings.HasPrefix(entry.Source, "/dev/") {
+		return entry.Source, nil
 	}
 
 	resolved, err := filepath.EvalSymlinks(stagingTargetPath)

@@ -116,11 +116,8 @@ func (s *NodeService) unstageNFSVolume(ctx context.Context, req *csi.NodeUnstage
 		klog.V(4).Infof("Staging path %s is not mounted, skipping unmount", stagingTargetPath)
 	}
 
-	// Remove the staging directory (best effort).
-	// Use RemoveAll because NFS may leave behind .nfs* silly-rename files
-	// for files that were open at unmount time.
-	if err := os.RemoveAll(stagingTargetPath); err != nil {
-		klog.Warningf("Failed to remove staging target path %s: %v", stagingTargetPath, err)
+	if err := removeEmptyStagingDir(stagingTargetPath); err != nil {
+		return nil, err
 	}
 
 	klog.V(4).Infof("Unstaged NFS volume %s from %s", volumeID, stagingTargetPath)

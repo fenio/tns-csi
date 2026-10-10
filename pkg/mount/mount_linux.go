@@ -24,44 +24,20 @@ var (
 	errInvalidMountInfo    = errors.New("invalid mount information")
 )
 
-// IsMounted checks if a path is mounted.
+// IsMounted reports whether targetPath is a mount point. It reads the mount table
+// (see MountedEntry) and returns an error, never false, when that table cannot be read.
 func IsMounted(ctx context.Context, targetPath string) (bool, error) {
-	// Use findmnt to check if path is mounted with timeout
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "findmnt", "-o", "TARGET", "-n", "-l", targetPath)
-	output, err := cmd.CombinedOutput()
+	_, mounted, err := MountedEntry(ctx, targetPath)
 	if err != nil {
-		// findmnt returns non-zero exit code if path is not found
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			return false, nil
-		}
 		return false, fmt.Errorf("failed to check mount: %w", err)
 	}
-
-	// If we got output, the path is mounted
-	return len(output) > 0, nil
+	return mounted, nil
 }
 
-// IsDeviceMounted checks if a device path is mounted (for block devices).
+// IsDeviceMounted reports whether targetPath (a block-volume publish target) is a
+// mount point. Block volumes are bind mounts, so this is the same check as IsMounted.
 func IsDeviceMounted(ctx context.Context, targetPath string) (bool, error) {
-	// For block devices, check if it's bind mounted with timeout
-	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(checkCtx, "findmnt", "-o", "SOURCE", "-n", targetPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		// findmnt returns non-zero if not found
-		exitErr := &exec.ExitError{}
-		if errors.As(err, &exitErr) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to check mount: %w", err)
-	}
-
-	// If we got output, the path is mounted
-	return len(output) > 0, nil
+	return IsMounted(ctx, targetPath)
 }
 
 // IsSourceMounted checks whether a source device is mounted anywhere.

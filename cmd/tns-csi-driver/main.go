@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/fenio/tns-csi/pkg/driver"
 	"github.com/fenio/tns-csi/pkg/metrics"
@@ -24,7 +25,7 @@ var (
 	nodeID                    = flag.String("node-id", "", "Node ID")
 	driverName                = flag.String("driver-name", "tns.csi.io", "Name of the driver")
 	apiURL                    = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
-	apiKey                    = flag.String("api-key", "", "Storage system API key")
+	apiKey                    = flag.String("api-key", "", "Storage system API key (prefer the "+truenasKeyEnvName+" environment variable: flag values are visible in the process list)")
 	metricsAddr               = flag.String("metrics-addr", "", "Address to expose Prometheus metrics")
 	skipTLSVerify             = flag.Bool("skip-tls-verify", false, "Skip TLS certificate verification (for self-signed certificates)")
 	showVersion               = flag.Bool("show-version", false, "Show version and exit")
@@ -36,6 +37,20 @@ var (
 	clusterID                 = flag.String("cluster-id", "", "Unique identifier for this cluster (for multi-cluster TrueNAS sharing)")
 	maxResponseSizeMB         = flag.Int("max-response-size-mb", 10, "Maximum size in MiB of a single TrueNAS API response (WebSocket message); larger responses fail the call")
 )
+
+// truenasKeyEnvName holds the TrueNAS API key. Reading it from the environment keeps the
+// secret out of the process command line (visible to every user on the node via ps
+// and /proc/<pid>/cmdline), which passing --api-key=$(TNS_API_KEY) does not.
+const truenasKeyEnvName = "TNS_API_KEY"
+
+// resolveAPIKey returns the API key from --api-key if set (backward compatibility),
+// otherwise from the environment, with surrounding whitespace from secrets trimmed.
+func resolveAPIKey(flagValue string, getenv func(string) string) string {
+	if v := strings.TrimSpace(flagValue); v != "" {
+		return v
+	}
+	return strings.TrimSpace(getenv(truenasKeyEnvName))
+}
 
 func main() {
 	klog.InitFlags(nil)
@@ -65,8 +80,9 @@ func main() {
 		klog.Fatal("Storage API URL must be provided")
 	}
 
-	if *apiKey == "" {
-		klog.Fatal("Storage API key must be provided")
+	resolvedAPIKey := resolveAPIKey(*apiKey, os.Getenv)
+	if resolvedAPIKey == "" {
+		klog.Fatalf("Storage API key must be provided via the %s environment variable or --api-key", truenasKeyEnvName)
 	}
 
 	// Set version info for metrics endpoint
@@ -82,7 +98,7 @@ func main() {
 		NodeID:                    *nodeID,
 		Endpoint:                  *endpoint,
 		APIURL:                    *apiURL,
-		APIKey:                    *apiKey,
+		APIKey:                    resolvedAPIKey,
 		MetricsAddr:               *metricsAddr,
 		SkipTLSVerify:             *skipTLSVerify,
 		EnableNVMeDiscovery:       *enableNVMeDiscovery,

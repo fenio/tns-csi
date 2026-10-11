@@ -258,7 +258,7 @@ The driver is configured via command-line flags and Kubernetes secrets:
 - `--node-id` - Node identifier (typically the node name)
 - `--driver-name` - CSI driver name (default: `tns.csi.io`)
 - `--api-url` - TrueNAS API URL (e.g., `ws://YOUR-TRUENAS-IP/api/v2.0/websocket`)
-- `--api-key` - TrueNAS API key
+- `--api-key` - TrueNAS API key. Prefer the `TNS_API_KEY` environment variable, which the Helm chart sets from its secret: flag values are visible to every user on the node in the process list.
 - `--max-concurrent-nvme-connects` - Maximum concurrent NVMe-oF connect operations per node (default: `5`)
 
 ### Storage Class Parameters

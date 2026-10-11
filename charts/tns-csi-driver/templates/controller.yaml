@@ -44,7 +44,6 @@ spec:
             - "--endpoint=unix:///var/lib/csi/sockets/pluginproxy/csi.sock"
             - "--node-id=$(NODE_ID)"
             - "--api-url=$(TNS_URL)"
-            - "--api-key=$(TNS_API_KEY)"
             - "--v={{ .Values.controller.logLevel }}"
             {{- with .Values.truenas.maxResponseSizeMB }}
             - "--max-response-size-mb={{ . }}"

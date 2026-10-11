@@ -51,7 +51,6 @@ spec:
             - "--endpoint=unix:///csi/csi.sock"
             - "--node-id=$(NODE_ID)"
             - "--api-url=$(TNS_URL)"
-            - "--api-key=$(TNS_API_KEY)"
             - "--v={{ .Values.node.logLevel }}"
             {{- with .Values.truenas.maxResponseSizeMB }}
             - "--max-response-size-mb={{ . }}"

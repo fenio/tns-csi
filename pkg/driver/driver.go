@@ -160,6 +160,29 @@ func (d *Driver) Run() error {
 	return d.srv.Serve(listener)
 }
 
+// shutdownDrainTimeout bounds how long Stop waits for in-flight CSI RPCs. It stays under
+// Kubernetes' default 30s termination grace period so the force-stop happens here
+// rather than as a SIGKILL.
+const shutdownDrainTimeout = 25 * time.Second
+
+// stopGRPCServer stops accepting new RPCs and waits up to timeout for in-flight ones,
+// then force-closes. GracefulStop alone waits forever, so a single hung RPC (e.g. on an
+// unresponsive NFS server) would block shutdown until the pod is SIGKILLed.
+func stopGRPCServer(srv *grpc.Server, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		klog.Warningf("In-flight CSI requests did not finish within %v; forcing gRPC server stop", timeout)
+		srv.Stop()
+		<-done
+	}
+}
+
 // Stop stops the driver.
 func (d *Driver) Stop() {
 	klog.Info("Stopping TNS CSI Driver")
@@ -178,9 +201,9 @@ func (d *Driver) Stop() {
 		}
 	}
 
-	// Stop gRPC server
+	// Stop gRPC server: drain in-flight RPCs, bounded.
 	if d.srv != nil {
-		d.srv.GracefulStop()
+		stopGRPCServer(d.srv, shutdownDrainTimeout)
 	}
 
 	// Close API client

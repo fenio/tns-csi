@@ -828,7 +828,7 @@ func (s *ControllerService) deleteNVMeOFVolume(ctx context.Context, meta *Volume
 	zvolDeleted := true // assume deleted if DatasetID is empty
 	if meta.DatasetID != "" {
 		if err := s.deleteZVOL(ctx, meta); err != nil {
-			if isDependentClonesError(err) {
+			if tnsapi.IsDependentClones(err) {
 				// Dependent clones will never resolve on their own — bail without touching
 				// namespace/subsystem so the volume remains fully functional until clones are removed
 				klog.Warningf("ZVOL %s has dependent clones — skipping namespace/subsystem cleanup to prevent orphaning", meta.DatasetID)
@@ -949,7 +949,7 @@ func (s *ControllerService) deleteNVMeOFSubsystem(ctx context.Context, meta *Vol
 	retryConfig := retry.DeletionConfig("delete-nvmeof-subsystem")
 	err = retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteNVMeOFSubsystem(ctx, meta.NVMeOFSubsystemID)
-		if deleteErr != nil && isNotFoundError(deleteErr) {
+		if deleteErr != nil && tnsapi.IsNotFound(deleteErr) {
 			// Subsystem already deleted - not an error (idempotency)
 			klog.V(4).Infof("Subsystem %d not found, assuming already deleted (idempotency)", meta.NVMeOFSubsystemID)
 			return nil
@@ -981,7 +981,7 @@ func (s *ControllerService) deleteNVMeOFNamespace(ctx context.Context, meta *Vol
 	retryConfig := retry.DeletionConfig("delete-nvmeof-namespace")
 	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteNVMeOFNamespace(ctx, meta.NVMeOFNamespaceID)
-		if deleteErr != nil && isNotFoundError(deleteErr) {
+		if deleteErr != nil && tnsapi.IsNotFound(deleteErr) {
 			// Namespace already deleted - not an error (idempotency)
 			klog.V(4).Infof("Namespace %d not found, assuming already deleted (idempotency)", meta.NVMeOFNamespaceID)
 			return nil
@@ -1040,13 +1040,13 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 
 	// Try direct deletion first (common case: no dependent snapshots)
 	firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-	if firstErr == nil || isNotFoundError(firstErr) {
+	if firstErr == nil || tnsapi.IsNotFound(firstErr) {
 		klog.Infof("deleteZVOL: Successfully deleted ZVOL %s", meta.DatasetID)
 		return nil
 	}
 
 	// If dependent clones from deferred-destroy snapshots, promote them and retry
-	if isDependentClonesError(firstErr) {
+	if tnsapi.IsDependentClones(firstErr) {
 		if err := s.tryPromoteAndDeleteDataset(ctx, meta.DatasetID); err == nil {
 			return nil
 		}
@@ -1060,7 +1060,7 @@ func (s *ControllerService) deleteZVOL(ctx context.Context, meta *VolumeMetadata
 	retryConfig := retry.DeletionConfig("delete-zvol")
 	err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 		deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-		if deleteErr != nil && isNotFoundError(deleteErr) {
+		if deleteErr != nil && tnsapi.IsNotFound(deleteErr) {
 			return nil
 		}
 		return deleteErr

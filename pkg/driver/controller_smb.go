@@ -326,7 +326,7 @@ func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMet
 			tnsapi.PropertyDeleteStrategy,
 		})
 		if err != nil {
-			if isNotFoundError(err) {
+			if tnsapi.IsNotFound(err) {
 				klog.V(4).Infof("Dataset %s not found, assuming already deleted (idempotency)", meta.DatasetID)
 				timer.ObserveSuccess()
 				return &csi.DeleteVolumeResponse{}, nil
@@ -375,7 +375,7 @@ func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMet
 		switch {
 		case err == nil:
 			klog.V(4).Infof("Successfully deleted SMB share %d", meta.SMBShareID)
-		case isNotFoundError(err):
+		case tnsapi.IsNotFound(err):
 			klog.V(4).Infof("SMB share %d not found, assuming already deleted (idempotency)", meta.SMBShareID)
 		default:
 			klog.Warningf("Failed to delete SMB share %d: %v (continuing with dataset deletion)", meta.SMBShareID, err)
@@ -401,9 +401,9 @@ func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMet
 		klog.V(4).Infof("Deleting dataset: %s", meta.DatasetID)
 
 		firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-		if firstErr != nil && !isNotFoundError(firstErr) {
+		if firstErr != nil && !tnsapi.IsNotFound(firstErr) {
 			resolved := false
-			if isDependentClonesError(firstErr) {
+			if tnsapi.IsDependentClones(firstErr) {
 				if err := s.tryPromoteAndDeleteDataset(ctx, meta.DatasetID); err == nil {
 					resolved = true
 				} else {
@@ -422,7 +422,7 @@ func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMet
 				retryConfig := retry.DeletionConfig("delete-smb-dataset")
 				err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 					deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-					if deleteErr != nil && isNotFoundError(deleteErr) {
+					if deleteErr != nil && tnsapi.IsNotFound(deleteErr) {
 						return nil
 					}
 					return deleteErr

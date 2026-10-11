@@ -586,7 +586,7 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 // cleanupPartialClone attempts to clean up a partially created cloned dataset.
 func (s *ControllerService) cleanupPartialClone(ctx context.Context, datasetName string) {
 	if delErr := s.apiClient.DeleteDataset(ctx, datasetName); delErr != nil {
-		if !isNotFoundError(delErr) {
+		if !tnsapi.IsNotFound(delErr) {
 			klog.Errorf("Failed to cleanup potentially partially-created dataset %s: %v", datasetName, delErr)
 		}
 	} else {

@@ -66,6 +66,12 @@ jobs:
           if grep -q '^  namespace: \(ignored\|kube-system\)$' /tmp/tns-csi-rendered.yaml; then
             exit 1
           fi
+          # The API key must reach the driver via env, never as a flag (flags are visible in ps).
+          if grep -q -- '--api-key' /tmp/tns-csi-rendered.yaml; then
+            echo "API key must not be passed on the command line"
+            exit 1
+          fi
+          test "$(grep -c 'name: TNS_API_KEY' /tmp/tns-csi-rendered.yaml)" -eq 2
 
           helm template expansion-false charts/tns-csi-driver \
             --show-only templates/storageclass.yaml \

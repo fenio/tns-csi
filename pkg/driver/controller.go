@@ -103,38 +103,12 @@ func resolveParentDataset(pool, parentDataset string) string {
 	return pool + "/" + parentDataset
 }
 
-// capacityErrorSubstrings are error message patterns that indicate insufficient pool capacity.
-// TrueNAS returns these when a pool or dataset doesn't have enough free space.
 var errNoDeferredClonesToPromote = errors.New("no deferred-destroy snapshot clones to promote")
-
-var capacityErrorSubstrings = []string{
-	"insufficient space",
-	"out of space",
-	"not enough space",
-	"no space left",
-	"ENOSPC",
-	"quota exceeded",
-}
-
-// isCapacityError checks if an error indicates a storage capacity issue.
-// Returns codes.ResourceExhausted status if it is, nil otherwise.
-func isCapacityError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := strings.ToLower(err.Error())
-	for _, substr := range capacityErrorSubstrings {
-		if strings.Contains(errStr, substr) {
-			return true
-		}
-	}
-	return false
-}
 
 // createVolumeError returns an appropriate gRPC status error for volume creation failures.
 // Maps capacity-related errors to ResourceExhausted per CSI spec.
 func createVolumeError(msg string, err error) error {
-	if isCapacityError(err) {
+	if tnsapi.IsCapacity(err) {
 		return status.Errorf(codes.ResourceExhausted, "%s: %v", msg, err)
 	}
 	return status.Errorf(codes.Internal, "%s: %v", msg, err)
@@ -591,7 +565,7 @@ func (s *ControllerService) promoteClonesOfDeferredSnapshots(_ context.Context, 
 func (s *ControllerService) tryPromoteAndDeleteDataset(ctx context.Context, datasetID string) error {
 	if s.promoteClonesOfDeferredSnapshots(ctx, datasetID) {
 		retryErr := s.apiClient.DeleteDataset(ctx, datasetID)
-		if retryErr == nil || isNotFoundError(retryErr) {
+		if retryErr == nil || tnsapi.IsNotFound(retryErr) {
 			klog.Infof("Dataset %s deleted after promoting deferred snapshot clones", datasetID)
 			return nil
 		}

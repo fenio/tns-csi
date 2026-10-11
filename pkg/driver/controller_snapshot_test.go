@@ -1210,8 +1210,8 @@ func TestIsNotFoundError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isNotFoundError(tt.err); got != tt.want {
-				t.Errorf("isNotFoundError() = %v, want %v", got, tt.want)
+			if got := tnsapi.IsNotFound(tt.err); got != tt.want {
+				t.Errorf("tnsapi.IsNotFound() = %v, want %v", got, tt.want)
 			}
 		})
 	}

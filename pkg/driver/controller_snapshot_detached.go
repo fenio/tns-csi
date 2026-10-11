@@ -302,7 +302,7 @@ func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *m
 	props, err := s.apiClient.GetDatasetProperties(ctx, datasetPath, []string{tnsapi.PropertyDetachedSnapshot, tnsapi.PropertyManagedBy})
 	if err != nil {
 		// If dataset doesn't exist, consider deletion successful (idempotent)
-		if isNotFoundError(err) {
+		if tnsapi.IsNotFound(err) {
 			klog.Infof("Detached snapshot dataset %s not found, assuming already deleted", datasetPath)
 			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil
@@ -329,7 +329,7 @@ func (s *ControllerService) deleteDetachedSnapshot(ctx context.Context, timer *m
 	// Delete the dataset
 	if err := s.apiClient.DeleteDataset(ctx, datasetPath); err != nil {
 		// Check if error is because dataset doesn't exist
-		if isNotFoundError(err) {
+		if tnsapi.IsNotFound(err) {
 			klog.Infof("Detached snapshot dataset %s not found, assuming already deleted", datasetPath)
 			timer.ObserveSuccess()
 			return &csi.DeleteSnapshotResponse{}, nil

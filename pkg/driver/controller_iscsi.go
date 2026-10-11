@@ -788,7 +788,7 @@ func (s *ControllerService) verifyISCSIOwnership(ctx context.Context, meta *Volu
 		tnsapi.PropertyDeleteStrategy,
 	})
 	if err != nil {
-		if isNotFoundError(err) {
+		if tnsapi.IsNotFound(err) {
 			return "", true, nil
 		}
 		klog.Warningf("Failed to verify dataset ownership via ZFS properties: %v (continuing with deletion)", err)
@@ -881,9 +881,9 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 	// would leave an orphaned ZVOL with no presentation layer, making recovery impossible.
 	if meta.DatasetID != "" {
 		firstErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-		if firstErr != nil && !isNotFoundError(firstErr) {
+		if firstErr != nil && !tnsapi.IsNotFound(firstErr) {
 			resolved := false
-			if isDependentClonesError(firstErr) {
+			if tnsapi.IsDependentClones(firstErr) {
 				if err := s.tryPromoteAndDeleteDataset(ctx, meta.DatasetID); err == nil {
 					resolved = true
 				} else {
@@ -904,7 +904,7 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 				retryConfig := retry.DeletionConfig("delete-iscsi-zvol")
 				err := retry.WithRetryNoResult(ctx, retryConfig, func() error {
 					deleteErr := s.apiClient.DeleteDataset(ctx, meta.DatasetID)
-					if deleteErr != nil && isNotFoundError(deleteErr) {
+					if deleteErr != nil && tnsapi.IsNotFound(deleteErr) {
 						return nil
 					}
 					return deleteErr
@@ -941,7 +941,7 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 
 	if meta.ISCSITargetID != 0 {
 		if err := s.apiClient.DeleteISCSITarget(ctx, meta.ISCSITargetID, true); err != nil {
-			if !isNotFoundError(err) {
+			if !tnsapi.IsNotFound(err) {
 				klog.Warningf("Failed to delete iSCSI target %d (ZVOL already deleted, will retry): %v", meta.ISCSITargetID, err)
 			}
 		} else {
@@ -951,7 +951,7 @@ func (s *ControllerService) deleteISCSIVolume(ctx context.Context, meta *VolumeM
 
 	if meta.ISCSIExtentID != 0 {
 		if err := s.apiClient.DeleteISCSIExtent(ctx, meta.ISCSIExtentID, false, true); err != nil {
-			if !isNotFoundError(err) {
+			if !tnsapi.IsNotFound(err) {
 				klog.Warningf("Failed to delete iSCSI extent %d (ZVOL already deleted, will retry): %v", meta.ISCSIExtentID, err)
 			}
 		} else {

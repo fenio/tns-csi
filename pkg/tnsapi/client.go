@@ -616,6 +616,31 @@ func isConnectionError(err error) bool {
 		strings.Contains(errStr, "i/o timeout")
 }
 
+// ErrUncertainOutcome is returned when a non-idempotent request was sent but the
+// connection was lost before its response arrived: TrueNAS may or may not have applied it.
+var ErrUncertainOutcome = errors.New("request outcome unknown: connection lost after the request was sent")
+
+// errResponseLost marks a request that was written to the connection but whose
+// response never arrived because the connection was lost.
+var errResponseLost = errors.New("connection lost after the request was sent")
+
+// isIdempotentMethod reports whether repeating method has the same effect as running it
+// once, so it may be retried after its response was lost. Reads, absolute-state updates
+// and deletes (callers treat not-found as already deleted) qualify. Creates, clones,
+// promotions, replication runs and anything unknown do not: they default to no retry.
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case "core.get_jobs", "filesystem.stat", "filesystem.getacl", "filesystem.setacl":
+		return true
+	}
+	for _, suffix := range []string{".query", ".config", ".update", ".delete"} {
+		if strings.HasSuffix(method, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // Call makes a JSON-RPC 2.0 call with automatic retry on connection failures.
 func (c *Client) Call(ctx context.Context, method string, params []interface{}, result interface{}) error {
 	// Start timing for metrics
@@ -674,6 +699,10 @@ func (c *Client) prepareCallRetry(
 	// auth retries themselves and need the connection loss immediately.
 	if method == methodAuthLoginWithAPIKey && isConnectionError(err) {
 		return nil, false, err
+	}
+	// A request that may already have been applied is only repeated if that is harmless.
+	if errors.Is(err, errResponseLost) && !isIdempotentMethod(method) {
+		return nil, false, fmt.Errorf("%w (%s): %w", ErrUncertainOutcome, method, err)
 	}
 	if waitErr := c.waitForCallRetry(ctx, attempt, maxRetries, err); waitErr != nil {
 		return nil, false, waitErr
@@ -795,8 +824,9 @@ func (c *Client) callOnce(ctx context.Context, method string, params []interface
 	select {
 	case resp, ok := <-respCh:
 		if !ok {
-			// Channel was closed, connection error occurred
-			return requestEpoch, ErrConnectionClosed
+			// The connection was lost after the request was written: TrueNAS may have
+			// applied it. Still an ErrConnectionClosed for existing callers.
+			return requestEpoch, fmt.Errorf("%w: %w", ErrConnectionClosed, errResponseLost)
 		}
 		metrics.RecordWSMessage("received")
 		if resp.Error != nil {

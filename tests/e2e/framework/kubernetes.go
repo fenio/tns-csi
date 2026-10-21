@@ -1308,6 +1308,47 @@ func (k *KubernetesClient) GetCSIDriver(ctx context.Context, name string) (*stor
 	return k.clientset.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
 }
 
+// GetVolumeAttachmentsForPV returns the VolumeAttachments whose source is the given PV.
+func (k *KubernetesClient) GetVolumeAttachmentsForPV(ctx context.Context, pvName string) ([]storagev1.VolumeAttachment, error) {
+	list, err := k.clientset.StorageV1().VolumeAttachments().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	var attachments []storagev1.VolumeAttachment
+	for i := range list.Items {
+		source := list.Items[i].Spec.Source.PersistentVolumeName
+		if source != nil && *source == pvName {
+			attachments = append(attachments, list.Items[i])
+		}
+	}
+	return attachments, nil
+}
+
+// WaitForVolumeAttached waits until the PV has an attached VolumeAttachment for nodeName.
+func (k *KubernetesClient) WaitForVolumeAttached(ctx context.Context, pvName, nodeName string, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		attachments, err := k.GetVolumeAttachmentsForPV(ctx, pvName)
+		if err != nil {
+			klog.V(4).Infof("Listing VolumeAttachments for %s: %v", pvName, err)
+		}
+		// On a transient list error attachments is empty, so polling continues.
+		for i := range attachments {
+			if attachments[i].Spec.NodeName == nodeName && attachments[i].Status.Attached {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// WaitForVolumeDetached waits until no VolumeAttachment references the PV.
+func (k *KubernetesClient) WaitForVolumeDetached(ctx context.Context, pvName string, timeout time.Duration) error {
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, timeout, true, func(ctx context.Context) (bool, error) {
+		attachments, err := k.GetVolumeAttachmentsForPV(ctx, pvName)
+		return err == nil && len(attachments) == 0, nil // Continue polling on transient errors
+	})
+}
+
 // IsControllerReady checks if the CSI controller deployment is ready.
 func (k *KubernetesClient) IsControllerReady(ctx context.Context) (bool, error) {
 	args := []string{

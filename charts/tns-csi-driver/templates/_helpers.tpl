@@ -117,6 +117,15 @@ storage.k8s.io/v1beta1
 {{- end -}}
 
 {{/*
+Whether the CSIDriver requires attach. dig keeps an explicit false and falls back to
+true when the key is missing, e.g. on `helm upgrade --reuse-values` from a release
+that predates the setting.
+*/}}
+{{- define "tns-csi-driver.csiDriver.attachRequired" -}}
+{{- dig "attachRequired" true (.Values.csiDriver | default dict) -}}
+{{- end -}}
+
+{{/*
 Create the CSI driver name
 */}}
 {{- define "tns-csi-driver.driverName" -}}

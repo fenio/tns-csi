@@ -1,3 +1,8 @@
+{{- $attachRequired := include "tns-csi-driver.csiDriver.attachRequired" . }}
+{{- $existing := lookup "storage.k8s.io/v1" "CSIDriver" "" .Values.csiDriverName }}
+{{- if and $existing (ne (toString $existing.spec.attachRequired) $attachRequired) }}
+{{- fail (printf "CSIDriver %s has attachRequired=%v, but this release sets %s. The field is immutable: run `kubectl delete csidriver %s` and re-run the upgrade (running pods keep their mounts). See docs/DEPLOYMENT.md#csidriver-attachrequired-change-v0201." .Values.csiDriverName $existing.spec.attachRequired $attachRequired .Values.csiDriverName) }}
+{{- end }}
 apiVersion: {{ include "tns-csi-driver.csidriver.apiVersion" . }}
 kind: CSIDriver
 metadata:
@@ -9,7 +14,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  attachRequired: false
+  attachRequired: {{ $attachRequired }}
   podInfoOnMount: true
   storageCapacity: true
   fsGroupPolicy: File

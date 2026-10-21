@@ -52,6 +52,14 @@ csiDriverName: tns.csi.io
 
 # CSI Driver capabilities
 csiDriver:
+  # Route volumes through the attach/detach controller (VolumeAttachment objects).
+  # This is what enforces ReadWriteOnce across nodes: a volume is not attached to a
+  # new node until the old node has unstaged it. Disabling it lets an evicted pod's
+  # replacement mount an iSCSI/NVMe-oF volume while the old node still has it
+  # mounted, which can corrupt the filesystem (see issue #291).
+  # The field is immutable: changing it on an existing install requires deleting the
+  # CSIDriver object first (see docs/DEPLOYMENT.md).
+  attachRequired: true
   # Allow kubelet to pass mount options derived from explicit pod SELinux contexts.
   # Requires Kubernetes 1.25+ and a compatible SELinux policy on every node.
   # Keep disabled unless the behavior has been validated on your platform.

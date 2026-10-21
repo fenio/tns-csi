@@ -179,14 +179,16 @@ var _ = Describe("Detached Snapshot Independence", func() {
 		Expect(err).NotTo(HaveOccurred(), "Source PVC was not deleted in time")
 
 		By("Verifying source ZFS dataset was deleted")
-		time.Sleep(5 * time.Second)
-		sourceExists, _ := f.TrueNAS.DatasetExists(ctx, sourceDatasetPath)
-		if sourceExists {
-			GinkgoWriter.Printf("[SMB] WARNING: Source dataset %s still exists after PVC deletion\n", sourceDatasetPath)
-			Fail(fmt.Sprintf("Source dataset %s could not be deleted - likely due to clone dependency", sourceDatasetPath))
-		} else {
-			GinkgoWriter.Printf("[SMB] SUCCESS: Source dataset %s was deleted\n", sourceDatasetPath)
-		}
+		// PVC removal precedes asynchronous CSI/backend cleanup, and DeleteVolume also
+		// waits for the volume to be detached. Keep the detached snapshot intact while
+		// waiting, so its independence is still tested.
+		deleteCtx, cancelDelete := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancelDelete()
+		Eventually(func() (bool, error) {
+			return f.TrueNAS.DatasetExists(deleteCtx, sourceDatasetPath)
+		}, 2*time.Minute, 2*time.Second).Should(BeFalse(),
+			"Source dataset %s was not confirmed deleted within two minutes while the detached snapshot remained intact", sourceDatasetPath)
+		GinkgoWriter.Printf("[SMB] SUCCESS: Source dataset %s was deleted\n", sourceDatasetPath)
 
 		By("Verifying detached snapshot still exists after source deletion")
 		snapshotInfo, err := f.K8s.GetVolumeSnapshot(ctx, snapshotName)

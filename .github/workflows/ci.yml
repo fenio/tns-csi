@@ -150,7 +150,7 @@ jobs:
         with:
           # Scan with the Go version that builds the shipped image (Dockerfile builder),
           # not go.mod's minimum language version: stdlib advisories depend on it.
-          go-version: '1.27.2'
+          go-version: '1.27.3'
 
       # Plain `go run` with a pinned version instead of a third-party action, so the
       # job works under any repository Actions allowlist.

@@ -243,15 +243,21 @@ func TeardownSuite() {
 	// Clean up the csi-detached-snapshots parent dataset if it exists and is empty.
 	// This dataset is created by the CSI driver during detached snapshot operations.
 	// Individual detached snapshots are cleaned up by tests, but the parent container remains.
+	// Protocol suites run in parallel against the same pool, so the parent may still hold
+	// other suites' snapshots: never delete it recursively.
 	if suite.truenas != nil && suite.config != nil {
 		detachedPath := suite.config.TrueNASPool + "/csi-detached-snapshots"
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		exists, err := suite.truenas.DatasetExists(ctx, detachedPath)
 		if err == nil && exists {
-			if delErr := suite.truenas.DeleteDataset(ctx, detachedPath); delErr != nil {
+			deleted, delErr := suite.truenas.DeleteDatasetIfEmpty(ctx, detachedPath)
+			switch {
+			case delErr != nil:
 				klog.Warningf("Failed to cleanup csi-detached-snapshots dataset: %v", delErr)
-			} else {
+			case deleted:
 				klog.Infof("Cleaned up csi-detached-snapshots parent dataset")
+			default:
+				klog.Infof("Kept csi-detached-snapshots parent dataset: it still has children")
 			}
 		}
 		cancel()

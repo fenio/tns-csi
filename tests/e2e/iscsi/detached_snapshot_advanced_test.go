@@ -4,6 +4,7 @@ package iscsi
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -234,6 +235,17 @@ var _ = Describe("Detached Snapshot Advanced", func() {
 		} else {
 			GinkgoWriter.Printf("[iSCSI] WARNING: VolumeSnapshotContent is nil\n")
 		}
+
+		By("Verifying the detached snapshot dataset still exists on TrueNAS")
+		// The VolumeSnapshot object can outlive its backing dataset, so check TrueNAS directly.
+		Expect(contentErr).NotTo(HaveOccurred(), "Failed to get VolumeSnapshotContent")
+		Expect(contentInfo).NotTo(BeNil(), "VolumeSnapshotContent is nil")
+		_, csiSnapshotName, found := strings.Cut(contentInfo.SnapshotHandle, "@")
+		Expect(found).To(BeTrue(), "Invalid snapshot handle format: %s", contentInfo.SnapshotHandle)
+		detachedDatasetPath := fmt.Sprintf("%s/csi-detached-snapshots/%s", f.Config.TrueNASPool, csiSnapshotName)
+		detachedExists, err := f.TrueNAS.DatasetExists(ctx, detachedDatasetPath)
+		Expect(err).NotTo(HaveOccurred(), "Failed to check detached snapshot dataset")
+		Expect(detachedExists).To(BeTrue(), "Detached snapshot dataset %s should survive source deletion", detachedDatasetPath)
 
 		By("Restoring PVC from detached snapshot (after source was deleted)")
 		restoredPVCName := "detached-dr-restored-iscsi"

@@ -879,6 +879,32 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --reuse-values
 ```
 
+### CSIDriver attachRequired change (v0.20.1+)
+
+Starting with v0.20.1 the chart sets `CSIDriver.spec.attachRequired: true` (chart value `csiDriver.attachRequired`). Kubernetes then creates a VolumeAttachment for every volume and does not attach a ReadWriteOnce volume to a new node until the old node has unstaged it. Earlier releases set it to `false`, which let an evicted pod's replacement mount an iSCSI or NVMe-oF volume while the old node still had it mounted, and could corrupt the filesystem ([#291](https://github.com/fenio/tns-csi/issues/291)).
+
+`attachRequired` is immutable, so Helm cannot change it in place. The chart detects an existing CSIDriver with a different value and stops the upgrade with instructions. To upgrade:
+
+```bash
+# Avoid draining nodes or rescheduling storage-backed pods until the upgrade finishes.
+kubectl delete csidriver tns.csi.io
+
+helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version <NEW_VERSION> \
+  --namespace tns-csi \
+  --reuse-values
+```
+
+Deleting the CSIDriver object does not unmount anything. Running pods keep their volumes. Kubernetes treats a driver without a CSIDriver object as requiring attach, so the attach/detach controller starts creating VolumeAttachments right away. Until the upgraded controller is running, those attachments may report `node ... not found` errors from the old controller. They are retried and succeed once the new controller is up. Afterwards, every in-use volume should have an attached VolumeAttachment:
+
+```bash
+kubectl get volumeattachment -o custom-columns=PV:.spec.source.persistentVolumeName,NODE:.spec.nodeName,ATTACHED:.status.attached
+```
+
+The fence covers drains and evictions. If a node becomes unreachable and never reports its volumes unmounted, Kubernetes force-detaches after its timeout (about 6 minutes by default). The driver does not yet revoke the old node's access on TrueNAS, so do not run storage-backed workloads on a node you cannot confirm is down.
+
+To keep the previous behavior, set `csiDriver.attachRequired=false`. The same delete-and-upgrade steps apply when switching in either direction.
+
 ### Breaking Change Upgrade (v0.6.x → v0.8.0+)
 
 **⚠️ IMPORTANT:** Version 0.8.0 introduces Schema v1 which is a breaking change.

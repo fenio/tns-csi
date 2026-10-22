@@ -1224,6 +1224,7 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 
 	// Validate node exists in registry
 	// Per CSI spec: return NotFound if node doesn't exist
+	// The registry is only set in test mode (see NewDriverWithClient).
 	if s.nodeRegistry != nil && !s.nodeRegistry.IsRegistered(nodeID) {
 		return nil, status.Errorf(codes.NotFound, "node %s not found", nodeID)
 	}

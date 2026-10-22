@@ -84,6 +84,24 @@ var _ = Describe("iSCSI Access Modes", func() {
 			output, err := f.K8s.ExecInPod(ctx, podName, []string{"cat", "/data/test.txt"})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal(testData))
+
+			By("Verifying the volume is attached to the POD's node")
+			// Without a VolumeAttachment Kubernetes does not fence RWO volumes across
+			// nodes (issue #291).
+			pvName, err := f.K8s.GetPVName(ctx, pvcName)
+			Expect(err).NotTo(HaveOccurred())
+			runningPod, err := f.K8s.GetPod(ctx, podName)
+			Expect(err).NotTo(HaveOccurred())
+			err = f.K8s.WaitForVolumeAttached(ctx, pvName, runningPod.Spec.NodeName, podTimeout)
+			Expect(err).NotTo(HaveOccurred(), "volume should have an attached VolumeAttachment")
+
+			By("Deleting the POD and verifying the volume is detached")
+			err = f.K8s.DeletePod(ctx, podName)
+			Expect(err).NotTo(HaveOccurred())
+			err = f.K8s.WaitForPodDeleted(ctx, podName, podTimeout)
+			Expect(err).NotTo(HaveOccurred())
+			err = f.K8s.WaitForVolumeDetached(ctx, pvName, podTimeout)
+			Expect(err).NotTo(HaveOccurred(), "VolumeAttachment should be removed after the POD is deleted")
 		})
 	})
 

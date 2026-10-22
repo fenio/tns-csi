@@ -80,9 +80,18 @@ func NewDriverWithClient(cfg Config, client tnsapi.ClientInterface) (*Driver, er
 	// Create shared node registry for both controller and node services
 	nodeRegistry := NewNodeRegistry()
 
+	// The registry is in-memory and only filled by NodeGetInfo, so the controller can
+	// rely on it only when both services run in one process (csi-sanity). In a real
+	// deployment the controller pod never sees NodeGetInfo, and checking the registry
+	// would fail every ControllerPublishVolume with NotFound.
+	var controllerRegistry *NodeRegistry
+	if cfg.TestMode {
+		controllerRegistry = nodeRegistry
+	}
+
 	// Initialize CSI services
 	d.identity = NewIdentityService(cfg.DriverName, cfg.Version)
-	d.controller = NewControllerService(client, nodeRegistry, cfg.ClusterID)
+	d.controller = NewControllerService(client, controllerRegistry, cfg.ClusterID)
 	d.node = NewNodeService(cfg.NodeID, client, cfg.TestMode, nodeRegistry, cfg.EnableNVMeDiscovery, cfg.MaxConcurrentNVMeConnects)
 
 	return d, nil

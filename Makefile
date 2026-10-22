@@ -153,7 +153,7 @@ test-coverage: coverage
 GO_TEST_COVERAGE_VERSION ?= v2.20.0
 # go-test-coverage v2.20+ needs Go 1.27; only the tool runs on this toolchain (fetched on
 # demand), the tests that produce coverage.out still use the repo's Go version.
-GO_TEST_COVERAGE_TOOLCHAIN ?= go1.27.2
+GO_TEST_COVERAGE_TOOLCHAIN ?= go1.27.3
 COVERAGE_BREAKDOWN ?=
 COVERAGE_BASE_BREAKDOWN ?=
 # Allowed drop in total coverage vs the base, in percentage points. A small tolerance absorbs

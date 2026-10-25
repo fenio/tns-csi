@@ -907,23 +907,42 @@ kubectl get volumeattachment -o custom-columns=PV:.spec.source.persistentVolumeN
 
 The attach/detach controller only waits for a node to unstage a volume if that node lists the volume in `status.volumesInUse`. The kubelet decides whether to list a volume when it first mounts it, so volumes mounted while `attachRequired` was false are left out, even after the upgrade. **Moving one of those volumes to another node (drain, eviction, rescheduling) is still exposed to the original race** until the node lists it.
 
-List the volumes that are attached but not yet fenced:
+Check every volume that a pod is using. Set `driver` if you changed `csiDriverName`:
 
 ```bash
-kubectl get volumeattachment -o json \
-  | jq -r '.items[] | select(.spec.attacher=="tns.csi.io") | "\(.spec.nodeName) \(.spec.source.persistentVolumeName)"' \
-  | while read -r node pv; do
-      handle=$(kubectl get pv "$pv" -o jsonpath='{.spec.csi.volumeHandle}')
-      kubectl get node "$node" -o json \
-        | jq -e --arg v "kubernetes.io/csi/tns.csi.io^$handle" '(.status.volumesInUse // []) | index($v)' >/dev/null \
-        || echo "NOT FENCED: $pv on $node"
+driver=tns.csi.io
+pods=$(kubectl get pods -A -o json)
+pvs=$(kubectl get pv -o json)
+vas=$(kubectl get volumeattachment -o json)
+nodes=$(kubectl get nodes -o json)
+jq -r '.items[] | select(.spec.nodeName and .status.phase != "Succeeded" and .status.phase != "Failed")
+       | .metadata as $m | .spec.nodeName as $node | .spec.volumes[]?
+       | (.persistentVolumeClaim.claimName // (if .ephemeral then "\($m.name)-\(.name)" else empty end))
+       | "\($m.namespace) \(.) \($node)"' <<<"$pods" \
+  | sort -u \
+  | while read -r ns pvc node; do
+      pv=$(kubectl get pvc -n "$ns" "$pvc" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+      handle=$(jq -r --arg pv "$pv" --arg d "$driver" \
+        '.items[] | select(.metadata.name==$pv and .spec.csi.driver==$d) | .spec.csi.volumeHandle' <<<"$pvs")
+      [ -n "$handle" ] || continue
+      jq -e --arg pv "$pv" --arg node "$node" \
+        'any(.items[]; .spec.source.persistentVolumeName==$pv and .spec.nodeName==$node and .status.attached==true)' \
+        <<<"$vas" >/dev/null || { echo "NOT ATTACHED: $pv on $node ($ns/$pvc)"; continue; }
+      jq -e --arg node "$node" --arg v "kubernetes.io/csi/$driver^$handle" \
+        '.items[] | select(.metadata.name==$node) | (.status.volumesInUse // []) | index($v)' \
+        <<<"$nodes" >/dev/null || echo "NOT FENCED: $pv on $node ($ns/$pvc)"
     done
 ```
 
-Fix them without moving them to another node, then re-run the check until it prints nothing:
+It prints one line per volume that needs attention:
+
+- `NOT ATTACHED`: there is no attached VolumeAttachment for the pod's node. Right after the upgrade this is expected until the attach/detach controller's rescan creates them (typically within a couple of minutes), so wait and re-run. If it persists, check the VolumeAttachment's `status.attachError` and the `csi-attacher` logs in the controller pod.
+- `NOT FENCED`: the volume is attached, but the node does not list it in `volumesInUse`.
+
+Fix `NOT FENCED` volumes without moving them to another node, then re-run the check until it prints nothing:
 
 - **Restart each pod on its current node.** A volume is listed once it is mounted again after the upgrade. To keep the replacement on the same node, cordon the other nodes first, delete the pod, wait for it to be running again, then uncordon.
-- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods and lists their volumes again, without unmounting them or restarting pods.
+- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods and lists their volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting.
 
 Don't drain nodes until the check prints nothing.
 

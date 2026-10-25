@@ -895,11 +895,37 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --reuse-values
 ```
 
-Deleting the CSIDriver object does not unmount anything. Running pods keep their volumes. Kubernetes treats a driver without a CSIDriver object as requiring attach, so the attach/detach controller starts creating VolumeAttachments right away. Until the upgraded controller is running, those attachments may report `node ... not found` errors from the old controller. They are retried and succeed once the new controller is up. Afterwards, every in-use volume should have an attached VolumeAttachment:
+With Helm 4, add `--force-conflicts` when the release is also managed by Flux or another server-side-apply tool. Without it the upgrade can fail *after* the new CSIDriver has been created, leaving `attachRequired: true` with the old controller, which rejects every attach: new pods cannot start until you re-run the upgrade.
+
+Deleting the CSIDriver object does not unmount anything. Running pods keep their volumes. Kubernetes treats a driver without a CSIDriver object as requiring attach, so the attach/detach controller creates VolumeAttachments for in-use volumes on its next periodic rescan, typically within a couple of minutes. Until the upgraded controller is running, those attachments may report `node ... not found` errors from the old controller. They are retried and succeed once the new controller is up. Afterwards, every in-use volume should have an attached VolumeAttachment:
 
 ```bash
 kubectl get volumeattachment -o custom-columns=PV:.spec.source.persistentVolumeName,NODE:.spec.nodeName,ATTACHED:.status.attached
 ```
+
+#### Volumes mounted before the upgrade are not yet fenced
+
+The attach/detach controller only waits for a node to unstage a volume if that node lists the volume in `status.volumesInUse`. The kubelet decides whether to list a volume when it first mounts it, so volumes mounted while `attachRequired` was false are left out, even after the upgrade. **Moving one of those volumes to another node (drain, eviction, rescheduling) is still exposed to the original race** until the node lists it.
+
+List the volumes that are attached but not yet fenced:
+
+```bash
+kubectl get volumeattachment -o json \
+  | jq -r '.items[] | select(.spec.attacher=="tns.csi.io") | "\(.spec.nodeName) \(.spec.source.persistentVolumeName)"' \
+  | while read -r node pv; do
+      handle=$(kubectl get pv "$pv" -o jsonpath='{.spec.csi.volumeHandle}')
+      kubectl get node "$node" -o json \
+        | jq -e --arg v "kubernetes.io/csi/tns.csi.io^$handle" '(.status.volumesInUse // []) | index($v)' >/dev/null \
+        || echo "NOT FENCED: $pv on $node"
+    done
+```
+
+Fix them without moving them to another node, then re-run the check until it prints nothing:
+
+- **Restart each pod on its current node.** A volume is listed once it is mounted again after the upgrade. To keep the replacement on the same node, cordon the other nodes first, delete the pod, wait for it to be running again, then uncordon.
+- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods and lists their volumes again, without unmounting them or restarting pods.
+
+Don't drain nodes until the check prints nothing.
 
 The fence covers drains and evictions. If a node becomes unreachable and never reports its volumes unmounted, Kubernetes force-detaches after its timeout (about 6 minutes by default). The driver does not yet revoke the old node's access on TrueNAS, so do not run storage-backed workloads on a node you cannot confirm is down.
 

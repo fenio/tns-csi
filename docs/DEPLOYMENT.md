@@ -879,9 +879,9 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --reuse-values
 ```
 
-### CSIDriver attachRequired change (v0.20.1+)
+### CSIDriver attachRequired change (v0.21.0+)
 
-Starting with v0.20.1 the chart sets `CSIDriver.spec.attachRequired: true` (chart value `csiDriver.attachRequired`). Kubernetes then creates a VolumeAttachment for every volume and does not attach a ReadWriteOnce volume to a new node until the old node has unstaged it. Earlier releases set it to `false`, which let an evicted pod's replacement mount an iSCSI or NVMe-oF volume while the old node still had it mounted, and could corrupt the filesystem ([#291](https://github.com/fenio/tns-csi/issues/291)).
+Starting with v0.21.0 the chart sets `CSIDriver.spec.attachRequired: true` (chart value `csiDriver.attachRequired`). Kubernetes then creates a VolumeAttachment for every volume and does not attach a ReadWriteOnce volume to a new node until the old node has unstaged it. Earlier releases set it to `false`, which let an evicted pod's replacement mount an iSCSI or NVMe-oF volume while the old node still had it mounted, and could corrupt the filesystem ([#291](https://github.com/fenio/tns-csi/issues/291)).
 
 `attachRequired` is immutable, so Helm cannot change it in place. The chart detects an existing CSIDriver with a different value and stops the upgrade with instructions. To upgrade:
 
@@ -960,7 +960,7 @@ If it reports errors, repair with `e2fsck -fy` while the workload is still scale
 
 #### Nodes that crash or become unreachable
 
-The fence covers drains and evictions. A pod on a node that stops responding stays `Terminating`, and Kubernetes keeps its volumes attached to that node, so a replacement pod on another node waits with a `Multi-Attach error` instead of mounting the volume. Before v0.20.1 the replacement mounted the volume straight away, so this is a change in behavior. The replacement starts when one of these happens:
+The fence covers drains and evictions. A pod on a node that stops responding stays `Terminating`, and Kubernetes keeps its volumes attached to that node, so a replacement pod on another node waits with a `Multi-Attach error` instead of mounting the volume. Before v0.21.0 the replacement mounted the volume straight away, so this is a change in behavior. The replacement starts when one of these happens:
 
 - The node comes back and its kubelet cleans up the old pod.
 - You confirm the node is down and add the `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` taint ([non-graceful node shutdown](https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/#non-graceful-node-shutdown)). Kubernetes then deletes the old pods and detaches their volumes immediately.

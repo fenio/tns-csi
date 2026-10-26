@@ -45,11 +45,10 @@ var _ = Describe("CSI Identity", func() {
 		Expect(csiDriver.Name).To(Equal("tns.csi.io"), "CSIDriver name should be tns.csi.io")
 
 		By("Checking CSIDriver spec")
-		if csiDriver.Spec.AttachRequired != nil {
-			if f.Verbose() {
-				GinkgoWriter.Printf("CSIDriver attachRequired: %v\n", *csiDriver.Spec.AttachRequired)
-			}
-		}
+		// attachRequired is what makes Kubernetes fence ReadWriteOnce volumes across
+		// nodes (issue #291).
+		Expect(csiDriver.Spec.AttachRequired).NotTo(BeNil(), "CSIDriver attachRequired should be set")
+		Expect(*csiDriver.Spec.AttachRequired).To(BeTrue(), "CSIDriver attachRequired should be true")
 		if csiDriver.Spec.PodInfoOnMount != nil {
 			if f.Verbose() {
 				GinkgoWriter.Printf("CSIDriver podInfoOnMount: %v\n", *csiDriver.Spec.PodInfoOnMount)

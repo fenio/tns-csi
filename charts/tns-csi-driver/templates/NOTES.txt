@@ -1,6 +1,15 @@
 Thank you for installing {{ .Chart.Name }}!
 
 Your release is named {{ .Release.Name }}.
+{{- if and .Release.IsUpgrade (eq (include "tns-csi-driver.csiDriver.attachRequired" .) "true") }}
+
+IMPORTANT (upgrading from a release with attachRequired: false):
+Volumes that were already mounted are not fenced against multi-node mounts
+until each one is mounted again or its node's kubelet restarts. Don't drain
+nodes until every volume is fenced. See "Volumes mounted before the upgrade
+are not yet fenced" in docs/DEPLOYMENT.md for a check and how to fix it:
+https://github.com/fenio/tns-csi/blob/main/docs/DEPLOYMENT.md#volumes-mounted-before-the-upgrade-are-not-yet-fenced
+{{- end }}
 
 To verify the installation:
 

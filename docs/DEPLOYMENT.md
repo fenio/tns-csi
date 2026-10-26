@@ -879,6 +879,99 @@ helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
   --reuse-values
 ```
 
+### CSIDriver attachRequired change (v0.20.1+)
+
+Starting with v0.20.1 the chart sets `CSIDriver.spec.attachRequired: true` (chart value `csiDriver.attachRequired`). Kubernetes then creates a VolumeAttachment for every volume and does not attach a ReadWriteOnce volume to a new node until the old node has unstaged it. Earlier releases set it to `false`, which let an evicted pod's replacement mount an iSCSI or NVMe-oF volume while the old node still had it mounted, and could corrupt the filesystem ([#291](https://github.com/fenio/tns-csi/issues/291)).
+
+`attachRequired` is immutable, so Helm cannot change it in place. The chart detects an existing CSIDriver with a different value and stops the upgrade with instructions. To upgrade:
+
+```bash
+# Avoid draining nodes or rescheduling storage-backed pods until the upgrade finishes.
+kubectl delete csidriver tns.csi.io
+
+helm upgrade tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \
+  --version <NEW_VERSION> \
+  --namespace tns-csi \
+  --reuse-values
+```
+
+With Helm 4, add `--force-conflicts` when the release is also managed by Flux or another server-side-apply tool. Without it the upgrade can fail *after* the new CSIDriver has been created, leaving `attachRequired: true` with the old controller, which rejects every attach: new pods cannot start until you re-run the upgrade.
+
+Deleting the CSIDriver object does not unmount anything. Running pods keep their volumes. Kubernetes treats a driver without a CSIDriver object as requiring attach, so the attach/detach controller creates VolumeAttachments for in-use volumes on its next periodic rescan, typically within a couple of minutes. Until the upgraded controller is running, those attachments may report `node ... not found` errors from the old controller. They are retried and succeed once the new controller is up. Afterwards, every in-use volume should have an attached VolumeAttachment:
+
+```bash
+kubectl get volumeattachment -o custom-columns=PV:.spec.source.persistentVolumeName,NODE:.spec.nodeName,ATTACHED:.status.attached
+```
+
+#### Volumes mounted before the upgrade are not yet fenced
+
+The attach/detach controller only waits for a node to unstage a volume if that node lists the volume in `status.volumesInUse`. The kubelet decides whether to list a volume when it first mounts it, so volumes mounted while `attachRequired` was false are left out, even after the upgrade. **Moving one of those volumes to another node (drain, eviction, rescheduling) is still exposed to the original race** until the node lists it.
+
+Check every volume that a pod is using. Set `driver` if you changed `csiDriverName`:
+
+```bash
+driver=tns.csi.io
+pods=$(kubectl get pods -A -o json)
+pvs=$(kubectl get pv -o json)
+vas=$(kubectl get volumeattachment -o json)
+nodes=$(kubectl get nodes -o json)
+jq -r '.items[] | select(.spec.nodeName and .status.phase != "Succeeded" and .status.phase != "Failed")
+       | .metadata as $m | .spec.nodeName as $node | .spec.volumes[]?
+       | (.persistentVolumeClaim.claimName // (if .ephemeral then "\($m.name)-\(.name)" else empty end))
+       | "\($m.namespace) \(.) \($node)"' <<<"$pods" \
+  | sort -u \
+  | while read -r ns pvc node; do
+      pv=$(kubectl get pvc -n "$ns" "$pvc" -o jsonpath='{.spec.volumeName}' 2>/dev/null)
+      handle=$(jq -r --arg pv "$pv" --arg d "$driver" \
+        '.items[] | select(.metadata.name==$pv and .spec.csi.driver==$d) | .spec.csi.volumeHandle' <<<"$pvs")
+      [ -n "$handle" ] || continue
+      jq -e --arg pv "$pv" --arg node "$node" \
+        'any(.items[]; .spec.source.persistentVolumeName==$pv and .spec.nodeName==$node and .status.attached==true)' \
+        <<<"$vas" >/dev/null || { echo "NOT ATTACHED: $pv on $node ($ns/$pvc)"; continue; }
+      jq -e --arg node "$node" --arg v "kubernetes.io/csi/$driver^$handle" \
+        '.items[] | select(.metadata.name==$node) | (.status.volumesInUse // []) | index($v)' \
+        <<<"$nodes" >/dev/null || echo "NOT FENCED: $pv on $node ($ns/$pvc)"
+    done
+```
+
+It prints one line per volume that needs attention:
+
+- `NOT ATTACHED`: there is no attached VolumeAttachment for the pod's node. Right after the upgrade this is expected until the attach/detach controller's rescan creates them (typically within a couple of minutes), so wait and re-run. If it persists, check the VolumeAttachment's `status.attachError` and the `csi-attacher` logs in the controller pod.
+- `NOT FENCED`: the volume is attached, but the node does not list it in `volumesInUse`.
+
+Fix `NOT FENCED` volumes without moving them to another node, then re-run the check until it prints nothing:
+
+- **Restart each pod on its current node.** A volume is listed once it is mounted again after the upgrade. To keep the replacement on the same node, cordon the other nodes first, delete the pod, wait for it to be running again, then uncordon.
+- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods and lists their volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting.
+
+Don't drain nodes until the check prints nothing.
+
+#### Volumes that moved between nodes before the upgrade may be damaged
+
+Each move under `attachRequired: false` (a drain, an eviction, a node coming back after a crash) could leave the volume mounted read-write on two nodes for a few seconds. The damage this causes to ext4 can stay hidden: the filesystem keeps reporting `clean`, and nothing fails until the damaged metadata is next used, which can be days later. The volume's history tells you whether it is at risk: look in the nodes' kernel logs for `EXT4-fs (...): mounted filesystem <uuid>` on one node before `unmounting filesystem <uuid>` for the same UUID on another node.
+
+For a volume you are unsure about, the only reliable check is an offline `e2fsck`. Scale its workload to zero, wait until its VolumeAttachment is gone, then run a read-only check against the zvol from the TrueNAS shell (or any host with `e2fsprogs` that can see the device):
+
+```bash
+e2fsck -fn /dev/zvol/<pool>/<dataset>
+```
+
+If it reports errors, repair with `e2fsck -fy` while the workload is still scaled to zero, then scale it back up.
+
+#### Nodes that crash or become unreachable
+
+The fence covers drains and evictions. A pod on a node that stops responding stays `Terminating`, and Kubernetes keeps its volumes attached to that node, so a replacement pod on another node waits with a `Multi-Attach error` instead of mounting the volume. Before v0.20.1 the replacement mounted the volume straight away, so this is a change in behavior. The replacement starts when one of these happens:
+
+- The node comes back and its kubelet cleans up the old pod.
+- You confirm the node is down and add the `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` taint ([non-graceful node shutdown](https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/#non-graceful-node-shutdown)). Kubernetes then deletes the old pods and detaches their volumes immediately.
+- You force-delete the old pod (`kubectl delete pod --force --grace-period=0`). Kubernetes force-detaches the volume about 6 minutes later.
+
+Only do the last two when you are sure the node is powered off. The driver does not yet revoke the old node's access on TrueNAS ([#299](https://github.com/fenio/tns-csi/issues/299)), so a node that is partitioned rather than down can keep writing to the volume after it is attached elsewhere.
+
+#### Keeping the previous behavior
+
+To keep the previous behavior, set `csiDriver.attachRequired=false`. The same delete-and-upgrade steps apply when switching in either direction.
+
 ### Breaking Change Upgrade (v0.6.x → v0.8.0+)
 
 **⚠️ IMPORTANT:** Version 0.8.0 introduces Schema v1 which is a breaking change.

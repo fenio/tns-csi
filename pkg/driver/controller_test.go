@@ -920,6 +920,45 @@ func TestControllerPublishVolume(t *testing.T) {
 	}
 }
 
+// TestControllerPublishVolumeNodeRegistryWiring guards the split-process deployment:
+// the controller pod never receives NodeGetInfo, so outside test mode publishing must
+// not depend on the in-memory node registry (issue #291).
+func TestControllerPublishVolumeNodeRegistryWiring(t *testing.T) {
+	req := &csi.ControllerPublishVolumeRequest{
+		VolumeId: "test-volume",
+		NodeId:   "node-never-seen-by-controller",
+		VolumeCapability: &csi.VolumeCapability{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{},
+			},
+			AccessMode: &csi.VolumeCapability_AccessMode{
+				Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+			},
+		},
+	}
+
+	t.Run("production mode publishes to any node", func(t *testing.T) {
+		d, err := NewDriverWithClient(Config{DriverName: "tns.csi.io", NodeID: "controller"}, &mockAPIClient{})
+		if err != nil {
+			t.Fatalf("NewDriverWithClient() error = %v", err)
+		}
+		if _, err := d.controller.ControllerPublishVolume(context.Background(), req); err != nil {
+			t.Fatalf("ControllerPublishVolume() error = %v, want nil", err)
+		}
+	})
+
+	t.Run("test mode rejects unknown node", func(t *testing.T) {
+		d, err := NewDriverWithClient(Config{DriverName: "tns.csi.io", NodeID: "controller", TestMode: true}, &mockAPIClient{})
+		if err != nil {
+			t.Fatalf("NewDriverWithClient() error = %v", err)
+		}
+		_, err = d.controller.ControllerPublishVolume(context.Background(), req)
+		if status.Code(err) != codes.NotFound {
+			t.Fatalf("ControllerPublishVolume() code = %v, want NotFound", status.Code(err))
+		}
+	})
+}
+
 func TestControllerUnpublishVolume(t *testing.T) {
 	ctx := context.Background()
 

@@ -114,6 +114,29 @@ func (v *TrueNASVerifier) NVMeOFSubsystemExists(ctx context.Context, nqn string)
 	return len(subsystems) > 0, nil
 }
 
+// DeleteDatasetIfEmpty deletes a dataset only if it has no children. The delete is
+// non-recursive, so ZFS itself refuses it while children exist: there is no window in
+// which a concurrently created child could be destroyed. Returns deleted=false (and no
+// error) when the dataset still has children.
+func (v *TrueNASVerifier) DeleteDatasetIfEmpty(ctx context.Context, datasetPath string) (bool, error) {
+	var children []map[string]any
+	filter := []any{[]any{"id", "^", datasetPath + "/"}}
+	if err := v.client.Call(ctx, "pool.dataset.query", []any{filter, map[string]any{"select": []string{"id"}}}, &children); err != nil {
+		return false, fmt.Errorf("failed to query children of %s: %w", datasetPath, err)
+	}
+	if len(children) > 0 {
+		return false, nil
+	}
+	var result any
+	params := []any{datasetPath, map[string]any{"recursive": false}}
+	if err := v.client.Call(ctx, "pool.dataset.delete", params, &result); err != nil {
+		// A child created after the query makes ZFS reject the delete; that is the
+		// intended outcome, so the caller only logs it.
+		return false, fmt.Errorf("failed to delete dataset %s: %w", datasetPath, err)
+	}
+	return true, nil
+}
+
 // DeleteDataset deletes a dataset from TrueNAS with recursive+force flags and retry logic.
 // This matches the driver's DeleteDataset approach: passes recursive=true, force=true,
 // and retries on EBUSY errors (12 attempts × 5s interval = ~60s total).

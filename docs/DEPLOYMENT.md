@@ -946,7 +946,29 @@ Fix `NOT FENCED` volumes without moving them to another node, then re-run the ch
 
 Don't drain nodes until the check prints nothing.
 
-The fence covers drains and evictions. If a node becomes unreachable and never reports its volumes unmounted, Kubernetes force-detaches after its timeout (about 6 minutes by default). The driver does not yet revoke the old node's access on TrueNAS, so do not run storage-backed workloads on a node you cannot confirm is down.
+#### Volumes that moved between nodes before the upgrade may be damaged
+
+Each move under `attachRequired: false` (a drain, an eviction, a node coming back after a crash) could leave the volume mounted read-write on two nodes for a few seconds. The damage this causes to ext4 can stay hidden: the filesystem keeps reporting `clean`, and nothing fails until the damaged metadata is next used, which can be days later. The volume's history tells you whether it is at risk: look in the nodes' kernel logs for `EXT4-fs (...): mounted filesystem <uuid>` on one node before `unmounting filesystem <uuid>` for the same UUID on another node.
+
+For a volume you are unsure about, the only reliable check is an offline `e2fsck`. Scale its workload to zero, wait until its VolumeAttachment is gone, then run a read-only check against the zvol from the TrueNAS shell (or any host with `e2fsprogs` that can see the device):
+
+```bash
+e2fsck -fn /dev/zvol/<pool>/<dataset>
+```
+
+If it reports errors, repair with `e2fsck -fy` while the workload is still scaled to zero, then scale it back up.
+
+#### Nodes that crash or become unreachable
+
+The fence covers drains and evictions. A pod on a node that stops responding stays `Terminating`, and Kubernetes keeps its volumes attached to that node, so a replacement pod on another node waits with a `Multi-Attach error` instead of mounting the volume. Before v0.20.1 the replacement mounted the volume straight away, so this is a change in behavior. The replacement starts when one of these happens:
+
+- The node comes back and its kubelet cleans up the old pod.
+- You confirm the node is down and add the `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` taint ([non-graceful node shutdown](https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/#non-graceful-node-shutdown)). Kubernetes then deletes the old pods and detaches their volumes immediately.
+- You force-delete the old pod (`kubectl delete pod --force --grace-period=0`). Kubernetes force-detaches the volume about 6 minutes later.
+
+Only do the last two when you are sure the node is powered off. The driver does not yet revoke the old node's access on TrueNAS ([#299](https://github.com/fenio/tns-csi/issues/299)), so a node that is partitioned rather than down can keep writing to the volume after it is attached elsewhere.
+
+#### Keeping the previous behavior
 
 To keep the previous behavior, set `csiDriver.attachRequired=false`. The same delete-and-upgrade steps apply when switching in either direction.
 

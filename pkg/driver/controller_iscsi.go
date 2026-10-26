@@ -990,7 +990,7 @@ func (s *ControllerService) expandISCSIVolume(ctx context.Context, meta *VolumeM
 
 	klog.Infof("Expanded iSCSI volume: %s to %d bytes", meta.Name, requiredBytes)
 
-	// Update volume capacity metric using plain volume name
+	// Update volume capacity metric
 	metrics.SetVolumeCapacity(meta.Name, metrics.ProtocolISCSI, requiredBytes)
 
 	timer.ObserveSuccess()
@@ -1249,7 +1249,7 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 	}
 
 	// Update volume capacity metric
-	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolISCSI, requestedCapacity)
+	metrics.SetVolumeCapacity(zvol.ID, metrics.ProtocolISCSI, requestedCapacity)
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -1447,7 +1447,7 @@ func (s *ControllerService) adoptISCSIVolume(ctx context.Context, req *csi.Creat
 	volumeContext := buildVolumeContext(meta)
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolISCSI, requestedCapacity)
+	metrics.SetVolumeCapacity(dataset.ID, metrics.ProtocolISCSI, requestedCapacity)
 
 	klog.Infof("Successfully adopted iSCSI volume: %s (target=%s, IQN=%s)", volumeName, target.Name, fullIQN)
 	timer.ObserveSuccess()

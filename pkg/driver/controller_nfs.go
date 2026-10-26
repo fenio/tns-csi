@@ -715,7 +715,7 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 
 	klog.Infof("Deleted NFS volume: %s", meta.Name)
 
-	// Remove volume capacity metric using plain volume name
+	// Remove volume capacity metric
 	metrics.DeleteVolumeCapacity(meta.Name, metrics.ProtocolNFS)
 
 	timer.ObserveSuccess()
@@ -942,7 +942,7 @@ func (s *ControllerService) adoptNFSVolume(ctx context.Context, req *csi.CreateV
 	volumeContext[VolumeContextKeyShare] = dataset.Mountpoint
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolNFS, requestedCapacity)
+	metrics.SetVolumeCapacity(dataset.ID, metrics.ProtocolNFS, requestedCapacity)
 
 	klog.Infof("Successfully adopted NFS volume: %s (shareID=%d)", volumeName, nfsShare.ID)
 	timer.ObserveSuccess()
@@ -991,7 +991,7 @@ func (s *ControllerService) expandNFSVolume(ctx context.Context, meta *VolumeMet
 
 	klog.Infof("Expanded NFS volume: %s to %d bytes", meta.Name, requiredBytes)
 
-	// Update volume capacity metric using plain volume name
+	// Update volume capacity metric
 	metrics.SetVolumeCapacity(meta.Name, metrics.ProtocolNFS, requiredBytes)
 
 	timer.ObserveSuccess()

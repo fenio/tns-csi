@@ -50,7 +50,7 @@ type NodeService struct {
 	detectFilesystemFn   func(context.Context, string) (string, error)
 	isSourceMountedFn    func(context.Context, string) (bool, error)
 	needsFormatFn        func(context.Context, string, bool) (bool, error)
-	formatDeviceFn       func(context.Context, string, string, string) error
+	formatDeviceFn       func(context.Context, string, string, string, []string) error
 	volumeLifecycleLocks keyedMutex
 	nodeID               string
 	nvmeLifecycleMu      sync.Mutex
@@ -111,6 +111,11 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 	if filesystemCheckMode == filesystemCheckModePreen {
 		volumeContext[VolumeContextKeyFilesystemCheck] = filesystemCheckMode
+	}
+	// Validated here too: a static PV sets the volume context without CreateVolume.
+	if _, mkfsErr := validateMkfsOptions(volumeContext[VolumeContextKeyMkfsOptions], protocol, []*csi.VolumeCapability{req.GetVolumeCapability()}); mkfsErr != nil {
+		timer.ObserveError()
+		return nil, mkfsErr
 	}
 	unlock, lockErr := s.volumeLifecycleLocks.lock(ctx, volumeID)
 	if lockErr != nil {

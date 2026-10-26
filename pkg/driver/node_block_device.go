@@ -125,7 +125,7 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 // detection, and retry. We deliberately do not pass mke2fs a second -F to bypass that
 // check — if udev's scan eventually surfaces a filesystem we initially missed, we
 // preserve it instead of destroying data.
-func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool) (bool, error) {
+func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool, mkfsArgs []string) (bool, error) {
 	needsFormat := s.needsFormatFn
 	if needsFormat == nil {
 		needsFormat = needsFormatWithRetries
@@ -152,7 +152,7 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 	backoff := 2 * time.Second
 	var lastErr error
 	for attempt := 1; attempt <= maxFormatAttempts; attempt++ {
-		formatErr := format(ctx, volumeID, devicePath, fsType)
+		formatErr := format(ctx, volumeID, devicePath, fsType, mkfsArgs)
 		if formatErr == nil {
 			return true, nil
 		}

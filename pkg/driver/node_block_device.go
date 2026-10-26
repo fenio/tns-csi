@@ -119,13 +119,19 @@ func forceDeviceRescan(ctx context.Context, devicePath string) error {
 	return nil
 }
 
+// filesystemSpec is the filesystem to create on a device that has none.
+type filesystemSpec struct {
+	fsType   string
+	mkfsArgs []string // From mkfsOptions, already checked by mkfsOptionArgs
+}
+
 // handleDeviceFormatting checks if a device needs formatting and formats it if necessary.
 // On transient "device busy" errors from mke2fs (the BLKRRPART EBUSY check, typically
 // caused by udev/blkid briefly scanning the new LUN), we wait, re-run the filesystem
 // detection, and retry. We deliberately do not pass mke2fs a second -F to bypass that
 // check — if udev's scan eventually surfaces a filesystem we initially missed, we
 // preserve it instead of destroying data.
-func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath, fsType, datasetName, nqn string, isClone bool, mkfsArgs []string) (bool, error) {
+func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devicePath string, fs filesystemSpec, datasetName, nqn string, isClone bool) (bool, error) {
 	needsFormat := s.needsFormatFn
 	if needsFormat == nil {
 		needsFormat = needsFormatWithRetries
@@ -146,13 +152,13 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 		return false, nil
 	}
 
-	klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fsType, datasetName)
+	klog.V(4).Infof("Device %s needs formatting with %s (dataset: %s)", devicePath, fs.fsType, datasetName)
 
 	const maxFormatAttempts = 5
 	backoff := 2 * time.Second
 	var lastErr error
 	for attempt := 1; attempt <= maxFormatAttempts; attempt++ {
-		formatErr := format(ctx, volumeID, devicePath, fsType, mkfsArgs)
+		formatErr := format(ctx, volumeID, devicePath, fs.fsType, fs.mkfsArgs)
 		if formatErr == nil {
 			return true, nil
 		}

@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -79,45 +80,54 @@ func mkfsOptionArgs(raw, fsType string) ([]string, error) {
 	}
 
 	fsType = strings.ToLower(strings.TrimSpace(fsType))
-	var allowed map[string]mkfsFlag
-	switch fsType {
-	case "", fsTypeExt4, fsTypeExt3:
-		allowed = mke2fsFlags
-	case fsTypeXFS:
-		allowed = mkfsXFSFlags
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, "mkfsOptions is not supported for filesystem %q", fsType)
+	if fsType == "" {
+		fsType = fsTypeExt4
+	}
+	allowed, err := mkfsFlagsFor(fsType)
+	if err != nil {
+		return nil, err
 	}
 
 	for i := 0; i < len(fields); i++ {
-		flag, ok := allowed[fields[i]]
+		name := fields[i]
+		flag, ok := allowed[name]
 		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument,
-				"mkfsOptions: unsupported option %q for %s (pass each option and its value as separate words)", fields[i], fsTypeOrDefault(fsType))
+				"mkfsOptions: unsupported option %q for %s (pass each option and its value as separate words)", name, fsType)
 		}
 		if !flag.takesArg {
 			continue
 		}
 		if i+1 == len(fields) {
-			return nil, status.Errorf(codes.InvalidArgument, "mkfsOptions: option %s needs a value", fields[i])
+			return nil, status.Errorf(codes.InvalidArgument, "mkfsOptions: option %s needs a value", name)
 		}
 		i++
-		for _, subopt := range strings.Split(fields[i], ",") {
-			key, _, _ := strings.Cut(subopt, "=")
-			for _, forbidden := range flag.forbiddenSubopts {
-				if key == forbidden {
-					return nil, status.Errorf(codes.InvalidArgument,
-						"mkfsOptions: %s %s is not allowed, since it points mkfs at another device or file", fields[i-1], key)
-				}
-			}
+		if err := checkMkfsSubopts(name, fields[i], flag.forbiddenSubopts); err != nil {
+			return nil, err
 		}
 	}
 	return fields, nil
 }
 
-func fsTypeOrDefault(fsType string) string {
-	if fsType == "" {
-		return fsTypeExt4
+func mkfsFlagsFor(fsType string) (map[string]mkfsFlag, error) {
+	switch fsType {
+	case fsTypeExt4, fsTypeExt3:
+		return mke2fsFlags, nil
+	case fsTypeXFS:
+		return mkfsXFSFlags, nil
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, "mkfsOptions is not supported for filesystem %q", fsType)
 	}
-	return fsType
+}
+
+// checkMkfsSubopts rejects a comma-separated option value that uses a forbidden key.
+func checkMkfsSubopts(name, value string, forbidden []string) error {
+	for _, subopt := range strings.Split(value, ",") {
+		key, _, _ := strings.Cut(subopt, "=")
+		if slices.Contains(forbidden, key) {
+			return status.Errorf(codes.InvalidArgument,
+				"mkfsOptions: %s %s is not allowed, since it points mkfs at another device or file", name, key)
+		}
+	}
+	return nil
 }

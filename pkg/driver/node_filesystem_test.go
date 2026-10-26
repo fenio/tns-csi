@@ -275,7 +275,7 @@ func TestHandleDeviceFormattingOutcomes(t *testing.T) {
 					return nil
 				},
 			}
-			formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false, nil)
+			formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", filesystemSpec{fsType: fsTypeExt4}, "dataset", "target", false)
 			if formatted != tt.wantFormatted {
 				t.Fatalf("formatted = %v, want %v", formatted, tt.wantFormatted)
 			}
@@ -304,7 +304,7 @@ func TestHandleDeviceFormattingStopsAfterFailedBusyRecheck(t *testing.T) {
 			return errors.New("device is apparently in use by the system")
 		},
 	}
-	formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false, nil)
+	formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", filesystemSpec{fsType: fsTypeExt4}, "dataset", "target", false)
 	if formatted || status.Code(err) != codes.Internal || formats != 1 || checks != 2 {
 		t.Fatalf("handleDeviceFormatting() = %v, %v; checks=%d formats=%d; want false, Internal, 2, 1", formatted, err, checks, formats)
 	}
@@ -317,7 +317,7 @@ func TestHandleDeviceFormattingDefaultHooks(t *testing.T) {
 				return false, nil
 			},
 		}
-		formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false, nil)
+		formatted, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", filesystemSpec{fsType: fsTypeExt4}, "dataset", "target", false)
 		if err != nil || formatted {
 			t.Fatalf("handleDeviceFormatting() = %v, %v; want false, nil", formatted, err)
 		}
@@ -329,7 +329,7 @@ func TestHandleDeviceFormattingDefaultHooks(t *testing.T) {
 				return errors.New("format blocked")
 			},
 		}
-		if _, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/tns-csi-does-not-exist", fsTypeExt4, "dataset", "target", false, nil); err == nil {
+		if _, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/tns-csi-does-not-exist", filesystemSpec{fsType: fsTypeExt4}, "dataset", "target", false); err == nil {
 			t.Fatal("handleDeviceFormatting() error = nil, want formatting failure")
 		}
 	})

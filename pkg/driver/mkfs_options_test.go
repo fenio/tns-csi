@@ -2,6 +2,9 @@ package driver
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -127,7 +130,7 @@ func TestHandleDeviceFormattingPassesMkfsArgs(t *testing.T) {
 		},
 	}
 	want := []string{"-O", "mmp"}
-	if _, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", fsTypeExt4, "dataset", "target", false, want); err != nil {
+	if _, err := service.handleDeviceFormatting(context.Background(), "volume", "/dev/test", filesystemSpec{fsType: fsTypeExt4, mkfsArgs: want}, "dataset", "target", false); err != nil {
 		t.Fatalf("handleDeviceFormatting() error = %v", err)
 	}
 	if !slices.Equal(gotArgs, want) {
@@ -151,5 +154,42 @@ func TestNodeStageVolumeRejectsUnsafeMkfsOptions(t *testing.T) {
 	})
 	if status.Code(err) != codes.InvalidArgument || !strings.Contains(err.Error(), "mkfsOptions") {
 		t.Fatalf("NodeStageVolume() error = %v, want InvalidArgument for mkfsOptions", err)
+	}
+}
+
+// TestFormatDeviceWithMkfsOptions formats a regular file, which mkfs accepts like a
+// device. Where the mkfs tool is not installed, it only checks the call fails cleanly.
+func TestFormatDeviceWithMkfsOptions(t *testing.T) {
+	tests := []struct {
+		fsType string
+		tool   string
+		args   []string
+	}{
+		{fsType: fsTypeExt4, tool: "mkfs.ext4", args: []string{"-O", "mmp", "-m", "0"}},
+		{fsType: fsTypeExt3, tool: "mkfs.ext3", args: []string{"-L", "data"}},
+		{fsType: fsTypeXFS, tool: "mkfs.xfs", args: []string{"-m", "reflink=1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.fsType, func(t *testing.T) {
+			image := filepath.Join(t.TempDir(), "disk.img")
+			// mkfs.xfs needs at least 300 MiB; the file is sparse.
+			if err := os.WriteFile(image, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Truncate(image, 512<<20); err != nil {
+				t.Fatal(err)
+			}
+
+			err := formatDevice(context.Background(), "test-vol", image, tt.fsType, tt.args)
+			if _, lookErr := exec.LookPath(tt.tool); lookErr != nil {
+				if err == nil {
+					t.Fatalf("formatDevice() succeeded without %s installed", tt.tool)
+				}
+				t.Skipf("%s not installed: %v", tt.tool, err)
+			}
+			if err != nil {
+				t.Fatalf("formatDevice(%q, %q) error = %v", tt.fsType, tt.args, err)
+			}
+		})
 	}
 }

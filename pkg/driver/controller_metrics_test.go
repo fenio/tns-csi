@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/fenio/tns-csi/pkg/metrics"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -113,5 +114,40 @@ func TestSyncVolumeCapacityMetricsKeepsSeriesOnListError(t *testing.T) {
 	}
 	if _, ok := metrics.VolumeCapacitySnapshot()[existing]; !ok {
 		t.Error("a failed listing removed an existing capacity series")
+	}
+}
+
+func TestRunVolumeCapacitySyncRepeatsUntilCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	calls := make(chan struct{}, 10)
+	client := &mockAPIClient{
+		findManagedDatasetsFunc: func(context.Context, string) ([]tnsapi.DatasetWithProperties, error) {
+			calls <- struct{}{}
+			// A failing sync is logged and retried on the next tick.
+			return nil, errors.New("connection refused")
+		},
+	}
+	s := NewControllerService(client, nil, "")
+
+	done := make(chan struct{})
+	go func() {
+		s.runVolumeCapacitySync(ctx, time.Millisecond)
+		close(done)
+	}()
+
+	for i := range 2 {
+		select {
+		case <-calls:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("sync %d did not run", i+1)
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runVolumeCapacitySync did not return after cancel")
 	}
 }

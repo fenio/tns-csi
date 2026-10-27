@@ -65,6 +65,8 @@ type MockAPIClientForSnapshots struct {
 	QuerySMBSharesFunc             func(ctx context.Context, filters []interface{}) ([]tnsapi.SMBShare, error)
 	QueryNVMeOFNamespacesFunc      func(ctx context.Context, filters []interface{}) ([]tnsapi.NVMeOFNamespace, error)
 	QueryNVMeOFSubsystemsFunc      func(ctx context.Context, filters []interface{}) ([]tnsapi.NVMeOFSubsystem, error)
+	QuerySubsystemPortBindingsFunc func(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error)
+	RemoveSubsystemFromPortFunc    func(ctx context.Context, portSubsysID int) error
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -272,7 +274,7 @@ func (m *MockAPIClientForSnapshots) QueryNVMeOFSubsystem(ctx context.Context, nq
 	if m.QueryNVMeOFSubsystemFunc != nil {
 		return m.QueryNVMeOFSubsystemFunc(ctx, nqn)
 	}
-	return nil, errors.New("QueryNVMeOFSubsystemFunc not implemented")
+	return nil, nil // Default: no subsystem with this NQN
 }
 
 func (m *MockAPIClientForSnapshots) ListAllNVMeOFSubsystems(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
@@ -325,10 +327,16 @@ func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName stri
 }
 
 func (m *MockAPIClientForSnapshots) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	if m.RemoveSubsystemFromPortFunc != nil {
+		return m.RemoveSubsystemFromPortFunc(ctx, portSubsysID)
+	}
 	return nil
 }
 
 func (m *MockAPIClientForSnapshots) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error) {
+	if m.QuerySubsystemPortBindingsFunc != nil {
+		return m.QuerySubsystemPortBindingsFunc(ctx, subsystemID)
+	}
 	return nil, nil
 }
 

@@ -1048,6 +1048,25 @@ func validateCapacityCompatibility(volumeName string, existingCapacity, reqCapac
 // This is space-efficient as the clone shares blocks with the source until modified.
 // The temporary snapshot is kept because the clone depends on it - this is fundamental
 // ZFS behavior where clones always depend on their origin snapshot.
+// existingSnapshot returns the snapshot of dataset whose full name (dataset@name) is
+// fullName, or nil when it does not exist or the query fails (the caller then tries to
+// create it, and a create of an existing snapshot reports EEXIST).
+func (s *ControllerService) existingSnapshot(ctx context.Context, dataset, fullName string) *tnsapi.Snapshot {
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{verbDataset, "=", dataset},
+	})
+	if err != nil {
+		klog.V(4).Infof("Failed to query snapshots of %s (will attempt to create): %v", dataset, err)
+		return nil
+	}
+	for i := range snapshots {
+		if snapshots[i].ID == fullName || snapshots[i].Name == fullName {
+			return &snapshots[i]
+		}
+	}
+	return nil
+}
+
 func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID string) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("=== createVolumeFromVolume CALLED === New volume: %s, Source volume: %s", req.GetName(), sourceVolumeID)
 
@@ -1107,12 +1126,27 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 		Recursive: false,
 	}
 
-	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", err)
+	// The name is deterministic, so a retried CreateVolume (the external-provisioner
+	// retries after a timeout) finds the snapshot the previous attempt made. Reuse it
+	// instead of failing on "already exists" on every retry.
+	tempSnapshotFullName := sourceDatasetName + "@" + tempSnapshotName
+	snapshot := s.existingSnapshot(ctx, sourceDatasetName, tempSnapshotFullName)
+	if snapshot != nil {
+		klog.Infof("Temporary snapshot %s already exists (retried request), reusing it", tempSnapshotFullName)
+	} else {
+		created, createErr := s.apiClient.CreateSnapshot(ctx, snapshotParams)
+		switch {
+		case createErr == nil:
+			snapshot = created
+			klog.V(4).Infof("Created temporary snapshot: %s", snapshot.ID)
+		case tnsapi.IsAlreadyExists(createErr):
+			// Created by an attempt whose response was lost, or not yet visible to the query.
+			klog.Infof("Temporary snapshot %s already exists, reusing it", tempSnapshotFullName)
+			snapshot = &tnsapi.Snapshot{ID: tempSnapshotFullName, Name: tempSnapshotFullName, Dataset: sourceDatasetName}
+		default:
+			return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", createErr)
+		}
 	}
-
-	klog.V(4).Infof("Created temporary snapshot: %s", snapshot.ID)
 
 	// Create snapshot metadata for the temporary snapshot
 	snapshotMeta := SnapshotMetadata{

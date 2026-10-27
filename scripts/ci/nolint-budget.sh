@@ -51,9 +51,18 @@ if [ ! -f "${BUDGET}" ]; then
     exit 1
 fi
 
-status=0
 # Join current and budget on linter name: "linter current budget" (missing side = -1).
+# The fill is a word, not "-1": uutils join (Ubuntu 26.04) parses "-e -1" as a missing
+# value. Joining outside the loop lets set -e stop on a join error instead of reading
+# nothing and reporting OK.
+JOINED=$(join -a1 -a2 -e missing -o 0,1.2,2.2 \
+            <(printf '%s\n' "${CURRENT}" | sed '/^$/d') \
+            <(sed '/^$/d' "${BUDGET}" | sort))
+
+status=0
 while read -r linter cur bud; do
+    [ "${cur}" = missing ] && cur=-1
+    [ "${bud}" = missing ] && bud=-1
     if [ "${bud}" -lt 0 ]; then
         echo "NEW   ${linter}: ${cur} //nolint directive(s), no budget entry. Fix the code instead of suppressing."
         status=1
@@ -64,9 +73,7 @@ while read -r linter cur bud; do
         echo "STALE ${linter}: ${cur} < budget ${bud}. Lower the budget (run: $0 --update) so it cannot creep back."
         status=1
     fi
-done < <(join -a1 -a2 -e -1 -o 0,1.2,2.2 \
-            <(printf '%s\n' "${CURRENT}" | sed '/^$/d') \
-            <(sed '/^$/d' "${BUDGET}" | sort))
+done < <(printf '%s\n' "${JOINED}" | sed '/^$/d')
 
 if [ "${status}" -eq 0 ]; then
     echo "nolint budget OK ($(printf '%s\n' "${CURRENT}" | awk '{ s += $2 } END { print s + 0 }') directive-linter pairs)"

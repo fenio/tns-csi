@@ -270,6 +270,7 @@ For iSCSI, `server` must identify one advertised TrueNAS portal address. If a ho
 | `zfs.volblocksize` | ZVOL block size (e.g., `16K`, `64K`) | nvmeof, iscsi |
 | `portID` | TrueNAS NVMe-oF port ID (auto-detected if not set) | nvmeof |
 | `filesystemCheckMode` | Pre-mount filesystem check: `none` or `preen` | nvmeof, iscsi |
+| `mkfsOptions` | Extra `mkfs` options for newly formatted volumes (e.g. `-O mmp`) | nvmeof, iscsi |
 | `nfsHosts` | Comma-separated client hostnames/IPs allowed to mount new NFS shares | nfs |
 | `nfsNetworks` | Comma-separated client CIDR networks allowed to mount new NFS shares | nfs |
 
@@ -315,6 +316,27 @@ storageClasses:
 The default is `none`. Preen mode repairs only problems that `e2fsck` considers safe to fix without interaction. If manual repair is required, staging fails instead of mounting the filesystem. Checks are skipped for newly formatted filesystems and idempotent retries whose staging target is already mounted. If the source device is mounted anywhere else, staging fails rather than checking a live filesystem. Raw Block, XFS, NFS, and SMB volumes are not supported.
 
 For a static PV, set `filesystemCheckMode: preen` in `spec.csi.volumeAttributes`; static volumes do not use StorageClass parameters during `CreateVolume`.
+
+**Extra format options:**
+
+Set `mkfsOptions` to pass extra options to `mkfs` when the node formats a new NVMe-oF or iSCSI volume. For example, ext4 multi-mount protection makes the kernel refuse a second read-write mount of the same volume from another node:
+
+```yaml
+storageClasses:
+  - name: tns-csi-iscsi
+    protocol: iscsi
+    pool: "tank"
+    server: "10.0.0.1"
+    fsType: ext4
+    parameters:
+      mkfsOptions: "-O mmp -E mmp_update_interval=5"
+```
+
+- Separate options and their values with spaces (`-O mmp`, not `-Ommp`). Values cannot contain spaces. The driver still adds its own `-F` (ext3/ext4) or `-f` and `-s size=` (XFS).
+- Only options that cannot point `mkfs` at another device or a file on the node are accepted. For ext3/ext4: `-b -C -D -E -e -G -g -I -i -J -j -L -M -m -N -O -q -r -T -v` (not `-J device=`). For XFS: `-b -d -i -K -L -l -m -n -q -r` (not the `name`, `file`, `logdev` or `rtdev` sub-options). Anything else fails provisioning.
+- The options apply only when a volume is formatted for the first time. Existing volumes, clones and restored snapshots keep their filesystem.
+- StorageClass parameters cannot be changed, so to add the option to an existing class, delete and recreate the StorageClass. Only PVCs created afterwards are affected.
+- With MMP, mounting a volume that was not cleanly unmounted (for example after a node crash) waits about twice the update interval to check that no other node is still using it. If another node is, the mount fails with `Device is already active on another node` and the kubelet retries staging. To enable MMP on an existing ext4 volume, scale its workload to zero and run `tune2fs -O mmp` on the unmounted device.
 
 #### Multiple Storage Classes per Protocol
 

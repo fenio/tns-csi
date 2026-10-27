@@ -633,6 +633,10 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if modeErr != nil {
 		return nil, modeErr
 	}
+	mkfsOptions, mkfsErr := validateMkfsOptions(params[VolumeContextKeyMkfsOptions], protocol, req.GetVolumeCapabilities())
+	if mkfsErr != nil {
+		return nil, mkfsErr
+	}
 
 	// Check for idempotency: if volume with same name already exists
 	existingVolume, existingErr := s.checkExistingVolume(ctx, req, params, protocol)
@@ -641,7 +645,7 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	}
 	if existingVolume != nil {
 		klog.V(4).Infof("Returning existing volume for idempotency: %s", req.GetName())
-		applyCreateVolumeContext(req, existingVolume, filesystemCheckMode)
+		applyCreateVolumeContext(req, existingVolume, filesystemCheckMode, mkfsOptions)
 		return existingVolume, nil
 	}
 
@@ -651,7 +655,7 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 			return nil, err
 		}
 		klog.Infof("Successfully adopted orphaned volume: %s", req.GetName())
-		applyCreateVolumeContext(req, resp, filesystemCheckMode)
+		applyCreateVolumeContext(req, resp, filesystemCheckMode, mkfsOptions)
 		return resp, nil
 	}
 
@@ -660,7 +664,7 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		if err != nil {
 			return nil, err
 		}
-		applyCreateVolumeContext(req, resp, filesystemCheckMode)
+		applyCreateVolumeContext(req, resp, filesystemCheckMode, mkfsOptions)
 		return resp, nil
 	}
 
@@ -670,16 +674,16 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if createErr != nil {
 		return nil, createErr
 	}
-	applyCreateVolumeContext(req, resp, filesystemCheckMode)
+	applyCreateVolumeContext(req, resp, filesystemCheckMode, mkfsOptions)
 	return resp, nil
 }
 
-func applyCreateVolumeContext(req *csi.CreateVolumeRequest, resp *csi.CreateVolumeResponse, filesystemCheckMode string) {
+func applyCreateVolumeContext(req *csi.CreateVolumeRequest, resp *csi.CreateVolumeResponse, filesystemCheckMode, mkfsOptions string) {
 	if resp == nil || resp.Volume == nil {
 		return
 	}
 	isClone := req != nil && req.GetVolumeContentSource() != nil
-	if filesystemCheckMode != filesystemCheckModePreen && !isClone {
+	if filesystemCheckMode != filesystemCheckModePreen && !isClone && mkfsOptions == "" {
 		return
 	}
 	if resp.Volume.VolumeContext == nil {
@@ -690,6 +694,10 @@ func applyCreateVolumeContext(req *csi.CreateVolumeRequest, resp *csi.CreateVolu
 	}
 	if isClone {
 		resp.Volume.VolumeContext[VolumeContextKeyClonedFromSnap] = VolumeContextValueTrue
+	}
+	// Only used when the node formats a new device; existing filesystems are kept.
+	if mkfsOptions != "" {
+		resp.Volume.VolumeContext[VolumeContextKeyMkfsOptions] = mkfsOptions
 	}
 }
 

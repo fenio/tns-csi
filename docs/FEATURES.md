@@ -162,6 +162,22 @@ parameters:
   filesystemCheckMode: preen
 ```
 
+#### Extra Format Options
+- **Status**: Implemented
+- **Protocols**: NVMe-oF and iSCSI filesystem volumes
+- **Filesystems**: ext3, ext4 and XFS
+- **Configuration**: Set `mkfsOptions` in the StorageClass `parameters` map, or in `spec.csi.volumeAttributes` for a static PV.
+- **Behavior**: The options are passed to `mkfs` when the node formats a new volume. Existing filesystems, clones and restored snapshots are not reformatted.
+- **Safety**: Only an allowlist of options is accepted, excluding anything that points `mkfs` at another device or a node file. Both the controller and the node check the options. See the [chart README](../charts/tns-csi-driver/README.md) for the list.
+
+```yaml
+parameters:
+  protocol: iscsi
+  pool: tank
+  server: truenas.local
+  mkfsOptions: "-O mmp -E mmp_update_interval=5"
+```
+
 ### Configurable Mount Options
 - **Status**: ✅ Implemented
 - **Protocols**: NFS, NVMe-oF, iSCSI, SMB

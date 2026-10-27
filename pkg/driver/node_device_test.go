@@ -308,7 +308,7 @@ func TestFormatDeviceUnsupportedFSType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := formatDevice(context.Background(), "test-vol", "/dev/null", tt.fsType)
+			err := formatDevice(context.Background(), "test-vol", "/dev/null", tt.fsType, nil)
 			if err == nil {
 				t.Fatal("expected error for unsupported fsType")
 			}

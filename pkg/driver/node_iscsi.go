@@ -567,7 +567,11 @@ func (s *NodeService) formatAndMountISCSIDevice(ctx context.Context, volumeID, d
 	}
 
 	// Handle formatting
-	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, iqn, isClone)
+	mkfsArgs, mkfsErr := mkfsOptionArgs(volumeContext[VolumeContextKeyMkfsOptions], fsType)
+	if mkfsErr != nil {
+		return nil, mkfsErr
+	}
+	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, filesystemSpec{fsType: fsType, mkfsArgs: mkfsArgs}, datasetName, iqn, isClone)
 	if formatErr != nil {
 		return nil, formatErr
 	}

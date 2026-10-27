@@ -143,13 +143,13 @@ func TestValidateFilesystemCheckMode(t *testing.T) {
 
 func TestApplyCreateVolumeContext(t *testing.T) {
 	resp := &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
-	applyCreateVolumeContext(nil, resp, filesystemCheckModePreen)
+	applyCreateVolumeContext(nil, resp, filesystemCheckModePreen, "")
 	if got := resp.Volume.VolumeContext[VolumeContextKeyFilesystemCheck]; got != filesystemCheckModePreen {
 		t.Fatalf("filesystemCheckMode = %q, want %q", got, filesystemCheckModePreen)
 	}
 
 	resp = &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
-	applyCreateVolumeContext(nil, resp, filesystemCheckModeNone)
+	applyCreateVolumeContext(nil, resp, filesystemCheckModeNone, "")
 	if _, exists := resp.Volume.VolumeContext[VolumeContextKeyFilesystemCheck]; exists {
 		t.Fatal("filesystemCheckMode should not be propagated when disabled")
 	}
@@ -159,12 +159,18 @@ func TestApplyCreateVolumeContext(t *testing.T) {
 		VolumeContentSource: &csi.VolumeContentSource{
 			Type: &csi.VolumeContentSource_Snapshot{Snapshot: &csi.VolumeContentSource_SnapshotSource{SnapshotId: "snapshot"}},
 		},
-	}, resp, filesystemCheckModeNone)
+	}, resp, filesystemCheckModeNone, "")
 	if got := resp.Volume.VolumeContext[VolumeContextKeyClonedFromSnap]; got != VolumeContextValueTrue {
 		t.Fatalf("clonedFromSnapshot = %q, want %q", got, VolumeContextValueTrue)
 	}
 
-	applyCreateVolumeContext(nil, nil, filesystemCheckModePreen)
+	resp = &csi.CreateVolumeResponse{Volume: &csi.Volume{}}
+	applyCreateVolumeContext(nil, resp, filesystemCheckModeNone, "-O mmp")
+	if got := resp.Volume.VolumeContext[VolumeContextKeyMkfsOptions]; got != "-O mmp" {
+		t.Fatalf("mkfsOptions = %q, want %q", got, "-O mmp")
+	}
+
+	applyCreateVolumeContext(nil, nil, filesystemCheckModePreen, "")
 }
 
 func TestControllerGetCapabilities(t *testing.T) {

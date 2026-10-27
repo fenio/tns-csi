@@ -503,10 +503,20 @@ func getLogicalSectorSize(devicePath string) (int, error) {
 	return size, nil
 }
 
-// formatDevice formats a device with the specified filesystem.
+// mkfsArgs builds the mkfs argument list: the driver's own options, then the
+// StorageClass's, then the device.
+func mkfsArgs(driverArgs, extraArgs []string, devicePath string) []string {
+	args := make([]string, 0, len(driverArgs)+len(extraArgs)+1)
+	args = append(args, driverArgs...)
+	args = append(args, extraArgs...)
+	return append(args, devicePath)
+}
+
+// formatDevice formats a device with the specified filesystem. extraArgs come from the
+// mkfsOptions parameter, already checked by mkfsOptionArgs, and go before the device.
 // This function performs the actual formatting operation. The caller is responsible
 // for determining whether formatting is appropriate (e.g., checking needsFormat first).
-func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) error {
+func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, extraArgs []string) error {
 	klog.Infof("Formatting volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
 	// Formatting can take time, allow up to 60 seconds
@@ -518,9 +528,9 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 	switch fsType {
 	case fsTypeExt4:
 		// -F force, don't ask for confirmation
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext4", "-F", devicePath)
+		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext4", mkfsArgs([]string{"-F"}, extraArgs, devicePath)...)
 	case fsTypeExt3:
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext3", "-F", devicePath)
+		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext3", mkfsArgs([]string{"-F"}, extraArgs, devicePath)...)
 	case fsTypeXFS:
 		// -f force overwrite
 		// Explicitly pass the logical sector size to avoid mismatches when the
@@ -533,8 +543,7 @@ func formatDevice(ctx context.Context, volumeID, devicePath, fsType string) erro
 		} else {
 			klog.V(4).Infof("Could not detect logical sector size for %s, using mkfs.xfs default: %v", devicePath, err)
 		}
-		args = append(args, devicePath)
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.xfs", args...)
+		cmd = cmdexec.CommandContext(formatCtx, "mkfs.xfs", mkfsArgs(args, extraArgs, devicePath)...)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedFSType, fsType)
 	}

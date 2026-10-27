@@ -585,7 +585,11 @@ func (s *NodeService) formatAndMountNVMeDevice(ctx context.Context, volumeID, de
 	}
 
 	// Check if device needs formatting (will detect existing filesystem or format if needed)
-	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, fsType, datasetName, nqn, isClone)
+	mkfsArgs, mkfsErr := mkfsOptionArgs(volumeContext[VolumeContextKeyMkfsOptions], fsType)
+	if mkfsErr != nil {
+		return nil, mkfsErr
+	}
+	newlyFormatted, formatErr := s.handleDeviceFormatting(ctx, volumeID, devicePath, filesystemSpec{fsType: fsType, mkfsArgs: mkfsArgs}, datasetName, nqn, isClone)
 	if formatErr != nil {
 		return nil, formatErr
 	}

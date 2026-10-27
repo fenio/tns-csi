@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestMetricsAvailability(t *testing.T) {
@@ -169,5 +170,38 @@ func TestMetricsConstants(t *testing.T) {
 	// Verify protocol constants
 	if ProtocolNFS == "" || ProtocolNVMeOF == "" {
 		t.Error("Protocol constants should not be empty")
+	}
+}
+
+func TestSyncVolumeCapacities(t *testing.T) {
+	stale := VolumeCapacityKey{VolumeID: "tank/csi/stale", Protocol: ProtocolNFS}
+	kept := VolumeCapacityKey{VolumeID: "tank/csi/kept", Protocol: ProtocolISCSI}
+	created := VolumeCapacityKey{VolumeID: "tank/csi/created-during-listing", Protocol: ProtocolSMB}
+	listed := VolumeCapacityKey{VolumeID: "tank/csi/listed", Protocol: ProtocolNVMeOF}
+	t.Cleanup(func() {
+		for _, key := range []VolumeCapacityKey{stale, kept, created, listed} {
+			DeleteVolumeCapacity(key.VolumeID, key.Protocol)
+		}
+	})
+
+	SetVolumeCapacity(stale.VolumeID, stale.Protocol, 1)
+	SetVolumeCapacity(kept.VolumeID, kept.Protocol, 2)
+	before := VolumeCapacitySnapshot()
+	// Created after the snapshot, so a sync that started before it must keep it.
+	SetVolumeCapacity(created.VolumeID, created.Protocol, 3)
+
+	SyncVolumeCapacities(before, map[VolumeCapacityKey]int64{kept: 20, listed: 40})
+
+	want := map[VolumeCapacityKey]float64{kept: 20, created: 3, listed: 40}
+	if got := testutil.CollectAndCount(volumeCapacityBytes); got != len(want) {
+		t.Errorf("volume_capacity_bytes has %d series, want %d", got, len(want))
+	}
+	for key, value := range want {
+		if got := testutil.ToFloat64(volumeCapacityBytes.WithLabelValues(key.VolumeID, key.Protocol)); got != value {
+			t.Errorf("volume_capacity_bytes{%s,%s} = %v, want %v", key.VolumeID, key.Protocol, got, value)
+		}
+	}
+	if _, ok := VolumeCapacitySnapshot()[stale]; ok {
+		t.Errorf("stale series %v is still tracked", stale)
 	}
 }

@@ -227,6 +227,7 @@ type mockAPIClient struct {
 	queryPoolFunc                func(ctx context.Context, poolName string) (*tnsapi.Pool, error)
 	updateDatasetFunc            func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
 	getDatasetWithPropertiesFunc func(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error)
+	findManagedDatasetsFunc      func(ctx context.Context, prefix string) ([]tnsapi.DatasetWithProperties, error)
 }
 
 var errNotImplemented = errors.New("mock method not implemented")
@@ -454,6 +455,9 @@ func (m *mockAPIClient) FindDatasetsByProperty(ctx context.Context, prefix, prop
 }
 
 func (m *mockAPIClient) FindManagedDatasets(ctx context.Context, prefix string) ([]tnsapi.DatasetWithProperties, error) {
+	if m.findManagedDatasetsFunc != nil {
+		return m.findManagedDatasetsFunc(ctx, prefix)
+	}
 	return nil, nil // Stub implementation - returns empty result
 }
 

@@ -1410,7 +1410,7 @@ func (s *ControllerService) adoptNVMeOFVolume(ctx context.Context, req *csi.Crea
 	injectQueueParams(volumeContext, params["nvmeof.nr-io-queues"], params["nvmeof.queue-size"])
 
 	// Record volume capacity metric
-	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolNVMeOF, requestedCapacity)
+	metrics.SetVolumeCapacity(dataset.ID, metrics.ProtocolNVMeOF, requestedCapacity)
 
 	klog.Infof("Successfully adopted NVMe-oF volume: %s (subsystem=%s, namespaceID=%d)", volumeName, subsystem.NQN, namespace.ID)
 	timer.ObserveSuccess()
@@ -1457,7 +1457,7 @@ func (s *ControllerService) expandNVMeOFVolume(ctx context.Context, meta *Volume
 
 	klog.Infof("Expanded NVMe-oF volume: %s to %d bytes", meta.Name, requiredBytes)
 
-	// Update volume capacity metric using plain volume name
+	// Update volume capacity metric
 	metrics.SetVolumeCapacity(meta.Name, metrics.ProtocolNVMeOF, requiredBytes)
 
 	timer.ObserveSuccess()

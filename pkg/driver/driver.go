@@ -47,6 +47,7 @@ type Driver struct {
 	controller   *ControllerService
 	node         *NodeService
 	identity     *IdentityService
+	stopSync     context.CancelFunc // Stops the controller's volume capacity metric sync
 	config       Config
 	testMode     bool // Test mode flag for sanity tests
 }
@@ -132,6 +133,13 @@ func (d *Driver) Run() error {
 		}()
 	}
 
+	// Only the controller pod serves metrics, so this keeps the sync off the nodes.
+	if d.config.MetricsAddr != "" && !d.testMode {
+		syncCtx, stopSync := context.WithCancel(context.Background())
+		d.stopSync = stopSync
+		go d.controller.runVolumeCapacitySync(syncCtx, volumeCapacitySyncInterval)
+	}
+
 	// Start dashboard server if configured
 	if d.config.DashboardAddr != "" {
 		dashSrv, dashErr := dashboard.NewServer(d.apiClient, d.config.DashboardPool, d.config.Version, d.config.ClusterID)
@@ -195,6 +203,10 @@ func stopGRPCServer(srv *grpc.Server, timeout time.Duration) {
 // Stop stops the driver.
 func (d *Driver) Stop() {
 	klog.Info("Stopping TNS CSI Driver")
+
+	if d.stopSync != nil {
+		d.stopSync()
+	}
 
 	// Stop dashboard server
 	if d.dashboardSrv != nil {

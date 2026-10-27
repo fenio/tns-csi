@@ -1405,13 +1405,8 @@ func (s *ControllerService) listManagedVolumes(ctx context.Context) ([]*csi.List
 		ds := &datasets[i]
 
 		// Skip detached snapshots — they are not volumes
-		if ds.UserProperties != nil {
-			if detached, ok := ds.UserProperties[tnsapi.PropertyDetachedSnapshot]; ok && detached.Value == VolumeContextValueTrue {
-				continue
-			}
-			if _, ok := ds.UserProperties[tnsapi.PropertySnapshotID]; ok {
-				continue
-			}
+		if isSnapshotDataset(ds.UserProperties) {
+			continue
 		}
 
 		meta, err := extractVolumeMetadata(ds.ID, ds)
@@ -1432,6 +1427,16 @@ func (s *ControllerService) listManagedVolumes(ctx context.Context) ([]*csi.List
 
 	klog.V(5).Infof("Found %d managed volumes", len(entries))
 	return entries, nil
+}
+
+// isSnapshotDataset reports whether a managed dataset holds a detached snapshot
+// rather than a volume.
+func isSnapshotDataset(props map[string]tnsapi.UserProperty) bool {
+	if detached, ok := props[tnsapi.PropertyDetachedSnapshot]; ok && detached.Value == VolumeContextValueTrue {
+		return true
+	}
+	_, ok := props[tnsapi.PropertySnapshotID]
+	return ok
 }
 
 // buildVolumeEntry constructs a ListVolumesResponse_Entry from dataset and metadata.

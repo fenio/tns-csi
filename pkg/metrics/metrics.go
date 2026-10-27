@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -250,14 +251,63 @@ func SetWSConnectionDuration(duration time.Duration) {
 	wsConnectionDuration.Set(duration.Seconds())
 }
 
+// VolumeCapacityKey identifies one volume_capacity_bytes series.
+type VolumeCapacityKey struct {
+	VolumeID string
+	Protocol string
+}
+
+// volumeCapacitySeries tracks the exported volume_capacity_bytes series, since a
+// GaugeVec cannot list its own label values.
+var (
+	volumeCapacityMu     sync.Mutex
+	volumeCapacitySeries = map[VolumeCapacityKey]struct{}{}
+)
+
 // SetVolumeCapacity sets the capacity of a volume.
 func SetVolumeCapacity(volumeID, protocol string, bytes int64) {
+	volumeCapacityMu.Lock()
+	defer volumeCapacityMu.Unlock()
+	volumeCapacitySeries[VolumeCapacityKey{VolumeID: volumeID, Protocol: protocol}] = struct{}{}
 	volumeCapacityBytes.WithLabelValues(volumeID, protocol).Set(float64(bytes))
 }
 
 // DeleteVolumeCapacity removes the capacity metric for a deleted volume.
 func DeleteVolumeCapacity(volumeID, protocol string) {
+	volumeCapacityMu.Lock()
+	defer volumeCapacityMu.Unlock()
+	delete(volumeCapacitySeries, VolumeCapacityKey{VolumeID: volumeID, Protocol: protocol})
 	volumeCapacityBytes.DeleteLabelValues(volumeID, protocol)
+}
+
+// VolumeCapacitySnapshot returns the volume_capacity_bytes series exported right now.
+// Take it before listing volumes and pass it to SyncVolumeCapacities.
+func VolumeCapacitySnapshot() map[VolumeCapacityKey]struct{} {
+	volumeCapacityMu.Lock()
+	defer volumeCapacityMu.Unlock()
+	snapshot := make(map[VolumeCapacityKey]struct{}, len(volumeCapacitySeries))
+	for key := range volumeCapacitySeries {
+		snapshot[key] = struct{}{}
+	}
+	return snapshot
+}
+
+// SyncVolumeCapacities sets the capacity of every volume in current and removes the
+// series in before that current no longer lists. Series added after before was taken
+// are kept, so a volume created while the listing ran is not dropped.
+func SyncVolumeCapacities(before map[VolumeCapacityKey]struct{}, current map[VolumeCapacityKey]int64) {
+	volumeCapacityMu.Lock()
+	defer volumeCapacityMu.Unlock()
+	for key := range before {
+		if _, ok := current[key]; !ok {
+			delete(volumeCapacitySeries, key)
+			volumeCapacityBytes.DeleteLabelValues(key.VolumeID, key.Protocol)
+		}
+	}
+	for key, bytes := range current {
+		volumeCapacitySeries[key] = struct{}{}
+		volumeCapacityBytes.WithLabelValues(key.VolumeID, key.Protocol).Set(float64(bytes))
+	}
 }
 
 // NVMeConnectWaiting increments the waiting gauge.

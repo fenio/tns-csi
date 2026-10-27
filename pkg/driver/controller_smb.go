@@ -662,7 +662,7 @@ func (s *ControllerService) adoptSMBVolume(ctx context.Context, req *csi.CreateV
 	volumeContext := buildVolumeContext(meta)
 	volumeContext[VolumeContextKeyShare] = smbShare.Name
 
-	metrics.SetVolumeCapacity(volumeName, metrics.ProtocolSMB, requestedCapacity)
+	metrics.SetVolumeCapacity(dataset.ID, metrics.ProtocolSMB, requestedCapacity)
 
 	klog.Infof("Successfully adopted SMB volume: %s (shareID=%d)", volumeName, smbShare.ID)
 	timer.ObserveSuccess()

@@ -196,8 +196,8 @@ func TestControllerGetCapabilities(t *testing.T) {
 		"GET_CAPACITY":             false,
 	}
 
-	for _, cap := range resp.Capabilities {
-		if rpc := cap.GetRpc(); rpc != nil {
+	for _, capability := range resp.Capabilities {
+		if rpc := capability.GetRpc(); rpc != nil {
 			switch rpc.Type.String() {
 			case "CREATE_DELETE_VOLUME":
 				expectedCaps["CREATE_DELETE_VOLUME"] = true
@@ -211,9 +211,9 @@ func TestControllerGetCapabilities(t *testing.T) {
 		}
 	}
 
-	for cap, found := range expectedCaps {
+	for capability, found := range expectedCaps {
 		if !found {
-			t.Errorf("Expected capability %s not found", cap)
+			t.Errorf("Expected capability %s not found", capability)
 		}
 	}
 }

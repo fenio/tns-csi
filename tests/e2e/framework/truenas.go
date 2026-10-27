@@ -521,31 +521,41 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 		ISCSIExtents: make(map[string]bool),
 	}
 
-	// Managed datasets
+	v.snapshotDatasets(ctx, poolPrefix, snap)
+	v.snapshotShares(ctx, poolPrefix, snap)
+	v.snapshotBlockTargets(ctx, snap)
+	return snap
+}
+
+// snapshotDatasets records managed datasets with their protocol and creation time.
+func (v *TrueNASVerifier) snapshotDatasets(ctx context.Context, poolPrefix string, snap *ResourceSnapshot) {
 	datasets, err := v.client.FindManagedDatasets(ctx, poolPrefix)
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query managed datasets: %v", err)
-	} else {
-		for _, ds := range datasets {
-			info := datasetInfo{}
-			if props := ds.UserProperties; props != nil {
-				if p, ok := props[tnsapi.PropertyProtocol]; ok {
-					info.Protocol = p.Value
-				}
-				if p, ok := props[tnsapi.PropertyCreatedAt]; ok {
-					info.CreatedAt = p.Value
-				}
-			}
-			snap.Datasets[ds.ID] = info
-		}
+		return
 	}
+	for _, ds := range datasets {
+		info := datasetInfo{}
+		if props := ds.UserProperties; props != nil {
+			if p, ok := props[tnsapi.PropertyProtocol]; ok {
+				info.Protocol = p.Value
+			}
+			if p, ok := props[tnsapi.PropertyCreatedAt]; ok {
+				info.CreatedAt = p.Value
+			}
+		}
+		snap.Datasets[ds.ID] = info
+	}
+}
 
-	// NFS shares — filter to shares under the pool mount path
+// snapshotShares records NFS and SMB shares under the pool mount path.
+func (v *TrueNASVerifier) snapshotShares(ctx context.Context, poolPrefix string, snap *ResourceSnapshot) {
+	mountPrefix := "/mnt/" + poolPrefix
+
 	shares, err := v.client.QueryAllNFSShares(ctx, "")
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query NFS shares: %v", err)
 	} else {
-		mountPrefix := "/mnt/" + poolPrefix
 		for _, s := range shares {
 			if strings.HasPrefix(s.Path, mountPrefix) {
 				snap.NFSShares[s.Path] = true
@@ -553,20 +563,20 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 		}
 	}
 
-	// SMB shares — filter to shares under the pool mount path
 	smbShares, err := v.client.QueryAllSMBShares(ctx, "")
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query SMB shares: %v", err)
-	} else {
-		smbMountPrefix := "/mnt/" + poolPrefix
-		for _, s := range smbShares {
-			if strings.HasPrefix(s.Path, smbMountPrefix) {
-				snap.SMBShares[s.Path] = true
-			}
+		return
+	}
+	for _, s := range smbShares {
+		if strings.HasPrefix(s.Path, mountPrefix) {
+			snap.SMBShares[s.Path] = true
 		}
 	}
+}
 
-	// NVMe-oF subsystems — filter to CSI-created ones (NQN contains "tns-csi" or "pvc-")
+// snapshotBlockTargets records CSI-created NVMe-oF subsystems and iSCSI targets and extents.
+func (v *TrueNASVerifier) snapshotBlockTargets(ctx context.Context, snap *ResourceSnapshot) {
 	subsystems, err := v.client.ListAllNVMeOFSubsystems(ctx)
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query NVMe-oF subsystems: %v", err)
@@ -582,7 +592,6 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 		}
 	}
 
-	// iSCSI targets — filter to CSI-created ones
 	targets, err := v.client.QueryISCSITargets(ctx, nil)
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query iSCSI targets: %v", err)
@@ -594,19 +603,16 @@ func (v *TrueNASVerifier) SnapshotResources(ctx context.Context, poolPrefix stri
 		}
 	}
 
-	// iSCSI extents — filter to CSI-created ones
 	extents, err := v.client.QueryISCSIExtents(ctx, nil)
 	if err != nil {
 		klog.Warningf("Resource snapshot: failed to query iSCSI extents: %v", err)
-	} else {
-		for _, e := range extents {
-			if isCSIResource(e.Name) {
-				snap.ISCSIExtents[e.Name] = true
-			}
+		return
+	}
+	for _, e := range extents {
+		if isCSIResource(e.Name) {
+			snap.ISCSIExtents[e.Name] = true
 		}
 	}
-
-	return snap
 }
 
 // isCSIResource returns true if the resource name looks like it was created by the CSI driver.

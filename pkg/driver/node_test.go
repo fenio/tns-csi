@@ -68,8 +68,8 @@ func TestNodeGetCapabilities(t *testing.T) {
 		csi.NodeServiceCapability_RPC_GET_VOLUME_HEALTH:    false,
 	}
 
-	for _, cap := range resp.Capabilities {
-		if rpc := cap.GetRpc(); rpc != nil {
+	for _, capability := range resp.Capabilities {
+		if rpc := capability.GetRpc(); rpc != nil {
 			expectedCaps[rpc.Type] = true
 		}
 	}

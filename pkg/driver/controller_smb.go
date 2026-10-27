@@ -356,7 +356,10 @@ func (s *ControllerService) deleteSMBVolume(ctx context.Context, meta *VolumeMet
 		case tnsapi.IsNotFound(err):
 			klog.V(4).Infof("SMB share %d not found, assuming already deleted (idempotency)", meta.SMBShareID)
 		default:
-			klog.Warningf("Failed to delete SMB share %d: %v (continuing with dataset deletion)", meta.SMBShareID, err)
+			// Keep the dataset: it carries the share ID in a property, so the retry can
+			// find and delete the share. Destroying it now would orphan the export.
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Unavailable, "failed to delete SMB share %d of volume %s (dataset kept for retry): %v", meta.SMBShareID, meta.Name, err)
 		}
 	}
 

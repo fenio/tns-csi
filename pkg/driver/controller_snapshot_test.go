@@ -25,6 +25,7 @@ type MockAPIClientForSnapshots struct {
 	UpdateDatasetFunc              func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
 	CreateNFSShareFunc             func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
 	DeleteNFSShareFunc             func(ctx context.Context, shareID int) error
+	DeleteSMBShareFunc             func(ctx context.Context, shareID int) error
 	QueryNFSShareFunc              func(ctx context.Context, path string) ([]tnsapi.NFSShare, error)
 	CreateZvolFunc                 func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
 	CreateNVMeOFSubsystemFunc      func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
@@ -178,6 +179,9 @@ func (m *MockAPIClientForSnapshots) CreateSMBShare(ctx context.Context, params t
 }
 
 func (m *MockAPIClientForSnapshots) DeleteSMBShare(ctx context.Context, shareID int) error {
+	if m.DeleteSMBShareFunc != nil {
+		return m.DeleteSMBShareFunc(ctx, shareID)
+	}
 	return errors.New("DeleteSMBShareFunc not implemented")
 }
 

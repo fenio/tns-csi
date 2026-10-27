@@ -649,9 +649,10 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		case tnsapi.IsNotFound(err):
 			klog.V(4).Infof("NFS share %d not found, assuming already deleted (idempotency)", meta.NFSShareID)
 		default:
-			// For non-idempotent errors, log warning but continue to try dataset deletion
-			// This prevents orphaned datasets if share deletion fails
-			klog.Warningf("Failed to delete NFS share %d: %v (continuing with dataset deletion)", meta.NFSShareID, err)
+			// Keep the dataset: it carries the share ID in a property, so the retry can
+			// find and delete the share. Destroying it now would orphan the export.
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Unavailable, "failed to delete NFS share %d of volume %s (dataset kept for retry): %v", meta.NFSShareID, meta.Name, err)
 		}
 	}
 

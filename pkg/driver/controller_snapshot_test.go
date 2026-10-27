@@ -67,6 +67,8 @@ type MockAPIClientForSnapshots struct {
 	QueryNVMeOFSubsystemsFunc      func(ctx context.Context, filters []interface{}) ([]tnsapi.NVMeOFSubsystem, error)
 	QuerySubsystemPortBindingsFunc func(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error)
 	RemoveSubsystemFromPortFunc    func(ctx context.Context, portSubsysID int) error
+	CreateSMBShareFunc             func(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error)
+	QuerySMBShareFunc              func(ctx context.Context, path string) ([]tnsapi.SMBShare, error)
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -177,6 +179,9 @@ func (m *MockAPIClientForSnapshots) QueryNFSShare(ctx context.Context, path stri
 }
 
 func (m *MockAPIClientForSnapshots) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	if m.CreateSMBShareFunc != nil {
+		return m.CreateSMBShareFunc(ctx, params)
+	}
 	return nil, errors.New("CreateSMBShareFunc not implemented")
 }
 
@@ -188,7 +193,10 @@ func (m *MockAPIClientForSnapshots) DeleteSMBShare(ctx context.Context, shareID 
 }
 
 func (m *MockAPIClientForSnapshots) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
-	return nil, errors.New("QuerySMBShareFunc not implemented")
+	if m.QuerySMBShareFunc != nil {
+		return m.QuerySMBShareFunc(ctx, path)
+	}
+	return nil, nil // no share at this path
 }
 
 func (m *MockAPIClientForSnapshots) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {

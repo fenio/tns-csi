@@ -91,6 +91,12 @@ type Client struct {
 	apiKey        string
 	connectedAt   time.Time // Track connection start time for metrics
 	retryInterval time.Duration
+	// pingInterval is how often pingLoop pings TrueNAS; pingTimeout is how long it
+	// waits for the pong. After pingFailureLimit consecutive failures the connection
+	// is closed so readLoop reconnects.
+	pingInterval     time.Duration
+	pingTimeout      time.Duration
+	pingFailureLimit int
 	// connectRetryDelays holds the wait before each NewClient connection attempt
 	// (one entry per attempt; the first is normally 0). Tests shorten it.
 	connectRetryDelays []time.Duration
@@ -232,6 +238,27 @@ func WithConnectRetryDelays(delays ...time.Duration) ClientOption {
 	}
 }
 
+// Keepalive defaults: a ping every 20s answered within 10s; three misses in a row
+// (about a minute of silence) mean the peer is gone even if TCP still looks fine.
+const (
+	defaultPingInterval     = 20 * time.Second
+	defaultPingTimeout      = 10 * time.Second
+	defaultPingFailureLimit = 3
+)
+
+// WithKeepalive sets how often the client pings TrueNAS and how long it waits for the
+// pong. Non-positive values keep the defaults.
+func WithKeepalive(interval, timeout time.Duration) ClientOption {
+	return func(c *Client) {
+		if interval > 0 {
+			c.pingInterval = interval
+		}
+		if timeout > 0 {
+			c.pingTimeout = timeout
+		}
+	}
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
 func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*Client, error) {
@@ -249,6 +276,9 @@ func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*C
 			closeCh:            make(chan struct{}),
 			maxRetries:         5,
 			retryInterval:      5 * time.Second,
+			pingInterval:       defaultPingInterval,
+			pingTimeout:        defaultPingTimeout,
+			pingFailureLimit:   defaultPingFailureLimit,
 			connectRetryDelays: defaultConnectRetryDelays,
 			skipTLSVerify:      skipTLSVerify,
 			authGate:           make(chan struct{}, 1),
@@ -357,7 +387,6 @@ func (c *Client) connect() error {
 		}
 	}
 
-	// coder/websocket handles ping/pong automatically
 	conn, resp, err := websocket.Dial(ctx, c.url, &websocket.DialOptions{
 		HTTPClient: httpClient,
 	})
@@ -377,8 +406,8 @@ func (c *Client) connect() error {
 	}
 	conn.SetReadLimit(readLimit)
 
-	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
-	// We still run our own ping loop for connection health monitoring and metrics.
+	// coder/websocket answers the peer's pings while readLoop is reading, but it does
+	// not detect a peer that stopped answering ours: that is pingLoop's job.
 
 	c.mu.Lock()
 	if c.closed {
@@ -1073,11 +1102,18 @@ func (c *Client) connectAndAuthenticateDirect() error {
 	return nil
 }
 
-// pingLoop sends periodic pings to keep the connection alive and detect failures.
+// pingLoop sends periodic pings to detect a peer that stopped answering.
+//
+// A missed pong does not close the connection by itself: coder/websocket only closes
+// on read errors, so a wedged middlewared (or a flow silently dropped by a firewall
+// while the local TCP stack stays happy) would leave readLoop blocked forever and every
+// RPC timing out on its own context. After pingFailureLimit consecutive misses the
+// loop closes the connection itself, which makes readLoop's Read fail and reconnect.
 func (c *Client) pingLoop() {
-	ticker := time.NewTicker(20 * time.Second)
+	ticker := time.NewTicker(c.pingInterval)
 	defer ticker.Stop()
 
+	failures := 0
 	for {
 		select {
 		case <-ticker.C:
@@ -1086,6 +1122,7 @@ func (c *Client) pingLoop() {
 				c.mu.Unlock()
 				if c.reconnecting {
 					// Skip ping during reconnection - connection is being replaced
+					failures = 0
 					continue
 				}
 				return
@@ -1100,16 +1137,30 @@ func (c *Client) pingLoop() {
 			c.mu.Unlock()
 
 			// Send ping using coder/websocket's Ping method with timeout context
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), c.pingTimeout)
 			err := conn.Ping(ctx)
 			cancel()
 
-			if err != nil {
-				klog.Warningf("Failed to send ping: %v", err)
+			if err == nil {
+				failures = 0
+				klog.V(6).Info("Sent WebSocket ping")
 				continue
 			}
 
-			klog.V(6).Info("Sent WebSocket ping")
+			failures++
+			if failures < c.pingFailureLimit {
+				klog.Warningf("WebSocket ping failed (%d/%d): %v", failures, c.pingFailureLimit, err)
+				continue
+			}
+			klog.Errorf("WebSocket peer did not answer %d pings in a row (last: %v); closing the connection to force a reconnect", failures, err)
+			failures = 0
+			c.mu.Lock()
+			if c.conn == conn {
+				// CloseNow skips the close handshake: the peer is not answering.
+				//nolint:errcheck,gosec // G104: the connection is being discarded
+				conn.CloseNow()
+			}
+			c.mu.Unlock()
 
 		case <-c.closeCh:
 			return

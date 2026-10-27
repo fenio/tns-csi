@@ -1086,8 +1086,22 @@
   "style": "dark",
   "tags": ["tns-csi", "kubernetes", "csi", "truenas", "storage"],
   "templating": {
-    "list": []
-  },
+  "list": [
+    {
+      "current": {},
+      "hide": 2,
+      "includeAll": false,
+      "label": "Prometheus",
+      "name": "DS_PROMETHEUS",
+      "options": [],
+      "query": "prometheus",
+      "refresh": 1,
+      "regex": "",
+      "skipUrlSync": false,
+      "type": "datasource"
+    }
+  ]
+},
   "time": {
     "from": "now-1h",
     "to": "now"

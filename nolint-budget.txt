@@ -1,5 +1,5 @@
 contextcheck 14
-dupl 27
+dupl 25
 errcheck 62
 errchkjson 2
 gocognit 1

@@ -3377,27 +3377,43 @@ func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([
 
 // ReloadISCSIService triggers a reload of the iSCSI service to pick up new configuration.
 // This is needed after creating targets to make them discoverable via iSCSI discovery.
-//
-//nolint:dupl // Same reload pattern as SMB but for a different service
 func (c *Client) ReloadISCSIService(ctx context.Context) error {
 	klog.V(4).Info("Reloading iSCSI service to apply configuration changes")
 
-	// service.control(verb, service, options) is the documented API for managing services.
 	// For iSCSI, the service name is "iscsitarget" on TrueNAS Scale.
-	// The API returns a job ID (integer), not a boolean.
-	var jobID int
-	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "iscsitarget"}, &jobID)
+	jobID, err := c.reloadService(ctx, "iscsitarget")
 	if err != nil {
-		// If reload fails, try restart as fallback
-		klog.V(4).Infof("Service reload failed (%v), trying restart", err)
-		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "iscsitarget"}, &jobID)
-		if err != nil {
-			return fmt.Errorf("failed to reload/restart iSCSI service: %w", err)
-		}
+		return err
 	}
 
 	klog.V(4).Infof("iSCSI service reload completed (job ID: %d)", jobID)
 	return nil
+}
+
+// reloadService runs service.control RELOAD for a service and returns the job ID.
+// service.control(verb, service, options) is the documented API for managing services;
+// it returns a job ID (integer), not a boolean.
+//
+// It falls back to RESTART only when middlewared itself rejects the RELOAD with an API
+// error (the verb is not supported for that service or release). A lost response, an
+// expired context or a connection failure is returned as is: the RELOAD may already have
+// run, and a RESTART would drop every active session of the service (for iSCSI, every
+// mounted volume on every node) to work around a failure that was never the service's.
+func (c *Client) reloadService(ctx context.Context, service string) (int, error) {
+	var jobID int
+	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", service}, &jobID)
+	if err == nil {
+		return jobID, nil
+	}
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		return 0, fmt.Errorf("failed to reload %s service: %w", service, err)
+	}
+	klog.Warningf("Service %s rejected RELOAD (%v), trying RESTART", service, err)
+	if err := c.Call(ctx, "service.control", []interface{}{"RESTART", service}, &jobID); err != nil {
+		return 0, fmt.Errorf("failed to reload/restart %s service: %w", service, err)
+	}
+	return jobID, nil
 }
 
 // ReloadSMBService triggers a reload of the SMB/CIFS service.
@@ -3405,19 +3421,12 @@ func (c *Client) ReloadISCSIService(ctx context.Context) error {
 // Needed after creating shares for ZFS clones: TrueNAS's initial config generation
 // during sharing.smb.create can silently exclude the share if the clone's filesystem
 // metadata isn't fully ready for os.getxattr() yet.
-//
-//nolint:dupl // Same reload pattern as iSCSI but for a different service
 func (c *Client) ReloadSMBService(ctx context.Context) error {
 	klog.V(4).Info("Reloading SMB/CIFS service to apply configuration changes")
 
-	var jobID int
-	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "cifs"}, &jobID)
+	jobID, err := c.reloadService(ctx, "cifs")
 	if err != nil {
-		klog.V(4).Infof("SMB service reload failed (%v), trying restart", err)
-		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "cifs"}, &jobID)
-		if err != nil {
-			return fmt.Errorf("failed to reload/restart SMB service: %w", err)
-		}
+		return err
 	}
 
 	klog.V(4).Infof("SMB/CIFS service reload completed (job ID: %d)", jobID)

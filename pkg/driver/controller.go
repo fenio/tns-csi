@@ -1753,8 +1753,8 @@ func (s *ControllerService) expandAdoptedVolume(ctx context.Context, dataset *tn
 
 	switch protocol {
 	case ProtocolNFS, ProtocolSMB:
-		// NFS and SMB use quota (both are FILESYSTEM datasets)
-		updateParams.Quota = &newCapacityBytes
+		// NFS and SMB are FILESYSTEM datasets sized with refquota, as at creation and expansion
+		updateParams.RefQuota = &newCapacityBytes
 	case ProtocolNVMeOF, ProtocolISCSI:
 		// NVMe-oF and iSCSI use volsize (both are ZVOLs)
 		updateParams.Volsize = &newCapacityBytes

@@ -1011,6 +1011,12 @@ func (c *Client) reconnect() bool {
 	// Update metrics - connection lost
 	metrics.SetWSConnectionStatus(false)
 
+	// Fail every in-flight request now, before the first backoff. Their responses can
+	// no longer arrive on this connection; idempotent calls queue behind the reconnect
+	// and non-idempotent ones report ErrUncertainOutcome so the caller can look the
+	// resource up instead of burning its own deadline waiting here.
+	c.failPendingRequests()
+
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
 		// Record reconnection attempt
 		metrics.RecordWSReconnection()
@@ -1042,12 +1048,9 @@ func (c *Client) reconnect() bool {
 			//nolint:errcheck,gosec // G104: Intentionally ignoring close error during reconnection
 			c.conn.Close(websocket.StatusGoingAway, "reconnecting")
 		}
-		// Reset pending requests for new connection
-		for _, ch := range c.pending {
-			close(ch)
-		}
-		c.pending = make(map[string]chan *Response)
 		c.mu.Unlock()
+		// Reset pending requests for new connection
+		c.failPendingRequests()
 
 		// Reconnect and authenticate while live re-authentication is excluded;
 		// readLoop is blocked here, so authentication must read directly.
@@ -1061,6 +1064,17 @@ func (c *Client) reconnect() bool {
 	}
 
 	return false
+}
+
+// failPendingRequests closes every pending response channel so waiting callers see
+// the connection as lost, and starts a fresh pending map for the next connection.
+func (c *Client) failPendingRequests() {
+	c.mu.Lock()
+	for _, ch := range c.pending {
+		close(ch)
+	}
+	c.pending = make(map[string]chan *Response)
+	c.mu.Unlock()
 }
 
 func (c *Client) beginReconnect() bool {

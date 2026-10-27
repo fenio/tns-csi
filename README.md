@@ -157,6 +157,7 @@ Compatibility tests run weekly and on-demand. See [Distro Compatibility Tests](d
   - TrueNAS Scale 25.10+
   - iSCSI service enabled in TrueNAS (System > Services > iSCSI)
   - `open-iscsi` package installed on all Kubernetes nodes (`iscsid` service running)
+  - The host's open-iscsi must be the same version as the driver image's `iscsiadm` (2.1.12 since v0.18.0). With a mismatch, discovery and login hang without an error ([#194](https://github.com/fenio/tns-csi/issues/194)). On Talos that means v1.13.9 or later: v1.13.7 and earlier ship 2.1.11, and v1.13.8 ships 2.1.12 without the node-database compatibility patch.
   - Network connectivity from Kubernetes nodes to TrueNAS on port 3260
 - For SMB:
   - TrueNAS Scale 25.10+

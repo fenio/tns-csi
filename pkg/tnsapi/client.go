@@ -1171,8 +1171,9 @@ func (c *Client) pingLoop() {
 			c.mu.Lock()
 			if c.conn == conn {
 				// CloseNow skips the close handshake: the peer is not answering.
-				//nolint:errcheck,gosec // G104: the connection is being discarded
-				conn.CloseNow()
+				if closeErr := conn.CloseNow(); closeErr != nil {
+					klog.V(4).Infof("Closing unresponsive WebSocket connection: %v", closeErr)
+				}
 			}
 			c.mu.Unlock()
 

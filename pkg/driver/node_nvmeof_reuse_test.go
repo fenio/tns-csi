@@ -45,8 +45,11 @@ func TestReuseExistingConnectionRefusesToDisconnectMountedStaleDevice(t *testing
 		AccessType: &csi.VolumeCapability_Mount{Mount: &csi.VolumeCapability_MountVolume{FsType: "ext4"}},
 		AccessMode: &csi.VolumeCapability_AccessMode{Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER},
 	}
-	resp, err := s.tryReuseExistingConnection(context.Background(), params, "tank/volumes/vol", stagingPath, capability, false, map[string]string{})
+	resp, reused, err := s.tryReuseExistingConnection(context.Background(), params, "tank/volumes/vol", stagingPath, capability, false, map[string]string{})
 
+	if reused {
+		t.Fatalf("stale device reported as reused")
+	}
 	if disconnects != 0 {
 		t.Fatalf("stale subsystem was disconnected %d time(s) while its namespace is still mounted at %s", disconnects, stagingPath)
 	}
@@ -86,9 +89,9 @@ func TestReuseExistingConnectionDisconnectsUnmountedStaleDevice(t *testing.T) {
 	}
 
 	params := &nvmeOFConnectionParams{nqn: nqnA, server: "truenas.example", port: "4420", transport: "tcp"}
-	resp, err := s.tryReuseExistingConnection(context.Background(), params, "tank/volumes/vol", stagingPath, &csi.VolumeCapability{}, false, map[string]string{})
-	if err != nil || resp != nil {
-		t.Fatalf("got %#v, %v; want nil, nil (fall through to a fresh connect)", resp, err)
+	resp, reused, err := s.tryReuseExistingConnection(context.Background(), params, "tank/volumes/vol", stagingPath, &csi.VolumeCapability{}, false, map[string]string{})
+	if err != nil || reused || resp != nil {
+		t.Fatalf("got %#v, reused=%v, %v; want nil, false, nil (fall through to a fresh connect)", resp, reused, err)
 	}
 	if disconnects != 1 {
 		t.Fatalf("stale subsystem disconnected %d time(s), want 1", disconnects)

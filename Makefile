@@ -13,7 +13,7 @@ REGISTRY?=docker.io
 # Single source of truth for the golangci-lint version. CI workflows read this line
 # (see .github/workflows/ci.yml and release.yml); keep .pre-commit-config.yaml in sync.
 # Bump deliberately and fix any new warnings in the same PR.
-GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT_VERSION ?= v2.15.0
 
 # Version information - derived from git tags
 VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo "dev")
@@ -150,7 +150,7 @@ test-coverage: coverage
 # Coverage ratchet: enforce the floors in .testcoverage.yml.
 # COVERAGE_BREAKDOWN=<file>       also write a breakdown (CI uploads it from main).
 # COVERAGE_BASE_BREAKDOWN=<file>  also fail if total coverage drops below that breakdown.
-GO_TEST_COVERAGE_VERSION ?= v2.20.0
+GO_TEST_COVERAGE_VERSION ?= v2.20.1
 # go-test-coverage v2.20+ needs Go 1.27; only the tool runs on this toolchain (fetched on
 # demand), the tests that produce coverage.out still use the repo's Go version.
 GO_TEST_COVERAGE_TOOLCHAIN ?= go1.27.3

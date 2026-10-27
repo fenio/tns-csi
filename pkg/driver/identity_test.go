@@ -97,8 +97,8 @@ func TestGetPluginCapabilities(t *testing.T) {
 	// Verify expected capabilities.
 	hasControllerService := false
 
-	for _, cap := range resp.Capabilities {
-		if svc := cap.GetService(); svc != nil {
+	for _, capability := range resp.Capabilities {
+		if svc := capability.GetService(); svc != nil {
 			if svc.Type == csi.PluginCapability_Service_CONTROLLER_SERVICE {
 				hasControllerService = true
 			}

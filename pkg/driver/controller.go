@@ -758,17 +758,17 @@ func isMultiNodeMode(mode csi.VolumeCapability_AccessMode_Mode) bool {
 // filesystem on block protocols would corrupt ext4/xfs. File protocols (NFS, SMB)
 // handle multi-node access natively.
 func validateAccessModeForProtocol(caps []*csi.VolumeCapability, protocol string) error {
-	for _, cap := range caps {
-		if !isMultiNodeMode(cap.GetAccessMode().GetMode()) {
+	for _, capability := range caps {
+		if !isMultiNodeMode(capability.GetAccessMode().GetMode()) {
 			continue
 		}
 		// Multi-node requested — block protocols only allow raw block mode
 		if protocol == ProtocolNVMeOF || protocol == ProtocolISCSI {
-			if cap.GetMount() != nil {
+			if capability.GetMount() != nil {
 				return status.Errorf(codes.InvalidArgument,
 					"multi-node access mode %s with mounted filesystem is not supported for %s — "+
 						"use volumeMode: Block for multi-node block storage (e.g., KubeVirt live migration)",
-					cap.GetAccessMode().GetMode(), protocol)
+					capability.GetAccessMode().GetMode(), protocol)
 			}
 		}
 	}

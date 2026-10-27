@@ -68,7 +68,9 @@ rules:
     verbs: ["get", "watch", "list", "delete", "update", "create"]
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshots"]
-    verbs: ["get", "list", "watch"]
+    # update lets csi-provisioner (v6.1.2+) hold a finalizer on a snapshot while a volume
+    # is created from it.
+    verbs: ["get", "list", "watch", "update"]
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshotcontents"]
     verbs: ["get", "list", "watch", "update", "patch"]

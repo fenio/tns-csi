@@ -132,6 +132,9 @@ func main() {
 	case <-ctx.Done():
 		klog.Info("Received termination signal, shutting down")
 		drv.Stop()
-		<-runErr
+		// Serve returns nil after a graceful stop, so an error here is a real failure.
+		if err := <-runErr; err != nil {
+			klog.Errorf("Driver stopped with error: %v", err)
+		}
 	}
 }

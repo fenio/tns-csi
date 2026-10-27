@@ -2821,19 +2821,9 @@ func (c *Client) RunOnetimeReplication(ctx context.Context, params ReplicationRu
 func (c *Client) GetJobStatus(ctx context.Context, jobID int) (*ReplicationJobState, error) {
 	klog.V(5).Infof("Getting job status for job %d", jobID)
 
-	var result ReplicationJobState
-	err := c.Call(ctx, "core.get_jobs", []interface{}{
-		[]interface{}{
-			[]interface{}{"id", "=", jobID},
-		},
-	}, &[]ReplicationJobState{result})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job status: %w", err)
-	}
-
 	// Query returns an array, we need to get the first element
 	var jobs []ReplicationJobState
-	err = c.Call(ctx, "core.get_jobs", []interface{}{
+	err := c.Call(ctx, "core.get_jobs", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", jobID},
 		},
@@ -2864,6 +2854,13 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 		case <-ticker.C:
 			status, err := c.GetJobStatus(ctx, jobID)
 			if err != nil {
+				// core.get_jobs only knows jobs middlewared still holds in memory; a
+				// job that is gone (middlewared restarted) never comes back, and a
+				// closed client never answers. Keep polling only through transient
+				// failures such as a reconnect in progress.
+				if errors.Is(err, ErrJobNotFound) || errors.Is(err, ErrClientClosed) {
+					return fmt.Errorf("waiting for job %d: %w", jobID, err)
+				}
 				klog.Warningf("Failed to get job %d status: %v", jobID, err)
 				continue
 			}

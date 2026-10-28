@@ -156,6 +156,11 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 			return s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
 		}
 	}
+	if mode == cloneModeDetached {
+		if err := s.settleDetachedReplication(ctx, snapshotMeta, cloneParams); err != nil {
+			return nil, err
+		}
+	}
 	clonedDataset, reused, err := s.cloneOrResume(ctx, cloneParams, mode == cloneModePromoted, promoteDetachedRestore, clone)
 	if err != nil {
 		return nil, err
@@ -453,10 +458,7 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 	// Step 1: Run one-time replication (zfs send/receive) to create independent copy
 	// We use the snapshot directly as the source, not the parent dataset
 	sourceDataset := snapshotMeta.DatasetName
-	snapshotNameOnly := snapshotMeta.SnapshotName
-	if idx := strings.LastIndex(snapshotMeta.SnapshotName, "@"); idx != -1 {
-		snapshotNameOnly = snapshotMeta.SnapshotName[idx+1:]
-	}
+	snapshotNameOnly := replicatedSnapshotName(snapshotMeta)
 
 	klog.V(4).Infof("Running one-time replication from %s (snapshot: %s) to %s",
 		sourceDataset, snapshotNameOnly, params.newDatasetName)
@@ -481,30 +483,18 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 
 	err := s.apiClient.RunOnetimeReplicationAndWait(ctx, replicationParams, ReplicationPollInterval)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, replicationStillRunning(ctx, params.newDatasetName, err)
+		}
 		klog.Errorf("Detached volume clone replication failed: %v. Attempting cleanup of %s", err, params.newDatasetName)
 		s.cleanupPartialClone(ctx, params.newDatasetName)
 		return nil, status.Errorf(codes.Internal, "Failed to create detached volume clone via replication: %v", err)
 	}
 
 	klog.V(4).Infof("Replication completed for detached volume clone: %s", params.newDatasetName)
+	s.finishDetachedReplication(ctx, params.newDatasetName, snapshotNameOnly)
 
-	// Step 2: Promote to ensure complete independence
-	// LOCAL replication may create clone relationships for efficiency
-	klog.V(4).Infof("Promoting detached volume clone %s to ensure independence", params.newDatasetName)
-	if promoteErr := s.apiClient.PromoteDataset(ctx, params.newDatasetName); promoteErr != nil {
-		klog.Warningf("PromoteDataset(%s) failed: %v (continuing, may still work)", params.newDatasetName, promoteErr)
-	} else {
-		klog.V(4).Infof("Successfully promoted detached volume clone: %s", params.newDatasetName)
-	}
-
-	// Step 3: Clean up the replicated snapshot from the target dataset
-	targetSnapshot := fmt.Sprintf("%s@%s", params.newDatasetName, snapshotNameOnly)
-	klog.V(4).Infof("Cleaning up replicated snapshot %s", targetSnapshot)
-	if delErr := s.apiClient.DeleteSnapshot(ctx, targetSnapshot); delErr != nil {
-		klog.Warningf("Failed to delete replicated snapshot %s: %v (non-fatal)", targetSnapshot, delErr)
-	}
-
-	// Step 4: Query the dataset to get its full info
+	// Query the dataset to get its full info
 	clonedDataset, err := s.apiClient.Dataset(ctx, params.newDatasetName)
 	if err != nil {
 		klog.Errorf("Failed to query detached clone dataset %s: %v", params.newDatasetName, err)
@@ -513,6 +503,88 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 
 	klog.Infof("Successfully created detached (send/receive) volume: %s (truly independent, no dependencies)", clonedDataset.Name)
 	return clonedDataset, nil
+}
+
+// settleDetachedReplication deals with a replication an earlier attempt of this request
+// started into the clone target. TrueNAS keeps running it after that request timed out,
+// and a second one into the same target fails and starts the copy over, so a large volume
+// would never converge. A running job is waited for and a finished one is completed; only
+// a failed one is discarded, so the copy starts again. With no job known, cloneOrResume
+// decides from the target dataset alone.
+func (s *ControllerService) settleDetachedReplication(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) error {
+	target := params.newDatasetName
+	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to look up replication jobs for %s: %v", target, err)
+	}
+	if len(jobs) == 0 {
+		return nil
+	}
+	job := jobs[len(jobs)-1]
+	klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
+
+	switch job.State {
+	case "WAITING", "RUNNING":
+		err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
+			return replicationStillRunning(ctx, target, err)
+		case errors.Is(err, tnsapi.ErrJobNotFound):
+			// middlewared restarted, which ends the job: decide from the dataset alone.
+			return nil
+		case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
+			return s.discardFailedReceive(ctx, target, job.ID, err.Error())
+		default:
+			return status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
+		}
+	case "SUCCESS":
+	case "FAILED", "ABORTED":
+		return s.discardFailedReceive(ctx, target, job.ID, job.State+": "+job.Error)
+	default:
+		return status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
+	}
+
+	s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
+	return nil
+}
+
+// discardFailedReceive deletes what a failed replication left at target so the copy can
+// start again. The request may already be expiring, so the delete runs detached from it.
+func (s *ControllerService) discardFailedReceive(ctx context.Context, target string, jobID int, reason string) error {
+	klog.Warningf("Replication job %d into %s did not complete (%s); deleting the target and starting again", jobID, target, reason)
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
+	if err := s.apiClient.DeleteDataset(ctx, target); err != nil && !tnsapi.IsNotFound(err) {
+		return status.Errorf(codes.Internal, "Failed to delete %s left by failed replication job %d: %v", target, jobID, err)
+	}
+	return nil
+}
+
+// finishDetachedReplication runs the steps that follow a completed receive. Both are
+// best effort and safe to repeat.
+func (s *ControllerService) finishDetachedReplication(ctx context.Context, target, snapshotName string) {
+	// LOCAL replication may create clone relationships for efficiency; promote to be independent.
+	klog.V(4).Infof("Promoting detached volume clone %s to ensure independence", target)
+	if promoteErr := s.apiClient.PromoteDataset(ctx, target); promoteErr != nil {
+		klog.Warningf("PromoteDataset(%s) failed: %v (continuing, may still work)", target, promoteErr)
+	}
+	s.deleteSnapshotIfPresent(ctx, target+"@"+snapshotName)
+}
+
+// replicationStillRunning reports a request that ended while its replication runs on. The
+// target is kept so that the next retry picks the job up.
+func replicationStillRunning(ctx context.Context, target string, err error) error {
+	return status.Errorf(status.FromContextError(ctx.Err()).Code(),
+		"replication into %s is still running; a retry will resume it: %v", target, err)
+}
+
+// replicatedSnapshotName returns the short name of the snapshot a detached clone replicates.
+func replicatedSnapshotName(snapshotMeta *SnapshotMetadata) string {
+	if idx := strings.LastIndex(snapshotMeta.SnapshotName, "@"); idx != -1 {
+		return snapshotMeta.SnapshotName[idx+1:]
+	}
+	return snapshotMeta.SnapshotName
 }
 
 // executeDetachedSnapshotRestore restores a volume from a detached snapshot.

@@ -3,9 +3,11 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/tnsapi"
@@ -465,6 +467,194 @@ func TestCreateVolumeFromSnapshotDetachedResumesReceivedDataset(t *testing.T) {
 	}
 	if got := f.props[tnsapi.PropertyCSIVolumeName]; got != cloneRetryName {
 		t.Errorf("csi_volume_name = %q after resume, want %q", got, cloneRetryName)
+	}
+}
+
+// detachedReplicationFake adds the replication side of TrueNAS to cloneRetryFake: the jobs
+// core.get_jobs still knows for the clone target, and the calls the driver makes.
+type detachedReplicationFake struct {
+	*cloneRetryFake
+	jobs             []tnsapi.ReplicationJobState
+	waited           []int
+	deletedSnapshots []string
+	events           []string // "delete" and "replicate", in call order
+	replications     int
+}
+
+func newDetachedReplicationFake(jobs ...tnsapi.ReplicationJobState) *detachedReplicationFake {
+	return &detachedReplicationFake{cloneRetryFake: newCloneRetryFake(), jobs: jobs}
+}
+
+// withReceivedTarget gives the fake a target a receive made: managed_by is copied from the
+// source, csi_volume_name is not.
+func (f *detachedReplicationFake) withReceivedTarget() *detachedReplicationFake {
+	f.withTarget("FILESYSTEM")
+	delete(f.props, tnsapi.PropertyCSIVolumeName)
+	return f
+}
+
+// receive makes the target the way a finished replication does. Callers hold f.mu.
+func (f *detachedReplicationFake) receive() {
+	f.target = &tnsapi.Dataset{ID: cloneRetryTarget, Name: cloneRetryTarget, Type: "FILESYSTEM", Mountpoint: cloneRetryMount}
+	f.props[tnsapi.PropertyManagedBy] = tnsapi.ManagedByValue
+}
+
+func (f *detachedReplicationFake) mock() *MockAPIClientForSnapshots {
+	m := f.cloneRetryFake.mock()
+	deleteDataset := m.DeleteDatasetFunc
+	m.DeleteDatasetFunc = func(ctx context.Context, id string) error {
+		f.mu.Lock()
+		f.events = append(f.events, "delete")
+		f.mu.Unlock()
+		return deleteDataset(ctx, id)
+	}
+	m.DeleteSnapshotFunc = func(_ context.Context, id string) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.deletedSnapshots = append(f.deletedSnapshots, id)
+		return nil
+	}
+	m.FindReplicationJobsForTargetFunc = func(_ context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+		if target != cloneRetryTarget {
+			return nil, nil
+		}
+		return f.jobs, nil
+	}
+	m.WaitForJobFunc = func(_ context.Context, jobID int, _ time.Duration) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.waited = append(f.waited, jobID)
+		f.receive()
+		return nil
+	}
+	m.RunOnetimeReplicationAndWaitFunc = func(_ context.Context, p tnsapi.ReplicationRunOnetimeParams, _ time.Duration) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.replications++
+		f.events = append(f.events, "replicate")
+		if p.TargetDataset == cloneRetryTarget {
+			f.receive()
+		}
+		return nil
+	}
+	return m
+}
+
+func detachedRequest() (req *csi.CreateVolumeRequest, snapshotID string) {
+	return cloneRetryRequest(ProtocolNFS, map[string]string{DetachedVolumesFromSnapshotsParam: VolumeContextValueTrue})
+}
+
+// TrueNAS keeps running a replication after the request that started it timed out. The
+// retry must wait for that job, not start another one into the same target (which fails
+// and restarts the copy, so a large volume never converges), and must not delete it.
+func TestCreateVolumeFromSnapshotDetachedWaitsForRunningReplication(t *testing.T) {
+	t.Parallel()
+	f := newDetachedReplicationFake(
+		tnsapi.ReplicationJobState{ID: 40, State: "FAILED"},
+		tnsapi.ReplicationJobState{ID: 41, State: "RUNNING"},
+	)
+	req, snapshotID := detachedRequest()
+
+	resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	checkClonedVolume(t, resp, snapshotID)
+	if !reflect.DeepEqual(f.waited, []int{41}) || f.replications != 0 || len(f.deletes) != 0 {
+		t.Errorf("waited=%v replications=%d deletes=%v, want a wait on job 41 and nothing else", f.waited, f.replications, f.deletes)
+	}
+	if f.promotes != 1 || !reflect.DeepEqual(f.deletedSnapshots, []string{cloneRetryTarget + "@snap1"}) {
+		t.Errorf("promotes=%d deleted snapshots=%v, want the post-replication promote and snapshot cleanup", f.promotes, f.deletedSnapshots)
+	}
+	if got := f.props[tnsapi.PropertyCSIVolumeName]; got != cloneRetryName {
+		t.Errorf("csi_volume_name = %q, want %q", got, cloneRetryName)
+	}
+}
+
+// The replication finished after the request timed out: the retry continues with the steps
+// that follow it instead of copying again.
+func TestCreateVolumeFromSnapshotDetachedContinuesAfterSucceededReplication(t *testing.T) {
+	t.Parallel()
+	f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: "SUCCESS"}).withReceivedTarget()
+	req, snapshotID := detachedRequest()
+
+	resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	checkClonedVolume(t, resp, snapshotID)
+	if f.replications != 0 || len(f.waited) != 0 || len(f.deletes) != 0 {
+		t.Errorf("replications=%d waited=%v deletes=%v, want none", f.replications, f.waited, f.deletes)
+	}
+	if f.promotes != 1 || !reflect.DeepEqual(f.deletedSnapshots, []string{cloneRetryTarget + "@snap1"}) {
+		t.Errorf("promotes=%d deleted snapshots=%v, want the post-replication promote and snapshot cleanup", f.promotes, f.deletedSnapshots)
+	}
+	if got := f.props[tnsapi.PropertyCSIVolumeName]; got != cloneRetryName {
+		t.Errorf("csi_volume_name = %q, want %q", got, cloneRetryName)
+	}
+}
+
+// Only a failed replication is discarded: its partial target is deleted (on a context the
+// expired request cannot cancel) and the copy starts again.
+func TestCreateVolumeFromSnapshotDetachedRestartsAfterFailedReplication(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"FAILED", "ABORTED"} {
+		f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: state}).withReceivedTarget()
+		req, snapshotID := detachedRequest()
+
+		resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+		if err != nil {
+			t.Fatalf("%s: retry failed: %v", state, err)
+		}
+		checkClonedVolume(t, resp, snapshotID)
+		if !reflect.DeepEqual(f.events, []string{"delete", "replicate"}) || len(f.waited) != 0 {
+			t.Errorf("%s: events=%v waited=%v, want the target deleted, then one new replication", state, f.events, f.waited)
+		}
+		if !reflect.DeepEqual(f.deletes, []string{cloneRetryTarget}) || len(f.staleCtx) != 0 {
+			t.Errorf("%s: deletes=%v (on canceled ctx: %v), want %s deleted on a live context", state, f.deletes, f.staleCtx, cloneRetryTarget)
+		}
+	}
+}
+
+// When the request's deadline expires during the wait, the copy is still running on
+// TrueNAS: report DeadlineExceeded and keep the target so the next retry picks the job up.
+// This holds for a job this request started as well as one it found.
+func TestCreateVolumeFromSnapshotDetachedDeadlineKeepsTarget(t *testing.T) {
+	t.Parallel()
+	waitUntilDone := func(ctx context.Context) error {
+		<-ctx.Done()
+		return fmt.Errorf("context canceled while waiting for job 41: %w", ctx.Err())
+	}
+	for _, running := range []bool{true, false} {
+		var f *detachedReplicationFake
+		if running {
+			f = newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: "RUNNING"}).withReceivedTarget()
+		} else {
+			f = newDetachedReplicationFake()
+		}
+		m := f.mock()
+		m.WaitForJobFunc = func(ctx context.Context, _ int, _ time.Duration) error { return waitUntilDone(ctx) }
+		m.RunOnetimeReplicationAndWaitFunc = func(ctx context.Context, _ tnsapi.ReplicationRunOnetimeParams, _ time.Duration) error {
+			f.mu.Lock()
+			f.replications++
+			f.receive() // the receive is under way; its target must survive
+			f.mu.Unlock()
+			return waitUntilDone(ctx)
+		}
+		req, snapshotID := detachedRequest()
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+
+		_, err := NewControllerService(m, NewNodeRegistry(), "").createVolumeFromSnapshot(ctx, req, snapshotID)
+		cancel()
+		if status.Code(err) != codes.DeadlineExceeded {
+			t.Fatalf("running job=%v: error = %v, want DeadlineExceeded", running, err)
+		}
+		if len(f.deletes) != 0 {
+			t.Errorf("running job=%v: deletes=%v, want the target kept", running, f.deletes)
+		}
+		if running && f.replications != 0 {
+			t.Errorf("replications=%d, want none while a job is running", f.replications)
+		}
 	}
 }
 

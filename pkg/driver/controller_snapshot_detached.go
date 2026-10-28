@@ -106,8 +106,13 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for detached copy: %v", err)
 	}
 
-	// Ensure we clean up the temporary snapshot
+	// Ensure we clean up the temporary snapshot, unless a replication may still be sending it.
+	replicationMayBeRunning := false
 	defer func() {
+		if replicationMayBeRunning {
+			klog.Warningf("Keeping temporary snapshot %s: the replication sending it may still be running", tempSnapshot)
+			return
+		}
 		klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshot)
 		cleanupCtx, cancel := cleanupContext(ctx)
 		defer cancel()
@@ -140,6 +145,13 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 	err = s.apiClient.RunOnetimeReplicationAndWait(ctx, replicationParams, ReplicationPollInterval)
 	if err != nil {
 		timer.ObserveError()
+		if ctx.Err() != nil {
+			// Only the wait ended: the job keeps running on TrueNAS, so neither its target nor
+			// the snapshot it sends may be deleted (that would make every retry start over).
+			replicationMayBeRunning = true
+			klog.Warningf("Stopped waiting for the detached snapshot replication into %s: %v (the job may still be running)", targetDataset, err)
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
 		// Try to clean up the target dataset if it was partially created
 		klog.Warningf("Detached snapshot replication failed: %v. Attempting cleanup of %s", err, targetDataset)
 		cleanupCtx, cancel := cleanupContext(ctx)

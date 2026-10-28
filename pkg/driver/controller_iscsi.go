@@ -1121,75 +1121,49 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 		initiatorID, _ = strconv.Atoi(initiatorIDStr) //nolint:errcheck // Invalid values will use default (0)
 	}
 
-	// Resolve portal/initiator IDs (query TrueNAS if not specified)
-	portalID, initiatorID, err = s.resolveISCSIPortalAndInitiator(ctx, portalID, initiatorID)
-	if err != nil {
-		return nil, err
+	// Steps 1-3 reuse an extent, target or LUN mapping an earlier attempt of this request
+	// made, as the create path does. Cleanup only removes what THIS call created, and the
+	// ZVOL only if this call cloned it.
+	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolISCSI, "clone")
+	iscsiParams := &iscsiVolumeParams{
+		volumeName:  volumeName,
+		zvolName:    zvol.ID,
+		portalID:    portalID,
+		initiatorID: initiatorID,
+	}
+	created := iscsiCreated{}
+	if !info.Reused {
+		created.zvolID = zvol.ID
 	}
 
 	// Step 1: Create iSCSI extent (points to the cloned ZVOL)
-	extent, err := s.apiClient.CreateISCSIExtent(ctx, tnsapi.ISCSIExtentCreateParams{
-		Name:      volumeName,
-		Type:      zfsLogicalDiskType,
-		Disk:      "zvol/" + zvol.ID,
-		Blocksize: 512,
-	})
+	extent, extentIsNew, err := s.getOrCreateISCSIExtent(ctx, iscsiParams, timer)
 	if err != nil {
-		// Cleanup: delete the cloned ZVOL if extent creation fails
 		klog.Errorf("Failed to create iSCSI extent for cloned ZVOL, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to create iSCSI extent for cloned volume: %v", err)
+		s.cleanupISCSICreate(ctx, created)
+		return nil, err
 	}
-
-	klog.V(4).Infof("Created iSCSI extent with ID: %d for cloned ZVOL: %s", extent.ID, zvol.ID)
+	if extentIsNew {
+		created.extentID = extent.ID
+	}
 
 	// Step 2: Create iSCSI target WITH portal/initiator groups (critical for discoverability!)
 	// Without groups, the target won't be advertised on any portal and won't be discoverable.
-	target, err := s.apiClient.CreateISCSITarget(ctx, tnsapi.ISCSITargetCreateParams{
-		Name: volumeName,
-		Mode: iscsiExtentType,
-		Groups: []tnsapi.ISCSITargetGroup{
-			{
-				Portal:    portalID,
-				Initiator: initiatorID,
-			},
-		},
-	})
+	target, targetIsNew, err := s.getOrCreateISCSITarget(ctx, iscsiParams, timer)
 	if err != nil {
-		// Cleanup: delete extent and ZVOL
 		klog.Errorf("Failed to create iSCSI target, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteISCSIExtent(ctx, extent.ID, false, false); delErr != nil {
-			klog.Errorf("Failed to cleanup iSCSI extent: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to create iSCSI target for cloned volume: %v", err)
+		s.cleanupISCSICreate(ctx, created)
+		return nil, err
+	}
+	if targetIsNew {
+		created.targetID = target.ID
 	}
 
-	klog.V(4).Infof("Created iSCSI target with ID: %d, Name: %s", target.ID, target.Name)
-
 	// Step 3: Create target-extent association (LUN 0)
-	_, err = s.apiClient.CreateISCSITargetExtent(ctx, tnsapi.ISCSITargetExtentCreateParams{
-		Target: target.ID,
-		Extent: extent.ID,
-		LunID:  0,
-	})
-	if err != nil {
-		// Cleanup: delete target, extent, and ZVOL
+	if err = s.ensureISCSITargetExtent(ctx, target.ID, extent.ID, timer); err != nil {
 		klog.Errorf("Failed to create target-extent association, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteISCSITarget(ctx, target.ID, false); delErr != nil {
-			klog.Errorf("Failed to cleanup iSCSI target: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteISCSIExtent(ctx, extent.ID, false, false); delErr != nil {
-			klog.Errorf("Failed to cleanup iSCSI extent: %v", delErr)
-		}
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned ZVOL: %v", delErr)
-		}
-		return nil, status.Errorf(codes.Internal, "Failed to create target-extent association for cloned volume: %v", err)
+		s.cleanupISCSICreate(ctx, created)
+		return nil, err
 	}
 
 	// Step 4: Reload iSCSI service to make the new target discoverable
@@ -1251,6 +1225,7 @@ func (s *ControllerService) setupISCSIVolumeFromClone(ctx context.Context, req *
 	// Update volume capacity metric
 	metrics.SetVolumeCapacity(zvol.ID, metrics.ProtocolISCSI, requestedCapacity)
 
+	timer.ObserveSuccess()
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			VolumeId:      zvol.ID,

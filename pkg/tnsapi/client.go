@@ -1372,6 +1372,7 @@ type Dataset struct {
 	Available  map[string]interface{} `json:"available,omitempty"`
 	Used       map[string]interface{} `json:"used,omitempty"`
 	Volsize    map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
+	Origin     map[string]interface{} `json:"origin,omitempty"`  // Origin snapshot of a clone (empty value when not a clone)
 	ID         string                 `json:"id"`
 	Name       string                 `json:"name"`
 	Type       string                 `json:"type"`
@@ -3009,11 +3010,11 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 }
 
 // datasetDecodedProperties are the ZFS properties the Dataset struct decodes (Used,
-// Available, Volsize). Requesting only these keeps pool.dataset.query from loading and
-// serializing every ZFS property of every matching dataset, which the client would discard
-// during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are always
-// returned. Keep this in sync with the Dataset struct.
-var datasetDecodedProperties = []string{"used", "available", "volsize"}
+// Available, Volsize, Origin). Requesting only these keeps pool.dataset.query from loading
+// and serializing every ZFS property of every matching dataset, which the client would
+// discard during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are
+// always returned. Keep this in sync with the Dataset struct.
+var datasetDecodedProperties = []string{"used", "available", "volsize", "origin"}
 
 // datasetQueryOptions builds pool.dataset.query options that return only what the client
 // decodes:

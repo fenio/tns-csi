@@ -36,9 +36,7 @@ func TestCreateVolumeFromVolumeReusesExistingTempSnapshot(t *testing.T) {
 
 	created := 0
 	mock := &MockAPIClientForSnapshots{
-		GetDatasetFunc: func(_ context.Context, id string) (*tnsapi.Dataset, error) {
-			return &tnsapi.Dataset{ID: id, Name: id, Type: "FILESYSTEM"}, nil
-		},
+		GetDatasetFunc: sourceDatasetOnly(source),
 		QuerySnapshotsFunc: func(context.Context, []interface{}) ([]tnsapi.Snapshot, error) {
 			return []tnsapi.Snapshot{{ID: tempFullName, Name: tempFullName, Dataset: source}}, nil
 		},
@@ -68,9 +66,7 @@ func TestCreateVolumeFromVolumeTreatsSnapshotEEXISTAsReuse(t *testing.T) {
 	cloneErr := errors.New("stop here: clone is not under test")
 
 	mock := &MockAPIClientForSnapshots{
-		GetDatasetFunc: func(_ context.Context, id string) (*tnsapi.Dataset, error) {
-			return &tnsapi.Dataset{ID: id, Name: id, Type: "FILESYSTEM"}, nil
-		},
+		GetDatasetFunc: sourceDatasetOnly(source),
 		QuerySnapshotsFunc: func(context.Context, []interface{}) ([]tnsapi.Snapshot, error) {
 			return nil, nil // not visible yet
 		},
@@ -86,6 +82,17 @@ func TestCreateVolumeFromVolumeTreatsSnapshotEEXISTAsReuse(t *testing.T) {
 	_, err := s.createVolumeFromVolume(context.Background(), cloneFromVolumeRequest("pvc-new", source), source)
 	if err == nil || !errorContains(err, cloneErr.Error()) {
 		t.Fatalf("createVolumeFromVolume() error = %v, want the clone error (EEXIST must mean reuse)", err)
+	}
+}
+
+// sourceDatasetOnly describes a TrueNAS where only the source volume's dataset exists (the
+// clone target does not yet).
+func sourceDatasetOnly(source string) func(context.Context, string) (*tnsapi.Dataset, error) {
+	return func(_ context.Context, id string) (*tnsapi.Dataset, error) {
+		if id != source {
+			return nil, tnsapi.ErrDatasetNotFound
+		}
+		return &tnsapi.Dataset{ID: id, Name: id, Type: "FILESYSTEM"}, nil
 	}
 }
 

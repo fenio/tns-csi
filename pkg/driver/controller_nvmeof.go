@@ -1223,9 +1223,7 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		klog.Errorf("Expected ZVOL (type=VOLUME) but got type=%q for dataset %s. "+
 			"This can happen if the source detached snapshot was not a ZVOL.", zvol.Type, zvol.Name)
 		// Cleanup the non-ZVOL dataset
-		if delErr := s.apiClient.DeleteDataset(ctx, zvol.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup non-ZVOL dataset: %v", delErr)
-		}
+		s.discardClone(ctx, zvol.ID, info)
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal,
 			"Cannot create NVMe-oF volume from snapshot: cloned dataset %s has type %q, expected VOLUME (ZVOL). "+
@@ -1252,9 +1250,10 @@ func (s *ControllerService) setupNVMeOFVolumeFromClone(ctx context.Context, req 
 		}
 	}
 
-	// The caller cloned the ZVOL in this call, so a failure removes it. A subsystem, port
-	// binding or namespace left by an earlier attempt is reused and kept.
-	created := nvmeofCreated{zvol: true}
+	// A ZVOL the caller cloned in this call is removed on failure; one an earlier attempt
+	// cloned is kept. A subsystem, port binding or namespace left by an earlier attempt is
+	// reused and kept.
+	created := nvmeofCreated{zvol: !info.Reused}
 
 	// Step 1: Get or create the dedicated subsystem for the cloned volume
 	subsystem, subsystemIsNew, err := s.getOrCreateNVMeOFSubsystem(ctx, subsystemNQN, zvol.Name, timer)

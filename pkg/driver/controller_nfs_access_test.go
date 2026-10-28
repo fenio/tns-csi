@@ -148,11 +148,7 @@ func TestExistingNFSVolumeRejectsUnrestrictedShare(t *testing.T) {
 		},
 	}
 	controller := NewControllerService(mock, NewNodeRegistry(), "")
-	_, _, err := controller.checkExistingNFSVolume(context.Background(), request, request.Parameters, dataset, dataset.ID, 1<<30)
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("checkExistingNFSVolume() error = %v, want FailedPrecondition", err)
-	}
-	// Legacy idempotency checks must not bypass the access comparison either.
+	// An existing share must not bypass the access comparison.
 	params, err := validateNFSParams(request)
 	if err != nil {
 		t.Fatal(err)

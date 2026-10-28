@@ -517,38 +517,9 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 // dataset that is not this volume's: a job into the path may be someone else's.
 func (s *ControllerService) settleDetachedReplication(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) error {
 	target := params.newDatasetName
-	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
+	failed, reason, err := s.awaitEarlierReplication(ctx, target)
 	if err != nil {
-		return status.Errorf(codes.Unavailable, "Failed to look up replication jobs for %s: %v", target, err)
-	}
-
-	// failed stays false when no job is known.
-	var failed bool
-	reason := "no replication job known"
-	if len(jobs) > 0 {
-		job := jobs[len(jobs)-1]
-		klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
-		reason = fmt.Sprintf("job %d succeeded", job.ID)
-		switch job.State {
-		case "WAITING", "RUNNING":
-			err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
-			switch {
-			case err == nil:
-			case ctx.Err() != nil:
-				return replicationStillRunning(ctx, target, err)
-			case errors.Is(err, tnsapi.ErrJobNotFound):
-				reason = fmt.Sprintf("job %d is gone", job.ID)
-			case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
-				failed, reason = true, err.Error()
-			default:
-				return status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
-			}
-		case "SUCCESS":
-		case "FAILED", "ABORTED":
-			failed, reason = true, fmt.Sprintf("job %d %s: %s", job.ID, job.State, job.Error)
-		default:
-			return status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
-		}
+		return err
 	}
 
 	existing, err := s.queryExactDataset(ctx, target)
@@ -574,6 +545,47 @@ func (s *ControllerService) settleDetachedReplication(ctx context.Context, snaps
 	// gone after a middlewared restart, or the request ended first). They are safe to repeat.
 	s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
 	return nil
+}
+
+// awaitEarlierReplication looks up the replication.run_onetime jobs into target that an
+// earlier attempt of the request may have started, and waits for the newest one while it
+// is still running. failed reports that it failed or was aborted; reason describes the
+// outcome for logs. No job known (never started, or forgotten by a middlewared restart) is
+// not a failure: the caller judges the target itself. A request ending during the wait
+// returns its context error and leaves the job alone.
+func (s *ControllerService) awaitEarlierReplication(ctx context.Context, target string) (failed bool, reason string, err error) {
+	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
+	if err != nil {
+		return false, "", status.Errorf(codes.Unavailable, "Failed to look up replication jobs for %s: %v", target, err)
+	}
+	if len(jobs) == 0 {
+		return false, "no replication job known", nil
+	}
+
+	job := jobs[len(jobs)-1]
+	klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
+	reason = fmt.Sprintf("job %d succeeded", job.ID)
+	switch job.State {
+	case "WAITING", "RUNNING":
+		err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
+			return false, "", replicationStillRunning(ctx, target, err)
+		case errors.Is(err, tnsapi.ErrJobNotFound):
+			reason = fmt.Sprintf("job %d is gone", job.ID)
+		case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
+			failed, reason = true, err.Error()
+		default:
+			return false, "", status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
+		}
+	case "SUCCESS":
+	case "FAILED", "ABORTED":
+		failed, reason = true, fmt.Sprintf("job %d %s: %s", job.ID, job.State, job.Error)
+	default:
+		return false, "", status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
+	}
+	return failed, reason, nil
 }
 
 // checkDiscardableReceive reports whether the dataset at the clone target may be deleted as
@@ -614,13 +626,20 @@ func (s *ControllerService) discardFailedReceive(ctx context.Context, target, re
 	return nil
 }
 
-// finishDetachedReplication runs the steps that follow a completed receive. Both are
-// best effort and safe to repeat.
+// finishDetachedReplication runs the steps that follow a completed receive into target:
+// promote it and delete the replicated snapshotName from it. Both are best effort and safe
+// to repeat.
 func (s *ControllerService) finishDetachedReplication(ctx context.Context, target, snapshotName string) {
 	// LOCAL replication may create clone relationships for efficiency; promote to be independent.
-	klog.V(4).Infof("Promoting detached volume clone %s to ensure independence", target)
-	if promoteErr := s.apiClient.PromoteDataset(ctx, target); promoteErr != nil {
-		klog.Warningf("PromoteDataset(%s) failed: %v (continuing, may still work)", target, promoteErr)
+	klog.V(4).Infof("Promoting detached copy %s to ensure independence", target)
+	switch promoteErr := s.apiClient.PromoteDataset(ctx, target); {
+	case promoteErr == nil:
+		klog.V(4).Infof("Promoted detached copy %s", target)
+	case tnsapi.IsNotAClone(promoteErr):
+		// A full send/receive makes an independent dataset: there is no origin to break.
+		klog.V(4).Infof("Detached copy %s is not a clone; nothing to promote", target)
+	default:
+		klog.Warningf("PromoteDataset(%s) failed: %v (continuing; deleting the source may later fail with 'dependent clones')", target, promoteErr)
 	}
 	s.deleteSnapshotIfPresent(ctx, target+"@"+snapshotName)
 }

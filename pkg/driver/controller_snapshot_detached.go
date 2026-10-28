@@ -45,55 +45,36 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 
 	// Target dataset for the detached snapshot
 	targetDataset := fmt.Sprintf("%s/%s", detachedParentDataset, snapshotName)
+	// The temporary snapshot sent to the target is named after the CSI snapshot, so that a
+	// retry knows which snapshot an earlier attempt sent and has to clean up.
+	tempSnapshotName := "csi-detached-temp-" + snapshotName
+	tempSnapshot := fmt.Sprintf("%s@%s", sourceDataset, tempSnapshotName)
 
 	klog.Infof("Creating detached snapshot %s for volume %s (source: %s, target: %s, protocol: %s)",
 		snapshotName, sourceVolumeID, sourceDataset, targetDataset, protocol)
 
-	// Check if detached snapshot already exists (idempotency)
-	existingDatasets, err := s.queryExactDataset(ctx, targetDataset)
+	// A retried CreateSnapshot (the snapshotter retries after its timeout) may find the
+	// replication an earlier attempt started still running, failed, or finished.
+	received, err := s.settleDetachedSnapshotReplication(ctx, snapshotName, targetDataset)
 	if err != nil {
-		klog.Warningf("Failed to query existing datasets: %v", err)
+		timer.ObserveError()
+		return nil, err
 	}
-
-	for _, ds := range existingDatasets {
-		if ds.Name != targetDataset {
-			continue
-		}
-		klog.Infof("Detached snapshot dataset %s already exists", targetDataset)
-
-		// Create snapshot metadata
-		createdAt := time.Now().Unix()
-		snapshotMeta := SnapshotMetadata{
-			SnapshotName: snapshotName,
-			SourceVolume: sourceVolumeID,
-			DatasetName:  targetDataset,
-			Protocol:     protocol,
-			CreatedAt:    createdAt,
-			Detached:     true,
-		}
-
-		snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
-		if encodeErr != nil {
+	if received {
+		klog.Infof("Detached snapshot dataset %s was received by an earlier attempt; finishing it", targetDataset)
+		s.finishDetachedReplication(ctx, targetDataset, tempSnapshotName)
+		props := s.detachedSnapshotProperties(snapshotName, sourceVolumeID, sourceDataset, protocol)
+		if err = s.apiClient.SetDatasetProperties(ctx, targetDataset, props); err != nil {
+			// The complete copy is kept: the next retry finishes it again.
 			timer.ObserveError()
-			return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
+			return nil, status.Errorf(codes.Internal, "Failed to set CSI properties on detached snapshot: %v", err)
 		}
-
-		timer.ObserveSuccess()
-		return &csi.CreateSnapshotResponse{
-			Snapshot: &csi.Snapshot{
-				SnapshotId:     snapshotID,
-				SourceVolumeId: sourceVolumeID,
-				CreationTime:   timestamppb.New(time.Unix(createdAt, 0)),
-				ReadyToUse:     true,
-				SizeBytes:      sizeBytes,
-			},
-		}, nil
+		s.deleteSnapshotIfPresent(ctx, tempSnapshot)
+		return detachedSnapshotResponse(timer, snapshotName, sourceVolumeID, targetDataset, protocol, sizeBytes)
 	}
 
-	// Step 1: Create a temporary ZFS snapshot on the source
-	tempSnapshotName := fmt.Sprintf("csi-detached-temp-%d", time.Now().UnixNano())
-	tempSnapshot := fmt.Sprintf("%s@%s", sourceDataset, tempSnapshotName)
-
+	// Step 1: Create a temporary ZFS snapshot on the source. An earlier attempt whose
+	// replication failed may have kept it; it is sent again.
 	klog.V(4).Infof("Creating temporary snapshot %s for detached copy", tempSnapshot)
 
 	_, err = s.apiClient.CreateSnapshot(ctx, tnsapi.SnapshotCreateParams{
@@ -101,7 +82,7 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		Name:      tempSnapshotName,
 		Recursive: false,
 	})
-	if err != nil {
+	if err != nil && !tnsapi.IsAlreadyExists(err) {
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for detached copy: %v", err)
 	}
@@ -164,48 +145,13 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 
 	klog.Infof("Replication completed for detached snapshot dataset: %s", targetDataset)
 
-	// Step 3: Attempt to promote the target dataset to break clone dependency
-	// TrueNAS LOCAL replication creates clone relationships for efficiency (instant, space-efficient).
-	// Promotion breaks the clone->origin dependency, allowing the source volume to be deleted later.
-	// Without promotion, deleting the source will fail with "volume has dependent clones".
-	klog.Infof("Attempting to promote detached snapshot dataset %s to break clone dependency", targetDataset)
-	if promoteErr := s.apiClient.PromoteDataset(ctx, targetDataset); promoteErr != nil {
-		if tnsapi.IsNotAClone(promoteErr) {
-			// A full send/receive produces an independent dataset, not a clone: there is
-			// no origin to break. Observed on TrueNAS 25.10 as "[EBADMSG] Only cloned
-			// datasets can be promoted."
-			klog.V(4).Infof("Detached snapshot dataset %s is not a clone; nothing to promote", targetDataset)
-		} else {
-			// Log the full error for debugging - this helps identify why promotion failed
-			klog.Warningf("PromoteDataset(%s) failed: %v", targetDataset, promoteErr)
-			klog.Warningf("Promotion failure may cause source volume deletion to fail later with 'dependent clones' error")
-			// Continue anyway - snapshot creation can still succeed, but source deletion may be blocked
-		}
-	} else {
-		klog.Infof("Successfully promoted detached snapshot dataset: %s (clone dependency broken)", targetDataset)
-	}
-
-	// Step 4: Clean up the temporary snapshot that was replicated to the target
-	// The replication copies the snapshot to the target, so we need to remove it
-	targetTempSnapshot := fmt.Sprintf("%s@%s", targetDataset, tempSnapshotName)
-	klog.V(4).Infof("Cleaning up replicated temporary snapshot %s", targetTempSnapshot)
-	if delErr := s.apiClient.DeleteSnapshot(ctx, targetTempSnapshot); delErr != nil {
-		klog.Warningf("Failed to delete replicated temporary snapshot %s: %v", targetTempSnapshot, delErr)
-	}
+	// Steps 3 and 4: promote the target to break any clone dependency on the source (without
+	// it, deleting the source fails with "dependent clones") and delete the temporary snapshot
+	// the replication copied to it.
+	s.finishDetachedReplication(ctx, targetDataset, tempSnapshotName)
 
 	// Step 5: Set CSI metadata properties on the detached snapshot dataset
-	props := map[string]string{
-		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
-		tnsapi.PropertySnapshotID:       snapshotName,
-		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
-		tnsapi.PropertyDetachedSnapshot: VolumeContextValueTrue,
-		tnsapi.PropertySourceDataset:    sourceDataset,
-		tnsapi.PropertyProtocol:         protocol,
-		tnsapi.PropertyDeleteStrategy:   verbDelete,
-	}
-	if s.clusterID != "" {
-		props[tnsapi.PropertyClusterID] = s.clusterID
-	}
+	props := s.detachedSnapshotProperties(snapshotName, sourceVolumeID, sourceDataset, protocol)
 	if err := s.apiClient.SetDatasetProperties(ctx, targetDataset, props); err != nil {
 		// Property setting is critical - without PropertySnapshotID, the snapshot can't be found
 		// during restore operations. We must clean up and fail.
@@ -219,7 +165,88 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		return nil, status.Errorf(codes.Internal, "Failed to set CSI properties on detached snapshot: %v", err)
 	}
 
-	// Create snapshot metadata
+	return detachedSnapshotResponse(timer, snapshotName, sourceVolumeID, targetDataset, protocol, sizeBytes)
+}
+
+// settleDetachedSnapshotReplication deals with what an earlier attempt of this CreateSnapshot
+// left at target. TrueNAS keeps running a replication after the request that started it
+// timed out, so the target of a retry may hold a partial copy. A running job is waited for.
+// The target of a failed job, or one still holding a receive_resume_token (an interrupted
+// receive whose job middlewared may have forgotten), is discarded so the copy starts again.
+// received reports a complete receive whose remaining steps the caller must (re)run. A
+// dataset there that belongs to anything else is AlreadyExists and is never changed.
+func (s *ControllerService) settleDetachedSnapshotReplication(ctx context.Context, snapshotName, target string) (received bool, err error) {
+	failed, reason, err := s.awaitEarlierReplication(ctx, target)
+	if err != nil {
+		return false, err
+	}
+
+	existing, err := s.queryExactDataset(ctx, target)
+	if err != nil {
+		return false, status.Errorf(codes.Internal, "Failed to check for existing dataset %s: %v", target, err)
+	}
+	if len(existing) == 0 {
+		return false, nil
+	}
+	if exists, err := s.checkOwnDetachedSnapshotTarget(ctx, snapshotName, target); err != nil || !exists {
+		return false, err
+	}
+	if failed || existing[0].ReceiveIncomplete() {
+		if !failed {
+			reason += " and the receive was interrupted (the target still holds a receive_resume_token)"
+		}
+		return false, s.discardFailedReceive(ctx, target, reason)
+	}
+	return true, nil
+}
+
+// checkOwnDetachedSnapshotTarget verifies that the dataset at target may be this snapshot's:
+// a receive copies the source volume's managed_by and, at most, this snapshot's own
+// properties from an earlier attempt. User properties may only land at the end of a receive,
+// so managed_by may be missing, but it must not name another owner; a snapshot_id must be
+// this snapshot's, and csi_volume_name (never replicated) must be empty. exists is false when
+// the dataset is gone.
+func (s *ControllerService) checkOwnDetachedSnapshotTarget(ctx context.Context, snapshotName, target string) (exists bool, err error) {
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: snapshotName, DatasetID: target}, tnsapi.PropertySnapshotID)
+	switch {
+	case status.Code(err) == codes.FailedPrecondition:
+		return false, status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to snapshot %s: %s", target, snapshotName, status.Convert(err).Message())
+	case err != nil:
+		return false, err
+	case ownership.notFound:
+		return false, nil
+	}
+	managedBy := ownership.props[tnsapi.PropertyManagedBy]
+	snapshotID := ownership.props[tnsapi.PropertySnapshotID]
+	volumeName := ownership.props[tnsapi.PropertyCSIVolumeName]
+	if (snapshotID != "" && snapshotID != snapshotName) || volumeName != "" {
+		return false, status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and is not snapshot %s (%s=%q, %s=%q, %s=%q)", target, snapshotName,
+			tnsapi.PropertyManagedBy, managedBy, tnsapi.PropertySnapshotID, snapshotID, tnsapi.PropertyCSIVolumeName, volumeName)
+	}
+	return true, nil
+}
+
+// detachedSnapshotProperties returns the CSI properties written on a detached snapshot dataset.
+func (s *ControllerService) detachedSnapshotProperties(snapshotName, sourceVolumeID, sourceDataset, protocol string) map[string]string {
+	props := map[string]string{
+		tnsapi.PropertyManagedBy:        tnsapi.ManagedByValue,
+		tnsapi.PropertySnapshotID:       snapshotName,
+		tnsapi.PropertySourceVolumeID:   sourceVolumeID,
+		tnsapi.PropertyDetachedSnapshot: VolumeContextValueTrue,
+		tnsapi.PropertySourceDataset:    sourceDataset,
+		tnsapi.PropertyProtocol:         protocol,
+		tnsapi.PropertyDeleteStrategy:   verbDelete,
+	}
+	if s.clusterID != "" {
+		props[tnsapi.PropertyClusterID] = s.clusterID
+	}
+	return props
+}
+
+// detachedSnapshotResponse reports a finished detached snapshot as ready.
+func detachedSnapshotResponse(timer *metrics.OperationTimer, snapshotName, sourceVolumeID, targetDataset, protocol string, sizeBytes int64) (*csi.CreateSnapshotResponse, error) {
 	createdAt := time.Now().Unix()
 	snapshotMeta := SnapshotMetadata{
 		SnapshotName: snapshotName,

@@ -160,6 +160,11 @@ func TestDatasetReceiveIncomplete(t *testing.T) {
 		{token: map[string]interface{}{"value": ""}, want: false},
 		{token: map[string]interface{}{"value": nil}, want: false},
 		{token: map[string]interface{}{"value": "1-e604ea4bf-e0-789c63a2"}, want: true},
+		// What TrueNAS 25.10.7 returns for a completed dataset with no saved receive state
+		// (observed on a real system): value "NONE", rawvalue "none", parsed null.
+		{token: map[string]interface{}{"parsed": nil, "rawvalue": "none", "value": "NONE", "source": "NONE"}, want: false},
+		{token: map[string]interface{}{"value": "none"}, want: false},
+		{token: map[string]interface{}{"parsed": "1-e604ea4bf-e0-789c63a2", "rawvalue": "1-e604ea4bf-e0-789c63a2", "value": "1-e604ea4bf-e0-789c63a2"}, want: true},
 	}
 	for _, tt := range tests {
 		ds := Dataset{ReceiveResumeToken: tt.token}

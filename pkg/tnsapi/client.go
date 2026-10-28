@@ -1383,10 +1383,19 @@ type Dataset struct {
 }
 
 // ReceiveIncomplete reports whether the dataset holds an interrupted resumable receive. It
-// is false when the query did not return receive_resume_token.
+// is false when the query did not return receive_resume_token, or returned it unset:
+// TrueNAS 25.10 reports an unset token as value "NONE" (rawvalue "none", parsed null),
+// older releases as "-" or "".
 func (d *Dataset) ReceiveIncomplete() bool {
 	token, ok := d.ReceiveResumeToken["value"].(string)
-	return ok && token != "" && token != "-"
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(token)) {
+	case "", "-", "none":
+		return false
+	}
+	return true
 }
 
 // CreateDataset creates a new ZFS dataset.

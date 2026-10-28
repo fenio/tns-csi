@@ -165,6 +165,23 @@ var _ = Describe("Detached snapshot retried after a timeout", func() {
 		Expect(f.K8s.WaitForSnapshotReady(ctx, "snap-retry", 15*time.Minute)).To(Succeed())
 		stopWatch()
 
+		By("Checking the copy behind the snapshot was complete when it was reported ready")
+		content, err := f.K8s.GetVolumeSnapshotContent(ctx, "snap-retry")
+		Expect(err).NotTo(HaveOccurred())
+		parts := strings.Split(content.SnapshotHandle, "@")
+		Expect(parts).To(HaveLen(2), "unexpected snapshot handle %q", content.SnapshotHandle)
+		target := f.Config.TrueNASPool + "/csi-detached-snapshots/" + parts[1]
+		jobs, err := f.TrueNAS.Client().FindReplicationJobsForTarget(ctx, target)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(jobs).NotTo(BeEmpty(), "no replication job found into %s", target)
+		latest := jobs[len(jobs)-1]
+		Expect(latest.State).To(Equal("SUCCESS"),
+			"the snapshot was reported ready while the copy into %s was %s (job %d)", target, latest.State, latest.ID)
+		ds, err := f.TrueNAS.Client().Dataset(ctx, target)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ds).NotTo(BeNil(), "detached snapshot dataset %s does not exist", target)
+		Expect(ds.ReceiveIncomplete()).To(BeFalse(), "the snapshot's dataset %s is a partial receive", target)
+
 		By("Checking the first attempt really timed out and was retried")
 		mu.Lock()
 		Expect(timedOut).To(BeTrue(),
@@ -175,6 +192,8 @@ var _ = Describe("Detached snapshot retried after a timeout", func() {
 		Expect(f.K8s.CreatePVCFromSnapshot(ctx, "snap-retry-restored", "snap-retry", "tns-csi-nfs", "8Gi",
 			[]corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany})).To(Succeed())
 		f.RegisterPVCCleanup("snap-retry-restored")
+		Expect(f.K8s.WaitForPVCBound(ctx, "snap-retry-restored", 10*time.Minute)).To(Succeed(),
+			"the volume restored from the snapshot was never provisioned")
 		rpod, err := f.CreatePod(ctx, framework.PodOptions{Name: "snap-retry-restored-pod", PVCName: "snap-retry-restored", MountPath: "/data"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.K8s.WaitForPodReady(ctx, rpod.Name, 5*time.Minute)).To(Succeed())

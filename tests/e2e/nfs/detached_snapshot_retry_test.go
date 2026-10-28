@@ -2,7 +2,9 @@ package nfs
 
 import (
 	"context"
+	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -59,6 +61,24 @@ func waitForRollout(ctx context.Context, f *framework.Framework) error {
 	})
 }
 
+// snapshotContentError returns status.error.message of the VolumeSnapshotContent bound
+// to the named VolumeSnapshot, or "" when there is none yet.
+func snapshotContentError(ctx context.Context, f *framework.Framework, snapshot string) string {
+	kubectl := func(args ...string) string {
+		cmd := exec.CommandContext(ctx, "kubectl", append([]string{"--kubeconfig", f.Config.Kubeconfig}, args...)...)
+		out, err := cmd.Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	content := kubectl("get", "volumesnapshot", snapshot, "-n", f.Namespace(), "-o", "jsonpath={.status.boundVolumeSnapshotContentName}")
+	if content == "" {
+		return ""
+	}
+	return kubectl("get", "volumesnapshotcontent", content, "-o", "jsonpath={.status.error.message}")
+}
+
 func rolledOut(d *appsv1.Deployment) bool {
 	return d.Status.ObservedGeneration >= d.Generation &&
 		d.Status.UpdatedReplicas == *d.Spec.Replicas &&
@@ -100,9 +120,6 @@ var _ = Describe("Detached snapshot retried after a timeout", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)).To(Succeed())
 		sum := writeRandomData(ctx, f, pod.Name, 3072)
-		pv, err := f.K8s.GetPVForPVC(ctx, pvc.Name)
-		Expect(err).NotTo(HaveOccurred())
-		sourceHandle := pv.Spec.CSI.VolumeHandle
 
 		By("Shortening the snapshotter timeout so the first CreateSnapshot times out mid-copy")
 		previous := setSnapshotterTimeout(ctx, f, "3s")
@@ -114,19 +131,38 @@ var _ = Describe("Detached snapshot retried after a timeout", func() {
 		f.Cleanup.Add(func() error { return f.K8s.DeleteVolumeSnapshotClass(context.Background(), "snap-retry-class") })
 		Expect(f.K8s.CreateVolumeSnapshot(ctx, "snap-retry", pvc.Name, "snap-retry-class")).To(Succeed())
 		f.Cleanup.Add(func() error { return f.K8s.DeleteVolumeSnapshot(context.Background(), "snap-retry") })
+
+		// The external-snapshotter records a timed-out CreateSnapshot on the content's
+		// status.error before retrying. Watch for it while the snapshot settles: it proves
+		// the retry path ran, independently of the driver's own logging.
+		var (
+			mu        sync.Mutex
+			timedOut  bool
+			lastError string
+		)
+		watchCtx, stopWatch := context.WithCancel(ctx)
+		go func() {
+			defer GinkgoRecover()
+			for watchCtx.Err() == nil {
+				if msg := snapshotContentError(watchCtx, f, "snap-retry"); msg != "" {
+					mu.Lock()
+					lastError = msg
+					if strings.Contains(strings.ToLower(msg), "deadline") {
+						timedOut = true
+					}
+					mu.Unlock()
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+		}()
 		Expect(f.K8s.WaitForSnapshotReady(ctx, "snap-retry", 15*time.Minute)).To(Succeed())
+		stopWatch()
 
 		By("Checking the first attempt really timed out and was retried")
-		logs, err := f.K8s.GetControllerLogs(ctx, 20000)
-		Expect(err).NotTo(HaveOccurred())
-		calls := 0
-		for _, line := range strings.Split(logs, "\n") {
-			if strings.Contains(line, "CreateSnapshot called") && strings.Contains(line, sourceHandle) {
-				calls++
-			}
-		}
-		Expect(calls).To(BeNumerically(">=", 2),
-			"precondition: CreateSnapshot ran %d time(s); the copy finished inside the timeout, so the retry path was not exercised", calls)
+		mu.Lock()
+		Expect(timedOut).To(BeTrue(),
+			"precondition: no CreateSnapshot timeout was recorded (last content error %q); the copy finished inside the timeout, so the retry path was not exercised", lastError)
+		mu.Unlock()
 
 		By("Restoring from the snapshot and comparing the data")
 		Expect(f.K8s.CreatePVCFromSnapshot(ctx, "snap-retry-restored", "snap-retry", "tns-csi-nfs", "8Gi",

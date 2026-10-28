@@ -445,8 +445,8 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 	// Step 3: Set NFSv4 ACEs on the filesystem
 	// Step 4: Enable the share (triggers config generation with correct ACLs)
 	//
-	// A retry reuses the share an earlier attempt of this request made. If that share is
-	// already enabled, the ACL conversion before it was done too (and is now blocked).
+	// A retry reuses the share an earlier attempt of this request made. If that attempt
+	// already enabled it, the ACL conversion before it was done too (and is now blocked).
 	existingShares, err := s.apiClient.QuerySMBShare(ctx, dataset.Mountpoint)
 	if err != nil {
 		klog.Errorf("Failed to look up SMB share for cloned dataset, cleaning up: %v", err)
@@ -479,7 +479,10 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 			smbShare.Name, smbShare.ID, smbShare.Enabled, dataset.ID)
 	}
 
-	if dataset.Mountpoint != "" && !smbShare.Enabled {
+	// Only a share this request's earlier attempt enabled proves the conversion was done; an
+	// enabled share left at a fresh clone's path by anything else does not.
+	conversionDone := info.Reused && smbShare.Enabled
+	if dataset.Mountpoint != "" && !conversionDone {
 		klog.Infof("SMB clone: converting ACLs from POSIX to NFSv4 for %s", dataset.ID)
 
 		_, updateErr := s.apiClient.UpdateDataset(ctx, dataset.ID, tnsapi.DatasetUpdateParams{

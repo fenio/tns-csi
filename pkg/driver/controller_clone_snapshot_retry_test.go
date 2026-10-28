@@ -427,6 +427,94 @@ func TestCreateVolumeFromSnapshotPromotedRetry(t *testing.T) {
 	})
 }
 
+// If origin did not reveal that the clone is already promoted, PromoteDataset reports
+// "not a clone"; that means there is nothing to do, not a failure.
+func TestCreateVolumeFromSnapshotPromoteNothingToDo(t *testing.T) {
+	t.Parallel()
+	f := newCloneRetryFake().withTarget("FILESYSTEM").withPresentation(ProtocolNFS)
+	f.promoteErr = &tnsapi.Error{ErrorName: "EINVAL", Reason: "Only cloned datasets can be promoted."}
+	req, snapshotID := cloneRetryRequest(ProtocolNFS, map[string]string{PromotedVolumesFromSnapshotsParam: VolumeContextValueTrue})
+
+	resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	checkClonedVolume(t, resp, snapshotID)
+	if f.promotes != 1 || f.clones != 0 || len(f.deletes) != 0 {
+		t.Errorf("promotes=%d clones=%d deletes=%v, want one promote attempt and nothing else", f.promotes, f.clones, f.deletes)
+	}
+}
+
+// Detached (send/receive) mode: replication copies the source's properties except
+// csi_volume_name, which only setup writes. A receive that TrueNAS finished after the
+// request timed out leaves exactly that state; the retry must complete the volume.
+func TestCreateVolumeFromSnapshotDetachedResumesReceivedDataset(t *testing.T) {
+	t.Parallel()
+	f := newCloneRetryFake().withTarget("FILESYSTEM")
+	delete(f.props, tnsapi.PropertyCSIVolumeName)
+	req, snapshotID := cloneRetryRequest(ProtocolNFS, map[string]string{DetachedVolumesFromSnapshotsParam: VolumeContextValueTrue})
+
+	resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	checkClonedVolume(t, resp, snapshotID)
+	// A new replication would be followed by a promote of the received dataset.
+	if f.promotes != 0 || len(f.deletes) != 0 {
+		t.Errorf("promotes=%d deletes=%v, want the received dataset reused without a new replication", f.promotes, f.deletes)
+	}
+	if got := f.props[tnsapi.PropertyCSIVolumeName]; got != cloneRetryName {
+		t.Errorf("csi_volume_name = %q after resume, want %q", got, cloneRetryName)
+	}
+}
+
+// Outside detached mode the clone call writes csi_volume_name, so a dataset without it is
+// not this volume's even when managed_by says tns-csi.
+func TestCreateVolumeFromSnapshotUnnamedTargetIsForeignOutsideDetachedMode(t *testing.T) {
+	t.Parallel()
+	f := newCloneRetryFake().withTarget("FILESYSTEM")
+	delete(f.props, tnsapi.PropertyCSIVolumeName)
+	req, snapshotID := cloneRetryRequest(ProtocolNFS, nil)
+
+	_, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("error = %v, want AlreadyExists", err)
+	}
+	if f.clones != 0 || len(f.deletes) != 0 {
+		t.Errorf("clones=%d deletes=%v, want nothing touched", f.clones, f.deletes)
+	}
+}
+
+// An enabled share at the path of a FRESH clone was left by something else (e.g. an older
+// attempt whose dataset is gone). The clone still needs its ACL conversion.
+func TestSetupSMBVolumeFromCloneConvertsACLsUnlessReused(t *testing.T) {
+	t.Parallel()
+	for _, reused := range []bool{false, true} {
+		f := newCloneRetryFake().withTarget("FILESYSTEM").withPresentation(ProtocolSMB)
+		m := f.mock()
+		aclUpdates := 0
+		m.UpdateDatasetFunc = func(_ context.Context, _ string, p tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error) {
+			if p.Acltype != "" {
+				aclUpdates++
+			}
+			return f.target, nil
+		}
+		req, _ := cloneRetryRequest(ProtocolSMB, nil)
+		info := &cloneInfo{Mode: tnsapi.CloneModeCOW, SnapshotID: "snap", Reused: reused}
+
+		if _, err := NewControllerService(m, NewNodeRegistry(), "").setupSMBVolumeFromClone(context.Background(), req, f.target, "truenas.example", info); err != nil {
+			t.Fatalf("reused=%v: setup failed: %v", reused, err)
+		}
+		want := 1
+		if reused {
+			want = 0
+		}
+		if aclUpdates != want {
+			t.Errorf("reused=%v: ACL conversions = %d, want %d", reused, aclUpdates, want)
+		}
+	}
+}
+
 // Cleanup after a failed clone must not run on the request context: it has usually just
 // expired, and that is why the clone failed.
 func TestCreateVolumeFromSnapshotCleanupUsesDetachedContext(t *testing.T) {

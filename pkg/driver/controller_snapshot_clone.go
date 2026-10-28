@@ -21,6 +21,9 @@ type cloneParameters struct {
 	parentDataset     string
 	newVolumeName     string
 	newDatasetName    string
+	// receivedCopy is set in detached (send/receive) mode, where the new dataset carries no
+	// csi_volume_name until setup writes it.
+	receivedCopy bool
 }
 
 // cloneInfo holds metadata about how a clone was created.
@@ -131,6 +134,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		mode = cloneModeCOW
 	}
 
+	cloneParams.receivedCopy = mode == cloneModeDetached
 	clone := func() (*tnsapi.Dataset, error) {
 		switch mode {
 		case cloneModeDetachedSnapshotRestore:
@@ -673,8 +677,11 @@ func (s *ControllerService) findOwnCloneTarget(ctx context.Context, params *clon
 		return nil, false, nil
 	}
 	// The clone call writes both properties, so a dataset without them was not cloned here.
+	// Detached mode is the exception: replication copies the source's managed_by but not
+	// csi_volume_name, which only setup writes. A receive is atomic, so a dataset at this
+	// request-unique path with managed_by and no name is this request's completed receive.
 	managedBy, volumeName := ownership.props[tnsapi.PropertyManagedBy], ownership.props[tnsapi.PropertyCSIVolumeName]
-	if managedBy != tnsapi.ManagedByValue || volumeName == "" {
+	if managedBy != tnsapi.ManagedByValue || (volumeName == "" && !params.receivedCopy) {
 		return nil, false, status.Errorf(codes.AlreadyExists,
 			"dataset %s already exists but is not marked as volume %s (%s=%q, %s=%q)", params.newDatasetName, params.newVolumeName,
 			tnsapi.PropertyManagedBy, managedBy, tnsapi.PropertyCSIVolumeName, volumeName)
@@ -694,6 +701,10 @@ func (s *ControllerService) promoteReusedClone(ctx context.Context, dataset *tns
 		return nil
 	}
 	if err := s.apiClient.PromoteDataset(ctx, dataset.ID); err != nil {
+		if tnsapi.IsNotAClone(err) {
+			klog.Infof("Clone %s is no longer a clone (already promoted), nothing to promote", dataset.ID)
+			return nil
+		}
 		return status.Errorf(codes.Internal, "Failed to promote clone %s: %v", dataset.ID, err)
 	}
 	return nil

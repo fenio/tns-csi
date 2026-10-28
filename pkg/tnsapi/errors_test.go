@@ -67,6 +67,24 @@ func TestClassifiers(t *testing.T) {
 	}
 }
 
+func TestIsNotAClone(t *testing.T) {
+	for _, tt := range []struct {
+		err  error
+		want bool
+	}{
+		{err: nil},
+		{err: errors.New("context deadline exceeded")},
+		{err: apiErr("EINVAL", "Only cloned datasets can be promoted."), want: true},
+		{err: apiErr("EINVAL", "dataset is busy")},
+		{err: dataErr("EINVAL", "Only cloned datasets can be promoted."), want: true},
+		{err: fmt.Errorf("failed to promote dataset tank/x: %w", errors.New("cannot promote 'tank/x': not a cloned filesystem")), want: true},
+	} {
+		if got := IsNotAClone(tt.err); got != tt.want {
+			t.Errorf("IsNotAClone(%v) = %v, want %v", tt.err, got, tt.want)
+		}
+	}
+}
+
 func FuzzClassifiers(f *testing.F) {
 	f.Add("ENOENT", "missing")
 	f.Add("", "dependent clones")

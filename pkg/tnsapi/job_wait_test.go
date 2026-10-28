@@ -100,3 +100,50 @@ func TestWaitForJobReturnsAfterClientClose(t *testing.T) {
 		t.Errorf("WaitForJob() took %v after Close()", time.Since(start))
 	}
 }
+
+// A retried detached clone must find the replication an earlier attempt started into its
+// target, so the query asks for one-time replication jobs and keeps only those whose
+// target_dataset argument is that dataset, oldest first.
+func TestFindReplicationJobsForTarget(t *testing.T) {
+	var mu sync.Mutex
+	var params []interface{}
+	server := newMockWSServer()
+	server.handler = func(conn *websocket.Conn) {
+		serveMockRequests(conn, func(req Request) []Response {
+			if req.Method == methodAuthLoginWithAPIKey {
+				return []Response{{ID: req.ID, Result: json.RawMessage(`true`)}}
+			}
+			mu.Lock()
+			params = req.Params
+			mu.Unlock()
+			return []Response{{ID: req.ID, Result: json.RawMessage(`[
+				{"id": 9, "method": "replication.run_onetime", "state": "RUNNING", "arguments": [{"target_dataset": "tank/csi/pvc-new"}]},
+				{"id": 5, "method": "replication.run_onetime", "state": "FAILED", "error": "boom", "arguments": [{"target_dataset": "tank/csi/pvc-new"}]},
+				{"id": 7, "method": "replication.run_onetime", "state": "SUCCESS", "arguments": [{"target_dataset": "tank/csi/pvc-other"}]}
+			]`)}}
+		})
+	}
+	t.Cleanup(server.Close)
+	client, err := NewClient(server.URL(), "test-api-key", false)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer cleanupClient(client)
+
+	jobs, err := client.FindReplicationJobsForTarget(context.Background(), "tank/csi/pvc-new")
+	if err != nil {
+		t.Fatalf("FindReplicationJobsForTarget() error = %v", err)
+	}
+	if len(jobs) != 2 || jobs[0].ID != 5 || jobs[0].State != "FAILED" || jobs[1].ID != 9 || jobs[1].State != "RUNNING" {
+		t.Fatalf("jobs = %+v, want jobs 5 (FAILED) then 9 (RUNNING)", jobs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	got, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[[["method","=","replication.run_onetime"]]]`; string(got) != want {
+		t.Errorf("core.get_jobs params = %s, want %s", got, want)
+	}
+}

@@ -70,6 +70,11 @@ type MockAPIClientForSnapshots struct {
 	CreateSMBShareFunc             func(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error)
 	QuerySMBShareFunc              func(ctx context.Context, path string) ([]tnsapi.SMBShare, error)
 	SetFilesystemACLFunc           func(ctx context.Context, path string) error
+
+	// Replication hooks; unset, replication succeeds immediately and no job is known.
+	FindReplicationJobsForTargetFunc func(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error)
+	WaitForJobFunc                   func(ctx context.Context, jobID int, pollInterval time.Duration) error
+	RunOnetimeReplicationAndWaitFunc func(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -405,13 +410,26 @@ func (m *MockAPIClientForSnapshots) GetJobStatus(ctx context.Context, jobID int)
 }
 
 func (m *MockAPIClientForSnapshots) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	if m.WaitForJobFunc != nil {
+		return m.WaitForJobFunc(ctx, jobID, pollInterval)
+	}
 	// Mock implementation - always succeed immediately
 	return nil
 }
 
 func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
+	if m.RunOnetimeReplicationAndWaitFunc != nil {
+		return m.RunOnetimeReplicationAndWaitFunc(ctx, params, pollInterval)
+	}
 	// Mock implementation - always succeed
 	return nil
+}
+
+func (m *MockAPIClientForSnapshots) FindReplicationJobsForTarget(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+	if m.FindReplicationJobsForTargetFunc != nil {
+		return m.FindReplicationJobsForTargetFunc(ctx, target)
+	}
+	return nil, nil
 }
 
 func (m *MockAPIClientForSnapshots) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {

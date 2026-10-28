@@ -449,6 +449,10 @@ func (m *mockAPIClient) RunOnetimeReplicationAndWait(ctx context.Context, params
 	return nil // Stub implementation
 }
 
+func (m *mockAPIClient) FindReplicationJobsForTarget(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+	return nil, nil // Stub implementation
+}
+
 func (m *mockAPIClient) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {
 	if m.getDatasetWithPropertiesFunc != nil {
 		return m.getDatasetWithPropertiesFunc(ctx, datasetID)

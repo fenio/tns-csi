@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2835,6 +2836,7 @@ type ReplicationJobState struct {
 	Result      interface{}            `json:"result"`
 	TimeStarted *ejsonDate             `json:"time_started,omitempty"`
 	TimeEnded   *ejsonDate             `json:"time_finished,omitempty"`
+	Arguments   []json.RawMessage      `json:"arguments,omitempty"` // the call's params
 }
 
 type ejsonDate struct {
@@ -2950,6 +2952,35 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 			}
 		}
 	}
+}
+
+// FindReplicationJobsForTarget returns the one-time replication jobs middlewared still
+// holds (it forgets them on restart) that replicate into target, oldest first.
+func (c *Client) FindReplicationJobsForTarget(ctx context.Context, target string) ([]ReplicationJobState, error) {
+	var jobs []ReplicationJobState
+	err := c.Call(ctx, "core.get_jobs", []interface{}{
+		[]interface{}{
+			[]interface{}{"method", "=", "replication.run_onetime"},
+		},
+	}, &jobs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query replication jobs: %w", err)
+	}
+
+	matching := make([]ReplicationJobState, 0, len(jobs))
+	for i := range jobs {
+		if len(jobs[i].Arguments) == 0 {
+			continue
+		}
+		var params struct {
+			TargetDataset string `json:"target_dataset"`
+		}
+		if json.Unmarshal(jobs[i].Arguments[0], &params) == nil && params.TargetDataset == target {
+			matching = append(matching, jobs[i])
+		}
+	}
+	slices.SortFunc(matching, func(a, b ReplicationJobState) int { return a.ID - b.ID })
+	return matching, nil
 }
 
 // RunOnetimeReplicationAndWait runs a one-time replication and waits for completion.

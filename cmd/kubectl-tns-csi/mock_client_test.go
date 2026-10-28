@@ -104,6 +104,7 @@ type mockClient struct {
 	GetJobStatusFunc                 func(ctx context.Context, jobID int) (*tnsapi.ReplicationJobState, error)
 	WaitForJobFunc                   func(ctx context.Context, jobID int, pollInterval time.Duration) error
 	RunOnetimeReplicationAndWaitFunc func(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error
+	FindReplicationJobsForTargetFunc func(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error)
 }
 
 // errNotImplemented is the default error returned when a mock function is not set.
@@ -604,6 +605,13 @@ func (m *mockClient) RunOnetimeReplicationAndWait(ctx context.Context, params tn
 		return m.RunOnetimeReplicationAndWaitFunc(ctx, params, pollInterval)
 	}
 	return errNotImplemented
+}
+
+func (m *mockClient) FindReplicationJobsForTarget(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+	if m.FindReplicationJobsForTargetFunc != nil {
+		return m.FindReplicationJobsForTargetFunc(ctx, target)
+	}
+	return nil, errNotImplemented
 }
 
 // Connection management.

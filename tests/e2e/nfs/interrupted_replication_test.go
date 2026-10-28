@@ -89,16 +89,19 @@ var _ = Describe("Interrupted replication", func() {
 		ctx := context.Background()
 		client := f.TrueNAS.Client()
 
-		By("Creating a source volume with 1 GiB of random data")
+		// TrueNAS rejects speed_limit for LOCAL replications ("Speed limit has no sense
+		// for local replication"), so the copy is made slow by size instead: 1 GiB took
+		// 5-13s on the reference lab, so 6 GiB leaves a wide window to abort mid-transfer.
+		By("Creating a source volume with 6 GiB of random data")
 		pvc, err := f.CreatePVC(ctx, framework.PVCOptions{
-			Name: "resume-token-src", StorageClassName: "tns-csi-nfs", Size: "4Gi",
+			Name: "resume-token-src", StorageClassName: "tns-csi-nfs", Size: "16Gi",
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
 		})
 		Expect(err).NotTo(HaveOccurred())
 		pod, err := f.CreatePod(ctx, framework.PodOptions{Name: "resume-token-src-pod", PVCName: pvc.Name, MountPath: "/data"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.K8s.WaitForPodReady(ctx, pod.Name, 2*time.Minute)).To(Succeed())
-		writeRandomData(ctx, f, pod.Name, 1024)
+		writeRandomData(ctx, f, pod.Name, 6144)
 		pv, err := f.K8s.GetPVForPVC(ctx, pvc.Name)
 		Expect(err).NotTo(HaveOccurred())
 		source := f.GetDatasetPathFromPV(pv)
@@ -119,7 +122,7 @@ var _ = Describe("Interrupted replication", func() {
 			return client.DeleteDataset(context.Background(), target)
 		})
 
-		By("Starting a throttled replication with the same parameters the driver uses")
+		By("Starting a replication with the same parameters the driver uses")
 		var jobID int
 		err = client.Call(ctx, "replication.run_onetime", []any{map[string]any{
 			"direction":                  "PUSH",
@@ -137,7 +140,6 @@ var _ = Describe("Interrupted replication", func() {
 			"retention_policy":           "NONE",
 			"readonly":                   "IGNORE",
 			"allow_from_scratch":         true,
-			"speed_limit":                20 * 1024 * 1024, // 1 GiB takes ~50s, leaving room to abort
 		}}, &jobID)
 		Expect(err).NotTo(HaveOccurred(), "replication.run_onetime failed")
 		GinkgoWriter.Printf("replication job %d -> %s\n", jobID, target)
@@ -150,10 +152,11 @@ var _ = Describe("Interrupted replication", func() {
 			}
 			return status.State, nil
 		}, time.Minute, time.Second).Should(Equal("RUNNING"))
-		time.Sleep(15 * time.Second) // let a few hundred MiB arrive at 20 MiB/s
+		time.Sleep(10 * time.Second) // let a GiB or so arrive, well short of 6 GiB
 		status, err := client.GetJobStatus(ctx, jobID)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(status.State).To(Equal("RUNNING"), "replication finished before it could be aborted; the throttle did not apply")
+		Expect(status.State).To(Equal("RUNNING"),
+			"replication was no longer running when it should have been mid-transfer (state %s, error %q)", status.State, status.Error)
 		Expect(abortJob(ctx, client, jobID)).To(Succeed())
 		Eventually(func() (string, error) {
 			s, statusErr := client.GetJobStatus(ctx, jobID)

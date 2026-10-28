@@ -69,6 +69,7 @@ type MockAPIClientForSnapshots struct {
 	RemoveSubsystemFromPortFunc    func(ctx context.Context, portSubsysID int) error
 	CreateSMBShareFunc             func(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error)
 	QuerySMBShareFunc              func(ctx context.Context, path string) ([]tnsapi.SMBShare, error)
+	SetFilesystemACLFunc           func(ctx context.Context, path string) error
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -219,6 +220,9 @@ func (m *MockAPIClientForSnapshots) GetFilesystemACL(ctx context.Context, path s
 }
 
 func (m *MockAPIClientForSnapshots) SetFilesystemACL(ctx context.Context, path string) error {
+	if m.SetFilesystemACLFunc != nil {
+		return m.SetFilesystemACLFunc(ctx, path)
+	}
 	return nil
 }
 

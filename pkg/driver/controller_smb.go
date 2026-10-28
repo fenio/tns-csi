@@ -129,6 +129,16 @@ func buildSMBVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 func (s *ControllerService) handleExistingSMBVolume(ctx context.Context, params *smbVolumeParams, existingDataset *tnsapi.Dataset, timer *metrics.OperationTimer) (*csi.CreateVolumeResponse, bool, error) {
 	klog.V(4).Infof("Dataset %s already exists (ID: %s), checking idempotency for SMB", params.datasetName, existingDataset.ID)
 
+	// The name collision alone proves nothing: only a dataset marked as this volume's may be completed.
+	if _, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.volumeName, DatasetID: existingDataset.ID}); err != nil {
+		timer.ObserveError()
+		if status.Code(err) == codes.FailedPrecondition {
+			return nil, false, status.Errorf(codes.AlreadyExists,
+				"dataset %s already exists and does not belong to volume %s: %s", existingDataset.ID, params.volumeName, status.Convert(err).Message())
+		}
+		return nil, false, err
+	}
+
 	existingShares, err := s.apiClient.QuerySMBShare(ctx, existingDataset.Mountpoint)
 	if err != nil {
 		timer.ObserveError()
@@ -146,12 +156,31 @@ func (s *ControllerService) handleExistingSMBVolume(ctx context.Context, params 
 	if existingShare == nil {
 		return nil, false, nil
 	}
-	klog.V(4).Infof("SMB volume already exists (share ID: %d), returning existing volume", existingShare.ID)
+	klog.V(4).Infof("SMB volume already exists (share ID: %d), checking capacity compatibility", existingShare.ID)
+
+	existingCapacity := parseCapacityFromComment(existingShare.Comment)
+
+	// CSI spec: return AlreadyExists if volume exists with incompatible capacity
+	if existingCapacity > 0 && existingCapacity != params.requestedCapacity {
+		klog.Warningf("Volume %s exists with different capacity (existing: %d, requested: %d)",
+			params.volumeName, existingCapacity, params.requestedCapacity)
+		timer.ObserveError()
+		return nil, false, status.Errorf(codes.AlreadyExists,
+			"Volume %s already exists with different capacity (existing: %d bytes, requested: %d bytes)",
+			params.volumeName, existingCapacity, params.requestedCapacity)
+	}
 
 	// Ensure properties are set (handles retry after context expired during property-setting)
 	s.ensureSMBProperties(ctx, existingDataset.ID, params, existingShare)
 
-	resp := buildSMBVolumeResponse(params.volumeName, params.server, existingDataset, existingShare, params.requestedCapacity)
+	// The interrupted attempt may have stopped between share creation and the ACL call; applying it again is idempotent.
+	s.applySMBACL(ctx, existingDataset.Mountpoint)
+
+	capacityToReturn := params.requestedCapacity
+	if existingCapacity > 0 {
+		capacityToReturn = existingCapacity
+	}
+	resp := buildSMBVolumeResponse(params.volumeName, params.server, existingDataset, existingShare, capacityToReturn)
 
 	timer.ObserveSuccess()
 	return resp, true, nil
@@ -243,6 +272,16 @@ func (s *ControllerService) createSMBShareForDataset(ctx context.Context, datase
 	return smbShare, nil
 }
 
+// applySMBACL grants authenticated SMB users access to the dataset. A failure is logged, not returned.
+func (s *ControllerService) applySMBACL(ctx context.Context, mountpoint string) {
+	if mountpoint == "" {
+		return
+	}
+	if err := s.apiClient.SetFilesystemACL(ctx, mountpoint); err != nil {
+		klog.Errorf("Failed to set ACL on %s: %v (SMB writes will likely fail with Permission denied)", mountpoint, err)
+	}
+}
+
 // createSMBVolume creates an SMB volume with a ZFS dataset and SMB share.
 func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	timer := metrics.NewVolumeOperationTimer(metrics.ProtocolSMB, "create")
@@ -302,11 +341,7 @@ func (s *ControllerService) createSMBVolume(ctx context.Context, req *csi.Create
 	// Set NFSv4 ACLs AFTER share creation — TrueNAS may apply a preset ACL
 	// when creating the share, so we override it to allow full access for
 	// authenticated SMB users.
-	if dataset.Mountpoint != "" {
-		if aclErr := s.apiClient.SetFilesystemACL(ctx, dataset.Mountpoint); aclErr != nil {
-			klog.Errorf("Failed to set ACL on %s: %v (SMB writes will likely fail with Permission denied)", dataset.Mountpoint, aclErr)
-		}
-	}
+	s.applySMBACL(ctx, dataset.Mountpoint)
 
 	resp := buildSMBVolumeResponse(params.volumeName, params.server, dataset, smbShare, params.requestedCapacity)
 

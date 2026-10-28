@@ -208,12 +208,15 @@ var _ = Describe("Interrupted replication", func() {
 		})).To(Succeed())
 		f.Cleanup.Add(func() error { return f.K8s.DeleteStorageClass(context.Background(), scName) })
 
-		known := map[int]bool{}
-		before, err := listReplicationJobs(ctx, client)
+		restored := "aborted-clone-restored"
+		Expect(f.K8s.CreatePVCFromSnapshot(ctx, restored, "aborted-clone-snap", scName, "4Gi",
+			[]corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany})).To(Succeed())
+		f.RegisterPVCCleanup(restored)
+		restoredPVC, err := f.K8s.GetPVC(ctx, restored)
 		Expect(err).NotTo(HaveOccurred())
-		for _, j := range before {
-			known[j.ID] = true
-		}
+		// Other suites replicate on the same TrueNAS in parallel: only this restore's
+		// volume (named pvc-<UID> by the provisioner) may be aborted.
+		ownTarget := "/pvc-" + string(restoredPVC.UID)
 
 		By("Aborting the first replication the driver starts for the restore")
 		var (
@@ -229,7 +232,7 @@ var _ = Describe("Interrupted replication", func() {
 				jobs, listErr := listReplicationJobs(watchCtx, client)
 				if listErr == nil {
 					for _, j := range jobs {
-						if known[j.ID] || j.State != "RUNNING" || strings.Contains(j.target(), "/csi-detached-snapshots/") {
+						if j.State != "RUNNING" || !strings.HasSuffix(j.target(), ownTarget) {
 							continue
 						}
 						if abortErr := abortJob(watchCtx, client, j.ID); abortErr == nil {
@@ -244,11 +247,6 @@ var _ = Describe("Interrupted replication", func() {
 				time.Sleep(200 * time.Millisecond)
 			}
 		}()
-
-		restored := "aborted-clone-restored"
-		Expect(f.K8s.CreatePVCFromSnapshot(ctx, restored, "aborted-clone-snap", scName, "4Gi",
-			[]corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany})).To(Succeed())
-		f.RegisterPVCCleanup(restored)
 
 		Eventually(func() int {
 			mu.Lock()

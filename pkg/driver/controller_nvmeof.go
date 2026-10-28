@@ -545,7 +545,6 @@ func (s *ControllerService) createNVMeOFVolume(ctx context.Context, req *csi.Cre
 // values = not created here), so a failure never deletes objects it reused.
 type nvmeofCreated struct {
 	subsystemID int
-	namespaceID int
 	zvol        bool
 	portBound   bool
 }
@@ -557,11 +556,6 @@ type nvmeofCreated struct {
 func (s *ControllerService) cleanupNVMeOFCreate(ctx context.Context, created nvmeofCreated, zvolID string, subsystemID, portID int) {
 	ctx, cancel := cleanupContext(ctx)
 	defer cancel()
-	if created.namespaceID != 0 {
-		if err := s.apiClient.DeleteNVMeOFNamespace(ctx, created.namespaceID); err != nil {
-			klog.Errorf("Failed to cleanup NVMe-oF namespace: %v", err)
-		}
-	}
 	// Unbind before deleting the subsystem: TrueNAS may refuse to delete a bound subsystem.
 	switch {
 	case created.subsystemID != 0:

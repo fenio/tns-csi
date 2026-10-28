@@ -44,7 +44,10 @@ func TestMissedPongsForceReconnect(t *testing.T) {
 
 	// Options run before any goroutine starts, so the reconnect backoff is set race-free.
 	shortBackoff := func(c *Client) { c.retryInterval = 20 * time.Millisecond }
-	client, err := NewClient(server.URL(), "test-api-key", false, WithKeepalive(30*time.Millisecond, 60*time.Millisecond), shortBackoff)
+	// The pong timeout is generous so that slow pongs on the healthy second connection (the
+	// race detector and a loaded CI runner) cannot force another reconnect during the Call
+	// below; the silent first connection still trips the limit in a couple of seconds.
+	client, err := NewClient(server.URL(), "test-api-key", false, WithKeepalive(30*time.Millisecond, 500*time.Millisecond), shortBackoff)
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}

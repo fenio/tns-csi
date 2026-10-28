@@ -898,13 +898,6 @@ func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi
 	}
 }
 
-// createVolumeFromVolume creates a new volume by cloning an existing volume.
-// This is done by creating a temporary snapshot and cloning from it.
-//
-// The clone maintains a COW (Copy-on-Write) relationship with the temporary snapshot.
-// This is space-efficient as the clone shares blocks with the source until modified.
-// The temporary snapshot is kept because the clone depends on it - this is fundamental
-// ZFS behavior where clones always depend on their origin snapshot.
 // existingSnapshot returns the snapshot of dataset whose full name (dataset@name) is
 // fullName, or nil when it does not exist or the query fails (the caller then tries to
 // create it, and a create of an existing snapshot reports EEXIST).
@@ -924,6 +917,13 @@ func (s *ControllerService) existingSnapshot(ctx context.Context, dataset, fullN
 	return nil
 }
 
+// createVolumeFromVolume creates a new volume by cloning an existing volume.
+// This is done by creating a temporary snapshot and cloning from it.
+//
+// The clone maintains a COW (Copy-on-Write) relationship with the temporary snapshot.
+// This is space-efficient as the clone shares blocks with the source until modified.
+// The temporary snapshot is kept because the clone depends on it - this is fundamental
+// ZFS behavior where clones always depend on their origin snapshot.
 func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi.CreateVolumeRequest, sourceVolumeID string) (*csi.CreateVolumeResponse, error) {
 	klog.V(4).Infof("=== createVolumeFromVolume CALLED === New volume: %s, Source volume: %s", req.GetName(), sourceVolumeID)
 

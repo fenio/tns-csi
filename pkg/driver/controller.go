@@ -473,6 +473,18 @@ func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 }
 
+// createOutcomeUnknown reports whether a failed create request may still have been applied
+// by TrueNAS: the connection was lost after it was sent, or the request context ran out
+// before middlewared answered. Only an error middlewared itself returned (*tnsapi.Error)
+// proves the create did not happen once ctx is done.
+func createOutcomeUnknown(ctx context.Context, err error) bool {
+	if errors.Is(err, tnsapi.ErrUncertainOutcome) {
+		return true
+	}
+	var apiErr *tnsapi.Error
+	return ctx.Err() != nil && !errors.As(err, &apiErr)
+}
+
 // This is necessary because after ZFS clone promotion:
 //   - The snapshot moves from the source to the promoted clone.
 //   - The original source volume becomes a dependent of the promoted snapshot.

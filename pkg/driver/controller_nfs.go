@@ -511,13 +511,16 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	})
 	if err != nil {
 		klog.Errorf("Failed to create NFS share for dataset %s (mountpoint: %s): %v", dataset.ID, dataset.Mountpoint, err)
-		if datasetIsNew {
+		switch {
+		case datasetIsNew && createOutcomeUnknown(ctx, err):
+			klog.Warningf("Keeping dataset %s: the NFS share may have been created; the retry converges through the existing-volume path, which looks the share up by path", dataset.ID)
+		case datasetIsNew:
 			cleanupCtx, cancel := cleanupContext(ctx)
 			if delErr := s.apiClient.DeleteDataset(cleanupCtx, dataset.ID); delErr != nil {
 				klog.Errorf("Failed to cleanup dataset after NFS share creation failure: %v", delErr)
 			}
 			cancel()
-		} else {
+		default:
 			klog.Warningf("Skipping dataset cleanup — dataset was pre-existing")
 		}
 		timer.ObserveError()

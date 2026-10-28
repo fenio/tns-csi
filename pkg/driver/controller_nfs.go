@@ -307,12 +307,8 @@ func (s *ControllerService) handleExistingNFSVolume(ctx context.Context, params 
 	klog.V(4).Infof("Dataset %s already exists (ID: %s), checking idempotency", params.datasetName, existingDataset.ID)
 
 	// The name collision alone proves nothing: only a dataset marked as this volume's may be completed.
-	if _, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.volumeName, DatasetID: existingDataset.ID}); err != nil {
+	if err := s.checkExistingVolumeOwnership(ctx, params.volumeName, existingDataset.ID); err != nil {
 		timer.ObserveError()
-		if status.Code(err) == codes.FailedPrecondition {
-			return nil, false, status.Errorf(codes.AlreadyExists,
-				"dataset %s already exists and does not belong to volume %s: %s", existingDataset.ID, params.volumeName, status.Convert(err).Message())
-		}
 		return nil, false, err
 	}
 

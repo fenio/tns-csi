@@ -473,6 +473,26 @@ func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 }
 
+// checkExistingVolumeOwnership verifies that a dataset found at a new volume's path was made
+// for that volume, before the existing-volume path completes it. The name collision alone
+// proves nothing: the dataset must carry managed_by=tns-csi (the create call writes it) and
+// no other volume's name; anything else is AlreadyExists.
+func (s *ControllerService) checkExistingVolumeOwnership(ctx context.Context, volumeName, datasetID string) error {
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: volumeName, DatasetID: datasetID})
+	if status.Code(err) == codes.FailedPrecondition {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to volume %s: %s", datasetID, volumeName, status.Convert(err).Message())
+	}
+	if err != nil {
+		return err
+	}
+	if managedBy := ownership.props[tnsapi.PropertyManagedBy]; !ownership.notFound && managedBy != tnsapi.ManagedByValue {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and is not marked as managed by tns-csi (%s=%q)", datasetID, tnsapi.PropertyManagedBy, managedBy)
+	}
+	return nil
+}
+
 // createOutcomeUnknown reports whether a failed create request may still have been applied
 // by TrueNAS: the connection was lost after it was sent, or the request context ran out
 // before middlewared answered. Only an error middlewared itself returned (*tnsapi.Error)

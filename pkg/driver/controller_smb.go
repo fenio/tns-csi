@@ -129,13 +129,10 @@ func buildSMBVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 func (s *ControllerService) handleExistingSMBVolume(ctx context.Context, params *smbVolumeParams, existingDataset *tnsapi.Dataset, timer *metrics.OperationTimer) (*csi.CreateVolumeResponse, bool, error) {
 	klog.V(4).Infof("Dataset %s already exists (ID: %s), checking idempotency for SMB", params.datasetName, existingDataset.ID)
 
-	// The name collision alone proves nothing: only a dataset marked as this volume's may be completed.
-	if _, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.volumeName, DatasetID: existingDataset.ID}); err != nil {
+	// The name collision alone proves nothing: only a dataset marked as this volume's may be
+	// completed (and given the everyone@ FULL_CONTROL ACL below).
+	if err := s.checkExistingVolumeOwnership(ctx, params.volumeName, existingDataset.ID); err != nil {
 		timer.ObserveError()
-		if status.Code(err) == codes.FailedPrecondition {
-			return nil, false, status.Errorf(codes.AlreadyExists,
-				"dataset %s already exists and does not belong to volume %s: %s", existingDataset.ID, params.volumeName, status.Convert(err).Message())
-		}
 		return nil, false, err
 	}
 

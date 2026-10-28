@@ -146,6 +146,9 @@ func TestExistingNFSVolumeRejectsUnrestrictedShare(t *testing.T) {
 		QueryNFSShareFunc: func(context.Context, string) ([]tnsapi.NFSShare, error) {
 			return []tnsapi.NFSShare{{ID: 1, Path: dataset.Mountpoint}}, nil
 		},
+		GetDatasetPropertiesFunc: func(context.Context, string, []string) (map[string]string, error) {
+			return map[string]string{tnsapi.PropertyManagedBy: tnsapi.ManagedByValue}, nil
+		},
 	}
 	controller := NewControllerService(mock, NewNodeRegistry(), "")
 	// An existing share must not bypass the access comparison.

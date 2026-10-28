@@ -509,54 +509,70 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 // started into the clone target. TrueNAS keeps running it after that request timed out,
 // and a second one into the same target fails and starts the copy over, so a large volume
 // would never converge. A running job is waited for and a finished one is completed; only
-// a failed one is discarded, so the copy starts again. With no job known, cloneOrResume
-// decides from the target dataset alone.
+// a failed one is discarded, so the copy starts again. With no job known (middlewared
+// forgets jobs when it restarts, which also ends them) a target still holding a
+// receive_resume_token is an interrupted receive and is discarded too; any other target is
+// left for cloneOrResume to resume. Nothing is changed on a dataset that is not this
+// volume's: a job into the path may be someone else's.
 func (s *ControllerService) settleDetachedReplication(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) error {
 	target := params.newDatasetName
 	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
 	if err != nil {
-		return status.Errorf(codes.Internal, "Failed to look up replication jobs for %s: %v", target, err)
+		return status.Errorf(codes.Unavailable, "Failed to look up replication jobs for %s: %v", target, err)
 	}
-	if len(jobs) == 0 {
-		return nil
-	}
-	job := jobs[len(jobs)-1]
-	klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
 
-	switch job.State {
-	case "WAITING", "RUNNING":
-		err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
-		switch {
-		case err == nil:
-		case ctx.Err() != nil:
-			return replicationStillRunning(ctx, target, err)
-		case errors.Is(err, tnsapi.ErrJobNotFound):
-			// middlewared restarted, which ends the job: decide from the dataset alone.
-			return nil
-		case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
-			return s.discardFailedReceive(ctx, target, job.ID, err.Error())
+	// succeeded/failed stay false when no job is known.
+	var succeeded, failed bool
+	reason := "no replication job known and the receive was interrupted"
+	if len(jobs) > 0 {
+		job := jobs[len(jobs)-1]
+		klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
+		switch job.State {
+		case "WAITING", "RUNNING":
+			err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
+			switch {
+			case err == nil:
+				succeeded = true
+			case ctx.Err() != nil:
+				return replicationStillRunning(ctx, target, err)
+			case errors.Is(err, tnsapi.ErrJobNotFound):
+				reason = fmt.Sprintf("job %d is gone and the receive was interrupted", job.ID)
+			case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
+				failed, reason = true, err.Error()
+			default:
+				return status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
+			}
+		case "SUCCESS":
+			succeeded = true
+		case "FAILED", "ABORTED":
+			failed, reason = true, fmt.Sprintf("job %d %s: %s", job.ID, job.State, job.Error)
 		default:
-			return status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
+			return status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
 		}
-	case "SUCCESS":
-	case "FAILED", "ABORTED":
-		return s.discardFailedReceive(ctx, target, job.ID, job.State+": "+job.Error)
-	default:
-		return status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
 	}
 
-	s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
+	dataset, exists, err := s.findOwnCloneTarget(ctx, params)
+	if err != nil || !exists {
+		return err
+	}
+	switch {
+	case succeeded:
+		s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
+	case failed, dataset.ReceiveIncomplete():
+		return s.discardFailedReceive(ctx, target, reason)
+	}
 	return nil
 }
 
-// discardFailedReceive deletes what a failed replication left at target so the copy can
-// start again. The request may already be expiring, so the delete runs detached from it.
-func (s *ControllerService) discardFailedReceive(ctx context.Context, target string, jobID int, reason string) error {
-	klog.Warningf("Replication job %d into %s did not complete (%s); deleting the target and starting again", jobID, target, reason)
+// discardFailedReceive deletes what a failed or interrupted replication left at target so
+// the copy can start again. The request may already be expiring, so the delete runs
+// detached from it.
+func (s *ControllerService) discardFailedReceive(ctx context.Context, target, reason string) error {
+	klog.Warningf("Replication into %s did not complete (%s); deleting the target and starting again", target, reason)
 	ctx, cancel := cleanupContext(ctx)
 	defer cancel()
 	if err := s.apiClient.DeleteDataset(ctx, target); err != nil && !tnsapi.IsNotFound(err) {
-		return status.Errorf(codes.Internal, "Failed to delete %s left by failed replication job %d: %v", target, jobID, err)
+		return status.Errorf(codes.Internal, "Failed to delete %s left by an incomplete replication (%s): %v", target, reason, err)
 	}
 	return nil
 }

@@ -616,6 +616,78 @@ func TestCreateVolumeFromSnapshotDetachedRestartsAfterFailedReplication(t *testi
 	}
 }
 
+// With no job record (middlewared restarted, which also ends the job) a dataset still
+// holding a receive_resume_token is an interrupted receive, not a finished copy: it is
+// discarded and the copy starts again rather than being presented as the volume.
+func TestCreateVolumeFromSnapshotDetachedRestartsInterruptedReceive(t *testing.T) {
+	t.Parallel()
+	for _, forgotten := range []bool{false, true} {
+		var f *detachedReplicationFake
+		if forgotten {
+			f = newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: "RUNNING"}).withReceivedTarget()
+		} else {
+			f = newDetachedReplicationFake().withReceivedTarget()
+		}
+		f.target.ReceiveResumeToken = map[string]interface{}{"value": "1-e604ea4bf-e0-789c63a2"}
+		m := f.mock()
+		m.WaitForJobFunc = func(context.Context, int, time.Duration) error {
+			return fmt.Errorf("waiting for job 41: %w", tnsapi.ErrJobNotFound)
+		}
+		req, snapshotID := detachedRequest()
+
+		resp, err := NewControllerService(m, NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+		if err != nil {
+			t.Fatalf("job forgotten=%v: retry failed: %v", forgotten, err)
+		}
+		checkClonedVolume(t, resp, snapshotID)
+		if !reflect.DeepEqual(f.events, []string{"delete", "replicate"}) {
+			t.Errorf("job forgotten=%v: events=%v, want the partial target deleted, then one new replication", forgotten, f.events)
+		}
+		if !reflect.DeepEqual(f.deletes, []string{cloneRetryTarget}) || len(f.staleCtx) != 0 {
+			t.Errorf("job forgotten=%v: deletes=%v (on canceled ctx: %v), want %s deleted on a live context", forgotten, f.deletes, f.staleCtx, cloneRetryTarget)
+		}
+	}
+}
+
+// Any replication.run_onetime job into the target path (an admin's, say) must not let the
+// driver delete or modify a dataset there that is not this volume's.
+func TestCreateVolumeFromSnapshotDetachedKeepsForeignTarget(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"FAILED", "SUCCESS"} {
+		f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: state}).withReceivedTarget()
+		f.props[tnsapi.PropertyManagedBy] = "someone-else"
+		req, snapshotID := detachedRequest()
+
+		_, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+		if status.Code(err) != codes.AlreadyExists {
+			t.Fatalf("%s: error = %v, want AlreadyExists", state, err)
+		}
+		if len(f.deletes) != 0 || f.replications != 0 || f.promotes != 0 || len(f.deletedSnapshots) != 0 {
+			t.Errorf("%s: deletes=%v replications=%d promotes=%d deleted snapshots=%v, want nothing touched",
+				state, f.deletes, f.replications, f.promotes, f.deletedSnapshots)
+		}
+	}
+}
+
+// A failed job lookup is transient: the provisioner should retry, and nothing is started.
+func TestCreateVolumeFromSnapshotDetachedJobLookupFailureIsUnavailable(t *testing.T) {
+	t.Parallel()
+	f := newDetachedReplicationFake()
+	m := f.mock()
+	m.FindReplicationJobsForTargetFunc = func(context.Context, string) ([]tnsapi.ReplicationJobState, error) {
+		return nil, errors.New("connection reset")
+	}
+	req, snapshotID := detachedRequest()
+
+	_, err := NewControllerService(m, NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("error = %v, want Unavailable", err)
+	}
+	if f.replications != 0 || len(f.deletes) != 0 {
+		t.Errorf("replications=%d deletes=%v, want none", f.replications, f.deletes)
+	}
+}
+
 // When the request's deadline expires during the wait, the copy is still running on
 // TrueNAS: report DeadlineExceeded and keep the target so the next retry picks the job up.
 // This holds for a job this request started as well as one it found.

@@ -1370,14 +1370,23 @@ type DatasetCreateParams struct {
 
 // Dataset represents a ZFS dataset.
 type Dataset struct {
-	Available  map[string]interface{} `json:"available,omitempty"`
-	Used       map[string]interface{} `json:"used,omitempty"`
-	Volsize    map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
-	Origin     map[string]interface{} `json:"origin,omitempty"`  // Origin snapshot of a clone (empty value when not a clone)
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"`
-	Mountpoint string                 `json:"mountpoint,omitempty"`
+	Available map[string]interface{} `json:"available,omitempty"`
+	Used      map[string]interface{} `json:"used,omitempty"`
+	Volsize   map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
+	Origin    map[string]interface{} `json:"origin,omitempty"`  // Origin snapshot of a clone (empty value when not a clone)
+	// ReceiveResumeToken is set while the dataset holds an interrupted resumable receive.
+	ReceiveResumeToken map[string]interface{} `json:"receive_resume_token,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Type               string                 `json:"type"`
+	Mountpoint         string                 `json:"mountpoint,omitempty"`
+}
+
+// ReceiveIncomplete reports whether the dataset holds an interrupted resumable receive. It
+// is false when the query did not return receive_resume_token.
+func (d *Dataset) ReceiveIncomplete() bool {
+	token, ok := d.ReceiveResumeToken["value"].(string)
+	return ok && token != "" && token != "-"
 }
 
 // CreateDataset creates a new ZFS dataset.
@@ -3041,11 +3050,11 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 }
 
 // datasetDecodedProperties are the ZFS properties the Dataset struct decodes (Used,
-// Available, Volsize, Origin). Requesting only these keeps pool.dataset.query from loading
+// Available, Volsize, Origin, ReceiveResumeToken). Requesting only these keeps pool.dataset.query from loading
 // and serializing every ZFS property of every matching dataset, which the client would
 // discard during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are
 // always returned. Keep this in sync with the Dataset struct.
-var datasetDecodedProperties = []string{"used", "available", "volsize", "origin"}
+var datasetDecodedProperties = []string{"used", "available", "volsize", "origin", "receive_resume_token"}
 
 // datasetQueryOptions builds pool.dataset.query options that return only what the client
 // decodes:

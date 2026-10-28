@@ -147,3 +147,24 @@ func TestFindReplicationJobsForTarget(t *testing.T) {
 		t.Errorf("core.get_jobs params = %s, want %s", got, want)
 	}
 }
+
+// An interrupted resumable receive leaves receive_resume_token set on the dataset; an unset
+// token reads "-" (or empty), and a query that did not return the property says nothing.
+func TestDatasetReceiveIncomplete(t *testing.T) {
+	tests := []struct {
+		token map[string]interface{}
+		want  bool
+	}{
+		{token: nil, want: false},
+		{token: map[string]interface{}{"value": "-"}, want: false},
+		{token: map[string]interface{}{"value": ""}, want: false},
+		{token: map[string]interface{}{"value": nil}, want: false},
+		{token: map[string]interface{}{"value": "1-e604ea4bf-e0-789c63a2"}, want: true},
+	}
+	for _, tt := range tests {
+		ds := Dataset{ReceiveResumeToken: tt.token}
+		if got := ds.ReceiveIncomplete(); got != tt.want {
+			t.Errorf("ReceiveIncomplete() with token %v = %v, want %v", tt.token, got, tt.want)
+		}
+	}
+}

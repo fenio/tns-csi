@@ -170,10 +170,17 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 	// Without promotion, deleting the source will fail with "volume has dependent clones".
 	klog.Infof("Attempting to promote detached snapshot dataset %s to break clone dependency", targetDataset)
 	if promoteErr := s.apiClient.PromoteDataset(ctx, targetDataset); promoteErr != nil {
-		// Log the full error for debugging - this helps identify why promotion failed
-		klog.Warningf("PromoteDataset(%s) failed: %v", targetDataset, promoteErr)
-		klog.Warningf("Promotion failure may cause source volume deletion to fail later with 'dependent clones' error")
-		// Continue anyway - snapshot creation can still succeed, but source deletion may be blocked
+		if tnsapi.IsNotAClone(promoteErr) {
+			// A full send/receive produces an independent dataset, not a clone: there is
+			// no origin to break. Observed on TrueNAS 25.10 as "[EBADMSG] Only cloned
+			// datasets can be promoted."
+			klog.V(4).Infof("Detached snapshot dataset %s is not a clone; nothing to promote", targetDataset)
+		} else {
+			// Log the full error for debugging - this helps identify why promotion failed
+			klog.Warningf("PromoteDataset(%s) failed: %v", targetDataset, promoteErr)
+			klog.Warningf("Promotion failure may cause source volume deletion to fail later with 'dependent clones' error")
+			// Continue anyway - snapshot creation can still succeed, but source deletion may be blocked
+		}
 	} else {
 		klog.Infof("Successfully promoted detached snapshot dataset: %s (clone dependency broken)", targetDataset)
 	}

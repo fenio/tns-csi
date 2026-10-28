@@ -937,12 +937,24 @@ jq -r '.items[] | select(.spec.nodeName and .status.phase != "Succeeded" and .st
 It prints one line per volume that needs attention:
 
 - `NOT ATTACHED`: there is no attached VolumeAttachment for the pod's node. Right after the upgrade this is expected until the attach/detach controller's rescan creates them (typically within a couple of minutes), so wait and re-run. If it persists, check the VolumeAttachment's `status.attachError` and the `csi-attacher` logs in the controller pod.
-- `NOT FENCED`: the volume is attached, but the node does not list it in `volumesInUse`.
+- `NOT FENCED`: the volume is attached, but the node does not list it in `volumesInUse`. Restarting the pod in place does not fix this (see below).
 
-Fix `NOT FENCED` volumes without moving them to another node, then re-run the check until it prints nothing:
+Fix `NOT FENCED` volumes by making the kubelet unstage them completely and stage them again, then re-run the check until it prints nothing:
 
-- **Restart each pod on its current node.** A volume is listed once it is mounted again after the upgrade. To keep the replacement on the same node, cordon the other nodes first, delete the pod, wait for it to be running again, then uncordon.
-- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods and lists their volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting.
+- **Stop the workload until the volume is unstaged, then start it again.** Scale the Deployment or StatefulSet to zero (delete the pod if nothing manages it). Wait until the pod is gone *and* the volume's VolumeAttachment has been deleted, then scale back up:
+
+  ```bash
+  kubectl scale deployment/<name> -n <ns> --replicas=0
+  kubectl wait pod -n <ns> -l <selector> --for=delete --timeout=5m
+  until ! kubectl get volumeattachment -o jsonpath='{.items[*].spec.source.persistentVolumeName}' | grep -qw <pv>; do sleep 5; done
+  kubectl scale deployment/<name> -n <ns> --replicas=1
+  ```
+
+  The kubelet unstages the volume within seconds of the pod disappearing. To confirm it, look in the node plugin's log on that node for `Logged out iSCSI volume <id>` or `Disconnected NVMe-oF volume <id>` (NFS and SMB log `Unstaged ... volume` at verbosity 4). The replacement pod can run on any node: the volume is no longer staged anywhere, so there is nothing for the new mount to collide with. This is the procedure that was verified on a real cluster.
+
+- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods, evaluates `attachRequired` afresh for each volume, and lists the volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting. This path has been checked against the kubelet source and the driver's staging code, but not yet on a real cluster.
+
+**Restarting the pod in place does not work** for a Deployment, StatefulSet, or anything else that recreates the pod quickly, even with the other nodes cordoned. The kubelet decides whether a volume needs fencing when it first adds the volume to its desired state, and keeps that decision for as long as any pod on the node uses the volume. A replacement pod on the same node is added to the existing entry before the old pod's volume is unstaged, so `NodeUnstageVolume` never runs, the entry keeps its pre-upgrade decision, and the check keeps printing `NOT FENCED`. (The kubelet re-evaluates an entry only in the other direction, from attachable to non-attachable.) Only removing the last pod for long enough for the unstage to run, or restarting the kubelet, makes it decide again.
 
 Don't drain nodes until the check prints nothing.
 

@@ -12,7 +12,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/fenio/tns-csi/tests/e2e/framework"
@@ -21,44 +20,17 @@ import (
 const (
 	controllerDeployment = "tns-csi-driver-controller"
 	driverNamespace      = "tns-csi"
-	snapshotterContainer = "csi-snapshotter"
 )
 
-// setSnapshotterTimeout replaces the csi-snapshotter sidecar's --timeout and waits for
-// the controller to roll out. It returns the previous value ("" if the flag was unset).
-func setSnapshotterTimeout(ctx context.Context, f *framework.Framework, timeout string) string {
-	deployments := f.K8s.Clientset().AppsV1().Deployments(driverNamespace)
-	d, err := deployments.Get(ctx, controllerDeployment, metav1.GetOptions{})
-	Expect(err).NotTo(HaveOccurred())
-	previous := ""
-	for i := range d.Spec.Template.Spec.Containers {
-		c := &d.Spec.Template.Spec.Containers[i]
-		if c.Name != snapshotterContainer {
-			continue
-		}
-		var args []string
-		for _, a := range c.Args {
-			if v, ok := strings.CutPrefix(a, "--timeout="); ok {
-				previous = v
-				continue
-			}
-			args = append(args, a)
-		}
-		if timeout != "" {
-			args = append(args, "--timeout="+timeout)
-		}
-		c.Args = args
-	}
-	_, err = deployments.Update(ctx, d, metav1.UpdateOptions{FieldManager: "tns-csi-e2e"})
-	Expect(err).NotTo(HaveOccurred())
-	// Helm 4 applies with server-side apply and refuses fields another manager owns, so
-	// drop the ownership this edit recorded; otherwise every later helm upgrade of the
-	// release fails with "conflict with tns-csi-e2e".
-	_, err = deployments.Patch(ctx, controllerDeployment, types.JSONPatchType,
-		[]byte(`[{"op":"replace","path":"/metadata/managedFields","value":[{}]}]`), metav1.PatchOptions{})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(waitForRollout(ctx, f)).To(Succeed())
-	return previous
+// redeployNFS upgrades the release for the nfs suite with extra chart values and waits for
+// the controller to roll out. The change goes through Helm, not an edit of the
+// Deployment: Helm 4 upgrades with server-side apply, and a field written by anything
+// else makes every later upgrade of the release fail with a conflict.
+func redeployNFS(f *framework.Framework, extraSets ...string) {
+	h := framework.NewHelmDeployer(f.Config)
+	h.ExtraSets = extraSets
+	Expect(h.Deploy("nfs")).To(Succeed())
+	Expect(waitForRollout(context.Background(), f)).To(Succeed())
 }
 
 func waitForRollout(ctx context.Context, f *framework.Framework) error {
@@ -129,8 +101,8 @@ var _ = Describe("Detached snapshot retried after a timeout", func() {
 		sum := writeRandomData(ctx, f, pod.Name, 3072)
 
 		By("Shortening the snapshotter timeout so the first CreateSnapshot times out mid-copy")
-		previous := setSnapshotterTimeout(ctx, f, "3s")
-		DeferCleanup(func() { setSnapshotterTimeout(context.Background(), f, previous) })
+		redeployNFS(f, "sidecars.snapshotter.timeout=3s")
+		DeferCleanup(func() { redeployNFS(f) })
 
 		By("Taking a detached snapshot")
 		Expect(f.K8s.CreateVolumeSnapshotClassWithParams(ctx, "snap-retry-class", "tns.csi.io", "Delete",

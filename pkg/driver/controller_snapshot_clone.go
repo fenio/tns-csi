@@ -613,10 +613,6 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 // errCloneTargetExists reports that the clone call found the target dataset already there.
 var errCloneTargetExists = errors.New("clone target dataset already exists")
 
-// cloneCleanupTimeout bounds cleanup after a failed clone. Cleanup does not use the
-// request's deadline: that has usually just expired, and that is why the clone failed.
-const cloneCleanupTimeout = 2 * time.Minute
-
 // cloneOrResume runs clone unless an earlier attempt of this request already made the clone
 // target, and reports whether it reused that dataset. A retried CreateVolume (the
 // provisioner retries after a timeout) must resume from it: cloning again fails with
@@ -742,7 +738,7 @@ func (s *ControllerService) discardClone(ctx context.Context, datasetID string, 
 
 // cleanupPartialClone attempts to clean up a partially created cloned dataset.
 func (s *ControllerService) cleanupPartialClone(ctx context.Context, datasetName string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cloneCleanupTimeout)
+	ctx, cancel := cleanupContext(ctx)
 	defer cancel()
 	if delErr := s.apiClient.DeleteDataset(ctx, datasetName); delErr != nil {
 		if !tnsapi.IsNotFound(delErr) {

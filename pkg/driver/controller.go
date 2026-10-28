@@ -463,6 +463,16 @@ func (s *ControllerService) datasetHasCSIManagedSnapshots(_ context.Context, dat
 	return false, nil
 }
 
+// cleanupTimeout bounds cleanup after a failed operation.
+const cleanupTimeout = 2 * time.Minute
+
+// cleanupContext returns a context for cleanup-on-failure that keeps ctx's values but not its
+// cancellation: the request's deadline has usually just expired (that is why the operation
+// failed), and cleanup on it would silently do nothing and leave orphans behind.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
 // This is necessary because after ZFS clone promotion:
 //   - The snapshot moves from the source to the promoted clone.
 //   - The original source volume becomes a dependent of the promoted snapshot.
@@ -975,9 +985,11 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 	if encodeErr != nil {
 		// Cleanup the temporary snapshot
-		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, snapshot.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup temporary snapshot: %v", delErr)
 		}
+		cancel()
 		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 	}
 
@@ -985,9 +997,11 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	resp, cloneErr := s.createVolumeFromSnapshot(ctx, req, snapshotID)
 	if cloneErr != nil {
 		// Clone failed - cleanup temp snapshot
-		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, snapshot.ID); delErr != nil {
 			klog.Warningf("Failed to cleanup temporary snapshot %s after clone failure: %v", snapshot.ID, delErr)
 		}
+		cancel()
 		return nil, cloneErr
 	}
 

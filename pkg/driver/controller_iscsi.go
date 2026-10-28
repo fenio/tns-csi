@@ -311,15 +311,11 @@ type iscsiCreated struct {
 	targetID int
 }
 
-// iscsiCleanupTimeout bounds cleanup after a failed create. Cleanup does not use the
-// request's deadline: that has usually just expired, and that is why the create failed.
-const iscsiCleanupTimeout = 2 * time.Minute
-
 // cleanupISCSICreate deletes, in reverse order, only the objects this call created. A
 // reused ZVOL may hold data and reused extents/targets belong to an earlier attempt that
 // the next retry will pick up again.
 func (s *ControllerService) cleanupISCSICreate(ctx context.Context, created iscsiCreated) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), iscsiCleanupTimeout)
+	ctx, cancel := cleanupContext(ctx)
 	defer cancel()
 	if created.targetID != 0 {
 		if err := s.apiClient.DeleteISCSITarget(ctx, created.targetID, false); err != nil {

@@ -209,9 +209,11 @@ func (s *ControllerService) createSMBShareForDataset(ctx context.Context, datase
 	if err != nil {
 		klog.Errorf("Failed to create SMB share '%s' for dataset %s (mountpoint: %s): %v", params.volumeName, dataset.ID, dataset.Mountpoint, err)
 		if datasetIsNew {
-			if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
+			cleanupCtx, cancel := cleanupContext(ctx)
+			if delErr := s.apiClient.DeleteDataset(cleanupCtx, dataset.ID); delErr != nil {
 				klog.Errorf("Failed to cleanup dataset after SMB share creation failure: %v", delErr)
 			}
+			cancel()
 		} else {
 			klog.Warningf("Skipping dataset cleanup — dataset was pre-existing")
 		}
@@ -492,7 +494,7 @@ func (s *ControllerService) setupSMBVolumeFromClone(ctx context.Context, req *cs
 		if updateErr != nil {
 			klog.Errorf("SMB clone: failed to update ACL properties on %s: %v", dataset.ID, updateErr)
 			if shareIsNew {
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cloneCleanupTimeout)
+				cleanupCtx, cancel := cleanupContext(ctx)
 				if delShareErr := s.apiClient.DeleteSMBShare(cleanupCtx, smbShare.ID); delShareErr != nil {
 					klog.Errorf("Failed to cleanup SMB share after ACL update failure: %v", delShareErr)
 				}

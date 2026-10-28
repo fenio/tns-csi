@@ -109,7 +109,9 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 	// Ensure we clean up the temporary snapshot
 	defer func() {
 		klog.V(4).Infof("Cleaning up temporary snapshot %s", tempSnapshot)
-		if delErr := s.apiClient.DeleteSnapshot(ctx, tempSnapshot); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, tempSnapshot); delErr != nil {
 			klog.Warningf("Failed to delete temporary snapshot %s: %v", tempSnapshot, delErr)
 		}
 	}()
@@ -140,9 +142,11 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		timer.ObserveError()
 		// Try to clean up the target dataset if it was partially created
 		klog.Warningf("Detached snapshot replication failed: %v. Attempting cleanup of %s", err, targetDataset)
-		if delErr := s.apiClient.DeleteDataset(ctx, targetDataset); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteDataset(cleanupCtx, targetDataset); delErr != nil {
 			klog.Warningf("Failed to cleanup partial detached snapshot dataset: %v", delErr)
 		}
+		cancel()
 		return nil, status.Errorf(codes.Internal, "Failed to create detached snapshot via replication: %v", err)
 	}
 
@@ -187,9 +191,11 @@ func (s *ControllerService) createDetachedSnapshot(ctx context.Context, timer *m
 		// Property setting is critical - without PropertySnapshotID, the snapshot can't be found
 		// during restore operations. We must clean up and fail.
 		klog.Errorf("Failed to set CSI properties on detached snapshot dataset %s: %v. Cleaning up.", targetDataset, err)
-		if delErr := s.apiClient.DeleteDataset(ctx, targetDataset); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteDataset(cleanupCtx, targetDataset); delErr != nil {
 			klog.Errorf("Failed to cleanup detached snapshot dataset after property setting failure: %v", delErr)
 		}
+		cancel()
 		timer.ObserveError()
 		return nil, status.Errorf(codes.Internal, "Failed to set CSI properties on detached snapshot: %v", err)
 	}

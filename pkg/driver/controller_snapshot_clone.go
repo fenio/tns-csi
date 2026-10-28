@@ -508,12 +508,13 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 // settleDetachedReplication deals with a replication an earlier attempt of this request
 // started into the clone target. TrueNAS keeps running it after that request timed out,
 // and a second one into the same target fails and starts the copy over, so a large volume
-// would never converge. A running job is waited for and a finished one is completed; only
-// a failed one is discarded, so the copy starts again. With no job known (middlewared
-// forgets jobs when it restarts, which also ends them) a target still holding a
-// receive_resume_token is an interrupted receive and is discarded too; any other target is
-// left for cloneOrResume to resume. Nothing is changed on a dataset that is not this
-// volume's: a job into the path may be someone else's.
+// would never converge. A running job is waited for. The target of a failed job, and a
+// target still holding a receive_resume_token (an interrupted receive, e.g. one whose job
+// middlewared forgot when it restarted), is discarded so the copy starts again; since
+// user properties may only land at the end of a receive, that target may lack managed_by
+// (checkDiscardableReceive). Any other target is a complete receive: the steps that follow
+// it are (re)run and it is left for cloneOrResume to resume. Nothing is changed on a
+// dataset that is not this volume's: a job into the path may be someone else's.
 func (s *ControllerService) settleDetachedReplication(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) error {
 	target := params.newDatasetName
 	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
@@ -521,29 +522,28 @@ func (s *ControllerService) settleDetachedReplication(ctx context.Context, snaps
 		return status.Errorf(codes.Unavailable, "Failed to look up replication jobs for %s: %v", target, err)
 	}
 
-	// succeeded/failed stay false when no job is known.
-	var succeeded, failed bool
-	reason := "no replication job known and the receive was interrupted"
+	// failed stays false when no job is known.
+	var failed bool
+	reason := "no replication job known"
 	if len(jobs) > 0 {
 		job := jobs[len(jobs)-1]
 		klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
+		reason = fmt.Sprintf("job %d succeeded", job.ID)
 		switch job.State {
 		case "WAITING", "RUNNING":
 			err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
 			switch {
 			case err == nil:
-				succeeded = true
 			case ctx.Err() != nil:
 				return replicationStillRunning(ctx, target, err)
 			case errors.Is(err, tnsapi.ErrJobNotFound):
-				reason = fmt.Sprintf("job %d is gone and the receive was interrupted", job.ID)
+				reason = fmt.Sprintf("job %d is gone", job.ID)
 			case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
 				failed, reason = true, err.Error()
 			default:
 				return status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
 			}
 		case "SUCCESS":
-			succeeded = true
 		case "FAILED", "ABORTED":
 			failed, reason = true, fmt.Sprintf("job %d %s: %s", job.ID, job.State, job.Error)
 		default:
@@ -551,15 +551,52 @@ func (s *ControllerService) settleDetachedReplication(ctx context.Context, snaps
 		}
 	}
 
-	dataset, exists, err := s.findOwnCloneTarget(ctx, params)
-	if err != nil || !exists {
+	existing, err := s.queryExactDataset(ctx, target)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to check for existing dataset %s: %v", target, err)
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+	if failed || existing[0].ReceiveIncomplete() {
+		if !failed {
+			reason += " and the receive was interrupted (the target still holds a receive_resume_token)"
+		}
+		if err := s.checkDiscardableReceive(ctx, params); err != nil {
+			return err
+		}
+		return s.discardFailedReceive(ctx, target, reason)
+	}
+	if _, exists, err := s.findOwnCloneTarget(ctx, params); err != nil || !exists {
 		return err
 	}
+	// A complete receive: the steps that follow it may never have run (the job record is
+	// gone after a middlewared restart, or the request ended first). They are safe to repeat.
+	s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
+	return nil
+}
+
+// checkDiscardableReceive reports whether the dataset at the clone target may be deleted as
+// what this request's failed or interrupted receive left behind. User properties may only
+// land at the end of a receive, so managed_by may be missing; it must not name another
+// owner, and csi_volume_name (written only by setup, after a complete receive) must be
+// empty. Anything else is AlreadyExists and is left untouched.
+func (s *ControllerService) checkDiscardableReceive(ctx context.Context, params *cloneParameters) error {
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.newVolumeName, DatasetID: params.newDatasetName})
 	switch {
-	case succeeded:
-		s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
-	case failed, dataset.ReceiveIncomplete():
-		return s.discardFailedReceive(ctx, target, reason)
+	case status.Code(err) == codes.FailedPrecondition:
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to volume %s: %s", params.newDatasetName, params.newVolumeName, status.Convert(err).Message())
+	case err != nil:
+		return err
+	case ownership.notFound:
+		return nil
+	}
+	managedBy, volumeName := ownership.props[tnsapi.PropertyManagedBy], ownership.props[tnsapi.PropertyCSIVolumeName]
+	if (managedBy != "" && managedBy != tnsapi.ManagedByValue) || volumeName != "" {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and is not an incomplete receive for volume %s (%s=%q, %s=%q)", params.newDatasetName, params.newVolumeName,
+			tnsapi.PropertyManagedBy, managedBy, tnsapi.PropertyCSIVolumeName, volumeName)
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -449,21 +450,24 @@ func TestCreateVolumeFromSnapshotPromoteNothingToDo(t *testing.T) {
 
 // Detached (send/receive) mode: replication copies the source's properties except
 // csi_volume_name, which only setup writes. A receive that TrueNAS finished after the
-// request timed out leaves exactly that state; the retry must complete the volume.
+// request timed out leaves exactly that state; the retry must complete the volume. No job
+// is known (middlewared restarted), so the steps that follow a receive (promote, drop the
+// replicated snapshot) may never have run and are repeated.
 func TestCreateVolumeFromSnapshotDetachedResumesReceivedDataset(t *testing.T) {
 	t.Parallel()
-	f := newCloneRetryFake().withTarget("FILESYSTEM")
-	delete(f.props, tnsapi.PropertyCSIVolumeName)
-	req, snapshotID := cloneRetryRequest(ProtocolNFS, map[string]string{DetachedVolumesFromSnapshotsParam: VolumeContextValueTrue})
+	f := newDetachedReplicationFake().withReceivedTarget()
+	req, snapshotID := detachedRequest()
 
 	resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
 	if err != nil {
 		t.Fatalf("retry failed: %v", err)
 	}
 	checkClonedVolume(t, resp, snapshotID)
-	// A new replication would be followed by a promote of the received dataset.
-	if f.promotes != 0 || len(f.deletes) != 0 {
-		t.Errorf("promotes=%d deletes=%v, want the received dataset reused without a new replication", f.promotes, f.deletes)
+	if f.replications != 0 || len(f.deletes) != 0 {
+		t.Errorf("replications=%d deletes=%v, want the received dataset reused without a new replication", f.replications, f.deletes)
+	}
+	if f.promotes != 1 || !reflect.DeepEqual(f.deletedSnapshots, []string{cloneRetryTarget + "@snap1"}) {
+		t.Errorf("promotes=%d deleted snapshots=%v, want the post-replication promote and snapshot cleanup", f.promotes, f.deletedSnapshots)
 	}
 	if got := f.props[tnsapi.PropertyCSIVolumeName]; got != cloneRetryName {
 		t.Errorf("csi_volume_name = %q after resume, want %q", got, cloneRetryName)
@@ -598,8 +602,12 @@ func TestCreateVolumeFromSnapshotDetachedContinuesAfterSucceededReplication(t *t
 // expired request cannot cancel) and the copy starts again.
 func TestCreateVolumeFromSnapshotDetachedRestartsAfterFailedReplication(t *testing.T) {
 	t.Parallel()
-	for _, state := range []string{"FAILED", "ABORTED"} {
-		f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: state}).withReceivedTarget()
+	for _, state := range []string{"FAILED", "ABORTED", "FAILED without managed_by"} {
+		f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: strings.Fields(state)[0]}).withReceivedTarget()
+		if strings.HasSuffix(state, "without managed_by") {
+			// User properties may only land at the end of a receive.
+			delete(f.props, tnsapi.PropertyManagedBy)
+		}
 		req, snapshotID := detachedRequest()
 
 		resp, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
@@ -618,15 +626,21 @@ func TestCreateVolumeFromSnapshotDetachedRestartsAfterFailedReplication(t *testi
 
 // With no job record (middlewared restarted, which also ends the job) a dataset still
 // holding a receive_resume_token is an interrupted receive, not a finished copy: it is
-// discarded and the copy starts again rather than being presented as the volume.
+// discarded and the copy starts again rather than being presented as the volume. User
+// properties may only land at the end of a receive, so a partial dataset without
+// managed_by is discarded too.
 func TestCreateVolumeFromSnapshotDetachedRestartsInterruptedReceive(t *testing.T) {
 	t.Parallel()
-	for _, forgotten := range []bool{false, true} {
+	for _, tc := range []struct{ forgotten, unmarked bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		forgotten := tc.forgotten
 		var f *detachedReplicationFake
 		if forgotten {
 			f = newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: "RUNNING"}).withReceivedTarget()
 		} else {
 			f = newDetachedReplicationFake().withReceivedTarget()
+		}
+		if tc.unmarked {
+			delete(f.props, tnsapi.PropertyManagedBy)
 		}
 		f.target.ReceiveResumeToken = map[string]interface{}{"value": "1-e604ea4bf-e0-789c63a2"}
 		m := f.mock()
@@ -637,14 +651,14 @@ func TestCreateVolumeFromSnapshotDetachedRestartsInterruptedReceive(t *testing.T
 
 		resp, err := NewControllerService(m, NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
 		if err != nil {
-			t.Fatalf("job forgotten=%v: retry failed: %v", forgotten, err)
+			t.Fatalf("%+v: retry failed: %v", tc, err)
 		}
 		checkClonedVolume(t, resp, snapshotID)
 		if !reflect.DeepEqual(f.events, []string{"delete", "replicate"}) {
-			t.Errorf("job forgotten=%v: events=%v, want the partial target deleted, then one new replication", forgotten, f.events)
+			t.Errorf("%+v: events=%v, want the partial target deleted, then one new replication", tc, f.events)
 		}
 		if !reflect.DeepEqual(f.deletes, []string{cloneRetryTarget}) || len(f.staleCtx) != 0 {
-			t.Errorf("job forgotten=%v: deletes=%v (on canceled ctx: %v), want %s deleted on a live context", forgotten, f.deletes, f.staleCtx, cloneRetryTarget)
+			t.Errorf("%+v: deletes=%v (on canceled ctx: %v), want %s deleted on a live context", tc, f.deletes, f.staleCtx, cloneRetryTarget)
 		}
 	}
 }
@@ -665,6 +679,28 @@ func TestCreateVolumeFromSnapshotDetachedKeepsForeignTarget(t *testing.T) {
 		if len(f.deletes) != 0 || f.replications != 0 || f.promotes != 0 || len(f.deletedSnapshots) != 0 {
 			t.Errorf("%s: deletes=%v replications=%d promotes=%d deleted snapshots=%v, want nothing touched",
 				state, f.deletes, f.replications, f.promotes, f.deletedSnapshots)
+		}
+	}
+}
+
+// A failed receive is only discarded while the target carries no volume name: a dataset
+// setup has already named is never deleted on the strength of a job record.
+func TestCreateVolumeFromSnapshotDetachedKeepsNamedTargetOfFailedJob(t *testing.T) {
+	t.Parallel()
+	for _, unmarked := range []bool{false, true} {
+		f := newDetachedReplicationFake(tnsapi.ReplicationJobState{ID: 41, State: "FAILED"})
+		f.withTarget("FILESYSTEM")
+		if unmarked {
+			delete(f.props, tnsapi.PropertyManagedBy)
+		}
+		req, snapshotID := detachedRequest()
+
+		_, err := NewControllerService(f.mock(), NewNodeRegistry(), "").createVolumeFromSnapshot(context.Background(), req, snapshotID)
+		if status.Code(err) != codes.AlreadyExists {
+			t.Fatalf("unmarked=%v: error = %v, want AlreadyExists", unmarked, err)
+		}
+		if len(f.deletes) != 0 || f.replications != 0 {
+			t.Errorf("unmarked=%v: deletes=%v replications=%d, want nothing touched", unmarked, f.deletes, f.replications)
 		}
 	}
 }

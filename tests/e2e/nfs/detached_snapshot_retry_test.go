@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/fenio/tns-csi/tests/e2e/framework"
@@ -48,7 +49,13 @@ func setSnapshotterTimeout(ctx context.Context, f *framework.Framework, timeout 
 		}
 		c.Args = args
 	}
-	_, err = deployments.Update(ctx, d, metav1.UpdateOptions{})
+	_, err = deployments.Update(ctx, d, metav1.UpdateOptions{FieldManager: "tns-csi-e2e"})
+	Expect(err).NotTo(HaveOccurred())
+	// Helm 4 applies with server-side apply and refuses fields another manager owns, so
+	// drop the ownership this edit recorded; otherwise every later helm upgrade of the
+	// release fails with "conflict with tns-csi-e2e".
+	_, err = deployments.Patch(ctx, controllerDeployment, types.JSONPatchType,
+		[]byte(`[{"op":"replace","path":"/metadata/managedFields","value":[{}]}]`), metav1.PatchOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(waitForRollout(ctx, f)).To(Succeed())
 	return previous

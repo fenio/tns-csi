@@ -2,6 +2,7 @@ package framework
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"sort"
 	"time"
@@ -88,6 +89,56 @@ func (k *KubernetesClient) NodeVolumesAttached(ctx context.Context, node, unique
 		}
 	}
 	return false, nil
+}
+
+// CSIStagingDir is the part of a CSI volume's staging path that the kubelet derives from
+// its handle: <plugin dir>/<driver>/<sha256 of the handle>/globalmount. The mount stays
+// while the volume is staged on the node and disappears once NodeUnstageVolume has run.
+func CSIStagingDir(driver, volumeHandle string) string {
+	return fmt.Sprintf("%s/%x/globalmount", driver, sha256.Sum256([]byte(volumeHandle)))
+}
+
+// StartNodeShell starts a privileged pod in the host's PID namespace on node, for specs
+// that need to look at or act on the node itself, and returns its name once it runs.
+func (k *KubernetesClient) StartNodeShell(ctx context.Context, node string) (string, error) {
+	name := "node-shell-" + node
+	privileged := true
+	var zero int64
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: k.namespace},
+		Spec: corev1.PodSpec{
+			NodeName:                      node,
+			HostPID:                       true,
+			TerminationGracePeriodSeconds: &zero,
+			Tolerations:                   []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
+			Containers: []corev1.Container{{
+				Name:            "shell",
+				Image:           TestPodImage,
+				ImagePullPolicy: corev1.PullIfNotPresent,
+				Command:         []string{"sh", "-c", "while true; do sleep 30; done"},
+				SecurityContext: &corev1.SecurityContext{Privileged: &privileged},
+			}},
+		},
+	}
+	if _, err := k.clientset.CoreV1().Pods(k.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return "", err
+	}
+	return name, k.WaitForPodReady(ctx, name, 3*time.Minute)
+}
+
+// NodeHasMount reports whether the host's mount table, read through a node shell from
+// StartNodeShell, has a mount whose line contains substr.
+func (k *KubernetesClient) NodeHasMount(ctx context.Context, shell, substr string) (bool, error) {
+	out, err := k.ExecInPod(ctx, shell, []string{"sh", "-c", "grep -cF -- \"$0\" /proc/1/mountinfo || true", substr})
+	if err != nil {
+		return false, err
+	}
+	return out != "0", nil
+}
+
+// RunOnHost runs a shell command in the host's namespaces through a node shell.
+func (k *KubernetesClient) RunOnHost(ctx context.Context, shell, command string) (string, error) {
+	return k.ExecInPod(ctx, shell, []string{"nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", command})
 }
 
 // DeploymentOptions describes a single-volume Deployment for cross-node specs.

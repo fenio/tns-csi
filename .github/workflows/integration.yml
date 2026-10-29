@@ -48,6 +48,7 @@ on:
           - access-modes
           - snapshot-restore
           - volume-stress
+          - fencing-probe
           - error-handling
           - encryption
       pr:
@@ -356,6 +357,7 @@ jobs:
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
           CSI_IMAGE_PULL_POLICY: Never
+          E2E_FENCING_PROBE: ${{ inputs.test == 'fencing-probe' && '1' || '' }}
           KUBECONFIG: /tmp/kubeconfig
         run: |
           FOCUS=""
@@ -437,6 +439,7 @@ jobs:
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
           CSI_IMAGE_PULL_POLICY: Never
+          E2E_FENCING_PROBE: ${{ inputs.test == 'fencing-probe' && '1' || '' }}
           KUBECONFIG: /tmp/kubeconfig
         run: |
           FOCUS=""

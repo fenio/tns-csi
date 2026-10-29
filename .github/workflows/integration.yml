@@ -251,6 +251,8 @@ jobs:
           # QEMU SLIRP user-mode networking remaps source ports through NAT,
           # so NFS clients appear to use non-privileged ports (>1024).
           # TrueNAS defaults to allow_nonroot=false which rejects these.
+          # Left enabled afterwards (the TrueNAS is CI-only): the NFS and shared jobs
+          # run in parallel, so turning it off when one ends breaks the other's mounts.
           # Use WebSocket API only — REST (/api/v2.0/...) is deprecated and removed in 26.04.
           if [ ! -x /tmp/websocat ]; then
             curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
@@ -299,21 +301,6 @@ jobs:
           name: e2e-nfs-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
-      - name: Restore NFS allow_nonroot
-        if: always()
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-        run: |
-          if [ ! -x /tmp/websocat ]; then
-            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
-            chmod +x /tmp/websocat
-          fi
-          {
-            echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
-            sleep 5  # let auth complete before sending the next call (TrueNAS processes frames concurrently; 1s wasn't enough)
-            echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":false}]}'
-          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
       - name: Cleanup VM
         if: always()
         run: |
@@ -746,21 +733,6 @@ jobs:
           name: e2e-shared-diagnostics
           path: /tmp/test-logs/
           retention-days: 7
-      - name: Restore NFS allow_nonroot
-        if: always()
-        env:
-          TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
-          TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
-        run: |
-          if [ ! -x /tmp/websocat ]; then
-            curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl
-            chmod +x /tmp/websocat
-          fi
-          {
-            echo "{\"id\":\"1\",\"jsonrpc\":\"2.0\",\"method\":\"auth.login_with_api_key\",\"params\":[\"${TRUENAS_API_KEY}\"]}"
-            sleep 5  # let auth complete before sending the next call (TrueNAS processes frames concurrently; 1s wasn't enough)
-            echo '{"id":"2","jsonrpc":"2.0","method":"nfs.update","params":[{"allow_nonroot":false}]}'
-          } | timeout 30 /tmp/websocat -k "wss://${TRUENAS_HOST}/api/current" || echo "WARNING: Failed to restore allow_nonroot"
       - name: Cleanup VM
         if: always()
         run: |

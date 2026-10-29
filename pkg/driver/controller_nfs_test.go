@@ -590,7 +590,9 @@ func TestSetupNFSVolumeFromClone(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := &MockAPIClientForSnapshots{}
+			mockClient := &MockAPIClientForSnapshots{
+				QueryNFSSharesFunc: func(context.Context, []interface{}) ([]tnsapi.NFSShare, error) { return nil, nil },
+			}
 			tt.mockSetup(mockClient)
 
 			controller := NewControllerService(mockClient, NewNodeRegistry(), "")

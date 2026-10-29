@@ -407,9 +407,11 @@ func (s *ControllerService) createRegularSnapshot(ctx context.Context, timer *me
 		// which could allow the source volume to be deleted while this snapshot exists.
 		// Clean up the orphaned snapshot and fail.
 		klog.Errorf("Failed to set CSI properties on snapshot %s: %v — deleting orphaned snapshot", snapshot.ID, err)
-		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, snapshot.ID); delErr != nil {
 			klog.Warningf("Failed to clean up orphaned snapshot %s: %v", snapshot.ID, delErr)
 		}
+		cancel()
 		return nil, status.Errorf(codes.Internal, "Failed to set tracking properties on snapshot: %v", err)
 	}
 

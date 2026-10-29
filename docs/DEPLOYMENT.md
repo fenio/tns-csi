@@ -941,18 +941,21 @@ It prints one line per volume that needs attention:
 
 Fix `NOT FENCED` volumes by making the kubelet unstage them completely and stage them again, then re-run the check until it prints nothing:
 
-- **Stop the workload until the volume is unstaged, then start it again.** Scale the Deployment or StatefulSet to zero (delete the pod if nothing manages it). Wait until the pod is gone *and* the volume's VolumeAttachment has been deleted, then scale back up:
+- **Stop the workload until the node has unstaged the volume, then start it again.** Scale the Deployment or StatefulSet to zero (delete the pod if nothing manages it). Wait until the pod is gone *and* the node plugin on the pod's node has logged out of the volume, then scale back up:
 
   ```bash
   kubectl scale deployment/<name> -n <ns> --replicas=0
   kubectl wait pod -n <ns> -l <selector> --for=delete --timeout=5m
-  until ! kubectl get volumeattachment -o jsonpath='{.items[*].spec.source.persistentVolumeName}' | grep -qw <pv>; do sleep 5; done
+  plugin=$(kubectl get pod -n tns-csi -l app.kubernetes.io/component=node --field-selector spec.nodeName=<node> -o name)
+  until kubectl logs -n tns-csi "$plugin" -c tns-csi-plugin --since=10m | grep -E 'Logged out iSCSI volume|Disconnected NVMe-oF volume' | grep -qw <pv>; do sleep 5; done
   kubectl scale deployment/<name> -n <ns> --replicas=1
   ```
 
-  The kubelet unstages the volume within seconds of the pod disappearing. To confirm it, look in the node plugin's log on that node for `Logged out iSCSI volume <id>` or `Disconnected NVMe-oF volume <id>` (NFS and SMB log `Unstaged ... volume` at verbosity 4). The replacement pod can run on any node: the volume is no longer staged anywhere, so there is nothing for the new mount to collide with. This is the procedure that was verified on a real cluster.
+  **Do not use the VolumeAttachment as the signal.** The attach/detach controller only waits for a node to unstage volumes the node lists in `volumesInUse`, which is exactly what a `NOT FENCED` volume is missing, so it deletes the VolumeAttachment as soon as the pod is gone. The node can still have the volume staged at that point, typically for a second or two. A replacement started in that window joins the kubelet's pre-upgrade entry and the volume stays `NOT FENCED`. Once the node plugin has logged out, the volume is no longer staged anywhere, so the replacement can run on any node. Re-run the check afterwards: if the volume is still listed, scale to zero and wait again.
 
-- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods, evaluates `attachRequired` afresh for each volume, and lists the volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting. This path has been checked against the kubelet source and the driver's staging code, but not yet on a real cluster.
+  The log lines are at the default log level for iSCSI and NVMe-oF. NFS and SMB volumes are never at risk of the filesystem damage described here, and log `Unstaged ... volume` only at verbosity 4.
+
+- **Or restart the kubelet on each node, one node at a time** (for example `talosctl -n <node> service kubelet restart` on Talos, `systemctl restart kubelet` elsewhere). The kubelet rebuilds its volume state from the running pods, evaluates `attachRequired` afresh for each volume, and lists the volumes again, without restarting pods. It also calls `NodeStageVolume` and `NodePublishVolume` again for volumes that are already mounted; the driver finds the existing iSCSI session or NVMe-oF connection and the existing mounts and returns without logging in again or remounting. Both remedies are covered by the `crossnode` e2e suite, which upgrades a v0.20.0 install in place on a real cluster.
 
 **Restarting the pod in place does not work** for a Deployment, StatefulSet, or anything else that recreates the pod quickly, even with the other nodes cordoned. The kubelet decides whether a volume needs fencing when it first adds the volume to its desired state, and keeps that decision for as long as any pod on the node uses the volume. A replacement pod on the same node is added to the existing entry before the old pod's volume is unstaged, so `NodeUnstageVolume` never runs, the entry keeps its pre-upgrade decision, and the check keeps printing `NOT FENCED`. (The kubelet re-evaluates an entry only in the other direction, from attachable to non-attachable.) Only removing the last pod for long enough for the unstage to run, or restarting the kubelet, makes it decide again.
 
@@ -962,7 +965,7 @@ Don't drain nodes until the check prints nothing.
 
 Each move under `attachRequired: false` (a drain, an eviction, a node coming back after a crash) could leave the volume mounted read-write on two nodes for a few seconds. The damage this causes to ext4 can stay hidden: the filesystem keeps reporting `clean`, and nothing fails until the damaged metadata is next used, which can be days later. The volume's history tells you whether it is at risk: look in the nodes' kernel logs for `EXT4-fs (...): mounted filesystem <uuid>` on one node before `unmounting filesystem <uuid>` for the same UUID on another node.
 
-For a volume you are unsure about, the only reliable check is an offline `e2fsck`. Scale its workload to zero, wait until its VolumeAttachment is gone, then run a read-only check against the zvol from the TrueNAS shell (or any host with `e2fsprogs` that can see the device):
+For a volume you are unsure about, the only reliable check is an offline `e2fsck`. Scale its workload to zero, wait until the node plugin has logged out of it (as above; the VolumeAttachment can be gone before that), then run a read-only check against the zvol from the TrueNAS shell (or any host with `e2fsprogs` that can see the device):
 
 ```bash
 e2fsck -fn /dev/zvol/<pool>/<dataset>

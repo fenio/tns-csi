@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -20,6 +21,9 @@ type cloneParameters struct {
 	parentDataset     string
 	newVolumeName     string
 	newDatasetName    string
+	// receivedCopy is set in detached (send/receive) mode, where the new dataset carries no
+	// csi_volume_name until setup writes it.
+	receivedCopy bool
 }
 
 // cloneInfo holds metadata about how a clone was created.
@@ -31,6 +35,9 @@ type cloneInfo struct {
 	OriginSnapshot string
 	// SnapshotID is the CSI snapshot ID used as the source
 	SnapshotID string
+	// Reused is set when the dataset was cloned by an earlier attempt of this CreateVolume.
+	// Setup must then never delete it on failure: it may already hold presentation objects.
+	Reused bool
 }
 
 // createVolumeFromSnapshot creates a new volume from a snapshot by cloning.
@@ -127,37 +134,44 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 		mode = cloneModeCOW
 	}
 
-	var clonedDataset *tnsapi.Dataset
-	var cloneErr error
-
-	switch mode {
-	case cloneModeDetachedSnapshotRestore:
-		// Source is a detached snapshot (stored as a dataset, not a ZFS snapshot)
-		// Create temp snapshot on the dataset, clone from it, optionally promote
-		klog.Infof("Restoring volume %s from detached snapshot dataset %s (promote=%v)", req.GetName(), snapshotMeta.DatasetName, promoteDetachedRestore)
-		clonedDataset, cloneErr = s.executeDetachedSnapshotRestore(ctx, snapshotMeta, cloneParams, promoteDetachedRestore)
-	case cloneModeDetached:
-		// Truly independent copy via send/receive
-		klog.Infof("Creating detached (send/receive) volume %s from snapshot (truly independent)", req.GetName())
-		clonedDataset, cloneErr = s.executeDetachedVolumeClone(ctx, snapshotMeta, cloneParams)
-	case cloneModePromoted:
-		// Clone+promote (reversed dependency, allows snapshot deletion)
-		klog.Infof("Creating promoted clone for volume %s from snapshot (reversed dependency)", req.GetName())
-		clonedDataset, cloneErr = s.executePromotedSnapshotClone(ctx, snapshotMeta, cloneParams)
-	case cloneModeCOW:
-		// Explicit COW clone (clone depends on snapshot)
-		klog.Infof("Creating COW clone for volume %s from snapshot (normal dependency)", req.GetName())
-		clonedDataset, cloneErr = s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
+	cloneParams.receivedCopy = mode == cloneModeDetached
+	clone := func() (*tnsapi.Dataset, error) {
+		switch mode {
+		case cloneModeDetachedSnapshotRestore:
+			// Source is a detached snapshot (stored as a dataset, not a ZFS snapshot)
+			// Create temp snapshot on the dataset, clone from it, optionally promote
+			klog.Infof("Restoring volume %s from detached snapshot dataset %s (promote=%v)", req.GetName(), snapshotMeta.DatasetName, promoteDetachedRestore)
+			return s.executeDetachedSnapshotRestore(ctx, snapshotMeta, cloneParams, promoteDetachedRestore)
+		case cloneModeDetached:
+			// Truly independent copy via send/receive
+			klog.Infof("Creating detached (send/receive) volume %s from snapshot (truly independent)", req.GetName())
+			return s.executeDetachedVolumeClone(ctx, snapshotMeta, cloneParams)
+		case cloneModePromoted:
+			// Clone+promote (reversed dependency, allows snapshot deletion)
+			klog.Infof("Creating promoted clone for volume %s from snapshot (reversed dependency)", req.GetName())
+			return s.executePromotedSnapshotClone(ctx, snapshotMeta, cloneParams)
+		default:
+			// Explicit COW clone (clone depends on snapshot)
+			klog.Infof("Creating COW clone for volume %s from snapshot (normal dependency)", req.GetName())
+			return s.executeSnapshotClone(ctx, snapshotMeta, cloneParams)
+		}
 	}
-	if cloneErr != nil {
-		return nil, cloneErr
+	if mode == cloneModeDetached {
+		if err := s.settleDetachedReplication(ctx, snapshotMeta, cloneParams); err != nil {
+			return nil, err
+		}
 	}
-	klog.Infof("Clone operation succeeded: dataset=%s, type=%s, mountpoint=%s",
-		clonedDataset.Name, clonedDataset.Type, clonedDataset.Mountpoint)
+	clonedDataset, reused, err := s.cloneOrResume(ctx, cloneParams, mode == cloneModePromoted, promoteDetachedRestore, clone)
+	if err != nil {
+		return nil, err
+	}
+	klog.Infof("Clone operation succeeded: dataset=%s, type=%s, mountpoint=%s, reused=%v",
+		clonedDataset.Name, clonedDataset.Type, clonedDataset.Mountpoint, reused)
 
 	// Build clone info for property tracking
 	cloneInfoData := cloneInfo{
 		SnapshotID: snapshotID,
+		Reused:     reused,
 	}
 	switch mode {
 	case cloneModeDetachedSnapshotRestore:
@@ -184,7 +198,7 @@ func (s *ControllerService) createVolumeFromSnapshot(ctx context.Context, req *c
 	s.waitForZFSSyncIfNVMeOF(snapshotMeta.Protocol)
 
 	// Get server and subsystemNQN parameters
-	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset)
+	server, subsystemNQN, err := s.getVolumeParametersForSnapshot(ctx, params, snapshotMeta, clonedDataset, &cloneInfoData)
 	if err != nil {
 		klog.Errorf("Failed to get volume parameters for snapshot: %v", err)
 		return nil, err
@@ -372,6 +386,9 @@ func (s *ControllerService) executeSnapshotClone(ctx context.Context, snapshotMe
 
 	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
 	if err != nil {
+		if tnsapi.IsAlreadyExists(err) {
+			return nil, errCloneTargetExists
+		}
 		klog.Errorf("Failed to clone snapshot: %v. Checking if dataset was created...", err)
 		s.cleanupPartialClone(ctx, params.newDatasetName)
 		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
@@ -404,6 +421,9 @@ func (s *ControllerService) executePromotedSnapshotClone(ctx context.Context, sn
 
 	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneParams)
 	if err != nil {
+		if tnsapi.IsAlreadyExists(err) {
+			return nil, errCloneTargetExists
+		}
 		klog.Errorf("Failed to clone snapshot for promotion: %v", err)
 		s.cleanupPartialClone(ctx, params.newDatasetName)
 		return nil, status.Errorf(codes.Internal, "Failed to clone snapshot: %v", err)
@@ -414,11 +434,10 @@ func (s *ControllerService) executePromotedSnapshotClone(ctx context.Context, sn
 	// Step 2: Promote the clone to reverse the dependency
 	// After promotion: snapshot depends on clone (clone becomes the origin)
 	if err := s.apiClient.PromoteDataset(ctx, params.newDatasetName); err != nil {
+		// If the promote went through and only its response was lost, the delete fails
+		// (dependent clones) and the retry resumes from the promoted clone.
 		klog.Errorf("Failed to promote clone %s: %v. Cleaning up.", params.newDatasetName, err)
-		// Cleanup the clone since we couldn't complete the operation
-		if delErr := s.apiClient.DeleteDataset(ctx, params.newDatasetName); delErr != nil {
-			klog.Errorf("Failed to cleanup clone after promotion failure: %v", delErr)
-		}
+		s.cleanupPartialClone(ctx, params.newDatasetName)
 		return nil, status.Errorf(codes.Internal, "Failed to promote clone: %v", err)
 	}
 
@@ -439,10 +458,7 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 	// Step 1: Run one-time replication (zfs send/receive) to create independent copy
 	// We use the snapshot directly as the source, not the parent dataset
 	sourceDataset := snapshotMeta.DatasetName
-	snapshotNameOnly := snapshotMeta.SnapshotName
-	if idx := strings.LastIndex(snapshotMeta.SnapshotName, "@"); idx != -1 {
-		snapshotNameOnly = snapshotMeta.SnapshotName[idx+1:]
-	}
+	snapshotNameOnly := replicatedSnapshotName(snapshotMeta)
 
 	klog.V(4).Infof("Running one-time replication from %s (snapshot: %s) to %s",
 		sourceDataset, snapshotNameOnly, params.newDatasetName)
@@ -467,32 +483,18 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 
 	err := s.apiClient.RunOnetimeReplicationAndWait(ctx, replicationParams, ReplicationPollInterval)
 	if err != nil {
-		klog.Errorf("Detached volume clone replication failed: %v. Attempting cleanup of %s", err, params.newDatasetName)
-		if delErr := s.apiClient.DeleteDataset(ctx, params.newDatasetName); delErr != nil {
-			klog.Warningf("Failed to cleanup partial detached clone dataset: %v", delErr)
+		if ctx.Err() != nil {
+			return nil, replicationStillRunning(ctx, params.newDatasetName, err)
 		}
+		klog.Errorf("Detached volume clone replication failed: %v. Attempting cleanup of %s", err, params.newDatasetName)
+		s.cleanupPartialClone(ctx, params.newDatasetName)
 		return nil, status.Errorf(codes.Internal, "Failed to create detached volume clone via replication: %v", err)
 	}
 
 	klog.V(4).Infof("Replication completed for detached volume clone: %s", params.newDatasetName)
+	s.finishDetachedReplication(ctx, params.newDatasetName, snapshotNameOnly)
 
-	// Step 2: Promote to ensure complete independence
-	// LOCAL replication may create clone relationships for efficiency
-	klog.V(4).Infof("Promoting detached volume clone %s to ensure independence", params.newDatasetName)
-	if promoteErr := s.apiClient.PromoteDataset(ctx, params.newDatasetName); promoteErr != nil {
-		klog.Warningf("PromoteDataset(%s) failed: %v (continuing, may still work)", params.newDatasetName, promoteErr)
-	} else {
-		klog.V(4).Infof("Successfully promoted detached volume clone: %s", params.newDatasetName)
-	}
-
-	// Step 3: Clean up the replicated snapshot from the target dataset
-	targetSnapshot := fmt.Sprintf("%s@%s", params.newDatasetName, snapshotNameOnly)
-	klog.V(4).Infof("Cleaning up replicated snapshot %s", targetSnapshot)
-	if delErr := s.apiClient.DeleteSnapshot(ctx, targetSnapshot); delErr != nil {
-		klog.Warningf("Failed to delete replicated snapshot %s: %v (non-fatal)", targetSnapshot, delErr)
-	}
-
-	// Step 4: Query the dataset to get its full info
+	// Query the dataset to get its full info
 	clonedDataset, err := s.apiClient.Dataset(ctx, params.newDatasetName)
 	if err != nil {
 		klog.Errorf("Failed to query detached clone dataset %s: %v", params.newDatasetName, err)
@@ -501,6 +503,160 @@ func (s *ControllerService) executeDetachedVolumeClone(ctx context.Context, snap
 
 	klog.Infof("Successfully created detached (send/receive) volume: %s (truly independent, no dependencies)", clonedDataset.Name)
 	return clonedDataset, nil
+}
+
+// settleDetachedReplication deals with a replication an earlier attempt of this request
+// started into the clone target. TrueNAS keeps running it after that request timed out,
+// and a second one into the same target fails and starts the copy over, so a large volume
+// would never converge. A running job is waited for. The target of a failed job, and a
+// target still holding a receive_resume_token (an interrupted receive, e.g. one whose job
+// middlewared forgot when it restarted), is discarded so the copy starts again; since
+// user properties may only land at the end of a receive, that target may lack managed_by
+// (checkDiscardableReceive). Any other target is a complete receive: the steps that follow
+// it are (re)run and it is left for cloneOrResume to resume. Nothing is changed on a
+// dataset that is not this volume's: a job into the path may be someone else's.
+func (s *ControllerService) settleDetachedReplication(ctx context.Context, snapshotMeta *SnapshotMetadata, params *cloneParameters) error {
+	target := params.newDatasetName
+	failed, reason, err := s.awaitEarlierReplication(ctx, target)
+	if err != nil {
+		return err
+	}
+
+	existing, err := s.queryExactDataset(ctx, target)
+	if err != nil {
+		return status.Errorf(codes.Internal, "Failed to check for existing dataset %s: %v", target, err)
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+	if failed || existing[0].ReceiveIncomplete() {
+		if !failed {
+			reason += " and the receive was interrupted (the target still holds a receive_resume_token)"
+		}
+		if err := s.checkDiscardableReceive(ctx, params); err != nil {
+			return err
+		}
+		return s.discardFailedReceive(ctx, target, reason)
+	}
+	if _, exists, err := s.findOwnCloneTarget(ctx, params); err != nil || !exists {
+		return err
+	}
+	// A complete receive: the steps that follow it may never have run (the job record is
+	// gone after a middlewared restart, or the request ended first). They are safe to repeat.
+	s.finishDetachedReplication(ctx, target, replicatedSnapshotName(snapshotMeta))
+	return nil
+}
+
+// awaitEarlierReplication looks up the replication.run_onetime jobs into target that an
+// earlier attempt of the request may have started, and waits for the newest one while it
+// is still running. failed reports that it failed or was aborted; reason describes the
+// outcome for logs. No job known (never started, or forgotten by a middlewared restart) is
+// not a failure: the caller judges the target itself. A request ending during the wait
+// returns its context error and leaves the job alone.
+func (s *ControllerService) awaitEarlierReplication(ctx context.Context, target string) (failed bool, reason string, err error) {
+	jobs, err := s.apiClient.FindReplicationJobsForTarget(ctx, target)
+	if err != nil {
+		return false, "", status.Errorf(codes.Unavailable, "Failed to look up replication jobs for %s: %v", target, err)
+	}
+	if len(jobs) == 0 {
+		return false, "no replication job known", nil
+	}
+
+	job := jobs[len(jobs)-1]
+	klog.Infof("Replication job %d into %s from an earlier attempt is %s", job.ID, target, job.State)
+	reason = fmt.Sprintf("job %d succeeded", job.ID)
+	switch job.State {
+	case "WAITING", "RUNNING":
+		err = s.apiClient.WaitForJob(ctx, job.ID, ReplicationPollInterval)
+		switch {
+		case err == nil:
+		case ctx.Err() != nil:
+			return false, "", replicationStillRunning(ctx, target, err)
+		case errors.Is(err, tnsapi.ErrJobNotFound):
+			reason = fmt.Sprintf("job %d is gone", job.ID)
+		case errors.Is(err, tnsapi.ErrJobFailed), errors.Is(err, tnsapi.ErrJobAborted):
+			failed, reason = true, err.Error()
+		default:
+			return false, "", status.Errorf(codes.Unavailable, "Failed to wait for replication job %d into %s: %v", job.ID, target, err)
+		}
+	case "SUCCESS":
+	case "FAILED", "ABORTED":
+		failed, reason = true, fmt.Sprintf("job %d %s: %s", job.ID, job.State, job.Error)
+	default:
+		return false, "", status.Errorf(codes.Unavailable, "replication job %d into %s is in unexpected state %q", job.ID, target, job.State)
+	}
+	return failed, reason, nil
+}
+
+// checkDiscardableReceive reports whether the dataset at the clone target may be deleted as
+// what this request's failed or interrupted receive left behind. User properties may only
+// land at the end of a receive, so managed_by may be missing; it must not name another
+// owner, and csi_volume_name (written only by setup, after a complete receive) must be
+// empty. Anything else is AlreadyExists and is left untouched.
+func (s *ControllerService) checkDiscardableReceive(ctx context.Context, params *cloneParameters) error {
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.newVolumeName, DatasetID: params.newDatasetName})
+	switch {
+	case status.Code(err) == codes.FailedPrecondition:
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to volume %s: %s", params.newDatasetName, params.newVolumeName, status.Convert(err).Message())
+	case err != nil:
+		return err
+	case ownership.notFound:
+		return nil
+	}
+	managedBy, volumeName := ownership.props[tnsapi.PropertyManagedBy], ownership.props[tnsapi.PropertyCSIVolumeName]
+	if (managedBy != "" && managedBy != tnsapi.ManagedByValue) || volumeName != "" {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and is not an incomplete receive for volume %s (%s=%q, %s=%q)", params.newDatasetName, params.newVolumeName,
+			tnsapi.PropertyManagedBy, managedBy, tnsapi.PropertyCSIVolumeName, volumeName)
+	}
+	return nil
+}
+
+// discardFailedReceive deletes what a failed or interrupted replication left at target so
+// the copy can start again. The request may already be expiring, so the delete runs
+// detached from it.
+func (s *ControllerService) discardFailedReceive(ctx context.Context, target, reason string) error {
+	klog.Warningf("Replication into %s did not complete (%s); deleting the target and starting again", target, reason)
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
+	if err := s.apiClient.DeleteDataset(ctx, target); err != nil && !tnsapi.IsNotFound(err) {
+		return status.Errorf(codes.Internal, "Failed to delete %s left by an incomplete replication (%s): %v", target, reason, err)
+	}
+	return nil
+}
+
+// finishDetachedReplication runs the steps that follow a completed receive into target:
+// promote it and delete the replicated snapshotName from it. Both are best effort and safe
+// to repeat.
+func (s *ControllerService) finishDetachedReplication(ctx context.Context, target, snapshotName string) {
+	// LOCAL replication may create clone relationships for efficiency; promote to be independent.
+	klog.V(4).Infof("Promoting detached copy %s to ensure independence", target)
+	switch promoteErr := s.apiClient.PromoteDataset(ctx, target); {
+	case promoteErr == nil:
+		klog.V(4).Infof("Promoted detached copy %s", target)
+	case tnsapi.IsNotAClone(promoteErr):
+		// A full send/receive makes an independent dataset: there is no origin to break.
+		klog.V(4).Infof("Detached copy %s is not a clone; nothing to promote", target)
+	default:
+		klog.Warningf("PromoteDataset(%s) failed: %v (continuing; deleting the source may later fail with 'dependent clones')", target, promoteErr)
+	}
+	s.deleteSnapshotIfPresent(ctx, target+"@"+snapshotName)
+}
+
+// replicationStillRunning reports a request that ended while its replication runs on. The
+// target is kept so that the next retry picks the job up.
+func replicationStillRunning(ctx context.Context, target string, err error) error {
+	return status.Errorf(status.FromContextError(ctx.Err()).Code(),
+		"replication into %s is still running; a retry will resume it: %v", target, err)
+}
+
+// replicatedSnapshotName returns the short name of the snapshot a detached clone replicates.
+func replicatedSnapshotName(snapshotMeta *SnapshotMetadata) string {
+	if idx := strings.LastIndex(snapshotMeta.SnapshotName, "@"); idx != -1 {
+		return snapshotMeta.SnapshotName[idx+1:]
+	}
+	return snapshotMeta.SnapshotName
 }
 
 // executeDetachedSnapshotRestore restores a volume from a detached snapshot.
@@ -562,6 +718,9 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 
 	clonedDataset, err := s.apiClient.CloneSnapshot(ctx, cloneSnapshotParams)
 	if err != nil {
+		if tnsapi.IsAlreadyExists(err) {
+			return nil, errCloneTargetExists
+		}
 		klog.Errorf("Failed to clone snapshot: %v", err)
 		// Don't delete the temp snapshot - it might be used by other restores
 		// or might be needed for a retry
@@ -573,9 +732,7 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 		klog.V(4).Infof("Promoting clone %s to break COW dependency with detached snapshot", params.newDatasetName)
 		if promoteErr := s.apiClient.PromoteDataset(ctx, params.newDatasetName); promoteErr != nil {
 			klog.Errorf("Failed to promote clone %s: %v. Cleaning up.", params.newDatasetName, promoteErr)
-			if delErr := s.apiClient.DeleteDataset(ctx, params.newDatasetName); delErr != nil {
-				klog.Errorf("Failed to cleanup clone after promotion failure: %v", delErr)
-			}
+			s.cleanupPartialClone(ctx, params.newDatasetName)
 			return nil, status.Errorf(codes.Internal, "Failed to promote clone from detached snapshot: %v", promoteErr)
 		}
 
@@ -597,8 +754,136 @@ func (s *ControllerService) executeDetachedSnapshotRestore(ctx context.Context, 
 	return clonedDataset, nil
 }
 
+// errCloneTargetExists reports that the clone call found the target dataset already there.
+var errCloneTargetExists = errors.New("clone target dataset already exists")
+
+// cloneOrResume runs clone unless an earlier attempt of this request already made the clone
+// target, and reports whether it reused that dataset. A retried CreateVolume (the
+// provisioner retries after a timeout) must resume from it: cloning again fails with
+// "already exists", and deleting it would orphan the share/target that attempt may already
+// have built. promoted/promotedRestore say whether this mode promotes the clone; a reused
+// clone is promoted here unless that already happened.
+func (s *ControllerService) cloneOrResume(ctx context.Context, params *cloneParameters, promoted, promotedRestore bool, clone func() (*tnsapi.Dataset, error)) (*tnsapi.Dataset, bool, error) {
+	dataset, reused, err := s.findOwnCloneTarget(ctx, params)
+	if err != nil {
+		return nil, false, err
+	}
+	if !reused {
+		dataset, err = clone()
+		if !errors.Is(err, errCloneTargetExists) {
+			return dataset, false, err
+		}
+		if dataset, reused, err = s.findOwnCloneTarget(ctx, params); err != nil {
+			return nil, false, err
+		}
+		if !reused {
+			return nil, false, status.Errorf(codes.Unavailable, "clone target %s was reported as existing but cannot be found", params.newDatasetName)
+		}
+	}
+
+	if promoted || promotedRestore {
+		if promoteErr := s.promoteReusedClone(ctx, dataset); promoteErr != nil {
+			return nil, false, promoteErr
+		}
+	}
+	if promotedRestore {
+		// The promote moved the restore snapshot onto the clone; drop it as a fresh restore does.
+		s.deleteSnapshotIfPresent(ctx, params.newDatasetName+"@csi-restore-for-"+params.newVolumeName)
+	}
+	return dataset, true, nil
+}
+
+// findOwnCloneTarget looks up the dataset this CreateVolume clones into. It reports
+// (dataset, true) when an earlier attempt of this request made it and (nil, false) when
+// there is none. A dataset there that is not marked as this volume's is AlreadyExists: it
+// is never cloned over, adopted or deleted.
+func (s *ControllerService) findOwnCloneTarget(ctx context.Context, params *cloneParameters) (*tnsapi.Dataset, bool, error) {
+	existing, err := s.queryExactDataset(ctx, params.newDatasetName)
+	if err != nil {
+		return nil, false, status.Errorf(codes.Internal, "Failed to check for existing dataset %s: %v", params.newDatasetName, err)
+	}
+	if len(existing) == 0 {
+		return nil, false, nil
+	}
+
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: params.newVolumeName, DatasetID: params.newDatasetName})
+	switch {
+	case status.Code(err) == codes.FailedPrecondition:
+		return nil, false, status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to volume %s: %s", params.newDatasetName, params.newVolumeName, status.Convert(err).Message())
+	case err != nil:
+		return nil, false, err
+	case ownership.notFound:
+		return nil, false, nil
+	}
+	// The clone call writes both properties, so a dataset without them was not cloned here.
+	// Detached mode is the exception: replication copies the source's managed_by but not
+	// csi_volume_name, which only setup writes. A receive is atomic, so a dataset at this
+	// request-unique path with managed_by and no name is this request's completed receive.
+	managedBy, volumeName := ownership.props[tnsapi.PropertyManagedBy], ownership.props[tnsapi.PropertyCSIVolumeName]
+	if managedBy != tnsapi.ManagedByValue || (volumeName == "" && !params.receivedCopy) {
+		return nil, false, status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists but is not marked as volume %s (%s=%q, %s=%q)", params.newDatasetName, params.newVolumeName,
+			tnsapi.PropertyManagedBy, managedBy, tnsapi.PropertyCSIVolumeName, volumeName)
+	}
+
+	klog.Infof("Dataset %s for volume %s already exists (cloned by an earlier attempt), resuming from it",
+		params.newDatasetName, params.newVolumeName)
+	return &existing[0], true, nil
+}
+
+// promoteReusedClone promotes a clone an earlier attempt left unpromoted. A failure never
+// deletes the dataset: it may already be presented, and once a promote has gone through it
+// is the origin of the source's snapshot and cannot be deleted anyway.
+func (s *ControllerService) promoteReusedClone(ctx context.Context, dataset *tnsapi.Dataset) error {
+	if origin, known := datasetOrigin(dataset); known && origin == "" {
+		klog.Infof("Clone %s is already promoted, skipping promote", dataset.ID)
+		return nil
+	}
+	if err := s.apiClient.PromoteDataset(ctx, dataset.ID); err != nil {
+		if tnsapi.IsNotAClone(err) {
+			klog.Infof("Clone %s is no longer a clone (already promoted), nothing to promote", dataset.ID)
+			return nil
+		}
+		return status.Errorf(codes.Internal, "Failed to promote clone %s: %v", dataset.ID, err)
+	}
+	return nil
+}
+
+// datasetOrigin returns the origin snapshot of a clone ("" when the dataset is not a clone).
+// known is false when the query did not return the origin property.
+func datasetOrigin(dataset *tnsapi.Dataset) (origin string, known bool) {
+	if dataset.Origin == nil {
+		return "", false
+	}
+	origin, known = dataset.Origin["value"].(string)
+	if origin == "-" {
+		origin = ""
+	}
+	return origin, known
+}
+
+// deleteSnapshotIfPresent deletes a snapshot that is no longer needed (best effort).
+func (s *ControllerService) deleteSnapshotIfPresent(ctx context.Context, snapshotID string) {
+	if err := s.apiClient.DeleteSnapshot(ctx, snapshotID); err != nil && !tnsapi.IsNotFound(err) {
+		klog.Warningf("Failed to delete snapshot %s: %v (non-fatal)", snapshotID, err)
+	}
+}
+
+// discardClone deletes the cloned dataset when the request cannot be completed, unless an
+// earlier attempt made it: that dataset may already be presented and is kept for the retry.
+func (s *ControllerService) discardClone(ctx context.Context, datasetID string, info *cloneInfo) {
+	if info != nil && info.Reused {
+		klog.Warningf("Keeping dataset %s: it was cloned by an earlier attempt of this request", datasetID)
+		return
+	}
+	s.cleanupPartialClone(ctx, datasetID)
+}
+
 // cleanupPartialClone attempts to clean up a partially created cloned dataset.
 func (s *ControllerService) cleanupPartialClone(ctx context.Context, datasetName string) {
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
 	if delErr := s.apiClient.DeleteDataset(ctx, datasetName); delErr != nil {
 		if !tnsapi.IsNotFound(delErr) {
 			klog.Errorf("Failed to cleanup potentially partially-created dataset %s: %v", datasetName, delErr)
@@ -631,7 +916,7 @@ func (s *ControllerService) setupVolumeFromClone(ctx context.Context, req *csi.C
 	case ProtocolSMB:
 		return s.setupSMBVolumeFromClone(ctx, req, clonedDataset, server, info)
 	default:
-		return s.handleUnknownProtocol(ctx, clonedDataset, protocol)
+		return s.handleUnknownProtocol(ctx, clonedDataset, protocol, info)
 	}
 }
 
@@ -639,9 +924,7 @@ func (s *ControllerService) setupVolumeFromClone(ctx context.Context, req *csi.C
 func (s *ControllerService) setupNVMeOFVolumeFromCloneWithValidation(ctx context.Context, req *csi.CreateVolumeRequest, clonedDataset *tnsapi.Dataset, server, subsystemNQN string, info *cloneInfo) (*csi.CreateVolumeResponse, error) {
 	if subsystemNQN == "" {
 		klog.Errorf("subsystemNQN parameter is required for NVMe-oF volumes, cleaning up")
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-		}
+		s.discardClone(ctx, clonedDataset.ID, info)
 		return nil, status.Error(codes.InvalidArgument,
 			"subsystemNQN parameter is required for NVMe-oF volumes. "+
 				"Pre-configure an NVMe-oF subsystem in TrueNAS (Shares > NVMe-oF Subsystems) "+
@@ -651,11 +934,9 @@ func (s *ControllerService) setupNVMeOFVolumeFromCloneWithValidation(ctx context
 }
 
 // handleUnknownProtocol handles the case when protocol is not recognized.
-func (s *ControllerService) handleUnknownProtocol(ctx context.Context, clonedDataset *tnsapi.Dataset, protocol string) (*csi.CreateVolumeResponse, error) {
+func (s *ControllerService) handleUnknownProtocol(ctx context.Context, clonedDataset *tnsapi.Dataset, protocol string, info *cloneInfo) (*csi.CreateVolumeResponse, error) {
 	klog.Errorf("Unknown protocol %s in snapshot metadata, cleaning up", protocol)
-	if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-		klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-	}
+	s.discardClone(ctx, clonedDataset.ID, info)
 	return nil, status.Errorf(codes.InvalidArgument, "Unknown protocol in snapshot: %s", protocol)
 }
 
@@ -666,6 +947,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 	params map[string]string,
 	snapshotMeta *SnapshotMetadata,
 	clonedDataset *tnsapi.Dataset,
+	info *cloneInfo,
 ) (server, subsystemNQN string, err error) {
 	// First try to get from request parameters (StorageClass)
 	server = params["server"]
@@ -675,7 +957,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 	needsSourceExtraction := server == "" || (snapshotMeta.Protocol == ProtocolNVMeOF && subsystemNQN == "")
 	if !needsSourceExtraction {
 		// All required parameters are available
-		return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)
+		return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset, info)
 	}
 
 	klog.V(4).Infof("Server or subsystemNQN not in parameters, will derive from context (source volume: %s)", snapshotMeta.SourceVolume)
@@ -685,9 +967,7 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 	if server == "" {
 		// Server must come from StorageClass - we can't discover it
 		klog.Errorf("Server parameter is required but not provided in StorageClass, cleaning up")
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-		}
+		s.discardClone(ctx, clonedDataset.ID, info)
 		return "", "", status.Error(codes.InvalidArgument,
 			"server parameter is required in StorageClass for restoring from snapshot")
 	}
@@ -704,17 +984,15 @@ func (s *ControllerService) getVolumeParametersForSnapshot(
 		subsystemNQN = "clone-will-generate-new-nqn" // Placeholder to pass validation
 	}
 
-	return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset)
+	return server, subsystemNQN, s.validateServerParameter(ctx, server, clonedDataset, info)
 }
 
 // validateServerParameter validates that the server parameter is not empty.
-func (s *ControllerService) validateServerParameter(ctx context.Context, server string, clonedDataset *tnsapi.Dataset) error {
+func (s *ControllerService) validateServerParameter(ctx context.Context, server string, clonedDataset *tnsapi.Dataset, info *cloneInfo) error {
 	if server == "" {
 		// Cleanup the cloned dataset
 		klog.Errorf("server parameter is required, cleaning up")
-		if delErr := s.apiClient.DeleteDataset(ctx, clonedDataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset: %v", delErr)
-		}
+		s.discardClone(ctx, clonedDataset.ID, info)
 		return status.Error(codes.InvalidArgument, "server parameter is required")
 	}
 	return nil

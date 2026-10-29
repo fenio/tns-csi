@@ -306,6 +306,12 @@ func buildNFSVolumeResponse(volumeName, server string, dataset *tnsapi.Dataset, 
 func (s *ControllerService) handleExistingNFSVolume(ctx context.Context, params *nfsVolumeParams, existingDataset *tnsapi.Dataset, timer *metrics.OperationTimer) (*csi.CreateVolumeResponse, bool, error) {
 	klog.V(4).Infof("Dataset %s already exists (ID: %s), checking idempotency", params.datasetName, existingDataset.ID)
 
+	// The name collision alone proves nothing: only a dataset marked as this volume's may be completed.
+	if err := s.checkExistingVolumeOwnership(ctx, params.volumeName, existingDataset.ID); err != nil {
+		timer.ObserveError()
+		return nil, false, err
+	}
+
 	// Check if an NFS share exists for this dataset
 	existingShares, err := s.apiClient.QueryNFSShares(ctx, []interface{}{[]interface{}{queryFieldPath, "=", existingDataset.Mountpoint}})
 	if err != nil {
@@ -501,11 +507,16 @@ func (s *ControllerService) createNFSShareForDataset(ctx context.Context, datase
 	})
 	if err != nil {
 		klog.Errorf("Failed to create NFS share for dataset %s (mountpoint: %s): %v", dataset.ID, dataset.Mountpoint, err)
-		if datasetIsNew {
-			if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
+		switch {
+		case datasetIsNew && createOutcomeUnknown(ctx, err):
+			klog.Warningf("Keeping dataset %s: the NFS share may have been created; the retry converges through the existing-volume path, which looks the share up by path", dataset.ID)
+		case datasetIsNew:
+			cleanupCtx, cancel := cleanupContext(ctx)
+			if delErr := s.apiClient.DeleteDataset(cleanupCtx, dataset.ID); delErr != nil {
 				klog.Errorf("Failed to cleanup dataset after NFS share creation failure: %v", delErr)
 			}
-		} else {
+			cancel()
+		default:
 			klog.Warningf("Skipping dataset cleanup — dataset was pre-existing")
 		}
 		timer.ObserveError()
@@ -649,9 +660,10 @@ func (s *ControllerService) deleteNFSVolume(ctx context.Context, meta *VolumeMet
 		case tnsapi.IsNotFound(err):
 			klog.V(4).Infof("NFS share %d not found, assuming already deleted (idempotency)", meta.NFSShareID)
 		default:
-			// For non-idempotent errors, log warning but continue to try dataset deletion
-			// This prevents orphaned datasets if share deletion fails
-			klog.Warningf("Failed to delete NFS share %d: %v (continuing with dataset deletion)", meta.NFSShareID, err)
+			// Keep the dataset: it carries the share ID in a property, so the retry can
+			// find and delete the share. Destroying it now would orphan the export.
+			timer.ObserveError()
+			return nil, status.Errorf(codes.Unavailable, "failed to delete NFS share %d of volume %s (dataset kept for retry): %v", meta.NFSShareID, meta.Name, err)
 		}
 	}
 
@@ -732,26 +744,45 @@ func (s *ControllerService) setupNFSVolumeFromClone(ctx context.Context, req *cs
 
 	volumeName := req.GetName()
 
-	// Create NFS share for the cloned dataset
-	nfsShare, err := s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
-		Path:         dataset.Mountpoint,
-		Comment:      "CSI Volume (from snapshot): " + volumeName,
-		MaprootUser:  zfsACLModeRoot,
-		MaprootGroup: zfsACLModeWheel,
-		Hosts:        access.hosts,
-		Networks:     access.networks,
-		Enabled:      true,
-	})
+	// Reuse the share an earlier attempt of this request made for the clone.
+	existingShares, err := s.apiClient.QueryNFSShares(ctx, []interface{}{[]interface{}{queryFieldPath, "=", dataset.Mountpoint}})
 	if err != nil {
-		// Cleanup: delete the cloned dataset if NFS share creation fails
-		klog.Errorf("Failed to create NFS share for cloned dataset, cleaning up: %v", err)
-		if delErr := s.apiClient.DeleteDataset(ctx, dataset.ID); delErr != nil {
-			klog.Errorf("Failed to cleanup cloned dataset after NFS share creation failure: %v", delErr)
+		klog.Errorf("Failed to look up NFS share for cloned dataset, cleaning up: %v", err)
+		s.discardClone(ctx, dataset.ID, info)
+		return nil, status.Errorf(codes.Internal, "Failed to query existing NFS shares: %v", err)
+	}
+	var nfsShare *tnsapi.NFSShare
+	for i := range existingShares {
+		if existingShares[i].Path == dataset.Mountpoint {
+			nfsShare = &existingShares[i]
+			break
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to create NFS share for cloned volume: %v", err)
 	}
 
-	klog.V(4).Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
+	if nfsShare != nil {
+		if accessErr := checkExistingNFSShareAccess(access, nfsShare); accessErr != nil {
+			return nil, accessErr
+		}
+		klog.Infof("Reusing NFS share %d for cloned dataset %s (left by an earlier attempt)", nfsShare.ID, dataset.ID)
+	} else {
+		// Create NFS share for the cloned dataset
+		nfsShare, err = s.apiClient.CreateNFSShare(ctx, tnsapi.NFSShareCreateParams{
+			Path:         dataset.Mountpoint,
+			Comment:      "CSI Volume (from snapshot): " + volumeName,
+			MaprootUser:  zfsACLModeRoot,
+			MaprootGroup: zfsACLModeWheel,
+			Hosts:        access.hosts,
+			Networks:     access.networks,
+			Enabled:      true,
+		})
+		if err != nil {
+			// Cleanup: delete the cloned dataset if NFS share creation fails
+			klog.Errorf("Failed to create NFS share for cloned dataset, cleaning up: %v", err)
+			s.discardClone(ctx, dataset.ID, info)
+			return nil, status.Errorf(codes.Internal, "Failed to create NFS share for cloned volume: %v", err)
+		}
+		klog.V(4).Infof("Created NFS share with ID: %d for cloned dataset path: %s", nfsShare.ID, nfsShare.Path)
+	}
 
 	// Get requested capacity (needed before creating metadata)
 	requestedCapacity := req.GetCapacityRange().GetRequiredBytes()

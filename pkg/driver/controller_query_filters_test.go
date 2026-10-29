@@ -81,6 +81,9 @@ func TestSpecificLookupsFilterOnServer(t *testing.T) {
 			got = filtersJSON(t, f)
 			return nil, nil
 		}
+		mock.GetDatasetPropertiesFunc = func(context.Context, string, []string) (map[string]string, error) {
+			return map[string]string{tnsapi.PropertyManagedBy: tnsapi.ManagedByValue}, nil
+		}
 		s := NewControllerService(mock, NewNodeRegistry(), "")
 		ds := &tnsapi.Dataset{ID: "tank/pvc-1", Name: "tank/pvc-1", Mountpoint: "/mnt/tank/pvc-1"}
 		if _, _, err := s.handleExistingNFSVolume(context.Background(), &nfsVolumeParams{volumeName: "pvc-1", datasetName: "tank/pvc-1"}, ds,

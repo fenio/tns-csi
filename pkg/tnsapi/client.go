@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -91,6 +92,12 @@ type Client struct {
 	apiKey        string
 	connectedAt   time.Time // Track connection start time for metrics
 	retryInterval time.Duration
+	// pingInterval is how often pingLoop pings TrueNAS; pingTimeout is how long it
+	// waits for the pong. After pingFailureLimit consecutive failures the connection
+	// is closed so readLoop reconnects.
+	pingInterval     time.Duration
+	pingTimeout      time.Duration
+	pingFailureLimit int
 	// connectRetryDelays holds the wait before each NewClient connection attempt
 	// (one entry per attempt; the first is normally 0). Tests shorten it.
 	connectRetryDelays []time.Duration
@@ -232,6 +239,27 @@ func WithConnectRetryDelays(delays ...time.Duration) ClientOption {
 	}
 }
 
+// Keepalive defaults: a ping every 20s answered within 10s; three misses in a row
+// (about a minute of silence) mean the peer is gone even if TCP still looks fine.
+const (
+	defaultPingInterval     = 20 * time.Second
+	defaultPingTimeout      = 10 * time.Second
+	defaultPingFailureLimit = 3
+)
+
+// WithKeepalive sets how often the client pings TrueNAS and how long it waits for the
+// pong. Non-positive values keep the defaults.
+func WithKeepalive(interval, timeout time.Duration) ClientOption {
+	return func(c *Client) {
+		if interval > 0 {
+			c.pingInterval = interval
+		}
+		if timeout > 0 {
+			c.pingTimeout = timeout
+		}
+	}
+}
+
 // NewClient creates a new storage API client.
 // skipTLSVerify should be set to true only for self-signed certificates (common in TrueNAS deployments).
 func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*Client, error) {
@@ -249,6 +277,9 @@ func NewClient(url, apiKey string, skipTLSVerify bool, opts ...ClientOption) (*C
 			closeCh:            make(chan struct{}),
 			maxRetries:         5,
 			retryInterval:      5 * time.Second,
+			pingInterval:       defaultPingInterval,
+			pingTimeout:        defaultPingTimeout,
+			pingFailureLimit:   defaultPingFailureLimit,
 			connectRetryDelays: defaultConnectRetryDelays,
 			skipTLSVerify:      skipTLSVerify,
 			authGate:           make(chan struct{}, 1),
@@ -357,7 +388,6 @@ func (c *Client) connect() error {
 		}
 	}
 
-	// coder/websocket handles ping/pong automatically
 	conn, resp, err := websocket.Dial(ctx, c.url, &websocket.DialOptions{
 		HTTPClient: httpClient,
 	})
@@ -377,8 +407,8 @@ func (c *Client) connect() error {
 	}
 	conn.SetReadLimit(readLimit)
 
-	// Note: coder/websocket handles ping/pong automatically via the underlying connection.
-	// We still run our own ping loop for connection health monitoring and metrics.
+	// coder/websocket answers the peer's pings while readLoop is reading, but it does
+	// not detect a peer that stopped answering ours: that is pingLoop's job.
 
 	c.mu.Lock()
 	if c.closed {
@@ -982,6 +1012,12 @@ func (c *Client) reconnect() bool {
 	// Update metrics - connection lost
 	metrics.SetWSConnectionStatus(false)
 
+	// Fail every in-flight request now, before the first backoff. Their responses can
+	// no longer arrive on this connection; idempotent calls queue behind the reconnect
+	// and non-idempotent ones report ErrUncertainOutcome so the caller can look the
+	// resource up instead of burning its own deadline waiting here.
+	c.failPendingRequests()
+
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
 		// Record reconnection attempt
 		metrics.RecordWSReconnection()
@@ -1013,12 +1049,9 @@ func (c *Client) reconnect() bool {
 			//nolint:errcheck,gosec // G104: Intentionally ignoring close error during reconnection
 			c.conn.Close(websocket.StatusGoingAway, "reconnecting")
 		}
-		// Reset pending requests for new connection
-		for _, ch := range c.pending {
-			close(ch)
-		}
-		c.pending = make(map[string]chan *Response)
 		c.mu.Unlock()
+		// Reset pending requests for new connection
+		c.failPendingRequests()
 
 		// Reconnect and authenticate while live re-authentication is excluded;
 		// readLoop is blocked here, so authentication must read directly.
@@ -1032,6 +1065,17 @@ func (c *Client) reconnect() bool {
 	}
 
 	return false
+}
+
+// failPendingRequests closes every pending response channel so waiting callers see
+// the connection as lost, and starts a fresh pending map for the next connection.
+func (c *Client) failPendingRequests() {
+	c.mu.Lock()
+	for _, ch := range c.pending {
+		close(ch)
+	}
+	c.pending = make(map[string]chan *Response)
+	c.mu.Unlock()
 }
 
 func (c *Client) beginReconnect() bool {
@@ -1073,11 +1117,18 @@ func (c *Client) connectAndAuthenticateDirect() error {
 	return nil
 }
 
-// pingLoop sends periodic pings to keep the connection alive and detect failures.
+// pingLoop sends periodic pings to detect a peer that stopped answering.
+//
+// A missed pong does not close the connection by itself: coder/websocket only closes
+// on read errors, so a wedged middlewared (or a flow silently dropped by a firewall
+// while the local TCP stack stays happy) would leave readLoop blocked forever and every
+// RPC timing out on its own context. After pingFailureLimit consecutive misses the
+// loop closes the connection itself, which makes readLoop's Read fail and reconnect.
 func (c *Client) pingLoop() {
-	ticker := time.NewTicker(20 * time.Second)
+	ticker := time.NewTicker(c.pingInterval)
 	defer ticker.Stop()
 
+	failures := 0
 	for {
 		select {
 		case <-ticker.C:
@@ -1086,6 +1137,7 @@ func (c *Client) pingLoop() {
 				c.mu.Unlock()
 				if c.reconnecting {
 					// Skip ping during reconnection - connection is being replaced
+					failures = 0
 					continue
 				}
 				return
@@ -1100,16 +1152,31 @@ func (c *Client) pingLoop() {
 			c.mu.Unlock()
 
 			// Send ping using coder/websocket's Ping method with timeout context
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), c.pingTimeout)
 			err := conn.Ping(ctx)
 			cancel()
 
-			if err != nil {
-				klog.Warningf("Failed to send ping: %v", err)
+			if err == nil {
+				failures = 0
+				klog.V(6).Info("Sent WebSocket ping")
 				continue
 			}
 
-			klog.V(6).Info("Sent WebSocket ping")
+			failures++
+			if failures < c.pingFailureLimit {
+				klog.Warningf("WebSocket ping failed (%d/%d): %v", failures, c.pingFailureLimit, err)
+				continue
+			}
+			klog.Errorf("WebSocket peer did not answer %d pings in a row (last: %v); closing the connection to force a reconnect", failures, err)
+			failures = 0
+			c.mu.Lock()
+			if c.conn == conn {
+				// CloseNow skips the close handshake: the peer is not answering.
+				if closeErr := conn.CloseNow(); closeErr != nil {
+					klog.V(4).Infof("Closing unresponsive WebSocket connection: %v", closeErr)
+				}
+			}
+			c.mu.Unlock()
 
 		case <-c.closeCh:
 			return
@@ -1303,13 +1370,32 @@ type DatasetCreateParams struct {
 
 // Dataset represents a ZFS dataset.
 type Dataset struct {
-	Available  map[string]interface{} `json:"available,omitempty"`
-	Used       map[string]interface{} `json:"used,omitempty"`
-	Volsize    map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
-	ID         string                 `json:"id"`
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"`
-	Mountpoint string                 `json:"mountpoint,omitempty"`
+	Available map[string]interface{} `json:"available,omitempty"`
+	Used      map[string]interface{} `json:"used,omitempty"`
+	Volsize   map[string]interface{} `json:"volsize,omitempty"` // ZVOL size (for VOLUME type datasets)
+	Origin    map[string]interface{} `json:"origin,omitempty"`  // Origin snapshot of a clone (empty value when not a clone)
+	// ReceiveResumeToken is set while the dataset holds an interrupted resumable receive.
+	ReceiveResumeToken map[string]interface{} `json:"receive_resume_token,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Type               string                 `json:"type"`
+	Mountpoint         string                 `json:"mountpoint,omitempty"`
+}
+
+// ReceiveIncomplete reports whether the dataset holds an interrupted resumable receive. It
+// is false when the query did not return receive_resume_token, or returned it unset:
+// TrueNAS 25.10 reports an unset token as value "NONE" (rawvalue "none", parsed null),
+// older releases as "-" or "".
+func (d *Dataset) ReceiveIncomplete() bool {
+	token, ok := d.ReceiveResumeToken["value"].(string)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(token)) {
+	case "", "-", "none":
+		return false
+	}
+	return true
 }
 
 // CreateDataset creates a new ZFS dataset.
@@ -2768,6 +2854,7 @@ type ReplicationJobState struct {
 	Result      interface{}            `json:"result"`
 	TimeStarted *ejsonDate             `json:"time_started,omitempty"`
 	TimeEnded   *ejsonDate             `json:"time_finished,omitempty"`
+	Arguments   []json.RawMessage      `json:"arguments,omitempty"` // the call's params
 }
 
 type ejsonDate struct {
@@ -2821,19 +2908,9 @@ func (c *Client) RunOnetimeReplication(ctx context.Context, params ReplicationRu
 func (c *Client) GetJobStatus(ctx context.Context, jobID int) (*ReplicationJobState, error) {
 	klog.V(5).Infof("Getting job status for job %d", jobID)
 
-	var result ReplicationJobState
-	err := c.Call(ctx, "core.get_jobs", []interface{}{
-		[]interface{}{
-			[]interface{}{"id", "=", jobID},
-		},
-	}, &[]ReplicationJobState{result})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get job status: %w", err)
-	}
-
 	// Query returns an array, we need to get the first element
 	var jobs []ReplicationJobState
-	err = c.Call(ctx, "core.get_jobs", []interface{}{
+	err := c.Call(ctx, "core.get_jobs", []interface{}{
 		[]interface{}{
 			[]interface{}{"id", "=", jobID},
 		},
@@ -2864,6 +2941,13 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 		case <-ticker.C:
 			status, err := c.GetJobStatus(ctx, jobID)
 			if err != nil {
+				// core.get_jobs only knows jobs middlewared still holds in memory; a
+				// job that is gone (middlewared restarted) never comes back, and a
+				// closed client never answers. Keep polling only through transient
+				// failures such as a reconnect in progress.
+				if errors.Is(err, ErrJobNotFound) || errors.Is(err, ErrClientClosed) {
+					return fmt.Errorf("waiting for job %d: %w", jobID, err)
+				}
 				klog.Warningf("Failed to get job %d status: %v", jobID, err)
 				continue
 			}
@@ -2886,6 +2970,35 @@ func (c *Client) WaitForJob(ctx context.Context, jobID int, pollInterval time.Du
 			}
 		}
 	}
+}
+
+// FindReplicationJobsForTarget returns the one-time replication jobs middlewared still
+// holds (it forgets them on restart) that replicate into target, oldest first.
+func (c *Client) FindReplicationJobsForTarget(ctx context.Context, target string) ([]ReplicationJobState, error) {
+	var jobs []ReplicationJobState
+	err := c.Call(ctx, "core.get_jobs", []interface{}{
+		[]interface{}{
+			[]interface{}{"method", "=", "replication.run_onetime"},
+		},
+	}, &jobs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query replication jobs: %w", err)
+	}
+
+	matching := make([]ReplicationJobState, 0, len(jobs))
+	for i := range jobs {
+		if len(jobs[i].Arguments) == 0 {
+			continue
+		}
+		var params struct {
+			TargetDataset string `json:"target_dataset"`
+		}
+		if json.Unmarshal(jobs[i].Arguments[0], &params) == nil && params.TargetDataset == target {
+			matching = append(matching, jobs[i])
+		}
+	}
+	slices.SortFunc(matching, func(a, b ReplicationJobState) int { return a.ID - b.ID })
+	return matching, nil
 }
 
 // RunOnetimeReplicationAndWait runs a one-time replication and waits for completion.
@@ -2946,11 +3059,11 @@ func (c *Client) FindDatasetsByProperty(ctx context.Context, prefix, propertyNam
 }
 
 // datasetDecodedProperties are the ZFS properties the Dataset struct decodes (Used,
-// Available, Volsize). Requesting only these keeps pool.dataset.query from loading and
-// serializing every ZFS property of every matching dataset, which the client would discard
-// during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are always
-// returned. Keep this in sync with the Dataset struct.
-var datasetDecodedProperties = []string{"used", "available", "volsize"}
+// Available, Volsize, Origin, ReceiveResumeToken). Requesting only these keeps pool.dataset.query from loading
+// and serializing every ZFS property of every matching dataset, which the client would
+// discard during decoding anyway. Top-level fields (id, name, pool, type, mountpoint) are
+// always returned. Keep this in sync with the Dataset struct.
+var datasetDecodedProperties = []string{"used", "available", "volsize", "origin", "receive_resume_token"}
 
 // datasetQueryOptions builds pool.dataset.query options that return only what the client
 // decodes:
@@ -3377,27 +3490,43 @@ func (c *Client) ISCSITargetExtentByTarget(ctx context.Context, targetID int) ([
 
 // ReloadISCSIService triggers a reload of the iSCSI service to pick up new configuration.
 // This is needed after creating targets to make them discoverable via iSCSI discovery.
-//
-//nolint:dupl // Same reload pattern as SMB but for a different service
 func (c *Client) ReloadISCSIService(ctx context.Context) error {
 	klog.V(4).Info("Reloading iSCSI service to apply configuration changes")
 
-	// service.control(verb, service, options) is the documented API for managing services.
 	// For iSCSI, the service name is "iscsitarget" on TrueNAS Scale.
-	// The API returns a job ID (integer), not a boolean.
-	var jobID int
-	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "iscsitarget"}, &jobID)
+	jobID, err := c.reloadService(ctx, "iscsitarget")
 	if err != nil {
-		// If reload fails, try restart as fallback
-		klog.V(4).Infof("Service reload failed (%v), trying restart", err)
-		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "iscsitarget"}, &jobID)
-		if err != nil {
-			return fmt.Errorf("failed to reload/restart iSCSI service: %w", err)
-		}
+		return err
 	}
 
 	klog.V(4).Infof("iSCSI service reload completed (job ID: %d)", jobID)
 	return nil
+}
+
+// reloadService runs service.control RELOAD for a service and returns the job ID.
+// service.control(verb, service, options) is the documented API for managing services;
+// it returns a job ID (integer), not a boolean.
+//
+// It falls back to RESTART only when middlewared itself rejects the RELOAD with an API
+// error (the verb is not supported for that service or release). A lost response, an
+// expired context or a connection failure is returned as is: the RELOAD may already have
+// run, and a RESTART would drop every active session of the service (for iSCSI, every
+// mounted volume on every node) to work around a failure that was never the service's.
+func (c *Client) reloadService(ctx context.Context, service string) (int, error) {
+	var jobID int
+	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", service}, &jobID)
+	if err == nil {
+		return jobID, nil
+	}
+	var apiErr *Error
+	if !errors.As(err, &apiErr) {
+		return 0, fmt.Errorf("failed to reload %s service: %w", service, err)
+	}
+	klog.Warningf("Service %s rejected RELOAD (%v), trying RESTART", service, err)
+	if err := c.Call(ctx, "service.control", []interface{}{"RESTART", service}, &jobID); err != nil {
+		return 0, fmt.Errorf("failed to reload/restart %s service: %w", service, err)
+	}
+	return jobID, nil
 }
 
 // ReloadSMBService triggers a reload of the SMB/CIFS service.
@@ -3405,19 +3534,12 @@ func (c *Client) ReloadISCSIService(ctx context.Context) error {
 // Needed after creating shares for ZFS clones: TrueNAS's initial config generation
 // during sharing.smb.create can silently exclude the share if the clone's filesystem
 // metadata isn't fully ready for os.getxattr() yet.
-//
-//nolint:dupl // Same reload pattern as iSCSI but for a different service
 func (c *Client) ReloadSMBService(ctx context.Context) error {
 	klog.V(4).Info("Reloading SMB/CIFS service to apply configuration changes")
 
-	var jobID int
-	err := c.Call(ctx, "service.control", []interface{}{"RELOAD", "cifs"}, &jobID)
+	jobID, err := c.reloadService(ctx, "cifs")
 	if err != nil {
-		klog.V(4).Infof("SMB service reload failed (%v), trying restart", err)
-		err = c.Call(ctx, "service.control", []interface{}{"RESTART", "cifs"}, &jobID)
-		if err != nil {
-			return fmt.Errorf("failed to reload/restart SMB service: %w", err)
-		}
+		return err
 	}
 
 	klog.V(4).Infof("SMB/CIFS service reload completed (job ID: %d)", jobID)

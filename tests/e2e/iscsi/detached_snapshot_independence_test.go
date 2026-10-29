@@ -44,7 +44,7 @@ var _ = Describe("Detached Snapshot Independence", func() {
 		storageClass := "tns-csi-iscsi"
 		accessMode := corev1.ReadWriteOnce
 		podTimeout := 6 * time.Minute
-		pool := "storage"
+		pool := f.Config.TrueNASPool
 
 		if f.TrueNAS == nil {
 			Skip("TrueNAS verifier not configured - skipping ZFS-level verification")

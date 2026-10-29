@@ -1290,6 +1290,13 @@ func (m *MockClient) RunOnetimeReplicationAndWait(ctx context.Context, params tn
 	return nil
 }
 
+// FindReplicationJobsForTarget mocks core.get_jobs; mock replications finish at once
+// and are not remembered, so no job is ever known.
+func (m *MockClient) FindReplicationJobsForTarget(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+	m.logCall("FindReplicationJobsForTarget", target)
+	return nil, nil
+}
+
 // FindDatasetsByProperty searches for datasets that have a specific ZFS user property value.
 func (m *MockClient) FindDatasetsByProperty(ctx context.Context, prefix, propertyName, propertyValue string) ([]tnsapi.DatasetWithProperties, error) {
 	m.logCall("FindDatasetsByProperty", prefix, propertyName, propertyValue)

@@ -94,6 +94,7 @@ func TestNFSShareCreationPassesAccessLists(t *testing.T) {
 				QueryAllDatasetsFunc: func(context.Context, string) ([]tnsapi.Dataset, error) { return nil, nil },
 				CreateDatasetFunc:    func(context.Context, tnsapi.DatasetCreateParams) (*tnsapi.Dataset, error) { return dataset, nil },
 				QueryNFSShareFunc:    func(context.Context, string) ([]tnsapi.NFSShare, error) { return nil, nil },
+				QueryNFSSharesFunc:   func(context.Context, []interface{}) ([]tnsapi.NFSShare, error) { return nil, nil },
 				CreateNFSShareFunc: func(_ context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error) {
 					created = &params
 					return &tnsapi.NFSShare{ID: 1, Path: params.Path, Hosts: params.Hosts, Networks: params.Networks}, nil
@@ -145,13 +146,12 @@ func TestExistingNFSVolumeRejectsUnrestrictedShare(t *testing.T) {
 		QueryNFSShareFunc: func(context.Context, string) ([]tnsapi.NFSShare, error) {
 			return []tnsapi.NFSShare{{ID: 1, Path: dataset.Mountpoint}}, nil
 		},
+		GetDatasetPropertiesFunc: func(context.Context, string, []string) (map[string]string, error) {
+			return map[string]string{tnsapi.PropertyManagedBy: tnsapi.ManagedByValue}, nil
+		},
 	}
 	controller := NewControllerService(mock, NewNodeRegistry(), "")
-	_, _, err := controller.checkExistingNFSVolume(context.Background(), request, request.Parameters, dataset, dataset.ID, 1<<30)
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("checkExistingNFSVolume() error = %v, want FailedPrecondition", err)
-	}
-	// Legacy idempotency checks must not bypass the access comparison either.
+	// An existing share must not bypass the access comparison.
 	params, err := validateNFSParams(request)
 	if err != nil {
 		t.Fatal(err)

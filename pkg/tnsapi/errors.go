@@ -79,6 +79,13 @@ func IsDependentClones(err error) bool {
 	return classify(err, nil, []string{"dependent clones"})
 }
 
+// IsNotAClone reports whether err means a promote had nothing to do because the dataset
+// is not a clone (already promoted, or never cloned). The middleware rejects it with
+// "Only cloned datasets can be promoted"; zfs itself says "not a cloned filesystem".
+func IsNotAClone(err error) bool {
+	return classify(err, nil, []string{"only cloned datasets can be promoted", "not a cloned filesystem"})
+}
+
 // IsCapacity reports whether err means the pool or a quota is out of space.
 func IsCapacity(err error) bool {
 	return classify(err, []string{"ENOSPC", "EDQUOT"}, []string{

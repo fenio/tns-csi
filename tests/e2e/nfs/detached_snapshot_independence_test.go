@@ -44,7 +44,7 @@ var _ = Describe("Detached Snapshot Independence", func() {
 		storageClass := "tns-csi-nfs"
 		accessMode := corev1.ReadWriteMany
 		podTimeout := 2 * time.Minute
-		pool := "storage"
+		pool := f.Config.TrueNASPool
 
 		if f.TrueNAS == nil {
 			Skip("TrueNAS verifier not configured - skipping ZFS-level verification")
@@ -92,12 +92,15 @@ var _ = Describe("Detached Snapshot Independence", func() {
 		var sourceDatasetPath string
 		for _, path := range possibleDatasetPaths {
 			dsExists, dsErr := f.TrueNAS.DatasetExists(ctx, path)
+			if dsErr != nil {
+				GinkgoWriter.Printf("[NFS] DatasetExists(%s) error: %v\n", path, dsErr)
+			}
 			if dsErr == nil && dsExists {
 				sourceDatasetPath = path
 				break
 			}
 		}
-		Expect(sourceDatasetPath).NotTo(BeEmpty(), "Could not find source ZFS dataset")
+		Expect(sourceDatasetPath).NotTo(BeEmpty(), "Could not find source ZFS dataset (tried %v)", possibleDatasetPaths)
 		GinkgoWriter.Printf("[NFS] Source ZFS dataset: %s\n", sourceDatasetPath)
 
 		By("Writing test data to source volume")

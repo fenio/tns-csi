@@ -127,6 +127,9 @@ type ClientInterface interface {
 	// WaitForJob waits for a job to complete with polling.
 	WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error
 
+	// FindReplicationJobsForTarget returns the known one-time replication jobs into target, oldest first.
+	FindReplicationJobsForTarget(ctx context.Context, target string) ([]ReplicationJobState, error)
+
 	// RunOnetimeReplicationAndWait runs a one-time replication and waits for completion.
 	RunOnetimeReplicationAndWait(ctx context.Context, params ReplicationRunOnetimeParams, pollInterval time.Duration) error
 

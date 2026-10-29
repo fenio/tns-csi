@@ -79,9 +79,9 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 		volumeID, isBlockVolume, params.server, params.port, params.nqn, datasetName)
 
 	// Try to reuse existing connection (idempotent staging)
-	if resp, _, reuseErr := s.tryReuseExistingConnection(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); reuseErr != nil {
+	if resp, reused, reuseErr := s.tryReuseExistingConnection(ctx, params, volumeID, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext); reuseErr != nil {
 		return nil, reuseErr
-	} else if resp != nil {
+	} else if reused {
 		return resp, nil
 	}
 
@@ -116,27 +116,31 @@ func (s *NodeService) stageNVMeOFVolume(ctx context.Context, req *csi.NodeStageV
 }
 
 // tryReuseExistingConnection attempts to reuse an existing NVMe-oF connection.
-// Returns the response if successful, or nil if no existing connection found.
+// reused reports whether the volume was staged over an existing connection; when it is
+// false and err is nil, no usable connection exists and the caller connects afresh.
 // With independent subsystems, we simply check if the device for this NQN exists.
-func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (resp *csi.NodeStageVolumeResponse, devicePath string, err error) {
+func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nvmeOFConnectionParams, volumeID, stagingTargetPath string, volumeCapability *csi.VolumeCapability, isBlockVolume bool, volumeContext map[string]string) (resp *csi.NodeStageVolumeResponse, reused bool, err error) {
 	// With independent subsystems, NSID is always 1
 	devicePath, findErr := s.findNVMeDeviceByNQN(ctx, params.nqn)
 
 	// Check if we found an unhealthy device (stale connection from previous run)
 	// This is different from "not found" - we need to disconnect it before reconnecting
 	if errors.Is(findErr, ErrNVMeDeviceUnhealthy) {
+		if refuseErr := s.refuseStaleDisconnectWhileMounted(ctx, params.nqn, stagingTargetPath, findErr); refuseErr != nil {
+			return nil, false, refuseErr
+		}
 		klog.Warningf("Found stale NVMe connection for NQN %s (unhealthy device) - disconnecting before reconnect", params.nqn)
 		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
 			klog.Warningf("Failed to disconnect stale NVMe-oF connection: %v", disconnectErr)
 		}
 		// Wait for cleanup
-		time.Sleep(2 * time.Second)
-		return nil, "", nil
+		time.Sleep(staleDisconnectSettle)
+		return nil, false, nil
 	}
 
 	if findErr != nil || devicePath == "" {
 		// Device not found is expected when not previously connected - return nil to try other methods
-		return nil, "", nil //nolint:nilerr // intentionally swallowing "device not found" as this is expected
+		return nil, false, nil //nolint:nilerr // intentionally swallowing "device not found" as this is expected
 	}
 
 	klog.V(4).Infof("NVMe-oF device already connected at %s for NQN=%s - checking if connection is healthy",
@@ -150,12 +154,15 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 	// Verify the existing connection is healthy by checking device size
 	// A stale connection may have the device file but report zero size
 	if healthy := s.verifyDeviceHealthy(ctx, devicePath); !healthy {
+		if refuseErr := s.refuseStaleDisconnectWhileMounted(ctx, params.nqn, stagingTargetPath, fmt.Errorf("%w: %s reports zero size", ErrNVMeDeviceUnhealthy, devicePath)); refuseErr != nil {
+			return nil, false, refuseErr
+		}
 		klog.Warningf("Existing NVMe device %s appears stale (zero size) - disconnecting to force reconnect", devicePath)
 		if disconnectErr := s.disconnectNVMeOF(ctx, params.nqn); disconnectErr != nil {
 			klog.Warningf("Failed to disconnect stale NVMe-oF connection: %v", disconnectErr)
 		}
-		// Return nil to trigger a full reconnect
-		return nil, "", nil
+		// Fall through to a full reconnect
+		return nil, false, nil
 	}
 
 	klog.V(4).Infof("Existing NVMe-oF device %s is healthy - reusing connection (idempotent)", devicePath)
@@ -164,9 +171,34 @@ func (s *NodeService) tryReuseExistingConnection(ctx context.Context, params *nv
 	resp, err = s.stageNVMeDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 	if err != nil {
 		klog.Errorf("Failed to stage existing NVMe device: %v", err)
-		return nil, devicePath, err
+		return nil, false, err
 	}
-	return resp, devicePath, nil
+	return resp, true, nil
+}
+
+// staleDisconnectSettle is the pause after tearing down a stale subsystem before a
+// fresh connect. Tests shorten it.
+var staleDisconnectSettle = 2 * time.Second
+
+// refuseStaleDisconnectWhileMounted returns an Unavailable error when the staging path
+// is still mounted, so a stale-looking subsystem is not disconnected underneath a live
+// mount. The kubelet re-calls NodeStageVolume for mounted volumes (after a restart, or
+// when a previous call's outcome is unknown); if the controller happens to be
+// reconnecting at that moment the namespace reports no size and would otherwise be
+// torn down, leaving a dead mount under the pod while the reconnect creates a new
+// device that nothing mounts. Returning Unavailable makes the kubelet retry instead.
+// A mount-table lookup failure is treated as mounted: guessing wrong is worse.
+func (s *NodeService) refuseStaleDisconnectWhileMounted(ctx context.Context, nqn, stagingTargetPath string, cause error) error {
+	_, mounted, err := lookupMountedEntry(ctx, stagingTargetPath)
+	if err != nil {
+		return status.Errorf(codes.Unavailable,
+			"NVMe-oF subsystem %s looks stale (%v) but the mount state of %s is unknown (%v); not disconnecting", nqn, cause, stagingTargetPath, err)
+	}
+	if mounted {
+		return status.Errorf(codes.Unavailable,
+			"NVMe-oF subsystem %s looks stale (%v) but %s is still mounted; not disconnecting a mounted subsystem", nqn, cause, stagingTargetPath)
+	}
+	return nil
 }
 
 // verifyDeviceHealthy checks if an NVMe device is healthy by verifying it reports a non-zero size.

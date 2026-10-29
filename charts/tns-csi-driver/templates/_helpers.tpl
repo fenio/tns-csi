@@ -126,6 +126,14 @@ that predates the setting.
 {{- end -}}
 
 {{/*
+Whether the CSIDriver sets seLinuxMount. Renders "true" or "" so it can be used
+in `if`. Nil-safe for the same --reuse-values reason as attachRequired.
+*/}}
+{{- define "tns-csi-driver.csiDriver.seLinuxMount" -}}
+{{- if dig "seLinuxMount" false (.Values.csiDriver | default dict) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Create the CSI driver name
 */}}
 {{- define "tns-csi-driver.driverName" -}}
@@ -136,7 +144,7 @@ Create the CSI driver name
 Validate required TrueNAS configuration
 */}}
 {{- define "tns-csi-driver.validateConfig" -}}
-{{- if and .Values.csiDriver.seLinuxMount (semverCompare "<1.25-0" .Capabilities.KubeVersion.Version) }}
+{{- if and (include "tns-csi-driver.csiDriver.seLinuxMount" .) (semverCompare "<1.25-0" .Capabilities.KubeVersion.Version) }}
   {{- fail (printf "\n\nCONFIGURATION ERROR: csiDriver.seLinuxMount requires Kubernetes 1.25 or newer (got %s)." .Capabilities.KubeVersion.Version) }}
 {{- end }}
 {{- if not .Values.truenas.existingSecret }}

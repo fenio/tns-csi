@@ -26,6 +26,11 @@ var ErrUnknownProtocol = errors.New("unknown protocol")
 // HelmDeployer handles Helm-based deployment of the CSI driver.
 type HelmDeployer struct {
 	config *Config
+	// ExtraSets are additional "key=value" chart values passed as --set after the
+	// defaults, for specs that need a non-default setting. Changing the release through
+	// Helm (rather than editing its objects) keeps Helm 4's server-side apply ownership
+	// intact, so later upgrades of the release do not conflict.
+	ExtraSets []string
 }
 
 // NewHelmDeployer creates a new HelmDeployer.
@@ -161,6 +166,9 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 		}
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownProtocol, protocol)
+	}
+	for _, s := range h.ExtraSets {
+		args = append(args, flagSet, s)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)

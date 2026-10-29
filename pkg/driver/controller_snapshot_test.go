@@ -25,6 +25,7 @@ type MockAPIClientForSnapshots struct {
 	UpdateDatasetFunc              func(ctx context.Context, datasetID string, params tnsapi.DatasetUpdateParams) (*tnsapi.Dataset, error)
 	CreateNFSShareFunc             func(ctx context.Context, params tnsapi.NFSShareCreateParams) (*tnsapi.NFSShare, error)
 	DeleteNFSShareFunc             func(ctx context.Context, shareID int) error
+	DeleteSMBShareFunc             func(ctx context.Context, shareID int) error
 	QueryNFSShareFunc              func(ctx context.Context, path string) ([]tnsapi.NFSShare, error)
 	CreateZvolFunc                 func(ctx context.Context, params tnsapi.ZvolCreateParams) (*tnsapi.Dataset, error)
 	CreateNVMeOFSubsystemFunc      func(ctx context.Context, params tnsapi.NVMeOFSubsystemCreateParams) (*tnsapi.NVMeOFSubsystem, error)
@@ -64,6 +65,16 @@ type MockAPIClientForSnapshots struct {
 	QuerySMBSharesFunc             func(ctx context.Context, filters []interface{}) ([]tnsapi.SMBShare, error)
 	QueryNVMeOFNamespacesFunc      func(ctx context.Context, filters []interface{}) ([]tnsapi.NVMeOFNamespace, error)
 	QueryNVMeOFSubsystemsFunc      func(ctx context.Context, filters []interface{}) ([]tnsapi.NVMeOFSubsystem, error)
+	QuerySubsystemPortBindingsFunc func(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error)
+	RemoveSubsystemFromPortFunc    func(ctx context.Context, portSubsysID int) error
+	CreateSMBShareFunc             func(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error)
+	QuerySMBShareFunc              func(ctx context.Context, path string) ([]tnsapi.SMBShare, error)
+	SetFilesystemACLFunc           func(ctx context.Context, path string) error
+
+	// Replication hooks; unset, replication succeeds immediately and no job is known.
+	FindReplicationJobsForTargetFunc func(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error)
+	WaitForJobFunc                   func(ctx context.Context, jobID int, pollInterval time.Duration) error
+	RunOnetimeReplicationAndWaitFunc func(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error
 }
 
 func (m *MockAPIClientForSnapshots) CreateSnapshot(ctx context.Context, params tnsapi.SnapshotCreateParams) (*tnsapi.Snapshot, error) {
@@ -174,15 +185,24 @@ func (m *MockAPIClientForSnapshots) QueryNFSShare(ctx context.Context, path stri
 }
 
 func (m *MockAPIClientForSnapshots) CreateSMBShare(ctx context.Context, params tnsapi.SMBShareCreateParams) (*tnsapi.SMBShare, error) {
+	if m.CreateSMBShareFunc != nil {
+		return m.CreateSMBShareFunc(ctx, params)
+	}
 	return nil, errors.New("CreateSMBShareFunc not implemented")
 }
 
 func (m *MockAPIClientForSnapshots) DeleteSMBShare(ctx context.Context, shareID int) error {
+	if m.DeleteSMBShareFunc != nil {
+		return m.DeleteSMBShareFunc(ctx, shareID)
+	}
 	return errors.New("DeleteSMBShareFunc not implemented")
 }
 
 func (m *MockAPIClientForSnapshots) QuerySMBShare(ctx context.Context, path string) ([]tnsapi.SMBShare, error) {
-	return nil, errors.New("QuerySMBShareFunc not implemented")
+	if m.QuerySMBShareFunc != nil {
+		return m.QuerySMBShareFunc(ctx, path)
+	}
+	return nil, nil // no share at this path
 }
 
 func (m *MockAPIClientForSnapshots) QuerySMBShareByID(ctx context.Context, shareID int) (*tnsapi.SMBShare, error) {
@@ -205,6 +225,9 @@ func (m *MockAPIClientForSnapshots) GetFilesystemACL(ctx context.Context, path s
 }
 
 func (m *MockAPIClientForSnapshots) SetFilesystemACL(ctx context.Context, path string) error {
+	if m.SetFilesystemACLFunc != nil {
+		return m.SetFilesystemACLFunc(ctx, path)
+	}
 	return nil
 }
 
@@ -268,7 +291,7 @@ func (m *MockAPIClientForSnapshots) QueryNVMeOFSubsystem(ctx context.Context, nq
 	if m.QueryNVMeOFSubsystemFunc != nil {
 		return m.QueryNVMeOFSubsystemFunc(ctx, nqn)
 	}
-	return nil, errors.New("QueryNVMeOFSubsystemFunc not implemented")
+	return nil, nil // Default: no subsystem with this NQN
 }
 
 func (m *MockAPIClientForSnapshots) ListAllNVMeOFSubsystems(ctx context.Context) ([]tnsapi.NVMeOFSubsystem, error) {
@@ -321,10 +344,16 @@ func (m *MockAPIClientForSnapshots) QueryPool(ctx context.Context, poolName stri
 }
 
 func (m *MockAPIClientForSnapshots) RemoveSubsystemFromPort(ctx context.Context, portSubsysID int) error {
+	if m.RemoveSubsystemFromPortFunc != nil {
+		return m.RemoveSubsystemFromPortFunc(ctx, portSubsysID)
+	}
 	return nil
 }
 
 func (m *MockAPIClientForSnapshots) QuerySubsystemPortBindings(ctx context.Context, subsystemID int) ([]tnsapi.NVMeOFPortSubsystem, error) {
+	if m.QuerySubsystemPortBindingsFunc != nil {
+		return m.QuerySubsystemPortBindingsFunc(ctx, subsystemID)
+	}
 	return nil, nil
 }
 
@@ -381,13 +410,26 @@ func (m *MockAPIClientForSnapshots) GetJobStatus(ctx context.Context, jobID int)
 }
 
 func (m *MockAPIClientForSnapshots) WaitForJob(ctx context.Context, jobID int, pollInterval time.Duration) error {
+	if m.WaitForJobFunc != nil {
+		return m.WaitForJobFunc(ctx, jobID, pollInterval)
+	}
 	// Mock implementation - always succeed immediately
 	return nil
 }
 
 func (m *MockAPIClientForSnapshots) RunOnetimeReplicationAndWait(ctx context.Context, params tnsapi.ReplicationRunOnetimeParams, pollInterval time.Duration) error {
+	if m.RunOnetimeReplicationAndWaitFunc != nil {
+		return m.RunOnetimeReplicationAndWaitFunc(ctx, params, pollInterval)
+	}
 	// Mock implementation - always succeed
 	return nil
+}
+
+func (m *MockAPIClientForSnapshots) FindReplicationJobsForTarget(ctx context.Context, target string) ([]tnsapi.ReplicationJobState, error) {
+	if m.FindReplicationJobsForTargetFunc != nil {
+		return m.FindReplicationJobsForTargetFunc(ctx, target)
+	}
+	return nil, nil
 }
 
 func (m *MockAPIClientForSnapshots) GetDatasetWithProperties(ctx context.Context, datasetID string) (*tnsapi.DatasetWithProperties, error) {

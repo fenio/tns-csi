@@ -463,6 +463,48 @@ func (s *ControllerService) datasetHasCSIManagedSnapshots(_ context.Context, dat
 	return false, nil
 }
 
+// cleanupTimeout bounds cleanup after a failed operation.
+const cleanupTimeout = 2 * time.Minute
+
+// cleanupContext returns a context for cleanup-on-failure that keeps ctx's values but not its
+// cancellation: the request's deadline has usually just expired (that is why the operation
+// failed), and cleanup on it would silently do nothing and leave orphans behind.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
+// checkExistingVolumeOwnership verifies that a dataset found at a new volume's path was made
+// for that volume, before the existing-volume path completes it. The name collision alone
+// proves nothing: the dataset must carry managed_by=tns-csi (the create call writes it) and
+// no other volume's name; anything else is AlreadyExists.
+func (s *ControllerService) checkExistingVolumeOwnership(ctx context.Context, volumeName, datasetID string) error {
+	ownership, err := s.readVolumeOwnership(ctx, &VolumeMetadata{Name: volumeName, DatasetID: datasetID})
+	if status.Code(err) == codes.FailedPrecondition {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and does not belong to volume %s: %s", datasetID, volumeName, status.Convert(err).Message())
+	}
+	if err != nil {
+		return err
+	}
+	if managedBy := ownership.props[tnsapi.PropertyManagedBy]; !ownership.notFound && managedBy != tnsapi.ManagedByValue {
+		return status.Errorf(codes.AlreadyExists,
+			"dataset %s already exists and is not marked as managed by tns-csi (%s=%q)", datasetID, tnsapi.PropertyManagedBy, managedBy)
+	}
+	return nil
+}
+
+// createOutcomeUnknown reports whether a failed create request may still have been applied
+// by TrueNAS: the connection was lost after it was sent, or the request context ran out
+// before middlewared answered. Only an error middlewared itself returned (*tnsapi.Error)
+// proves the create did not happen once ctx is done.
+func createOutcomeUnknown(ctx context.Context, err error) bool {
+	if errors.Is(err, tnsapi.ErrUncertainOutcome) {
+		return true
+	}
+	var apiErr *tnsapi.Error
+	return ctx.Err() != nil && !errors.As(err, &apiErr)
+}
+
 // This is necessary because after ZFS clone promotion:
 //   - The snapshot moves from the source to the promoted clone.
 //   - The original source volume becomes a dependent of the promoted snapshot.
@@ -636,17 +678,6 @@ func (s *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	mkfsOptions, mkfsErr := validateMkfsOptions(params[VolumeContextKeyMkfsOptions], protocol, req.GetVolumeCapabilities())
 	if mkfsErr != nil {
 		return nil, mkfsErr
-	}
-
-	// Check for idempotency: if volume with same name already exists
-	existingVolume, existingErr := s.checkExistingVolume(ctx, req, params, protocol)
-	if existingErr != nil && !errors.Is(existingErr, ErrVolumeNotFound) {
-		return nil, existingErr
-	}
-	if existingVolume != nil {
-		klog.V(4).Infof("Returning existing volume for idempotency: %s", req.GetName())
-		applyCreateVolumeContext(req, existingVolume, filesystemCheckMode, mkfsOptions)
-		return existingVolume, nil
 	}
 
 	// Check for adoption: if volume exists elsewhere (different parentDataset) and can be adopted
@@ -867,177 +898,22 @@ func (s *ControllerService) createVolumeByProtocol(ctx context.Context, req *csi
 	}
 }
 
-// checkExistingVolume checks if a volume with the same name already exists and returns it for idempotency.
-// Returns ErrVolumeNotFound if the volume doesn't exist, or error if the volume exists but with incompatible parameters.
-func (s *ControllerService) checkExistingVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, protocol string) (*csi.CreateVolumeResponse, error) {
-	pool := params["pool"]
-	parentDataset := resolveParentDataset(pool, params["parentDataset"])
-
-	if parentDataset == "" {
-		return nil, ErrVolumeNotFound
-	}
-
-	expectedDatasetName := fmt.Sprintf("%s/%s", parentDataset, req.GetName())
-	existingDataset, err := s.apiClient.Dataset(ctx, expectedDatasetName)
-	if err != nil || existingDataset == nil {
-		// Dataset doesn't exist or error querying - continue with creation
-		if err != nil {
-			klog.V(4).Infof("Dataset %s does not exist or error querying: %v - proceeding with creation", expectedDatasetName, err)
-		}
-		return nil, ErrVolumeNotFound
-	}
-
-	// Volume already exists - check capacity compatibility
-	klog.V(4).Infof("Volume %s already exists as dataset %s", req.GetName(), expectedDatasetName)
-
-	reqCapacity := req.GetCapacityRange().GetRequiredBytes()
-	if reqCapacity == 0 {
-		reqCapacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
-	}
-
-	// Build complete volume metadata based on protocol
-	var volumeMeta VolumeMetadata
-	var volumeContext map[string]string
-
-	switch protocol {
-	case ProtocolNFS:
-		meta, ctx, err := s.checkExistingNFSVolume(ctx, req, params, existingDataset, expectedDatasetName, reqCapacity)
-		if err != nil {
-			return nil, err
-		}
-		volumeMeta = meta
-		volumeContext = ctx
-
-	case ProtocolNVMeOF, ProtocolISCSI, ProtocolSMB:
-		// Defer to protocol-specific handler which validates all resources
-		// (subsystem/target/share exist + capacity match + builds complete VolumeContext)
-		return nil, ErrVolumeNotFound
-
-	default:
-		klog.Errorf("Unknown protocol: %s", protocol)
-		return nil, ErrVolumeNotFound
-	}
-
-	// Volume ID is the full dataset path for O(1) lookups
-	volumeID := expectedDatasetName
-
-	// Return capacity from request if specified, otherwise use a default
-	capacity := reqCapacity
-	if capacity <= 0 {
-		capacity = 1 * 1024 * 1024 * 1024 // 1 GiB default
-	}
-
-	// Ensure volume context includes protocol
-	if volumeContext == nil {
-		volumeContext = buildVolumeContext(volumeMeta)
-	} else {
-		volumeContext[VolumeContextKeyProtocol] = protocol
-	}
-
-	klog.V(4).Infof("Returning existing volume %s (idempotent)", req.GetName())
-	return &csi.CreateVolumeResponse{
-		Volume: &csi.Volume{
-			VolumeId:      volumeID,
-			CapacityBytes: capacity,
-			VolumeContext: volumeContext,
-		},
-	}, nil
-}
-
-// checkExistingNFSVolume validates an existing NFS volume for idempotency.
-func (s *ControllerService) checkExistingNFSVolume(ctx context.Context, req *csi.CreateVolumeRequest, params map[string]string, existingDataset *tnsapi.Dataset, expectedDatasetName string, reqCapacity int64) (VolumeMetadata, map[string]string, error) {
-	// Query for NFS share to get share ID
-	shares, err := s.apiClient.QueryNFSShare(ctx, existingDataset.Mountpoint)
+// existingSnapshot returns the snapshot of dataset whose full name (dataset@name) is
+// fullName, or nil when it does not exist or the query fails (the caller then tries to
+// create it, and a create of an existing snapshot reports EEXIST).
+func (s *ControllerService) existingSnapshot(ctx context.Context, dataset, fullName string) *tnsapi.Snapshot {
+	snapshots, err := s.apiClient.QuerySnapshots(ctx, []interface{}{
+		[]interface{}{verbDataset, "=", dataset},
+	})
 	if err != nil {
-		klog.Errorf("Failed to query NFS shares for existing volume: %v", err)
-		return VolumeMetadata{}, nil, ErrVolumeNotFound
+		klog.V(4).Infof("Failed to query snapshots of %s (will attempt to create): %v", dataset, err)
+		return nil
 	}
-
-	if len(shares) == 0 {
-		klog.Errorf("No NFS share found for dataset %s (mountpoint: %s)", expectedDatasetName, existingDataset.Mountpoint)
-		return VolumeMetadata{}, nil, ErrVolumeNotFound
+	for i := range snapshots {
+		if snapshots[i].ID == fullName || snapshots[i].Name == fullName {
+			return &snapshots[i]
+		}
 	}
-	access, accessErr := parseNFSShareAccess(params)
-	if accessErr != nil {
-		return VolumeMetadata{}, nil, accessErr
-	}
-	if err := checkExistingNFSShareAccess(access, &shares[0]); err != nil {
-		return VolumeMetadata{}, nil, err
-	}
-
-	// Parse capacity from NFS share comment and validate compatibility
-	existingCapacity := parseNFSShareCapacity(shares[0].Comment)
-	if err := validateCapacityCompatibility(req.GetName(), existingCapacity, reqCapacity); err != nil {
-		return VolumeMetadata{}, nil, err
-	}
-
-	// Get server parameter
-	server := params["server"]
-	if server == "" {
-		server = "defaultServerAddress" // Default for testing
-	}
-
-	volumeMeta := VolumeMetadata{
-		Name:        req.GetName(),
-		Protocol:    ProtocolNFS,
-		DatasetID:   existingDataset.ID,
-		DatasetName: expectedDatasetName,
-		Server:      server,
-		NFSShareID:  shares[0].ID,
-	}
-
-	volumeContext := map[string]string{
-		VolumeContextKeyServer: server,
-		"share":                existingDataset.Mountpoint,
-		"datasetID":            existingDataset.ID,
-		"datasetName":          expectedDatasetName,
-		"nfsShareID":           strconv.Itoa(shares[0].ID),
-	}
-
-	return volumeMeta, volumeContext, nil
-}
-
-// parseNFSShareCapacity extracts capacity from NFS share comment.
-// Supports multiple formats:
-// - "CSI Volume: <name>, Capacity: <bytes>"
-// - "CSI Volume: <name> | Capacity: <bytes>".
-func parseNFSShareCapacity(comment string) int64 {
-	if comment == "" {
-		klog.V(4).Infof("Comment is empty")
-		return 0
-	}
-
-	klog.V(4).Infof("Parsing comment: %s", comment)
-
-	// Parse pipe separator format: "volume-name | Capacity: 1073741824"
-	parts := strings.Split(comment, " | Capacity: ")
-	if len(parts) != 2 {
-		klog.V(4).Infof("Comment does not match expected format: %s", comment)
-		return 0
-	}
-
-	parsed, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		klog.V(4).Infof("Could not parse capacity number: %s (error: %v)", parts[1], err)
-		return 0
-	}
-
-	klog.V(4).Infof("Successfully parsed capacity: %d", parsed)
-	return parsed
-}
-
-// validateCapacityCompatibility checks if the requested capacity matches the existing capacity.
-func validateCapacityCompatibility(volumeName string, existingCapacity, reqCapacity int64) error {
-	klog.V(4).Infof("Validating capacity - existing: %d, requested: %d", existingCapacity, reqCapacity)
-
-	if existingCapacity > 0 && reqCapacity != existingCapacity {
-		klog.Errorf("Volume %s already exists with different capacity (existing: %d, requested: %d)",
-			volumeName, existingCapacity, reqCapacity)
-		return status.Errorf(codes.AlreadyExists,
-			"Volume %s already exists with different capacity", volumeName)
-	}
-
-	klog.V(4).Infof("Capacity check passed (existing: %d, requested: %d)", existingCapacity, reqCapacity)
 	return nil
 }
 
@@ -1107,12 +983,27 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 		Recursive: false,
 	}
 
-	snapshot, err := s.apiClient.CreateSnapshot(ctx, snapshotParams)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", err)
+	// The name is deterministic, so a retried CreateVolume (the external-provisioner
+	// retries after a timeout) finds the snapshot the previous attempt made. Reuse it
+	// instead of failing on "already exists" on every retry.
+	tempSnapshotFullName := sourceDatasetName + "@" + tempSnapshotName
+	snapshot := s.existingSnapshot(ctx, sourceDatasetName, tempSnapshotFullName)
+	if snapshot != nil {
+		klog.Infof("Temporary snapshot %s already exists (retried request), reusing it", tempSnapshotFullName)
+	} else {
+		created, createErr := s.apiClient.CreateSnapshot(ctx, snapshotParams)
+		switch {
+		case createErr == nil:
+			snapshot = created
+			klog.V(4).Infof("Created temporary snapshot: %s", snapshot.ID)
+		case tnsapi.IsAlreadyExists(createErr):
+			// Created by an attempt whose response was lost, or not yet visible to the query.
+			klog.Infof("Temporary snapshot %s already exists, reusing it", tempSnapshotFullName)
+			snapshot = &tnsapi.Snapshot{ID: tempSnapshotFullName, Name: tempSnapshotFullName, Dataset: sourceDatasetName}
+		default:
+			return nil, status.Errorf(codes.Internal, "Failed to create temporary snapshot for cloning: %v", createErr)
+		}
 	}
-
-	klog.V(4).Infof("Created temporary snapshot: %s", snapshot.ID)
 
 	// Create snapshot metadata for the temporary snapshot
 	snapshotMeta := SnapshotMetadata{
@@ -1126,9 +1017,11 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	snapshotID, encodeErr := encodeSnapshotID(snapshotMeta)
 	if encodeErr != nil {
 		// Cleanup the temporary snapshot
-		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, snapshot.ID); delErr != nil {
 			klog.Errorf("Failed to cleanup temporary snapshot: %v", delErr)
 		}
+		cancel()
 		return nil, status.Errorf(codes.Internal, "Failed to encode snapshot ID: %v", encodeErr)
 	}
 
@@ -1136,9 +1029,11 @@ func (s *ControllerService) createVolumeFromVolume(ctx context.Context, req *csi
 	resp, cloneErr := s.createVolumeFromSnapshot(ctx, req, snapshotID)
 	if cloneErr != nil {
 		// Clone failed - cleanup temp snapshot
-		if delErr := s.apiClient.DeleteSnapshot(ctx, snapshot.ID); delErr != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		if delErr := s.apiClient.DeleteSnapshot(cleanupCtx, snapshot.ID); delErr != nil {
 			klog.Warningf("Failed to cleanup temporary snapshot %s after clone failure: %v", snapshot.ID, delErr)
 		}
+		cancel()
 		return nil, cloneErr
 	}
 
@@ -1277,13 +1172,24 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 	volumeID := req.GetVolumeId()
 	nodeID := req.GetNodeId()
 
-	// Remove from published volumes tracking
+	// Remove from published volumes tracking. Per CSI spec, an empty node_id means
+	// the volume must be unpublished from every node it is published to.
+	s.publishedVolumesMu.Lock()
 	if nodeID != "" {
-		publishKey := fmt.Sprintf("%s:%s", volumeID, nodeID)
-		s.publishedVolumesMu.Lock()
-		delete(s.publishedVolumes, publishKey)
-		s.publishedVolumesMu.Unlock()
+		delete(s.publishedVolumes, fmt.Sprintf("%s:%s", volumeID, nodeID))
+	} else {
+		prefix := volumeID + ":"
+		for key := range s.publishedVolumes {
+			if strings.HasPrefix(key, prefix) {
+				delete(s.publishedVolumes, key)
+			}
+		}
+	}
+	s.publishedVolumesMu.Unlock()
+	if nodeID != "" {
 		klog.V(4).Infof("ControllerUnpublishVolume: unpublished volume %s from node %s", volumeID, nodeID)
+	} else {
+		klog.V(4).Infof("ControllerUnpublishVolume: unpublished volume %s from all nodes", volumeID)
 	}
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
@@ -1742,8 +1648,8 @@ func (s *ControllerService) expandAdoptedVolume(ctx context.Context, dataset *tn
 
 	switch protocol {
 	case ProtocolNFS, ProtocolSMB:
-		// NFS and SMB use quota (both are FILESYSTEM datasets)
-		updateParams.Quota = &newCapacityBytes
+		// NFS and SMB are FILESYSTEM datasets sized with refquota, as at creation and expansion
+		updateParams.RefQuota = &newCapacityBytes
 	case ProtocolNVMeOF, ProtocolISCSI:
 		// NVMe-oF and iSCSI use volsize (both are ZVOLs)
 		updateParams.Volsize = &newCapacityBytes

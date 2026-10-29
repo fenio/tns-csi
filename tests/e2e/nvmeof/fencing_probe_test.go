@@ -80,9 +80,10 @@ var _ = Describe("NVMe-oF fencing-probe", func() {
 		_, _ = framework.ProbeCall(ctx, client, "nvmet.global.sessions")
 
 		By("Restoring access and checking the volume mounts again")
-		_, err = framework.ProbeCall(ctx, client, "nvmet.subsys.update", subsysID, map[string]any{"allow_any_host": true})
-		Expect(err).NotTo(HaveOccurred())
+		// The kernel refuses allow_any_host while the subsystem still lists hosts, so unlink first.
 		_, err = framework.ProbeCall(ctx, client, "nvmet.host_subsys.delete", linkID)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = framework.ProbeCall(ctx, client, "nvmet.subsys.update", subsysID, map[string]any{"allow_any_host": true})
 		Expect(err).NotTo(HaveOccurred())
 		ready, err := framework.ProbeRemount(ctx, f, pod, "access restored", 4*time.Minute)
 		Expect(err).NotTo(HaveOccurred())

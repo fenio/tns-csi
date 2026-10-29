@@ -119,7 +119,7 @@ func ProbeWrite(ctx context.Context, f *Framework, pod, label string) bool {
 	defer cancel()
 	start := time.Now()
 	out, err := f.K8s.ExecInPod(ctx, pod, []string{"sh", "-c", fmt.Sprintf(
-		"timeout 60 dd if=/dev/urandom of=/data/probe-%d bs=1M count=4 oflag=direct conv=fsync 2>&1", start.UnixNano())})
+		"dd if=/dev/urandom of=/data/probe-%d bs=1M count=4 conv=fsync 2>&1", start.UnixNano())})
 	ginkgo.GinkgoWriter.Printf("PROBE write [%s] took %s, err: %v, output: %s\n",
 		label, time.Since(start).Round(time.Second), err, strings.TrimSpace(out))
 	return err == nil

@@ -94,6 +94,8 @@ var _ = Describe("iSCSI Fencing", func() {
 		pod, err = f.CreatePod(ctx, framework.PodOptions{Name: name + "-pod", PVCName: pvc.Name, MountPath: "/data"})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(f.K8s.WaitForPodReady(ctx, pod.Name, 3*time.Minute)).To(Succeed())
+		pod, err = f.K8s.GetPod(ctx, pod.Name)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(admitted()).To(Equal([]string{nodeGroup + pod.Spec.NodeName}))
 		out, err := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data/f"})
 		Expect(err).NotTo(HaveOccurred())

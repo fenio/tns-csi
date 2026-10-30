@@ -22,8 +22,10 @@ import (
 const (
 	fencedGroupComment = "tns-csi:fenced"
 	fencedInitiatorIQN = "iqn.2005-10.invalid.tns-csi:fenced"
-	initiatorNameFile  = "/etc/iscsi/initiatorname.iscsi"
 )
+
+// initiatorNameFile is a variable so tests can point it at a temporary file.
+var initiatorNameFile = "/etc/iscsi/initiatorname.iscsi"
 
 var errNoInitiatorName = errors.New("no InitiatorName line")
 
@@ -120,34 +122,17 @@ func (s *ControllerService) fenceISCSIVolume(ctx context.Context, volumeID, node
 	if err != nil {
 		return status.Errorf(codes.Internal, "iSCSI fencing: failed to query initiator groups: %v", err)
 	}
-	nodeGroups := map[int]tnsapi.ISCSIInitiator{}
 	prefix := nodeGroupPrefix(s.clusterID)
-	var own *tnsapi.ISCSIInitiator
-	for i := range initiators {
-		if !strings.HasPrefix(initiators[i].Comment, prefix) {
-			continue
+	nodeGroups, own := nodeInitiatorGroups(initiators, prefix, nodeID)
+	if publish {
+		if err := checkPublishable(own, nodeGroups, prefix, nodeID); err != nil {
+			return err
 		}
-		nodeGroups[initiators[i].ID] = initiators[i]
-		if initiators[i].Comment == prefix+nodeID {
-			own = &initiators[i]
-		}
-	}
-	if !publish && nodeID == "" {
+	} else if nodeID == "" {
 		nodeGroups = nil // unpublished from every node: keep no node's access
 	}
-	if publish {
-		if own == nil {
-			return status.Errorf(codes.FailedPrecondition,
-				"iSCSI fencing: node %s has not registered its iSCSI initiator on TrueNAS; check its node plugin log", nodeID)
-		}
-		if other := sharedIQNNode(*own, nodeGroups, prefix); other != "" {
-			return status.Errorf(codes.FailedPrecondition,
-				"iSCSI fencing: nodes %s and %s report the same iSCSI initiator name %v; give each node a unique IQN",
-				nodeID, other, own.Initiators)
-		}
-	}
 
-	groups := fencedTargetGroups(target.Groups, nodeGroups, own, publish, multiNode)
+	groups := fencedTargetGroups(target.Groups, nodeGroups, prefix+nodeID, own, publish, multiNode)
 	if len(groups) == 0 {
 		fenced, err := s.fencedInitiatorGroup(ctx, initiators)
 		if err != nil {
@@ -166,14 +151,46 @@ func (s *ControllerService) fenceISCSIVolume(ctx context.Context, volumeID, node
 	return nil
 }
 
+// nodeInitiatorGroups returns this cluster's per-node groups by ID, and nodeID's own group.
+// A lost create response can leave a node with two groups; the first one is the one the
+// node keeps up to date (see registerISCSIInitiator).
+func nodeInitiatorGroups(initiators []tnsapi.ISCSIInitiator, prefix, nodeID string) (map[int]tnsapi.ISCSIInitiator, *tnsapi.ISCSIInitiator) {
+	nodeGroups := map[int]tnsapi.ISCSIInitiator{}
+	var own *tnsapi.ISCSIInitiator
+	for i := range initiators {
+		if !strings.HasPrefix(initiators[i].Comment, prefix) {
+			continue
+		}
+		nodeGroups[initiators[i].ID] = initiators[i]
+		if own == nil && initiators[i].Comment == prefix+nodeID {
+			own = &initiators[i]
+		}
+	}
+	return nodeGroups, own
+}
+
+// checkPublishable refuses a node that has not registered or shares its IQN with another node.
+func checkPublishable(own *tnsapi.ISCSIInitiator, nodeGroups map[int]tnsapi.ISCSIInitiator, prefix, nodeID string) error {
+	if own == nil {
+		return status.Errorf(codes.FailedPrecondition,
+			"iSCSI fencing: node %s has not registered its iSCSI initiator on TrueNAS; check its node plugin log", nodeID)
+	}
+	if other := sharedIQNNode(*own, nodeGroups, prefix); other != "" {
+		return status.Errorf(codes.FailedPrecondition,
+			"iSCSI fencing: nodes %s and %s report the same iSCSI initiator name %v; give each node a unique IQN",
+			nodeID, other, own.Initiators)
+	}
+	return nil
+}
+
 // fencedTargetGroups returns the target's new groups: only other nodes' groups are kept
 // (and only for a multi-node publish or an unpublish), so legacy shared groups such as
 // TrueNAS's allow-all group are dropped. An empty result means nobody may log in.
-func fencedTargetGroups(current []tnsapi.ISCSITargetGroup, nodeGroups map[int]tnsapi.ISCSIInitiator, own *tnsapi.ISCSIInitiator, publish, multiNode bool) []tnsapi.ISCSITargetGroup {
+func fencedTargetGroups(current []tnsapi.ISCSITargetGroup, nodeGroups map[int]tnsapi.ISCSIInitiator, ownComment string, own *tnsapi.ISCSIInitiator, publish, multiNode bool) []tnsapi.ISCSITargetGroup {
 	var groups []tnsapi.ISCSITargetGroup
 	if !publish || multiNode {
 		for _, g := range current {
-			if _, isNode := nodeGroups[g.Initiator]; isNode && (own == nil || g.Initiator != own.ID) {
+			if ng, isNode := nodeGroups[g.Initiator]; isNode && ng.Comment != ownComment {
 				groups = append(groups, g)
 			}
 		}
@@ -198,7 +215,7 @@ func targetGroupFor(current []tnsapi.ISCSITargetGroup, id int) tnsapi.ISCSITarge
 // sharedIQNNode returns another node whose group contains one of own's IQNs.
 func sharedIQNNode(own tnsapi.ISCSIInitiator, nodeGroups map[int]tnsapi.ISCSIInitiator, prefix string) string {
 	for _, g := range nodeGroups {
-		if g.ID == own.ID {
+		if g.Comment == own.Comment {
 			continue
 		}
 		for _, iqn := range g.Initiators {

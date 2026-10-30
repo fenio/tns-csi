@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,7 +34,7 @@ func (m *fencingAPIClient) CreateISCSIInitiator(_ context.Context, initiators []
 
 func (m *fencingAPIClient) ISCSITargetByName(_ context.Context, name string) (*tnsapi.ISCSITarget, error) {
 	if name != m.target.Name {
-		return nil, nil //nolint:nilnil // not found
+		return nil, fmt.Errorf("unexpected target name %q", name)
 	}
 	t := m.target
 	return &t, nil

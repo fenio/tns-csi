@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -36,7 +37,7 @@ func nodeGroupPrefix(clusterID string) string {
 
 // readInitiatorName returns the IQN from an open-iscsi initiatorname file.
 func readInitiatorName(path string) (string, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // fixed path of the host's open-iscsi config
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return "", err
 	}

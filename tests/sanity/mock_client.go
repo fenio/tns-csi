@@ -19,6 +19,8 @@ const (
 var (
 	// ErrDatasetExists indicates a dataset already exists.
 	ErrDatasetExists = errors.New("dataset already exists")
+	// ErrNotImplemented is returned by mock methods the sanity tests never call.
+	ErrNotImplemented = errors.New("not implemented")
 	// ErrDatasetNotFound indicates a dataset was not found.
 	ErrDatasetNotFound = errors.New("dataset not found")
 	// ErrNFSShareNotFound indicates an NFS share was not found.
@@ -1892,4 +1894,19 @@ func userPropertyMap(kvs []tnsapi.UserPropertyKV) map[string]string {
 		m[kv.Key] = kv.Value
 	}
 	return m
+}
+
+// CreateISCSIInitiator is unused by the sanity tests (fencing is off).
+func (m *MockClient) CreateISCSIInitiator(_ context.Context, _ []string, _ string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, ErrNotImplemented
+}
+
+// UpdateISCSIInitiator is unused by the sanity tests (fencing is off).
+func (m *MockClient) UpdateISCSIInitiator(_ context.Context, _ int, _ []string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, ErrNotImplemented
+}
+
+// UpdateISCSITarget is unused by the sanity tests (fencing is off).
+func (m *MockClient) UpdateISCSITarget(_ context.Context, _ int, _ []tnsapi.ISCSITargetGroup) (*tnsapi.ISCSITarget, error) {
+	return nil, ErrNotImplemented
 }

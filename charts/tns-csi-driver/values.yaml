@@ -47,6 +47,16 @@ imagePullSecrets: []
 # Leave empty to see all volumes (backward compatible).
 clusterID: ""
 
+# Fencing (opt-in, iSCSI only for now). Each node registers an iSCSI initiator group
+# with its own IQN on TrueNAS, and each iSCSI target only admits the nodes the volume is
+# published to. A node that is unpublished (e.g. force-detached after a crash or network
+# partition) can no longer log in, and I/O over a session it still holds is rejected.
+# Requires csiDriver.attachRequired: true. Existing targets switch over on their next
+# publish. Each node needs a unique IQN in /etc/iscsi/initiatorname.iscsi.
+# See docs/FENCING.md.
+fencing:
+  enabled: false
+
 # CSI Driver name
 csiDriverName: tns.csi.io
 

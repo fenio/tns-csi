@@ -62,6 +62,12 @@ spec:
             - "--enable-nvme-discovery"
             {{- end }}
             - "--max-concurrent-nvme-connects={{ .Values.node.maxConcurrentNVMeConnects | default 5 }}"
+            {{- if include "tns-csi-driver.fencing.enabled" . }}
+            - "--iscsi-fencing"
+            {{- with .Values.clusterID }}
+            - "--cluster-id={{ . }}"
+            {{- end }}
+            {{- end }}
           env:
             - name: NODE_ID
               valueFrom:

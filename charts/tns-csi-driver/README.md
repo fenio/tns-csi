@@ -178,6 +178,7 @@ kubectl create namespace tns-csi
 |-----------|-------------|---------|
 | `csiDriverName` | Registered CSI driver name | `tns.csi.io` |
 | `csiDriver.attachRequired` | Route volumes through the attach/detach controller so ReadWriteOnce is enforced across nodes. Immutable on an existing CSIDriver; see [the upgrade notes](../../docs/DEPLOYMENT.md#csidriver-attachrequired-change-v0210) | `true` |
+| `fencing.enabled` | Restrict each iSCSI target to the nodes its volume is published to, so a detached node can't keep writing. Requires `csiDriver.attachRequired: true`; see [FENCING.md](../../docs/FENCING.md) | `false` |
 | `csiDriver.seLinuxMount` | Advertise support for kubelet-managed SELinux context mounts (Kubernetes 1.25+) | `false` |
 
 #### SELinux Mount Labeling

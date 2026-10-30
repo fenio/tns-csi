@@ -63,6 +63,9 @@ spec:
             {{- if .Values.clusterID }}
             - "--cluster-id={{ .Values.clusterID }}"
             {{- end }}
+            {{- if include "tns-csi-driver.fencing.enabled" . }}
+            - "--iscsi-fencing"
+            {{- end }}
           env:
             - name: NODE_ID
               valueFrom:

@@ -1595,3 +1595,15 @@ func (m *MockAPIClientForSnapshots) QueryNVMeOFSubsystems(ctx context.Context, f
 	}
 	return m.ListAllNVMeOFSubsystems(ctx)
 }
+
+func (m *MockAPIClientForSnapshots) CreateISCSIInitiator(_ context.Context, _ []string, _ string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) UpdateISCSIInitiator(_ context.Context, _ int, _ []string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (m *MockAPIClientForSnapshots) UpdateISCSITarget(_ context.Context, _ int, _ []tnsapi.ISCSITargetGroup) (*tnsapi.ISCSITarget, error) {
+	return nil, errors.New("not implemented")
+}

@@ -640,3 +640,15 @@ func (m *mockClient) QueryNVMeOFSubsystems(ctx context.Context, filters []interf
 	}
 	return m.ListAllNVMeOFSubsystems(ctx)
 }
+
+func (m *mockClient) CreateISCSIInitiator(_ context.Context, _ []string, _ string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockClient) UpdateISCSIInitiator(_ context.Context, _ int, _ []string) (*tnsapi.ISCSIInitiator, error) {
+	return nil, errNotImplemented
+}
+
+func (m *mockClient) UpdateISCSITarget(_ context.Context, _ int, _ []tnsapi.ISCSITargetGroup) (*tnsapi.ISCSITarget, error) {
+	return nil, errNotImplemented
+}

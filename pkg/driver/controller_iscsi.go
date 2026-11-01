@@ -692,7 +692,20 @@ func (s *ControllerService) getOrCreateISCSITarget(ctx context.Context, params *
 
 	klog.V(4).Infof("Creating iSCSI target for volume: %s", params.volumeName)
 
-	portalID, initiatorID, err := s.resolveISCSIPortalAndInitiator(ctx, params.portalID, params.initiatorID)
+	initiatorID := params.initiatorID
+	if s.iscsiFencing && initiatorID == 0 {
+		// Admit nobody until ControllerPublishVolume admits the node it is published to.
+		initiators, queryErr := s.apiClient.QueryISCSIInitiators(ctx)
+		if queryErr == nil {
+			initiatorID, queryErr = s.fencedInitiatorGroup(ctx, initiators)
+		}
+		if queryErr != nil {
+			timer.ObserveError()
+			return nil, false, status.Errorf(codes.Internal, "iSCSI fencing: %v", queryErr)
+		}
+	}
+
+	portalID, initiatorID, err := s.resolveISCSIPortalAndInitiator(ctx, params.portalID, initiatorID)
 	if err != nil {
 		timer.ObserveError()
 		return nil, false, err

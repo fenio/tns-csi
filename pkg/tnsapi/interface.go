@@ -83,8 +83,11 @@ type ClientInterface interface {
 	GetISCSIGlobalConfig(ctx context.Context) (*ISCSIGlobalConfig, error)
 	QueryISCSIPortals(ctx context.Context) ([]ISCSIPortal, error)
 	QueryISCSIInitiators(ctx context.Context) ([]ISCSIInitiator, error)
+	CreateISCSIInitiator(ctx context.Context, initiators []string, comment string) (*ISCSIInitiator, error)
+	UpdateISCSIInitiator(ctx context.Context, id int, initiators []string) (*ISCSIInitiator, error)
 
 	CreateISCSITarget(ctx context.Context, params ISCSITargetCreateParams) (*ISCSITarget, error)
+	UpdateISCSITarget(ctx context.Context, id int, groups []ISCSITargetGroup) (*ISCSITarget, error)
 	DeleteISCSITarget(ctx context.Context, targetID int, force bool) error
 	QueryISCSITargets(ctx context.Context, filters []interface{}) ([]ISCSITarget, error)
 	ISCSITargetByName(ctx context.Context, name string) (*ISCSITarget, error)

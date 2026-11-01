@@ -53,9 +53,11 @@ type NodeService struct {
 	formatDeviceFn       func(context.Context, string, string, string, []string) error
 	volumeLifecycleLocks keyedMutex
 	nodeID               string
+	clusterID            string // names this node's iSCSI initiator group (fencing)
 	nvmeLifecycleMu      sync.Mutex
 	testMode             bool
 	enableDiscovery      bool
+	iscsiFencing         bool
 }
 
 // NewNodeService creates a new node service.
@@ -775,13 +777,21 @@ func (s *NodeService) NodeGetCapabilities(_ context.Context, _ *csi.NodeGetCapab
 }
 
 // NodeGetInfo returns node information.
-func (s *NodeService) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+func (s *NodeService) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 	klog.V(4).Info("NodeGetInfo called")
 
 	// Register this node with the node registry
 	if s.nodeRegistry != nil {
 		s.nodeRegistry.Register(s.nodeID)
 		klog.V(4).Infof("Registered node %s with node registry", s.nodeID)
+	}
+
+	// Failing here makes node-driver-registrar exit and retry, so the node isn't
+	// registered with the kubelet until the controller can fence its iSCSI volumes.
+	if s.iscsiFencing {
+		if err := s.registerISCSIInitiator(ctx); err != nil {
+			return nil, status.Errorf(codes.Unavailable, "iSCSI fencing: failed to register this node's initiator on TrueNAS: %v", err)
+		}
 	}
 
 	return &csi.NodeGetInfoResponse{

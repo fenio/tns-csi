@@ -129,6 +129,13 @@ that predates the setting.
 Whether the CSIDriver sets seLinuxMount. Renders "true" or "" so it can be used
 in `if`. Nil-safe for the same --reuse-values reason as attachRequired.
 */}}
+{{/*
+Whether iSCSI fencing is enabled. Renders "true" or "". Nil-safe for --reuse-values.
+*/}}
+{{- define "tns-csi-driver.fencing.enabled" -}}
+{{- if dig "enabled" false (.Values.fencing | default dict) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "tns-csi-driver.csiDriver.seLinuxMount" -}}
 {{- if dig "seLinuxMount" false (.Values.csiDriver | default dict) -}}true{{- end -}}
 {{- end -}}

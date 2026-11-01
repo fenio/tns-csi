@@ -981,7 +981,7 @@ The fence covers drains and evictions. A pod on a node that stops responding sta
 - You confirm the node is down and add the `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` taint ([non-graceful node shutdown](https://kubernetes.io/docs/concepts/cluster-administration/node-shutdown/#non-graceful-node-shutdown)). Kubernetes then deletes the old pods and detaches their volumes immediately.
 - You force-delete the old pod (`kubectl delete pod --force --grace-period=0`). Kubernetes force-detaches the volume about 6 minutes later.
 
-Only do the last two when you are sure the node is powered off. The driver does not yet revoke the old node's access on TrueNAS ([#299](https://github.com/fenio/tns-csi/issues/299)), so a node that is partitioned rather than down can keep writing to the volume after it is attached elsewhere.
+Only do the last two when you are sure the node is powered off, unless the volume is protected by [iSCSI fencing](FENCING.md). Without fencing, the driver does not revoke the old node's access on TrueNAS, so a node that is partitioned rather than down can keep writing to the volume after it is attached elsewhere.
 
 #### Keeping the previous behavior
 

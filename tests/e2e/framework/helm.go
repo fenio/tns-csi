@@ -117,6 +117,8 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 			flagSet, "storageClasses[0].pool="+h.config.TrueNASPool,
 			flagSet, "storageClasses[0].server="+h.config.TrueNASHost,
 			flagSet, "storageClasses[0].port=3260",
+			// The shared suite still covers iSCSI without fencing.
+			flagSet, "fencing.enabled=true",
 		)
 	case protocolSMB:
 		args = append(args,

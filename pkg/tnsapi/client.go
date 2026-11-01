@@ -3218,6 +3218,26 @@ func (c *Client) QueryISCSIInitiators(ctx context.Context) ([]ISCSIInitiator, er
 	return result, nil
 }
 
+// CreateISCSIInitiator creates an iSCSI initiator group.
+func (c *Client) CreateISCSIInitiator(ctx context.Context, initiators []string, comment string) (*ISCSIInitiator, error) {
+	var result ISCSIInitiator
+	params := map[string]interface{}{"initiators": initiators, "comment": comment}
+	if err := c.Call(ctx, "iscsi.initiator.create", []interface{}{params}, &result); err != nil {
+		return nil, fmt.Errorf("failed to create iSCSI initiator group: %w", err)
+	}
+	return &result, nil
+}
+
+// UpdateISCSIInitiator replaces the initiators of an iSCSI initiator group.
+func (c *Client) UpdateISCSIInitiator(ctx context.Context, id int, initiators []string) (*ISCSIInitiator, error) {
+	var result ISCSIInitiator
+	params := map[string]interface{}{"initiators": initiators}
+	if err := c.Call(ctx, "iscsi.initiator.update", []interface{}{id, params}, &result); err != nil {
+		return nil, fmt.Errorf("failed to update iSCSI initiator group %d: %w", id, err)
+	}
+	return &result, nil
+}
+
 // ISCSITargetGroup represents a target group configuration (portal + initiator + auth).
 type ISCSITargetGroup struct {
 	Auth       *int   `json:"auth,omitempty"`
@@ -3259,6 +3279,16 @@ func (c *Client) CreateISCSITarget(ctx context.Context, params ISCSITargetCreate
 	}
 
 	klog.V(4).Infof("Successfully created iSCSI target with ID: %d", result.ID)
+	return &result, nil
+}
+
+// UpdateISCSITarget replaces the portal/initiator groups of an iSCSI target.
+func (c *Client) UpdateISCSITarget(ctx context.Context, id int, groups []ISCSITargetGroup) (*ISCSITarget, error) {
+	var result ISCSITarget
+	params := map[string]interface{}{"groups": groups}
+	if err := c.Call(ctx, "iscsi.target.update", []interface{}{id, params}, &result); err != nil {
+		return nil, fmt.Errorf("failed to update iSCSI target %d: %w", id, err)
+	}
 	return &result, nil
 }
 

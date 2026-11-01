@@ -229,7 +229,9 @@ type ControllerService struct {
 	// retry cannot overlap the attempt it is retrying (see CreateVolume).
 	createsInFlight    sync.Map
 	clusterID          string
+	fencingLocks       keyedMutex // serializes fencing updates per iSCSI target
 	publishedVolumesMu sync.RWMutex
+	iscsiFencing       bool
 }
 
 // NewControllerService creates a new controller service.
@@ -1105,7 +1107,7 @@ func (s *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 }
 
 // ControllerPublishVolume attaches a volume to a node.
-func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+func (s *ControllerService) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerPublishVolume called with request: %+v", req)
 
 	// Validate required parameters per CSI spec
@@ -1150,7 +1152,17 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 			volumeID, nodeID, readonly)
 		return &csi.ControllerPublishVolumeResponse{}, nil
 	}
+	s.publishedVolumesMu.Unlock()
+
+	if s.iscsiFencing {
+		multiNode := isMultiNodeMode(req.GetVolumeCapability().GetAccessMode().GetMode())
+		if err := s.fenceISCSIVolume(ctx, volumeID, nodeID, true, multiNode); err != nil {
+			return nil, err
+		}
+	}
+
 	// Track this publish
+	s.publishedVolumesMu.Lock()
 	s.publishedVolumes[publishKey] = readonly
 	s.publishedVolumesMu.Unlock()
 
@@ -1161,7 +1173,7 @@ func (s *ControllerService) ControllerPublishVolume(_ context.Context, req *csi.
 }
 
 // ControllerUnpublishVolume detaches a volume from a node.
-func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
+func (s *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	klog.V(4).Infof("ControllerUnpublishVolume called with request: %+v", req)
 
 	// Validate required parameters per CSI spec
@@ -1171,6 +1183,12 @@ func (s *ControllerService) ControllerUnpublishVolume(_ context.Context, req *cs
 
 	volumeID := req.GetVolumeId()
 	nodeID := req.GetNodeId()
+
+	if s.iscsiFencing {
+		if err := s.fenceISCSIVolume(ctx, volumeID, nodeID, false, false); err != nil {
+			return nil, err
+		}
+	}
 
 	// Remove from published volumes tracking. Per CSI spec, an empty node_id means
 	// the volume must be unpublished from every node it is published to.

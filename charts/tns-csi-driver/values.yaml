@@ -197,6 +197,10 @@ node:
   # Enable debug mode (sets DEBUG_CSI=true, equivalent to logLevel 4+)
   debug: false
   
+  # Port of the node plugin's /healthz endpoint. The node plugin uses the host
+  # network, so a second release on the same nodes needs a different port.
+  healthPort: 9808
+
   # Liveness probe for the node plugin container (the /healthz endpoint is
   # served by the liveness-probe sidecar)
   livenessProbe:

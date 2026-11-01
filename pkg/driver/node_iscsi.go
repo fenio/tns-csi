@@ -595,7 +595,7 @@ func (s *NodeService) formatAndMountISCSIDevice(ctx context.Context, volumeID, d
 		args = []string{"-o", mount.JoinMountOptions(mountOptions), devicePath, stagingTargetPath}
 	}
 
-	output, err := runMount(ctx, 30*time.Second, args...)
+	output, err := runMount(ctx, blockStageMountTimeout, args...)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Failed to mount device: %v, output: %s", err, string(output))
 	}

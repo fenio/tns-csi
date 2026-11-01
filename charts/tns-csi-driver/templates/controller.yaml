@@ -43,6 +43,7 @@ spec:
           args:
             - "--endpoint=unix:///var/lib/csi/sockets/pluginproxy/csi.sock"
             - "--node-id=$(NODE_ID)"
+            - "--driver-name={{ .Values.csiDriverName }}"
             - "--api-url=$(TNS_URL)"
             - "--v={{ .Values.controller.logLevel }}"
             {{- with .Values.truenas.maxResponseSizeMB }}

@@ -137,7 +137,7 @@ in `if`. Nil-safe for the same --reuse-values reason as attachRequired.
 Create the CSI driver name
 */}}
 {{- define "tns-csi-driver.driverName" -}}
-{{- .Values.driverName | default "tns.csi.io" }}
+{{- .Values.csiDriverName | default "tns.csi.io" }}
 {{- end }}
 
 {{/*

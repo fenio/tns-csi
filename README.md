@@ -374,6 +374,7 @@ kubectl logs -n tns-csi deployment/tns-csi-controller 2>&1 | head -1
 - [Quick Start - iSCSI](docs/QUICKSTART-ISCSI.md) - Get started with iSCSI volumes
 - [Quick Start - SMB](docs/QUICKSTART-SMB.md) - Get started with SMB volumes
 - [Snapshots Guide](docs/SNAPSHOTS.md) - Volume snapshots and cloning
+- [iSCSI Fencing](docs/FENCING.md) - Revoke a failed node's access to iSCSI volumes on TrueNAS
 - [Versioning](docs/VERSIONING.md) - Version management and checking installed version
 - [Distro Compatibility](docs/DISTRO-COMPATIBILITY.md) - Kubernetes distribution compatibility testing
 - [Metrics Guide](docs/METRICS.md) - Prometheus metrics and monitoring

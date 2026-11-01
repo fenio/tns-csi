@@ -404,6 +404,11 @@ spec:
 
 **Note:** This is a controller-side capability. Kubernetes periodically queries volume health for volumes with `GET_VOLUME` capability enabled.
 
+### iSCSI Fencing
+- **Status**: ✅ Implemented (since v0.22.0, opt-in)
+- **Protocols**: iSCSI
+- **Description**: With `fencing.enabled`, a volume's iSCSI target admits only the nodes it is published to. Detaching a volume from a node revokes that node's access on TrueNAS, even if the node is partitioned rather than down, so the out-of-service taint is safe for iSCSI volumes. See [FENCING.md](FENCING.md).
+
 ### Raw Block Volumes with RWX (KubeVirt Live Migration)
 - **Status**: ✅ Implemented (since v0.15.2)
 - **Protocols**: NVMe-oF, iSCSI
@@ -1293,6 +1298,7 @@ reclaimPolicy: Delete
 - ✅ QUICKSTART-NVMEOF.md - NVMe-oF setup guide
 - ✅ QUICKSTART-SMB.md - SMB/CIFS setup guide
 - ✅ SNAPSHOTS.md - Snapshot and cloning guide
+- ✅ FENCING.md - iSCSI fencing of failed or partitioned nodes
 - ✅ ADOPTION.md - Volume adoption and migration guide (including democratic-csi migration)
 - ✅ METRICS.md - Prometheus metrics documentation
 - ✅ TESTING.md - Comprehensive testing guide and infrastructure details

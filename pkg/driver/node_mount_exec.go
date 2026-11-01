@@ -16,6 +16,11 @@ var (
 	mountWaitDelay = cmdexec.DefaultWaitDelay
 )
 
+// blockStageMountTimeout bounds staging an iSCSI or NVMe-oF filesystem. An ext4 MMP takeover
+// after an unclean holder waits ~2*(2*mmp_check_interval+1) s (~42 s seen in #299); killing it
+// restarts the wait. It stays below the kubelet's 2 min NodeStage deadline.
+const blockStageMountTimeout = 100 * time.Second
+
 // runMount runs mount(8) with args (the last one is the target), bounded by timeout, and
 // returns its combined output.
 //

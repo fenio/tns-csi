@@ -2,7 +2,7 @@
 
 With fencing on, an iSCSI volume can only be reached on TrueNAS by the nodes it is currently published to. When Kubernetes detaches a volume from a node, the driver revokes that node's access on TrueNAS. That holds even when the node is unreachable. The node can no longer log in to the volume's target, and TrueNAS rejects I/O over a session the node still holds. This is what makes it safe to move a volume away from a node that is partitioned rather than powered off ([#299](https://github.com/fenio/tns-csi/issues/299)).
 
-Fencing is opt-in and covers iSCSI volumes only.
+Fencing is available from v0.22.0. It is opt-in and covers iSCSI volumes only.
 
 ## Requirements
 
@@ -52,4 +52,4 @@ ext4 multi-mount protection makes the kernel refuse a second read-write mount wh
 
 - `tune2fs` refuses any change to a mounted MMP filesystem (`MMP: device currently active`). To make it remount read-only on errors, set `errors=remount-ro` in the PV's `spec.mountOptions` instead of `tune2fs -e`.
 - New mount options only take effect after a full unstage (scale to zero, move the pod, or reboot the node). A pod restarting on the same node keeps the existing staging mount.
-- The second mount waits about twice the MMP check interval: up to ~45 s on a freshly formatted volume, and less once the interval settles.
+- The second mount waits about twice the MMP check interval: up to ~45 s on a freshly formatted volume, and less once the interval settles. Before v0.22.0 the driver killed staging mounts after 30 s, so a takeover after a crash or a fence never finished; v0.22.0 allows 100 s.

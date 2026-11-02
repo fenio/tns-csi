@@ -406,6 +406,7 @@ Detached snapshots use `zfs send/receive` to create independent dataset copies t
 | `node.resources.limits.memory` | Memory limit | `200Mi` |
 | `node.resources.requests.cpu` | CPU request | `10m` |
 | `node.resources.requests.memory` | Memory request | `20Mi` |
+| `node.healthPort` | Host port of the node plugin's `/healthz` endpoint (change it for a second release on the same nodes) | `9808` |
 | `node.livenessProbe` | Liveness probe timing for the node plugin container | `initialDelaySeconds: 10`, `timeoutSeconds: 3`, `periodSeconds: 10`, `failureThreshold: 5` |
 
 ### Sidecar Settings

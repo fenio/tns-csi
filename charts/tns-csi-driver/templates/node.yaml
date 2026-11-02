@@ -90,7 +90,7 @@ spec:
             {{- end }}
           ports:
             - name: healthz
-              containerPort: 9808
+              containerPort: {{ .Values.node.healthPort | default 9808 }}
               protocol: TCP
           livenessProbe:
             httpGet:
@@ -115,8 +115,6 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
-            - name: registry-dir
-              mountPath: /var/lib/tns-csi
             - name: run-dir
               mountPath: /run
             {{- if .Values.node.iscsi.enabled }}
@@ -156,7 +154,7 @@ spec:
           imagePullPolicy: {{ .Values.sidecars.livenessprobe.image.pullPolicy }}
           args:
             - "--csi-address=$(ADDRESS)"
-            - "--health-port=9808"
+            - "--health-port={{ .Values.node.healthPort | default 9808 }}"
             {{- with .Values.sidecars.livenessprobe.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -194,10 +192,6 @@ spec:
           hostPath:
             path: /sys
             type: Directory
-        - name: registry-dir
-          hostPath:
-            path: /var/lib/tns-csi
-            type: DirectoryOrCreate
         - name: run-dir
           hostPath:
             path: /run

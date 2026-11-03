@@ -16,7 +16,8 @@
       "description": "Go modules",
       "matchManagers": ["gomod"],
       "addLabels": ["go"],
-      "commitMessagePrefix": "chore(deps):"
+      "commitMessagePrefix": "chore(deps):",
+      "postUpdateOptions": ["gomodTidy"]
     },
     {
       "description": "Block k8s.io major version bumps",

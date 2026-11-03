@@ -37,7 +37,7 @@
     </thead>
     <tbody>
         {{range .Items}}
-        <tr class="clickable" onclick="showVolumeDetail('{{.VolumeID}}')" title="Click for details">
+        <tr class="clickable" tabindex="0" onclick="showVolumeDetail('{{.VolumeID}}')" onkeydown="if (event.key === 'Enter') showVolumeDetail('{{.VolumeID}}')" title="Click for details">
             <td class="mono">{{.VolumeID}}</td>
             <td class="mono text-muted">{{.Dataset}}</td>
             <td>

@@ -34,7 +34,15 @@ jobs:
       - name: Run tests with coverage
         run: make test-coverage
 
+      # The project version is the latest release tag, so main's "previous version"
+      # new-code baseline moves with each release instead of staying fixed.
+      - name: Get release version
+        id: version
+        run: echo "version=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8
+        with:
+          args: -Dsonar.projectVersion=${{ steps.version.outputs.version }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TNS-CSI Dashboard</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
     <style>
         :root {
             --bg-primary: #0f172a;
@@ -740,6 +740,7 @@
                 <div class="panel-header-left">
                     <span class="panel-title">Managed Volumes</span>
                     <input type="text" class="search-input" placeholder="Search volumes..."
+                           aria-label="Search volumes"
                            name="q"
                            hx-get="/dashboard/partials/volumes"
                            hx-trigger="keyup changed delay:300ms"
@@ -763,6 +764,7 @@
                 <div class="panel-header-left">
                     <span class="panel-title">Snapshots</span>
                     <input type="text" class="search-input" placeholder="Search snapshots..."
+                           aria-label="Search snapshots"
                            name="q"
                            hx-get="/dashboard/partials/snapshots"
                            hx-trigger="keyup changed delay:300ms"
@@ -784,6 +786,7 @@
                 <div class="panel-header-left">
                     <span class="panel-title">Cloned Volumes</span>
                     <input type="text" class="search-input" placeholder="Search clones..."
+                           aria-label="Search clones"
                            name="q"
                            hx-get="/dashboard/partials/clones"
                            hx-trigger="keyup changed delay:300ms"
@@ -805,6 +808,7 @@
                 <div class="panel-header-left">
                     <span class="panel-title">Unmanaged Volumes</span>
                     <input type="text" class="search-input" placeholder="Search unmanaged..."
+                           aria-label="Search unmanaged"
                            name="q"
                            hx-get="/dashboard/partials/unmanaged"
                            hx-trigger="keyup changed delay:300ms"

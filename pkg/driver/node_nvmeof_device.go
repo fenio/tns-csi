@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,7 +76,7 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 
 	// NVMe-oF connection with resilience and performance options:
 	// --reconnect-delay=2: Wait 2 seconds before reconnecting after connection loss
-	// --ctrl-loss-tmo=60: Keep retrying for 60 seconds before giving up
+	// --ctrl-loss-tmo: Keep reconnecting this long before failing I/O (node plugin flag, default 60)
 	// --keep-alive-tmo=5: Send keepalive every 5 seconds to detect dead connections
 	// --nr-io-queues: Number of I/O queues (default 4; configurable via StorageClass)
 	// --queue-size: Queue depth per I/O queue (kernel default 127; configurable via StorageClass)
@@ -86,7 +87,7 @@ func (s *NodeService) attemptNVMeConnect(ctx context.Context, params *nvmeOFConn
 		"-a", params.server,
 		"-s", params.port,
 		"--reconnect-delay=2",
-		"--ctrl-loss-tmo=60",
+		"--ctrl-loss-tmo=" + strconv.Itoa(s.nvmeCtrlLossTimeout),
 		"--keep-alive-tmo=5",
 	}
 

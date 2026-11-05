@@ -63,6 +63,12 @@ spec:
             - "--enable-nvme-discovery"
             {{- end }}
             - "--max-concurrent-nvme-connects={{ .Values.node.maxConcurrentNVMeConnects | default 5 }}"
+            {{- with .Values.node.iscsiReplacementTimeout }}
+            - "--iscsi-replacement-timeout={{ . }}"
+            {{- end }}
+            {{- with .Values.node.nvmeCtrlLossTimeout }}
+            - "--nvme-ctrl-loss-tmo={{ . }}"
+            {{- end }}
             {{- if include "tns-csi-driver.fencing.enabled" . }}
             - "--iscsi-fencing"
             {{- with .Values.clusterID }}

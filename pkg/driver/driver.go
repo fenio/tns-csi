@@ -37,6 +37,8 @@ type Config struct {
 	EnableNVMeDiscovery       bool   // Run nvme discover before nvme connect (default: false)
 	MaxConcurrentNVMeConnects int    // Max concurrent NVMe-oF connect operations per node (default: 5)
 	MaxResponseSizeMB         int    // Max TrueNAS API response size in MiB (<= 0 = tnsapi.DefaultReadLimit)
+	ISCSIReplacementTimeout   int    // iSCSI node.session.timeo.replacement_timeout in seconds (0 = host default)
+	NVMeCtrlLossTimeout       int    // NVMe-oF --ctrl-loss-tmo in seconds (0 = default 60, -1 = forever)
 }
 
 // Driver is the TNS CSI driver.
@@ -98,6 +100,10 @@ func NewDriverWithClient(cfg Config, client tnsapi.ClientInterface) (*Driver, er
 	d.node = NewNodeService(cfg.NodeID, client, cfg.TestMode, nodeRegistry, cfg.EnableNVMeDiscovery, cfg.MaxConcurrentNVMeConnects)
 	d.node.clusterID = cfg.ClusterID
 	d.node.iscsiFencing = cfg.ISCSIFencing
+	d.node.iscsiReplacementTimeout = cfg.ISCSIReplacementTimeout
+	if cfg.NVMeCtrlLossTimeout != 0 {
+		d.node.nvmeCtrlLossTimeout = cfg.NVMeCtrlLossTimeout
+	}
 
 	return d, nil
 }

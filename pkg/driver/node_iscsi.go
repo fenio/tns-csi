@@ -277,6 +277,17 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 		return selectErr
 	}
 
+	if s.iscsiReplacementTimeout > 0 {
+		// The node record is what login copies into the new session, so this must precede it.
+		updateCtx, updateCancel := context.WithTimeout(ctx, 5*time.Second)
+		defer updateCancel()
+		timeout := strconv.Itoa(s.iscsiReplacementTimeout)
+		if out, updateErr := s.runISCSIAdm(updateCtx, "-m", "node", "-T", params.iqn, "-p", selectedPortal,
+			"-o", "update", "-n", "node.session.timeo.replacement_timeout", "-v", timeout); updateErr != nil {
+			return fmt.Errorf("failed to set replacement_timeout=%s on iSCSI node %s: %w, output: %s", timeout, params.iqn, updateErr, string(out))
+		}
+	}
+
 	// Step 3: Login
 	klog.Infof("Logging into iSCSI target %s through %s", params.iqn, selectedPortal)
 	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)

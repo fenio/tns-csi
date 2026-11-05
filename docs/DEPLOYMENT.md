@@ -1100,6 +1100,16 @@ kubectl get pvc upgrade-test
 
 5. **Backup**: Ensure TrueNAS pool has proper backup strategy
 
+6. **Network interruptions** (iSCSI, NVMe-oF): when a node loses TrueNAS, its iSCSI and NVMe-oF sessions queue I/O while they reconnect. If the outage outlasts the session timeout, the queued I/O fails, ext4 aborts its journal, and the mount stays read-only until the pod is restarted. The defaults are 120 s for iSCSI (open-iscsi's `replacement_timeout`) and 60 s for NVMe-oF (`--ctrl-loss-tmo`), which a switch or router reboot can exceed. To ride out longer outages, raise them for every node:
+   ```yaml
+   node:
+     iscsiReplacementTimeout: 600
+     nvmeCtrlLossTimeout: 600
+   ```
+   - The trade-off: during a real TrueNAS outage, I/O hangs that long instead of failing fast, and unmounting (for example during a drain) can block as long.
+   - The value is applied when the node logs in to the iSCSI target or connects to the NVMe-oF subsystem. A volume that is already staged keeps its old timeout until it is fully unstaged (scale to zero, move the pod, or reboot the node). Check an iSCSI session with `cat /sys/class/iscsi_session/session*/recovery_tmo`.
+   - This doesn't affect [iSCSI fencing](FENCING.md): TrueNAS rejects a fenced node's I/O immediately rather than letting it time out.
+
 ## Protocol Support
 
 This CSI driver supports multiple storage protocols:

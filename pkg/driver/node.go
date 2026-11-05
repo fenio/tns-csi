@@ -54,10 +54,14 @@ type NodeService struct {
 	volumeLifecycleLocks keyedMutex
 	nodeID               string
 	clusterID            string // names this node's iSCSI initiator group (fencing)
-	nvmeLifecycleMu      sync.Mutex
-	testMode             bool
-	enableDiscovery      bool
-	iscsiFencing         bool
+	// iscsiReplacementTimeout (seconds) is written to each iSCSI node record before login; 0 leaves the host default.
+	iscsiReplacementTimeout int
+	// nvmeCtrlLossTimeout is passed to nvme connect as --ctrl-loss-tmo (seconds, -1 = forever).
+	nvmeCtrlLossTimeout int
+	nvmeLifecycleMu     sync.Mutex
+	testMode            bool
+	enableDiscovery     bool
+	iscsiFencing        bool
 }
 
 // NewNodeService creates a new node service.
@@ -72,6 +76,8 @@ func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bo
 		nodeRegistry:    nodeRegistry,
 		enableDiscovery: enableDiscovery,
 		nvmeConnectSem:  make(chan struct{}, maxConcurrentNVMeConnects),
+		// Matches the value the driver always passed before it was configurable.
+		nvmeCtrlLossTimeout: 60,
 	}
 }
 

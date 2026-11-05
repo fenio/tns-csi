@@ -402,6 +402,8 @@ Detached snapshots use `zfs send/receive` to create independent dataset copies t
 | `node.logLevel` | Log verbosity (0-5) | `2` |
 | `node.debug` | Enable debug mode | `false` |
 | `node.maxConcurrentNVMeConnects` | Max concurrent NVMe-oF connect operations per node | `5` |
+| `node.iscsiReplacementTimeout` | Seconds an iSCSI session keeps reconnecting before queued I/O fails (`0` = host iscsiadm default, 120 s) | `0` |
+| `node.nvmeCtrlLossTimeout` | Seconds an NVMe-oF controller keeps reconnecting before I/O fails (`-1` = forever) | `60` |
 | `node.resources.limits.cpu` | CPU limit | `200m` |
 | `node.resources.limits.memory` | Memory limit | `200Mi` |
 | `node.resources.requests.cpu` | CPU request | `10m` |

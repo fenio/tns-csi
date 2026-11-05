@@ -39,6 +39,8 @@ var (
 	dashboardPool             = flag.String("dashboard-pool", "", "ZFS pool for unmanaged volume discovery in dashboard")
 	clusterID                 = flag.String("cluster-id", "", "Unique identifier for this cluster (for multi-cluster TrueNAS sharing)")
 	iscsiFencing              = flag.Bool("iscsi-fencing", false, "Restrict each iSCSI target to the nodes it is published to (requires attachRequired: true)")
+	iscsiReplacementTimeout   = flag.Int("iscsi-replacement-timeout", 0, "Seconds an iSCSI session queues I/O while reconnecting before failing it (0 keeps the host's iscsiadm default)")
+	nvmeCtrlLossTimeout       = flag.Int("nvme-ctrl-loss-tmo", 60, "Seconds an NVMe-oF controller keeps reconnecting before failing I/O (-1 retries forever)")
 	maxResponseSizeMB         = flag.Int("max-response-size-mb", 10, "Maximum size in MiB of a single TrueNAS API response (WebSocket message); larger responses fail the call")
 )
 
@@ -96,6 +98,10 @@ func main() {
 	klog.V(4).Infof("Driver: %s", *driverName)
 	klog.V(4).Infof("Node ID: %s", *nodeID)
 
+	if *iscsiReplacementTimeout < 0 || *nvmeCtrlLossTimeout < -1 {
+		klog.Fatalf("Invalid session timeouts: --iscsi-replacement-timeout must be >= 0 and --nvme-ctrl-loss-tmo >= -1")
+	}
+
 	drv, err := driver.NewDriver(driver.Config{
 		DriverName:                *driverName,
 		Version:                   version,
@@ -112,6 +118,8 @@ func main() {
 		ClusterID:                 *clusterID,
 		MaxResponseSizeMB:         *maxResponseSizeMB,
 		ISCSIFencing:              *iscsiFencing,
+		ISCSIReplacementTimeout:   *iscsiReplacementTimeout,
+		NVMeCtrlLossTimeout:       *nvmeCtrlLossTimeout,
 	})
 	if err != nil {
 		klog.Fatalf("Failed to create driver: %v", err)

@@ -263,3 +263,43 @@ func TestStageISCSIVolumeRefusesAmbiguousExistingSession(t *testing.T) {
 		t.Fatalf("NodeStageVolume() error = %v, want FailedPrecondition", err)
 	}
 }
+
+func TestLoginISCSITargetSetsReplacementTimeout(t *testing.T) {
+	service := NewNodeService("node", nil, true, nil, false, 5)
+	service.iscsiReplacementTimeout = 600
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	update := []string{"-m", "node", "-T", testISCSIIQN, "-p", "192.0.2.10:3260,1",
+		"-o", "update", "-n", "node.session.timeo.replacement_timeout", "-v", "600"}
+	var calls [][]string
+	updateErr := error(nil)
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, slices.Clone(args))
+		switch {
+		case slices.Contains(args, "sendtargets"), slices.Equal(args, []string{"-m", "node", "-P", "0"}):
+			return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+		case slices.Contains(args, "update"):
+			return []byte("iscsiadm: no records found"), updateErr
+		default:
+			return []byte("Login successful"), nil
+		}
+	}
+	if err := service.loginISCSITarget(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 4 || !slices.Equal(calls[2], update) || !slices.Contains(calls[3], "--login") {
+		t.Fatalf("iscsiadm calls = %v; want the replacement_timeout update right before login", calls)
+	}
+
+	calls = nil
+	updateErr = errors.New("exit status 21")
+	if err := service.loginISCSITarget(context.Background(), params); err == nil || len(calls) != 3 {
+		t.Fatalf("err = %v, calls = %v; a failed update must stop before login", err, calls)
+	}
+
+	calls = nil
+	updateErr = nil
+	service.iscsiReplacementTimeout = 0
+	if err := service.loginISCSITarget(context.Background(), params); err != nil || len(calls) != 3 || slices.Contains(calls[2], "update") {
+		t.Fatalf("err = %v, calls = %v; timeout 0 must leave the node record alone", err, calls)
+	}
+}

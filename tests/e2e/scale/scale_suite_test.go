@@ -78,7 +78,7 @@ func createNoiseData() {
 	actualDatasetCount = getEnvInt("NOISE_DATASET_COUNT", defaultNoiseDatasetCount)
 	actualZvolCount = getEnvInt("NOISE_ZVOL_COUNT", defaultNoiseZvolCount)
 
-	noiseVerifier, err = framework.NewTrueNASVerifier(cfg.TrueNASHost, cfg.TrueNASAPIKey)
+	noiseVerifier, err = framework.NewTrueNASVerifier(cfg.TrueNASHost, cfg.TrueNASAPIKey, cfg.TrueNASAPIUsername)
 	Expect(err).NotTo(HaveOccurred(), "Failed to connect to TrueNAS for noise creation")
 
 	client := noiseVerifier.Client()

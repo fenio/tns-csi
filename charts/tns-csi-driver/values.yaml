@@ -12,10 +12,15 @@ truenas:
   # TrueNAS API key
   # You can generate this in TrueNAS UI: System > API Keys
   apiKey: ""
+
+  # TrueNAS user that owns the API key
+  # When set, the driver logs in with auth.login_ex. When empty, it uses
+  # auth.login_with_api_key, which TrueNAS 27 deprecates and plans to remove.
+  username: ""
   
   # Name of existing secret containing TrueNAS credentials
-  # If set, url and apiKey above will be ignored
-  # Secret should contain keys: 'url' and 'api-key'
+  # If set, url, apiKey and username above will be ignored
+  # Secret should contain keys: 'url' and 'api-key', and optionally 'username'
   existingSecret: ""
   
   # Skip TLS certificate verification

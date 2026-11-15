@@ -20,6 +20,14 @@ var (
 	errInvalidSecretRef    = errors.New("invalid secret reference format, expected 'namespace/name'")
 )
 
+// envAPIUsername names the TrueNAS user that owns the API key, read alongside
+// TRUENAS_API_KEY or with a key given by flag.
+const envAPIUsername = "TRUENAS_API_USERNAME"
+
+// secretUsernameKeys are the secret keys that may hold the API key's owner. The
+// Helm chart writes "username".
+var secretUsernameKeys = []string{"username", "api-username", envAPIUsername}
+
 // Constants for auto-discovery.
 const (
 	defaultDriverNamespace = "tns-csi"
@@ -31,6 +39,7 @@ const (
 type connectionConfig struct {
 	URL           string
 	APIKey        string
+	APIUsername   string // owner of APIKey, from the same source; empty uses the legacy login
 	SkipTLSVerify bool
 }
 
@@ -51,6 +60,7 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 	}
 	if apiKey != nil && *apiKey != "" {
 		cfg.APIKey = *apiKey
+		cfg.APIUsername = os.Getenv(envAPIUsername)
 	}
 
 	// If we have both from flags, we're done
@@ -69,6 +79,7 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 		}
 		if cfg.APIKey == "" {
 			cfg.APIKey = secretCfg.APIKey
+			cfg.APIUsername = secretCfg.APIUsername
 		}
 	}
 
@@ -80,6 +91,7 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 			}
 			if cfg.APIKey == "" {
 				cfg.APIKey = discoveredCfg.APIKey
+				cfg.APIUsername = discoveredCfg.APIUsername
 			}
 		}
 	}
@@ -90,6 +102,7 @@ func getConnectionConfig(ctx context.Context, url, apiKey, secretRef *string, sk
 	}
 	if cfg.APIKey == "" {
 		cfg.APIKey = os.Getenv("TRUENAS_API_KEY")
+		cfg.APIUsername = os.Getenv(envAPIUsername)
 	}
 
 	// Validate we have required config
@@ -150,8 +163,19 @@ func getConfigFromSecret(ctx context.Context, secretRef string) (*connectionConf
 			break
 		}
 	}
+	cfg.APIUsername = secretUsername(secret.Data)
 
 	return cfg, nil
+}
+
+// secretUsername returns the API key's owner from secret data, or "" if the secret has none.
+func secretUsername(data map[string][]byte) string {
+	for _, key := range secretUsernameKeys {
+		if val, ok := data[key]; ok && len(val) > 0 {
+			return strings.TrimSpace(string(val))
+		}
+	}
+	return ""
 }
 
 // TrueNASClient wraps the tnsapi.Client to provide ClientInterface with Close.
@@ -163,7 +187,7 @@ type TrueNASClient struct {
 // The client auto-connects on first API call.
 func connectToTrueNAS(_ context.Context, cfg *connectionConfig) (*TrueNASClient, error) {
 	//nolint:contextcheck // NewClient doesn't require context, connection is lazy
-	client, err := tnsapi.NewClient(cfg.URL, cfg.APIKey, cfg.SkipTLSVerify)
+	client, err := tnsapi.NewClient(cfg.URL, cfg.APIKey, cfg.SkipTLSVerify, tnsapi.WithAPIUsername(cfg.APIUsername))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TrueNAS client: %w", err)
 	}
@@ -326,6 +350,7 @@ func extractConfigFromSecretData(data map[string][]byte) *connectionConfig {
 			break
 		}
 	}
+	cfg.APIUsername = secretUsername(data)
 
 	if cfg.URL == "" && cfg.APIKey == "" {
 		return nil

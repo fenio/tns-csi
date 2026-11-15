@@ -27,6 +27,7 @@ type Config struct {
 	Endpoint                  string
 	APIURL                    string
 	APIKey                    string
+	APIUsername               string // Owner of APIKey; when set the client logs in with auth.login_ex
 	MetricsAddr               string // Address to expose Prometheus metrics (e.g., ":8080")
 	DashboardAddr             string // Address for in-cluster dashboard (e.g., ":9090", empty = disabled)
 	DashboardPool             string // ZFS pool for unmanaged volume discovery in dashboard
@@ -60,7 +61,8 @@ func NewDriver(cfg Config) (*Driver, error) {
 
 	// Create API client
 	apiClient, err := tnsapi.NewClient(cfg.APIURL, cfg.APIKey, cfg.SkipTLSVerify,
-		tnsapi.WithReadLimit(int64(cfg.MaxResponseSizeMB)*1024*1024))
+		tnsapi.WithReadLimit(int64(cfg.MaxResponseSizeMB)*1024*1024),
+		tnsapi.WithAPIUsername(cfg.APIUsername))
 	if err != nil {
 		return nil, err
 	}

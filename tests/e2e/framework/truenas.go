@@ -35,10 +35,11 @@ type TrueNASVerifier struct {
 	client *tnsapi.Client
 }
 
-// NewTrueNASVerifier creates a new TrueNASVerifier.
-func NewTrueNASVerifier(host, apiKey string) (*TrueNASVerifier, error) {
+// NewTrueNASVerifier creates a new TrueNASVerifier. An empty username uses the legacy
+// auth.login_with_api_key login.
+func NewTrueNASVerifier(host, apiKey, username string) (*TrueNASVerifier, error) {
 	url := fmt.Sprintf("wss://%s/api/current", host)
-	client, err := tnsapi.NewClient(url, apiKey, true) // skip TLS verify for tests
+	client, err := tnsapi.NewClient(url, apiKey, true, tnsapi.WithAPIUsername(username)) // skip TLS verify for tests
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to TrueNAS: %w", err)
 	}

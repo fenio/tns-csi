@@ -201,7 +201,7 @@ func SetupSuite(protocol string) error {
 	}
 
 	// Create TrueNAS verifier (store any error for later)
-	truenas, truenasErr := NewTrueNASVerifier(config.TrueNASHost, config.TrueNASAPIKey)
+	truenas, truenasErr := NewTrueNASVerifier(config.TrueNASHost, config.TrueNASAPIKey, config.TrueNASAPIUsername)
 	if truenasErr != nil {
 		klog.Warningf("Failed to create TrueNAS verifier: %v (TrueNAS verification will be skipped)", truenasErr)
 		suite.truenasError = truenasErr
@@ -370,7 +370,7 @@ func (f *Framework) Setup(protocol string) error {
 		}
 
 		// Create TrueNAS verifier
-		truenas, truenasErr := NewTrueNASVerifier(f.Config.TrueNASHost, f.Config.TrueNASAPIKey)
+		truenas, truenasErr := NewTrueNASVerifier(f.Config.TrueNASHost, f.Config.TrueNASAPIKey, f.Config.TrueNASAPIUsername)
 		if truenasErr != nil {
 			klog.Warningf("Failed to create TrueNAS verifier: %v (TrueNAS verification will be skipped)", truenasErr)
 		} else {

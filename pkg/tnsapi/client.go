@@ -24,6 +24,8 @@ import (
 // TrueNAS API methods, query/option keys, and ACL values used in JSON-RPC calls.
 const (
 	methodAuthLoginWithAPIKey = "auth.login_with_api_key" //nolint:gosec // API method name, not a credential
+	methodAuthLoginEx         = "auth.login_ex"
+	loginResponseSuccess      = "SUCCESS"
 
 	// errNameNotAuthenticated is reported by the storage API when the
 	// WebSocket session is not (or no longer) authenticated.
@@ -90,6 +92,7 @@ type Client struct {
 	closeCh       chan struct{}
 	url           string
 	apiKey        string
+	username      string    // owner of apiKey; selects auth.login_ex when set
 	connectedAt   time.Time // Track connection start time for metrics
 	retryInterval time.Duration
 	// pingInterval is how often pingLoop pings TrueNAS; pingTimeout is how long it
@@ -236,6 +239,15 @@ func WithConnectRetryDelays(delays ...time.Duration) ClientOption {
 		if len(delays) > 0 {
 			c.connectRetryDelays = delays
 		}
+	}
+}
+
+// WithAPIUsername sets the TrueNAS user that owns the API key. With it the client
+// logs in with auth.login_ex (API_KEY_PLAIN); without it, it falls back to
+// auth.login_with_api_key, which TrueNAS 27 deprecates and plans to remove.
+func WithAPIUsername(username string) ClientOption {
+	return func(c *Client) {
+		c.username = strings.TrimSpace(username)
 	}
 }
 
@@ -438,25 +450,73 @@ func (c *Client) authenticate(ctx context.Context) error {
 }
 
 func (c *Client) authenticateLocked(ctx context.Context) error {
-	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key")
+	method, params := c.loginRequest()
+	klog.V(4).Infof("Authenticating with storage system using %s", method)
 
-	// Storage system uses JSON-RPC 2.0 for authentication
-	// Call auth.login_with_api_key with the API key
 	authCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	var authResult bool
-	if err := c.Call(authCtx, methodAuthLoginWithAPIKey, []interface{}{c.apiKey}, &authResult); err != nil {
+	var authResult json.RawMessage
+	if err := c.Call(authCtx, method, params, &authResult); err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
-
-	if !authResult {
-		klog.Errorf("Storage system rejected API key (length: %d)", len(c.apiKey))
-		return ErrAuthenticationRejected
+	if err := c.checkLoginResult(method, authResult); err != nil {
+		return err
 	}
 
 	klog.V(4).Info("Successfully authenticated with storage system")
 	return nil
+}
+
+// loginRequest returns the login method and parameters for this client's credentials.
+func (c *Client) loginRequest() (method string, params []interface{}) {
+	if c.username == "" {
+		return methodAuthLoginWithAPIKey, []interface{}{c.apiKey}
+	}
+	return methodAuthLoginEx, []interface{}{map[string]string{
+		"mechanism": "API_KEY_PLAIN", // a username plus an API key
+		"username":  c.username,
+		"api_key":   c.apiKey,
+	}}
+}
+
+// checkLoginResult interprets a login response: auth.login_with_api_key returns a
+// boolean, auth.login_ex an object whose response_type is SUCCESS on success.
+func (c *Client) checkLoginResult(method string, result json.RawMessage) error {
+	if method == methodAuthLoginEx {
+		var resp struct {
+			ResponseType string `json:"response_type"`
+		}
+		if len(result) > 0 {
+			if err := json.Unmarshal(result, &resp); err != nil {
+				return fmt.Errorf("failed to unmarshal authentication result: %w", err)
+			}
+		}
+		if resp.ResponseType == loginResponseSuccess {
+			return nil
+		}
+		klog.Errorf("Storage system rejected API key for user %q: %s", c.username, resp.ResponseType)
+		return fmt.Errorf("%w (auth.login_ex returned %q for user %q, which must own the key)",
+			ErrAuthenticationRejected, resp.ResponseType, c.username)
+	}
+
+	var ok bool
+	if len(result) > 0 {
+		if err := json.Unmarshal(result, &ok); err != nil {
+			return fmt.Errorf("failed to unmarshal authentication result: %w", err)
+		}
+	}
+	if !ok {
+		klog.Errorf("Storage system rejected API key (length: %d)", len(c.apiKey))
+		return ErrAuthenticationRejected
+	}
+	return nil
+}
+
+// isLoginMethod reports whether method is one of the login calls, which the retry
+// and reconnect logic must not treat like ordinary requests.
+func isLoginMethod(method string) bool {
+	return method == methodAuthLoginWithAPIKey || method == methodAuthLoginEx
 }
 
 // authenticateDirect performs API key authentication by directly reading from WebSocket
@@ -472,7 +532,8 @@ func (c *Client) authenticateDirect() error {
 }
 
 func (c *Client) authenticateDirectLocked(ctx context.Context) error {
-	klog.V(4).Info("Authenticating with storage system using auth.login_with_api_key (direct mode)")
+	method, params := c.loginRequest()
+	klog.V(4).Infof("Authenticating with storage system using %s (direct mode)", method)
 
 	c.mu.Lock()
 
@@ -483,8 +544,8 @@ func (c *Client) authenticateDirectLocked(ctx context.Context) error {
 	req := &Request{
 		ID:      id,
 		JSONRPC: "2.0",
-		Method:  methodAuthLoginWithAPIKey,
-		Params:  []interface{}{c.apiKey},
+		Method:  method,
+		Params:  params,
 	}
 
 	// Send request (log method only, not params which contain sensitive data)
@@ -521,17 +582,8 @@ func (c *Client) authenticateDirectLocked(ctx context.Context) error {
 		return fmt.Errorf("%w: expected %s, got %s", ErrResponseIDMismatch, id, resp.ID)
 	}
 
-	// Parse auth result
-	var authResult bool
-	if resp.Result != nil {
-		if err := json.Unmarshal(resp.Result, &authResult); err != nil {
-			return fmt.Errorf("failed to unmarshal authentication result: %w", err)
-		}
-	}
-
-	if !authResult {
-		klog.Errorf("Storage system rejected API key (length: %d)", len(c.apiKey))
-		return ErrAuthenticationRejected
+	if err := c.checkLoginResult(method, resp.Result); err != nil {
+		return err
 	}
 
 	klog.V(4).Info("Successfully authenticated with storage system (direct mode)")
@@ -733,7 +785,7 @@ func (c *Client) prepareCallRetry(
 
 	// A live connection can lose its server-side session authentication. The
 	// auth method is excluded here so a rejected auth request cannot recurse.
-	if method != methodAuthLoginWithAPIKey && isSessionAuthError(err) {
+	if !isLoginMethod(method) && isSessionAuthError(err) {
 		if attempt >= maxRetries {
 			return nil, false, nil
 		}
@@ -746,7 +798,7 @@ func (c *Client) prepareCallRetry(
 
 	// Connection initialization and live-session reauthentication coordinate
 	// auth retries themselves and need the connection loss immediately.
-	if method == methodAuthLoginWithAPIKey && isConnectionError(err) {
+	if isLoginMethod(method) && isConnectionError(err) {
 		return nil, false, err
 	}
 	// A request that may already have been applied is only repeated if that is harmless.
@@ -822,7 +874,7 @@ func (c *Client) callOnce(ctx context.Context, method string, params []interface
 			break
 		}
 		c.mu.Unlock()
-		if method == methodAuthLoginWithAPIKey {
+		if isLoginMethod(method) {
 			return 0, ErrConnectionClosed
 		}
 

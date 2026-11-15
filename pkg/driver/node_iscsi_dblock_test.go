@@ -191,6 +191,79 @@ func TestISCSIDBLockJanitorDoesNotFollowAbsoluteSymlinkOutOfRoot(t *testing.T) {
 	}
 }
 
+// Debian, Ubuntu, Fedora and Arch ship /var/lock as an absolute symlink to /run/lock. Under
+// /proc/1/root that symlink means <host root>/run/lock, which is how the host itself sees it;
+// refusing it (as os.Root does) misreports a normal host as uninspectable on every call.
+func TestResolveInRootReadsAbsoluteSymlinksAsHostPaths(t *testing.T) {
+	f := newDBLockFixture(t, false)
+	if err := os.MkdirAll(filepath.Join(f.root, "var"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/run/lock", filepath.Join(f.root, "var", "lock")); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	for name, want := range map[string]string{
+		"var/lock/iscsi": "run/lock/iscsi", // absolute symlink, read inside the root
+		"run/lock/iscsi": "run/lock/iscsi", // no symlink
+	} {
+		got, err := resolveInRoot(root, name)
+		if err != nil {
+			t.Fatalf("resolveInRoot(%q) error = %v", name, err)
+		}
+		if got != want {
+			t.Fatalf("resolveInRoot(%q) = %q, want %q", name, got, want)
+		}
+	}
+
+	// A relative symlink climbing out of the root must still be refused.
+	if err := os.Symlink("../../../../etc", filepath.Join(f.root, "run", "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolveInRoot(root, "run/escape/iscsi"); err == nil {
+		t.Fatalf("resolveInRoot followed a relative symlink out of the root to %q", got)
+	}
+
+	// A symlink loop ends in an error, not a hang.
+	if err := os.Symlink("/run/loop", filepath.Join(f.root, "run", "loop")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := resolveInRoot(root, "run/loop/iscsi"); err == nil {
+		t.Fatalf("resolveInRoot(symlink loop) = %q, want an error", got)
+	}
+}
+
+// A lock reached only through an absolute symlink inside the host root is still found and
+// cleared: the janitor must not depend on the lock directory being free of symlinks.
+func TestISCSIDBLockJanitorRemovesLockBehindAbsoluteSymlinkInRoot(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	// Move the real lock directory to run/lock-real and point var/lock at it the way a
+	// distro would (absolute target); run/lock/iscsi no longer exists.
+	realDir := filepath.Join(f.root, "run", "lock-real")
+	if err := os.Rename(filepath.Join(f.root, "run", "lock"), realDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(f.root, "var"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/run/lock-real", filepath.Join(f.root, "var", "lock")); err != nil {
+		t.Fatal(err)
+	}
+	f.lockDir = filepath.Join(realDir, "iscsi")
+
+	if !f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() = false; the orphaned lock behind /var/lock -> /run/lock-real was not removed")
+	}
+	if f.writeLockExists(t) {
+		t.Fatal("lock.write still present")
+	}
+}
+
 func TestISCSIDBLockJanitorNilIsNoop(t *testing.T) {
 	var j *iscsiDBLockJanitor
 	if j.clearStale() {

@@ -3,6 +3,8 @@ package driver
 import (
 	"bufio"
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,18 +78,20 @@ func (j *iscsiDBLockJanitor) clearStale() bool {
 	}
 	seen := make(map[string]bool)
 	for _, rootPath := range j.roots {
-		for _, dir := range iscsiDBLockDirs {
-			if j.clearStaleIn(rootPath, dir, seen) {
-				return true
-			}
+		if j.clearStaleUnder(rootPath, seen) {
+			return true
 		}
 	}
 	return false
 }
 
-func (j *iscsiDBLockJanitor) clearStaleIn(rootPath, dir string, seen map[string]bool) bool {
-	// os.Root resolves the path inside rootPath and refuses symlinks that escape it, so an
-	// absolute symlink under /proc/1/root never redirects us into the container's tree.
+// clearStaleUnder checks each lock directory under rootPath once. On most distros
+// var/lock is a symlink to /run/lock, so both entries of iscsiDBLockDirs name the same
+// directory; resolving them first keeps that from being inspected (and reported) twice.
+func (j *iscsiDBLockJanitor) clearStaleUnder(rootPath string, seen map[string]bool) bool {
+	// os.Root refuses symlinks that escape it, so an absolute symlink under /proc/1/root
+	// never redirects us into the container's tree; resolveInRoot reads such a symlink as a
+	// host path instead, the way the host itself does.
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
 		klog.V(2).Infof("open-iscsi DB lock check: cannot open %s: %v", rootPath, err)
@@ -99,6 +103,25 @@ func (j *iscsiDBLockJanitor) clearStaleIn(rootPath, dir string, seen map[string]
 		}
 	}()
 
+	checked := make(map[string]bool, len(iscsiDBLockDirs))
+	for _, dir := range iscsiDBLockDirs {
+		resolved, resolveErr := resolveInRoot(root, dir)
+		if resolveErr != nil {
+			klog.V(2).Infof("open-iscsi DB lock check: cannot resolve %s under %s: %v", dir, rootPath, resolveErr)
+			continue
+		}
+		if checked[resolved] {
+			continue
+		}
+		checked[resolved] = true
+		if j.clearStaleIn(root, rootPath, resolved, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func (j *iscsiDBLockJanitor) clearStaleIn(root *os.Root, rootPath, dir string, seen map[string]bool) bool {
 	lockPath := filepath.Join(dir, iscsiDBWriteLock)
 	info, err := root.Lstat(lockPath)
 	if err != nil {
@@ -159,6 +182,67 @@ func (j *iscsiDBLockJanitor) clearStaleIn(rootPath, dir string, seen map[string]
 		"an iscsiadm was killed while holding it", filepath.Join(rootPath, lockPath), age.Round(time.Second))
 	metrics.RecordISCSIStaleDBLockRecovery()
 	return true
+}
+
+// maxSymlinkHops bounds symlink resolution, like the kernel's MAXSYMLINKS.
+const maxSymlinkHops = 40
+
+var (
+	errPathAboveRoot   = errors.New("path climbs above the root")
+	errTooManySymlinks = errors.New("too many levels of symbolic links")
+)
+
+// resolveInRoot resolves the symlinks in name (a path relative to root) the way the host
+// would if root were its "/": an absolute target restarts from root rather than from the
+// container's "/". A path that climbs above root with ".." is refused. Missing components
+// are kept literally, so a lock directory that does not exist yet still resolves.
+func resolveInRoot(root *os.Root, name string) (string, error) {
+	pending := strings.Split(filepath.ToSlash(name), "/")
+	var resolved []string
+	hops := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return "", fmt.Errorf("%s: %w", name, errPathAboveRoot)
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		current := filepath.Join(append(resolved, part)...)
+		info, err := root.Lstat(current)
+		if os.IsNotExist(err) {
+			resolved = append(append(resolved, part), pending...)
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			resolved = append(resolved, part)
+			continue
+		}
+		hops++
+		if hops > maxSymlinkHops {
+			return "", fmt.Errorf("%s: %w", name, errTooManySymlinks)
+		}
+		target, err := root.Readlink(current)
+		if err != nil {
+			return "", err
+		}
+		if filepath.IsAbs(target) {
+			resolved = nil
+		}
+		pending = append(strings.Split(filepath.ToSlash(target), "/"), pending...)
+	}
+	if len(resolved) == 0 {
+		return ".", nil
+	}
+	return filepath.Join(resolved...), nil
 }
 
 // possibleOwner returns a description of a live iscsiadm that started at or before the lock

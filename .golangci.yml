@@ -229,6 +229,8 @@ linters:
         - pattern: ^exec\.Command(Context)?$
           pkg: ^os/exec$
           msg: use cmdexec.CommandContext or cmdexec.CombinedOutput (bounded wait after timeout, timeout-aware errors)
+        - pattern: ^driver\.iscsiadmCommand$
+          msg: "run iscsiadm only through NodeService.runISCSIAdm (serializes node-database access, never kills iscsiadm on a deadline; see #336)"
 
   exclusions:
     generated: lax
@@ -255,6 +257,12 @@ linters:
           - revive
           - lll
           
+      # node_iscsiadm.go defines runISCSIAdm, the one caller of iscsiadmCommand.
+      - path: pkg/driver/node_iscsiadm\.go
+        text: iscsiadmCommand
+        linters:
+          - forbidigo
+
       # pkg/cmdexec is the one place allowed to build raw exec.Cmds; tests and the kubectl
       # plugin (outside any CSI RPC path) may run commands directly.
       - path: (pkg/cmdexec/|cmd/kubectl-tns-csi/|tests/|_test\.go$)

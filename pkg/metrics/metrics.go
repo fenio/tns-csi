@@ -199,6 +199,23 @@ var (
 		},
 	)
 
+	// iSCSI node-database serialization metrics (#336).
+	iscsiadmWaiting = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "iscsiadm_waiting",
+			Help:      "Number of iscsiadm node-database operations waiting for this node's iscsiadm gate",
+		},
+	)
+
+	iscsiStaleDBLockRecoveries = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "iscsi_stale_db_lock_recoveries_total",
+			Help:      "Number of orphaned open-iscsi node-database locks (lock.write) removed by the driver",
+		},
+	)
+
 	// Volume capacity metrics.
 	volumeCapacityBytes = promauto.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -321,6 +338,15 @@ func NVMeConnectStart() { nvmeConnectConcurrent.Inc() }
 
 // NVMeConnectDone decrements the concurrent gauge.
 func NVMeConnectDone() { nvmeConnectConcurrent.Dec() }
+
+// ISCSIAdmWaiting increments the iscsiadm gate waiting gauge.
+func ISCSIAdmWaiting() { iscsiadmWaiting.Inc() }
+
+// ISCSIAdmDoneWaiting decrements the iscsiadm gate waiting gauge.
+func ISCSIAdmDoneWaiting() { iscsiadmWaiting.Dec() }
+
+// RecordISCSIStaleDBLockRecovery counts a removed orphaned open-iscsi DB lock.
+func RecordISCSIStaleDBLockRecovery() { iscsiStaleDBLockRecoveries.Inc() }
 
 // OperationTimer helps time operations and record metrics automatically.
 type OperationTimer struct {

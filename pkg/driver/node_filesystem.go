@@ -1,7 +1,6 @@
 package driver
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -180,6 +179,10 @@ func (s *NodeService) runFilesystemPreen(ctx context.Context, devicePath, fsType
 		return nil
 	}
 
+	if abortErr := s.leftRunning(ctx, "filesystem check of "+devicePath, err); abortErr != nil {
+		return abortErr
+	}
+
 	var exitErr interface{ ExitCode() int }
 	if errors.As(err, &exitErr) {
 		exitCode := exitErr.ExitCode()
@@ -201,34 +204,10 @@ func runE2FSCK(ctx context.Context, devicePath string) ([]byte, error) {
 		return nil, err
 	}
 
-	// Do not bind process lifetime to the RPC context. Killing e2fsck during a repair
-	// can leave the filesystem in a worse state; let an in-progress check finish safely.
-	cmd := cmdexec.CommandContext(context.WithoutCancel(ctx), e2fsckPath, "-p", devicePath)
-	var output cappedCommandOutput
-	cmd.Stdout = &output
-	cmd.Stderr = &output
-	err := cmd.Run()
-	return output.Bytes(), err
-}
-
-type cappedCommandOutput struct {
-	buffer bytes.Buffer
-}
-
-func (o *cappedCommandOutput) Write(p []byte) (int, error) {
-	const captureLimit = 4097
-	originalLength := len(p)
-	if remaining := captureLimit - o.buffer.Len(); remaining > 0 {
-		if len(p) > remaining {
-			p = p[:remaining]
-		}
-		_, _ = o.buffer.Write(p)
-	}
-	return originalLength, nil
-}
-
-func (o *cappedCommandOutput) Bytes() []byte {
-	return o.buffer.Bytes()
+	// Never kill e2fsck at the request deadline: interrupting a repair can leave the
+	// filesystem in a worse state. A check still running when the request ends is left to
+	// finish (a cmdexec.StillRunningError) and the volume reports Aborted until it does.
+	return cmdexec.RunProtected(ctx, 0, 0, e2fsckPath, "-p", devicePath)
 }
 
 func truncateCommandOutput(output []byte) string {

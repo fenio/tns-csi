@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/fenio/tns-csi/pkg/cmdexec"
@@ -45,19 +46,23 @@ type NodeService struct {
 	// logoutISCSITargetFn is overridden by focused node-service tests.
 	logoutISCSITargetFn func(context.Context, *iscsiConnectionParams) error
 	// runISCSIAdmFn is overridden by focused command-result tests.
-	runISCSIAdmFn        func(context.Context, ...string) ([]byte, error)
-	runFilesystemCheckFn func(context.Context, string) ([]byte, error)
-	detectFilesystemFn   func(context.Context, string) (string, error)
-	isSourceMountedFn    func(context.Context, string) (bool, error)
-	needsFormatFn        func(context.Context, string, bool) (bool, error)
-	formatDeviceFn       func(context.Context, string, string, string, []string) error
-	volumeLifecycleLocks keyedMutex
-	nodeID               string
-	clusterID            string // names this node's iSCSI initiator group (fencing)
-	nvmeLifecycleMu      sync.Mutex
-	testMode             bool
-	enableDiscovery      bool
-	iscsiFencing         bool
+	runISCSIAdmFn func(context.Context, ...string) ([]byte, error)
+	// clearStaleISCSIDBLockFn removes an orphaned open-iscsi DB lock; nil means never.
+	clearStaleISCSIDBLockFn func() bool
+	runFilesystemCheckFn    func(context.Context, string) ([]byte, error)
+	detectFilesystemFn      func(context.Context, string) (string, error)
+	isSourceMountedFn       func(context.Context, string) (bool, error)
+	needsFormatFn           func(context.Context, string, bool) (bool, error)
+	formatDeviceFn          func(context.Context, string, string, string, []string) error
+	nodeID                  string
+	clusterID               string // names this node's iSCSI initiator group (fencing)
+	volumeLifecycleLocks    keyedMutex
+	leftRunningOps          leftRunningOps
+	iscsiadmGate            iscsiadmGate
+	nvmeLifecycleMu         sync.Mutex
+	testMode                bool
+	enableDiscovery         bool
+	iscsiFencing            bool
 }
 
 // NewNodeService creates a new node service.
@@ -72,6 +77,8 @@ func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bo
 		nodeRegistry:    nodeRegistry,
 		enableDiscovery: enableDiscovery,
 		nvmeConnectSem:  make(chan struct{}, maxConcurrentNVMeConnects),
+		// The janitor reads the host lock dir and /proc; nil (no hostPID) never removes anything.
+		clearStaleISCSIDBLockFn: newISCSIDBLockJanitor().clearStale,
 	}
 }
 
@@ -125,6 +132,11 @@ func (s *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.FromContextError(lockErr).Err()
 	}
 	defer unlock()
+	if busyErr := s.checkNoLeftRunningOp(volumeID); busyErr != nil {
+		timer.ObserveError()
+		return nil, busyErr
+	}
+	ctx = withVolumeOp(ctx, volumeID)
 
 	klog.V(4).Infof("Staging volume %s (protocol: %s) to %s", volumeID, protocol, stagingTargetPath)
 
@@ -195,6 +207,11 @@ func (s *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 		return nil, status.FromContextError(lockErr).Err()
 	}
 	defer unlock()
+	if busyErr := s.checkNoLeftRunningOp(volumeID); busyErr != nil {
+		timer.ObserveError()
+		return nil, busyErr
+	}
+	ctx = withVolumeOp(ctx, volumeID)
 
 	// With independent subsystems, we determine the protocol by checking the staging path
 	// NVMe-oF volumes use block devices, NFS volumes use NFS mounts
@@ -670,6 +687,10 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	volumeID := req.GetVolumeId()
 	volumePath := req.GetVolumePath()
+	if busyErr := s.checkNoLeftRunningOp(volumeID); busyErr != nil {
+		return nil, busyErr
+	}
+	ctx = withVolumeOp(ctx, volumeID)
 
 	// Check if volume path exists
 	if _, statErr := os.Stat(volumePath); os.IsNotExist(statErr) {
@@ -728,6 +749,9 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	// Resize based on filesystem type
 	if err := resizeFilesystem(ctx, volumePath, fsType); err != nil {
+		if abortErr := s.leftRunning(ctx, "filesystem resize of "+volumePath, err); abortErr != nil {
+			return nil, abortErr
+		}
 		return nil, keepStatus(err, codes.Internal, "Failed to resize filesystem")
 	}
 
@@ -837,6 +861,11 @@ func detectFilesystemType(ctx context.Context, mountPath string) (string, error)
 }
 
 // resizeFilesystem resizes the filesystem at the given path based on filesystem type.
+// resizeHardCeiling only stops a resize that is truly hung. resize2fs and xfs_growfs are not
+// killed at the request deadline: a resize interrupted part way can leave the filesystem
+// inconsistent. A resize still running is returned as a cmdexec.StillRunningError.
+const resizeHardCeiling = 30 * time.Minute
+
 func resizeFilesystem(ctx context.Context, mountPath, fsType string) error {
 	switch fsType {
 	case fsTypeExt2, fsTypeExt3, fsTypeExt4:
@@ -852,8 +881,10 @@ func resizeFilesystem(ctx context.Context, mountPath, fsType string) error {
 
 		klog.V(4).Infof("Resizing ext filesystem on device %s", device)
 		// #nosec G204 -- device path comes from the kernel mount table and is checked to be under /dev/
-		cmd := cmdexec.CommandContext(ctx, "resize2fs", device)
-		output, err := cmd.CombinedOutput()
+		output, err := cmdexec.RunProtected(ctx, 0, resizeHardCeiling, "resize2fs", device)
+		if cmdexec.IsStillRunning(err) {
+			return err
+		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "resize2fs failed: %v, output: %s", err, string(output))
 		}
@@ -863,8 +894,10 @@ func resizeFilesystem(ctx context.Context, mountPath, fsType string) error {
 	case fsTypeXFS:
 		// For XFS, xfs_growfs operates on the mount point
 		klog.V(4).Infof("Resizing XFS filesystem at mount point %s", mountPath)
-		cmd := cmdexec.CommandContext(ctx, "xfs_growfs", mountPath)
-		output, err := cmd.CombinedOutput()
+		output, err := cmdexec.RunProtected(ctx, 0, resizeHardCeiling, "xfs_growfs", mountPath)
+		if cmdexec.IsStillRunning(err) {
+			return err
+		}
 		if err != nil {
 			return status.Errorf(codes.Internal, "xfs_growfs failed: %v, output: %s", err, string(output))
 		}

@@ -1,0 +1,241 @@
+package driver
+
+import (
+	"bufio"
+	"bytes"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/fenio/tns-csi/pkg/metrics"
+	"k8s.io/klog/v2"
+)
+
+// open-iscsi locks its node database by link("<dir>/lock", "<dir>/lock.write") and releases
+// it by unlink() on a clean exit (idbm_lock in usr/idbm.c). It is not an flock, so the kernel
+// never drops it: an iscsiadm killed while holding it leaves lock.write behind, and every
+// later iscsiadm waits 30 s (3000 x 10 ms) and fails with "Timeout on acquiring lock on DB"
+// (#336). The janitor below detects and removes such an orphaned lock.
+const (
+	iscsiDBWriteLock = "lock.write"
+	// iscsiDBLockStaleAfter must stay well above open-iscsi's own 30 s lock wait and any
+	// single legitimate hold (iscsid and iscsiadm hold it per record, briefly).
+	iscsiDBLockStaleAfter = 60 * time.Second
+	// procClockTicks is USER_HZ, the unit of /proc/<pid>/stat starttime. It is 100 on every
+	// Linux architecture the driver ships for.
+	procClockTicks = 100
+)
+
+// iscsiDBLockDirs are the lock directories open-iscsi builds use (LOCK_DIR), relative to
+// the host root.
+var iscsiDBLockDirs = []string{"run/lock/iscsi", "var/lock/iscsi"}
+
+// iscsiDBLockJanitor removes an orphaned open-iscsi lock.write. Call it only while no
+// iscsiadm started by this driver can be running (that is, while holding the node's
+// iscsiadm gate), so that any live owner is a process it can see in /proc.
+type iscsiDBLockJanitor struct {
+	now          func() time.Time
+	beforeUnlink func() // test hook
+	procDir      string
+	roots        []string // host root candidates, e.g. /proc/1/root or /
+	staleAfter   time.Duration
+}
+
+// newISCSIDBLockJanitor returns a janitor for the host's lock directory, reached through
+// /proc/1/root (and the container's /run, which the chart mounts from the host). It returns
+// nil, which never removes anything, unless the host's processes are visible: without
+// hostPID a live host iscsiadm owning the lock would be invisible to the owner check.
+func newISCSIDBLockJanitor() *iscsiDBLockJanitor {
+	if !hostProcessesVisible("/proc") {
+		klog.Infof("Host processes are not visible (no hostPID); orphaned open-iscsi DB locks will be reported, not removed")
+		return nil
+	}
+	return &iscsiDBLockJanitor{roots: []string{"/proc/1/root", "/"}, procDir: "/proc", staleAfter: iscsiDBLockStaleAfter, now: time.Now}
+}
+
+// hostProcessesVisible reports whether procDir shows the host's processes. With hostPID,
+// PID 1 is the host's init, in a different mount namespace than this container; without
+// it, PID 1 belongs to this container and shares our mount namespace.
+func hostProcessesVisible(procDir string) bool {
+	initNS, err := os.Readlink(filepath.Join(procDir, "1", "ns", "mnt"))
+	if err != nil {
+		return false
+	}
+	selfNS, err := os.Readlink(filepath.Join(procDir, "self", "ns", "mnt"))
+	return err == nil && initNS != selfNS
+}
+
+// clearStale removes lock.write when it is old and no iscsiadm that could own it is alive.
+// It reports whether it removed a lock. Every doubt (unreadable /proc, unknown process
+// age, a lock that changed while being judged) keeps the lock.
+func (j *iscsiDBLockJanitor) clearStale() bool {
+	if j == nil {
+		return false
+	}
+	seen := make(map[string]bool)
+	for _, rootPath := range j.roots {
+		for _, dir := range iscsiDBLockDirs {
+			if j.clearStaleIn(rootPath, dir, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (j *iscsiDBLockJanitor) clearStaleIn(rootPath, dir string, seen map[string]bool) bool {
+	// os.Root resolves the path inside rootPath and refuses symlinks that escape it, so an
+	// absolute symlink under /proc/1/root never redirects us into the container's tree.
+	root, err := os.OpenRoot(rootPath)
+	if err != nil {
+		klog.V(2).Infof("open-iscsi DB lock check: cannot open %s: %v", rootPath, err)
+		return false
+	}
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			klog.V(4).Infof("closing %s: %v", rootPath, closeErr)
+		}
+	}()
+
+	lockPath := filepath.Join(dir, iscsiDBWriteLock)
+	info, err := root.Lstat(lockPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			klog.V(2).Infof("open-iscsi DB lock check: cannot inspect %s under %s: %v", lockPath, rootPath, err)
+		}
+		return false
+	}
+	if !info.Mode().IsRegular() {
+		klog.Warningf("open-iscsi DB lock %s under %s is not a regular file (%v); leaving it", lockPath, rootPath, info.Mode())
+		return false
+	}
+	ctime, ok := fileChangeTime(info)
+	if !ok {
+		klog.V(2).Infof("open-iscsi DB lock check: no change time for %s under %s", lockPath, rootPath)
+		return false
+	}
+	// The same lock can be visible through several roots; judge it once.
+	key := strconv.FormatInt(ctime.UnixNano(), 10) + "/" + strconv.FormatInt(info.Size(), 10) + "/" + dir
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+
+	age := j.now().Sub(ctime)
+	if age < j.staleAfter {
+		klog.V(2).Infof("open-iscsi DB lock %s is held (%v old, considered orphaned after %v)", lockPath, age.Round(time.Second), j.staleAfter)
+		return false
+	}
+	owner, scanErr := j.possibleOwner(ctime)
+	if scanErr != nil {
+		klog.Warningf("open-iscsi DB lock %s is %v old but processes cannot be inspected (%v); leaving it", lockPath, age.Round(time.Second), scanErr)
+		return false
+	}
+	if owner != "" {
+		klog.Warningf("open-iscsi DB lock %s is %v old; %s may still own it, leaving it", lockPath, age.Round(time.Second), owner)
+		return false
+	}
+
+	if j.beforeUnlink != nil {
+		j.beforeUnlink()
+	}
+	// lock.write is a hard link to lock, so the inode cannot tell a re-taken lock apart;
+	// the change time can (link and unlink both update it).
+	again, err := root.Lstat(lockPath)
+	if err != nil {
+		return false
+	}
+	if againCtime, ok := fileChangeTime(again); !ok || !againCtime.Equal(ctime) {
+		klog.V(2).Infof("open-iscsi DB lock %s changed while being checked; leaving it", lockPath)
+		return false
+	}
+	if err := root.Remove(lockPath); err != nil {
+		klog.Warningf("failed to remove orphaned open-iscsi DB lock %s: %v", lockPath, err)
+		return false
+	}
+	klog.Warningf("Removed orphaned open-iscsi DB lock %s (held for %v with no live iscsiadm owner); "+
+		"an iscsiadm was killed while holding it", filepath.Join(rootPath, lockPath), age.Round(time.Second))
+	metrics.RecordISCSIStaleDBLockRecovery()
+	return true
+}
+
+// possibleOwner returns a description of a live iscsiadm that started at or before the lock
+// was taken, or "" if there is none. An iscsiadm started later is only waiting for the lock.
+// A process whose start time cannot be read counts as a possible owner.
+func (j *iscsiDBLockJanitor) possibleOwner(lockTime time.Time) (string, error) {
+	entries, err := os.ReadDir(j.procDir)
+	if err != nil {
+		return "", err
+	}
+	bootTime, bootErr := readBootTime(filepath.Join(j.procDir, "stat"))
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil || pid <= 0 {
+			continue
+		}
+		comm, readErr := os.ReadFile(filepath.Join(j.procDir, entry.Name(), "comm"))
+		if readErr != nil || strings.TrimSpace(string(comm)) != "iscsiadm" {
+			continue
+		}
+		if !startedAfter(filepath.Join(j.procDir, entry.Name(), "stat"), bootTime, bootErr, lockTime) {
+			return "iscsiadm pid " + entry.Name(), nil
+		}
+	}
+	return "", nil
+}
+
+// startedAfter reports whether the process whose stat file is statPath certainly started
+// after lockTime. Any read or parse failure answers false (it may be the owner).
+func startedAfter(statPath string, bootTime time.Time, bootErr error, lockTime time.Time) bool {
+	if bootErr != nil {
+		return false
+	}
+	started, err := readProcessStart(statPath, bootTime)
+	// Allow a second of slack: starttime has tick resolution, btime second resolution.
+	return err == nil && started.After(lockTime.Add(time.Second))
+}
+
+func readBootTime(path string) (time.Time, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return time.Time{}, err
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) == 2 && fields[0] == "btime" {
+			seconds, convErr := strconv.ParseInt(fields[1], 10, 64)
+			if convErr != nil {
+				return time.Time{}, convErr
+			}
+			return time.Unix(seconds, 0), nil
+		}
+	}
+	return time.Time{}, os.ErrNotExist
+}
+
+// readProcessStart parses field 22 (starttime) of /proc/<pid>/stat. Field 2 (comm) may
+// contain spaces and parentheses, so fields are counted after its last ')'.
+func readProcessStart(path string, bootTime time.Time) (time.Time, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return time.Time{}, err
+	}
+	end := bytes.LastIndexByte(data, ')')
+	if end < 0 {
+		return time.Time{}, os.ErrInvalid
+	}
+	fields := strings.Fields(string(data[end+1:]))
+	// fields[0] is field 3 (state), so starttime (field 22) is fields[19].
+	const startTimeIndex = 19
+	if len(fields) <= startTimeIndex {
+		return time.Time{}, os.ErrInvalid
+	}
+	ticks, err := strconv.ParseInt(fields[startTimeIndex], 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return bootTime.Add(time.Duration(ticks) * time.Second / procClockTicks), nil
+}

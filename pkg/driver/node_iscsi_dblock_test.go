@@ -1,0 +1,228 @@
+//go:build linux
+
+package driver
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+)
+
+// dbLockFixture builds a fake host root (with run/lock/iscsi) and a fake /proc.
+type dbLockFixture struct {
+	ctime   time.Time
+	root    string
+	proc    string
+	lockDir string
+}
+
+func newDBLockFixture(t *testing.T, withWriteLock bool) *dbLockFixture {
+	t.Helper()
+	f := &dbLockFixture{root: t.TempDir(), proc: t.TempDir()}
+	f.lockDir = filepath.Join(f.root, "run", "lock", "iscsi")
+	if err := os.MkdirAll(f.lockDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	lock := filepath.Join(f.lockDir, "lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if withWriteLock {
+		if err := os.Link(lock, filepath.Join(f.lockDir, "lock.write")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, err := os.Lstat(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctime, _ = fileChangeTime(info)
+	// Boot time 1000 s before the lock was linked.
+	f.writeProc(t, "stat", fmt.Sprintf("cpu  1 2 3\nbtime %d\n", f.ctime.Unix()-1000))
+	return f
+}
+
+func (f *dbLockFixture) writeProc(t *testing.T, name, content string) {
+	t.Helper()
+	path := filepath.Join(f.proc, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// addProcess adds a process that started offset seconds after boot.
+func (f *dbLockFixture) addProcess(t *testing.T, pid int, comm string, startAfterBoot time.Duration) {
+	t.Helper()
+	ticks := int64(startAfterBoot/time.Second) * procClockTicks
+	dir := strconv.Itoa(pid)
+	f.writeProc(t, filepath.Join(dir, "comm"), comm+"\n")
+	// Field 2 contains spaces and a ')' on purpose: parsing must anchor on the last ')'.
+	stat := fmt.Sprintf("%d (%s) x) S 1 1 1 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 %d 0 0", pid, comm, ticks)
+	f.writeProc(t, filepath.Join(dir, "stat"), stat)
+}
+
+func (f *dbLockFixture) janitor(nowAfterLock time.Duration) *iscsiDBLockJanitor {
+	return &iscsiDBLockJanitor{
+		roots:      []string{f.root},
+		procDir:    f.proc,
+		staleAfter: 60 * time.Second,
+		now:        func() time.Time { return f.ctime.Add(nowAfterLock) },
+	}
+}
+
+func (f *dbLockFixture) writeLockExists(t *testing.T) bool {
+	t.Helper()
+	_, err := os.Lstat(filepath.Join(f.lockDir, "lock.write"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	return err == nil
+}
+
+func TestISCSIDBLockJanitorRemovesOrphanedLock(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.addProcess(t, 10, "iscsid", 5*time.Second) // long-lived daemon, not iscsiadm
+	if !f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() = false, want an orphaned lock removed")
+	}
+	if f.writeLockExists(t) {
+		t.Fatal("lock.write still present")
+	}
+	if _, err := os.Lstat(filepath.Join(f.lockDir, "lock")); err != nil {
+		t.Fatalf("janitor must never remove the base lock file: %v", err)
+	}
+}
+
+func TestISCSIDBLockJanitorKeepsFreshLock(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	if f.janitor(10 * time.Second).clearStale() {
+		t.Fatal("clearStale() removed a lock younger than the stale threshold")
+	}
+	if !f.writeLockExists(t) {
+		t.Fatal("lock.write removed")
+	}
+}
+
+func TestISCSIDBLockJanitorKeepsLockWithOlderLiveIscsiadm(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.addProcess(t, 42, "iscsiadm", 900*time.Second) // started 100 s before the lock was linked
+	if f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() removed a lock a live iscsiadm may own")
+	}
+}
+
+func TestISCSIDBLockJanitorIgnoresWaitersStartedAfterLock(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.addProcess(t, 43, "iscsiadm", 1300*time.Second) // started 300 s after the lock: only a waiter
+	if !f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() = false; an iscsiadm started after the lock cannot own it")
+	}
+}
+
+func TestISCSIDBLockJanitorTreatsUnknownStartTimeAsOwner(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.writeProc(t, "44/comm", "iscsiadm\n")
+	f.writeProc(t, "44/stat", "garbage")
+	if f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() removed a lock while an iscsiadm of unknown age is alive")
+	}
+}
+
+func TestISCSIDBLockJanitorNeverRemovesWithoutProcVisibility(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	j := f.janitor(10 * time.Minute)
+	j.procDir = filepath.Join(f.proc, "missing")
+	if j.clearStale() {
+		t.Fatal("clearStale() removed a lock without being able to scan processes")
+	}
+}
+
+func TestISCSIDBLockJanitorKeepsLockReplacedBeforeUnlink(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	j := f.janitor(10 * time.Minute)
+	j.beforeUnlink = func() {
+		// A real owner released and re-took the lock between the check and the unlink.
+		later := time.Now().Add(time.Hour)
+		writeLock := filepath.Join(f.lockDir, "lock.write")
+		if err := os.Chmod(writeLock, 0o640); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(writeLock, later, later)
+	}
+	// ctime only moves forward, and Chmod bumps it to "now"; make sure that is after the
+	// recorded ctime even on coarse clocks.
+	time.Sleep(20 * time.Millisecond)
+	if j.clearStale() {
+		t.Fatal("clearStale() removed a lock whose ctime changed after it was judged stale")
+	}
+	if !f.writeLockExists(t) {
+		t.Fatal("lock.write removed")
+	}
+}
+
+func TestISCSIDBLockJanitorNoLock(t *testing.T) {
+	f := newDBLockFixture(t, false)
+	if f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() = true with no lock.write")
+	}
+}
+
+func TestISCSIDBLockJanitorDoesNotFollowAbsoluteSymlinkOutOfRoot(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	outside := newDBLockFixture(t, true)
+	// Replace the root's run/lock/iscsi with an absolute symlink to a directory outside it.
+	if err := os.RemoveAll(f.lockDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside.lockDir, f.lockDir); err != nil {
+		t.Fatal(err)
+	}
+	j := f.janitor(10 * time.Minute)
+	j.now = func() time.Time { return outside.ctime.Add(10 * time.Minute) }
+	j.clearStale()
+	if !outside.writeLockExists(t) {
+		t.Fatal("janitor followed a symlink out of the host root and removed a foreign lock")
+	}
+}
+
+func TestISCSIDBLockJanitorNilIsNoop(t *testing.T) {
+	var j *iscsiDBLockJanitor
+	if j.clearStale() {
+		t.Fatal("nil janitor reported a removal")
+	}
+}
+
+func TestHostProcessesVisible(t *testing.T) {
+	proc := t.TempDir()
+	mk := func(pid, target string) {
+		dir := filepath.Join(proc, pid, "ns")
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(dir, "mnt")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("1", "mnt:[4026531841]")
+	mk("self", "mnt:[4026532999]")
+	if !hostProcessesVisible(proc) {
+		t.Fatal("different mount namespace for PID 1 means hostPID; want visible")
+	}
+
+	same := t.TempDir()
+	proc = same
+	mk("1", "mnt:[4026532999]")
+	mk("self", "mnt:[4026532999]")
+	if hostProcessesVisible(same) {
+		t.Fatal("PID 1 in our own mount namespace is our container (no hostPID); want not visible")
+	}
+	if hostProcessesVisible(filepath.Join(same, "missing")) {
+		t.Fatal("unreadable namespaces must count as not visible")
+	}
+}

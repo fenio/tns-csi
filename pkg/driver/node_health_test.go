@@ -298,3 +298,35 @@ func TestProtocolConstants(t *testing.T) {
 		t.Error("Protocol constants should be distinct")
 	}
 }
+
+func TestParseISCSISessionStateForDevice(t *testing.T) {
+	output := `Target: iqn.2005-10.org.freenas.ctl:pvc-a (non-flash)
+	Current Portal: 192.0.2.10:3260,1
+		iSCSI Connection State: TRANSPORT WAIT
+		iSCSI Session State: FAILED
+		************************
+		Attached SCSI devices:
+		************************
+		Host Number: 2	State: running
+		scsi2 Channel 00 Id 0 Lun: 0
+			Attached scsi disk sdb		State: blocked
+Target: iqn.2005-10.org.freenas.ctl:pvc-b (non-flash)
+	Current Portal: 192.0.2.10:3260,1
+		iSCSI Connection State: LOGGED IN
+		iSCSI Session State: LOGGED_IN
+		************************
+		Attached SCSI devices:
+		************************
+			Attached scsi disk sdc		State: running
+`
+	if got := parseISCSISessionStateForDevice(output, "/dev/sdc"); got != "LOGGED_IN" {
+		t.Errorf("state for sdc = %q, want LOGGED_IN", got)
+	}
+	// The first session's state must not be reported for another device.
+	if got := parseISCSISessionStateForDevice(output, "sdb"); got != "FAILED" {
+		t.Errorf("state for sdb = %q, want FAILED", got)
+	}
+	if got := parseISCSISessionStateForDevice(output, "sdz"); got != "" {
+		t.Errorf("state for unknown device = %q, want empty", got)
+	}
+}

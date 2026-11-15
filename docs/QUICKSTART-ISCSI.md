@@ -381,6 +381,20 @@ ssh <node> sudo systemctl status iscsid
 | Mount failed | iscsid not running | `sudo systemctl start iscsid` on nodes |
 | Connection refused | Firewall blocking port 3260 | Open port 3260 between nodes and TrueNAS |
 | Authentication failed | Initiator not recognized | Check initiator name in `/etc/iscsi/initiatorname.iscsi` |
+| `open-iscsi node database lock is held` or `Timeout on acquiring lock on DB` | An `iscsiadm` was killed while holding open-iscsi's node-database lock (`/run/lock/iscsi/lock.write`) | See [Stale open-iscsi database lock](#stale-open-iscsi-database-lock) |
+
+### Stale open-iscsi Database Lock
+
+open-iscsi locks its node database by creating `/run/lock/iscsi/lock.write` and removes it when `iscsiadm` exits cleanly. If an `iscsiadm` is killed while it holds the lock, the file stays behind, and every later `iscsiadm` on that node waits 30 seconds and fails with `Timeout on acquiring lock on DB`, so no iSCSI volume can be staged there.
+
+The driver never kills `iscsiadm` on a timeout, runs node-database operations one at a time per node, and skips SendTargets discovery when the node already has a record for the target. When it finds a `lock.write` older than 60 seconds that no live `iscsiadm` can own, it removes it, logs a warning (`Removed orphaned open-iscsi DB lock`), and increments `tns_csi_iscsi_stale_db_lock_recoveries_total`.
+
+If the driver cannot inspect host processes (it needs `hostPID`, which the chart sets), it leaves the lock alone. To clear it by hand, first make sure no `iscsiadm` is running on the node, then:
+
+```bash
+ls -l --time=ctime /run/lock/iscsi/   # lock.write has link count 2, same inode as lock
+sudo rm /run/lock/iscsi/lock.write     # never remove "lock" itself
+```
 
 ### Verify Connectivity
 

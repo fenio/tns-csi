@@ -9,8 +9,9 @@ import (
 	"time"
 )
 
-// ProtectedOutputLimit caps the output RunProtected keeps. A protected command may outlive
-// its caller, so its output must not grow without bound.
+// ProtectedOutputLimit caps the output a command keeps adding after RunProtected has stopped
+// waiting for it, so a command left running cannot grow without bound. The output of a
+// command that finishes while its caller waits is returned in full: callers parse it.
 const ProtectedOutputLimit = 64 * 1024
 
 // ErrStillRunning reports that a protected command was still running when its caller's
@@ -71,8 +72,8 @@ func StillRunningDone(err error) (<-chan struct{}, bool) {
 // softTimeout (in addition to ctx) bounds how long the caller waits, not how long the
 // command runs: when it passes, RunProtected returns a *StillRunningError and the process
 // keeps going. hardCeiling > 0 is the only kill, a backstop for a command that is truly
-// hung; 0 means the command is never killed. Combined output is capped at
-// ProtectedOutputLimit.
+// hung; 0 means the command is never killed. Combined output is returned in full; only
+// what a command left running writes afterwards is capped (ProtectedOutputLimit).
 func RunProtected(ctx context.Context, softTimeout, hardCeiling time.Duration, name string, args ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -90,7 +91,7 @@ func RunProtected(ctx context.Context, softTimeout, hardCeiling time.Duration, n
 		procCtx, procCancel = context.WithTimeout(procCtx, hardCeiling)
 	}
 
-	output := &cappedBuffer{limit: ProtectedOutputLimit}
+	output := &cappedBuffer{}
 	cmd := CommandContext(procCtx, name, args...)
 	cmd.Stdout = output
 	cmd.Stderr = output
@@ -121,23 +122,42 @@ func RunProtected(ctx context.Context, softTimeout, hardCeiling time.Duration, n
 	case <-done:
 		return result()
 	case <-waitCtx.Done():
+		// select picks at random when both are ready: a command that exited just as the
+		// deadline fired has finished, and its result must not be reported as still running.
+		select {
+		case <-done:
+			return result()
+		default:
+		}
+		output.capFurther(ProtectedOutputLimit)
 		return output.Bytes(), &StillRunningError{Name: name, Done: done, Err: waitCtx.Err(), result: result}
 	}
 }
 
-// cappedBuffer keeps the first limit bytes written and discards the rest. It is safe for
-// concurrent writes and reads, since a protected command may still be writing when the
-// caller reads what it has so far.
+// cappedBuffer collects combined output. It keeps everything until capFurther is called,
+// then accepts at most that many more bytes. It is safe for concurrent writes and reads,
+// since a protected command may still be writing when the caller reads what it has so far.
 type cappedBuffer struct {
 	buf   bytes.Buffer
-	limit int
+	capAt int // 0: unlimited
 	mu    sync.Mutex
+}
+
+// capFurther limits what the buffer accepts from now on to limit more bytes.
+func (c *cappedBuffer) capFurther(limit int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.capAt = c.buf.Len() + limit
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if remaining := c.limit - c.buf.Len(); remaining > 0 {
+	if c.capAt == 0 {
+		_, _ = c.buf.Write(p)
+		return len(p), nil
+	}
+	if remaining := c.capAt - c.buf.Len(); remaining > 0 {
 		if len(p) > remaining {
 			_, _ = c.buf.Write(p[:remaining])
 		} else {

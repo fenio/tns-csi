@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,13 +91,31 @@ func TestRunProtectedHardCeilingKills(t *testing.T) {
 	}
 }
 
-func TestRunProtectedCapsOutput(t *testing.T) {
-	out, err := RunProtected(context.Background(), 5*time.Second, 0, "sh", "-c", "head -c 200000 /dev/zero")
+// Output of a command that finished is parsed by callers (iscsiadm -m session -P 3 on a node
+// with many sessions is well over 64 KiB), so it must come back complete (review finding).
+func TestRunProtectedReturnsFullOutputOfFinishedCommand(t *testing.T) {
+	const size = 4 * ProtectedOutputLimit
+	out, err := RunProtected(context.Background(), 5*time.Second, 0, "sh", "-c", "head -c "+strconv.Itoa(size)+" /dev/zero")
 	if err != nil {
 		t.Fatalf("RunProtected() error = %v", err)
 	}
+	if len(out) != size {
+		t.Fatalf("output length %d, want the full %d bytes", len(out), size)
+	}
+}
+
+// Only a command left running has its further output capped, since nobody waits to read it.
+func TestRunProtectedCapsOutputAfterCallerLeaves(t *testing.T) {
+	_, err := RunProtected(context.Background(), 50*time.Millisecond, 0, "sh", "-c",
+		"sleep 0.2; head -c "+strconv.Itoa(4*ProtectedOutputLimit)+" /dev/zero")
+	var still *StillRunningError
+	if !errors.As(err, &still) {
+		t.Fatalf("RunProtected() = %v, want *StillRunningError", err)
+	}
+	<-still.Done
+	out, _ := still.Result()
 	if len(out) > ProtectedOutputLimit {
-		t.Errorf("output length %d exceeds limit %d", len(out), ProtectedOutputLimit)
+		t.Fatalf("output after the caller left grew to %d bytes, want at most %d", len(out), ProtectedOutputLimit)
 	}
 }
 

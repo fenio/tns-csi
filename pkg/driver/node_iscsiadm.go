@@ -23,6 +23,10 @@ import (
 //     iscsiadmHardCeiling.
 //  2. Run database operations one at a time per node. The database is single-writer anyway,
 //     so parallel calls only queue on the lock file and burn their timeouts doing so.
+//     Logins are the exception: they hold the lock only while reading the target's record,
+//     then wait on the network and iscsid, so one slow portal must not block every other
+//     volume's stage on the node. Outside the gate a login can still meet the lock; the
+//     janitor treats any live iscsiadm older than the lock as its possible owner.
 const (
 	// iscsiadmHardCeiling kills an iscsiadm that is truly hung. It is far above open-iscsi's
 	// 30 s lock wait plus a login's own retries.
@@ -44,14 +48,27 @@ const (
 // iscsiadmDBModes are the iscsiadm modes that read or write the node database under its lock.
 var iscsiadmDBModes = map[string]bool{"discovery": true, "discoverydb": true, "node": true, "iface": true}
 
-// iscsiadmNeedsDBLock reports whether args run an iscsiadm mode that uses the node database.
+// iscsiadmNeedsDBLock reports whether args run an iscsiadm database operation that must go
+// through the node's gate. Logins are excluded (see above).
 func iscsiadmNeedsDBLock(args []string) bool {
+	if iscsiadmIsLogin(args) {
+		return false
+	}
 	for i, arg := range args {
 		switch {
 		case (arg == "-m" || arg == "--mode") && i+1 < len(args):
 			return iscsiadmDBModes[args[i+1]]
 		case strings.HasPrefix(arg, "--mode="):
 			return iscsiadmDBModes[strings.TrimPrefix(arg, "--mode=")]
+		}
+	}
+	return false
+}
+
+func iscsiadmIsLogin(args []string) bool {
+	for _, arg := range args {
+		if arg == "--login" || arg == "-l" {
+			return true
 		}
 	}
 	return false
@@ -103,9 +120,17 @@ func (g *iscsiadmGate) release() { <-g.ch }
 // operations the gate stays held until it exits.
 func (s *NodeService) runISCSIAdm(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	if !iscsiadmNeedsDBLock(args) {
-		output, err := s.execISCSIAdm(ctx, timeout, iscsiadmQueryHardCeiling, args)
+		hardCeiling := iscsiadmQueryHardCeiling
+		if iscsiadmIsLogin(args) {
+			// A login can legitimately take minutes with iscsid's default retries.
+			hardCeiling = iscsiadmHardCeiling
+		}
+		output, err := s.execISCSIAdm(ctx, timeout, hardCeiling, args)
 		if cmdexec.IsStillRunning(err) {
 			go logLeftRunningResult(err, "iscsiadm "+strings.Join(args, " "))
+		} else if err != nil && isISCSIDBLockTimeout(output) {
+			// Not holding the gate, so no janitor here; the next gated call will run it.
+			err = fmt.Errorf("%w: %w, output: %s", ErrISCSINodeDBLocked, err, strings.TrimSpace(string(output)))
 		}
 		return output, wrapISCSIAdmStillRunning(err, timeout)
 	}

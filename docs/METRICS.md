@@ -50,7 +50,7 @@ Protocol-specific volume operations (NFS, NVMe-oF, iSCSI, and SMB):
 ### iSCSI Node Database Metrics
 
 - **`tns_csi_iscsiadm_waiting`** (gauge)
-  - Number of `iscsiadm` node-database operations (discovery, node records, login) waiting for this node's iscsiadm gate
+  - Number of `iscsiadm` node-database operations (discovery and node-record reads) waiting for this node's iscsiadm gate; logins do not wait on it
   - The driver runs these one at a time per node because open-iscsi's database is single-writer; sustained non-zero values mean many volumes are staging at once
 
 - **`tns_csi_iscsi_stale_db_lock_recoveries_total`** (counter)

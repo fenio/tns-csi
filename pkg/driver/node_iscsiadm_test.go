@@ -25,7 +25,10 @@ func TestISCSIAdmNeedsDBLock(t *testing.T) {
 		{[]string{"-m", "discovery", "-t", "sendtargets", "-p", "a:3260"}, true},
 		{[]string{"--mode", "discoverydb", "-t", "st"}, true},
 		{[]string{"--mode=node", "-P", "0"}, true},
-		{[]string{"-m", "node", "-T", "iqn", "-p", "a", "--login"}, true},
+		// A login holds the idbm lock only while it reads the record, then waits on the
+		// network; gating it would let one slow portal block every stage on the node.
+		{[]string{"-m", "node", "-T", "iqn", "-p", "a", "--login"}, false},
+		{[]string{"-m", "node", "-T", "iqn", "-p", "a", "-l"}, false},
 		{[]string{"-m", "iface"}, true},
 		{[]string{"-m", "session"}, false},
 		{[]string{"-m", "session", "-P", "3"}, false},
@@ -316,5 +319,41 @@ func TestLeftRunningWithoutVolumeIsInternal(t *testing.T) {
 		&cmdexec.StillRunningError{Name: "mkfs", Done: exited, Err: context.DeadlineExceeded})
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("leftRunning() without a volume = %v, want Internal (it cannot be tracked)", err)
+	}
+}
+
+// One slow or unreachable portal must not stop every other volume on the node from staging.
+func TestRunISCSIAdmLoginDoesNotHoldTheGate(t *testing.T) {
+	service := &NodeService{}
+	release := make(chan struct{})
+	entered := make(chan struct{})
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		if slices.Contains(args, "--login") {
+			close(entered)
+			<-release
+		}
+		return nil, nil
+	}
+	go func() {
+		_, _ = service.runISCSIAdm(context.Background(), time.Second, "-m", "node", "-T", "iqn", "-p", "a", "--login")
+	}()
+	<-entered
+	defer close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := service.runISCSIAdm(ctx, time.Second, "-m", "node", "-P", "0"); err != nil {
+		t.Fatalf("node listing waited behind a slow login: %v", err)
+	}
+}
+
+// A login outside the gate can still meet a held lock; it must be named as such.
+func TestRunISCSIAdmLoginReportsHeldLock(t *testing.T) {
+	service := &NodeService{}
+	service.runISCSIAdmFn = func(context.Context, ...string) ([]byte, error) {
+		return []byte("iscsiadm: Timeout on acquiring lock on DB: /run/lock/iscsi/lock, errno: 11"), errors.New("exit status 6")
+	}
+	_, err := service.runISCSIAdm(context.Background(), time.Second, "-m", "node", "-T", "iqn", "-p", "a", "--login")
+	if !errors.Is(err, ErrISCSINodeDBLocked) {
+		t.Fatalf("runISCSIAdm(login) = %v, want ErrISCSINodeDBLocked", err)
 	}
 }

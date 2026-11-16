@@ -245,7 +245,8 @@ node:
   # unmounting (e.g. a drain) can block as long. Applied at each login/connect, so a
   # staged volume picks up a change only after a full unstage. See docs/DEPLOYMENT.md.
   # iSCSI node.session.timeo.replacement_timeout. 0 keeps the host's iscsiadm default
-  # (120 s in open-iscsi).
+  # (120 s in open-iscsi). When set, the disk's SCSI command timeout is raised
+  # to a fifth of it, so commands in flight also survive the outage.
   iscsiReplacementTimeout: 0
   # NVMe-oF nvme connect --ctrl-loss-tmo. -1 reconnects forever.
   nvmeCtrlLossTimeout: 60

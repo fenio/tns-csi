@@ -1106,6 +1106,7 @@ kubectl get pvc upgrade-test
      iscsiReplacementTimeout: 600
      nvmeCtrlLossTimeout: 600
    ```
+   - For iSCSI the driver also raises the disk's SCSI command timeout (`/sys/block/<dev>/device/timeout`) to a fifth of `iscsiReplacementTimeout`, rounded up, e.g. 120 s for 600. The kernel fails a command older than that timeout times six (180 s with the default 30 s), so without this an outage longer than about three minutes still fails I/O after the session reconnects. A higher value already set on the host is kept.
    - The trade-off: during a real TrueNAS outage, I/O hangs that long instead of failing fast, and unmounting (for example during a drain) can block as long.
    - The value is applied when the node logs in to the iSCSI target or connects to the NVMe-oF subsystem. A volume that is already staged keeps its old timeout until it is fully unstaged (scale to zero, move the pod, or reboot the node). Check an iSCSI session with `cat /sys/class/iscsi_session/session*/recovery_tmo`.
    - This doesn't affect [iSCSI fencing](FENCING.md): TrueNAS rejects a fenced node's I/O immediately rather than letting it time out.

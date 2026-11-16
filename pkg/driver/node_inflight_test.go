@@ -113,3 +113,20 @@ func TestNodeStageVolumeRefusesWhileCommandLeftRunning(t *testing.T) {
 		t.Fatalf("NodeStageVolume() = %v, want Aborted", err)
 	}
 }
+
+// NodeExpand must hold the volume lock around its left-running check and the resize, or a
+// concurrent unstage could unmount under resize2fs, or two expands could resize at once.
+func TestNodeExpandVolumeTakesTheVolumeLock(t *testing.T) {
+	s := &NodeService{}
+	unlock, err := s.volumeLifecycleLocks.lock(context.Background(), "vol-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = s.NodeExpandVolume(ctx, &csi.NodeExpandVolumeRequest{VolumeId: "vol-1", VolumePath: t.TempDir()})
+	if status.Code(err) != codes.DeadlineExceeded {
+		t.Fatalf("NodeExpandVolume() while the volume is locked = %v, want to wait for the lock (DeadlineExceeded)", err)
+	}
+}

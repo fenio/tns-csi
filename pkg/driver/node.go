@@ -687,6 +687,14 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 
 	volumeID := req.GetVolumeId()
 	volumePath := req.GetVolumePath()
+	// Hold the volume lock across the left-running check and the resize, as stage and unstage
+	// do: otherwise an unstage could unmount under a running resize2fs, or two expands could
+	// resize the same filesystem at once.
+	unlock, lockErr := s.volumeLifecycleLocks.lock(ctx, volumeID)
+	if lockErr != nil {
+		return nil, status.FromContextError(lockErr).Err()
+	}
+	defer unlock()
 	if busyErr := s.checkNoLeftRunningOp(volumeID); busyErr != nil {
 		return nil, busyErr
 	}

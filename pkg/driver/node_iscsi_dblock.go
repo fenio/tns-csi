@@ -57,16 +57,19 @@ func newISCSIDBLockJanitor() *iscsiDBLockJanitor {
 	return &iscsiDBLockJanitor{roots: []string{"/proc/1/root", "/"}, procDir: "/proc", staleAfter: iscsiDBLockStaleAfter, now: time.Now}
 }
 
-// hostProcessesVisible reports whether procDir shows the host's processes. With hostPID,
-// PID 1 is the host's init, in a different mount namespace than this container; without
-// it, PID 1 belongs to this container and shares our mount namespace.
+// initialPIDNamespace is how /proc names the kernel's initial PID namespace. Its inode is a
+// fixed constant (PROC_PID_INIT_INO, include/linux/proc_ns.h).
+const initialPIDNamespace = "pid:[4026531836]"
+
+// hostProcessesVisible reports whether procDir shows every process on the host, i.e. this
+// process runs in the kernel's initial PID namespace (hostPID). Comparing PID 1's mount
+// namespace with ours is not enough: with shareProcessNamespace, PID 1 is the pod's pause
+// container, which also has its own mount namespace, yet /proc shows only the pod. A node
+// that is itself a container (kind, k3d) does not qualify either, which only makes the
+// janitor report instead of remove.
 func hostProcessesVisible(procDir string) bool {
-	initNS, err := os.Readlink(filepath.Join(procDir, "1", "ns", "mnt"))
-	if err != nil {
-		return false
-	}
-	selfNS, err := os.Readlink(filepath.Join(procDir, "self", "ns", "mnt"))
-	return err == nil && initNS != selfNS
+	selfNS, err := os.Readlink(filepath.Join(procDir, "self", "ns", "pid"))
+	return err == nil && selfNS == initialPIDNamespace
 }
 
 // clearStale removes lock.write when it is old and no iscsiadm that could own it is alive.
@@ -245,9 +248,10 @@ func resolveInRoot(root *os.Root, name string) (string, error) {
 	return filepath.Join(resolved...), nil
 }
 
-// possibleOwner returns a description of a live iscsiadm that started at or before the lock
-// was taken, or "" if there is none. An iscsiadm started later is only waiting for the lock.
-// A process whose start time cannot be read counts as a possible owner.
+// possibleOwner returns a description of a live process that may own the lock, or "" if there
+// is none: an iscsiadm or iscsistart that started at or before the lock was taken (one started
+// later is only waiting for it), or an iscsid that is not idle. A process whose start time or
+// state cannot be read counts as a possible owner.
 func (j *iscsiDBLockJanitor) possibleOwner(lockTime time.Time) (string, error) {
 	entries, err := os.ReadDir(j.procDir)
 	if err != nil {
@@ -260,11 +264,25 @@ func (j *iscsiDBLockJanitor) possibleOwner(lockTime time.Time) (string, error) {
 			continue
 		}
 		comm, readErr := os.ReadFile(filepath.Join(j.procDir, entry.Name(), "comm"))
-		if readErr != nil || strings.TrimSpace(string(comm)) != "iscsiadm" {
+		if readErr != nil {
 			continue
 		}
-		if !startedAfter(filepath.Join(j.procDir, entry.Name(), "stat"), bootTime, bootErr, lockTime) {
-			return "iscsiadm pid " + entry.Name(), nil
+		name := strings.TrimSpace(string(comm))
+		statPath := filepath.Join(j.procDir, entry.Name(), "stat")
+		switch name {
+		case "iscsiadm", "iscsistart":
+			// Short-lived clients: one started after the lock was taken is only waiting for it.
+			if !startedAfter(statPath, bootTime, bootErr, lockTime) {
+				return name + " pid " + entry.Name(), nil
+			}
+		case "iscsid":
+			// The daemon also takes the lock to read and write records, but it is always older
+			// than the lock, so its age proves nothing; counting it unconditionally would never
+			// remove an orphaned lock. Asleep in its event loop (S, I) it holds nothing; blocked
+			// in a write (D), running (R) or unreadable, it may.
+			if state, idle := processIdle(statPath); !idle {
+				return fmt.Sprintf("iscsid pid %s (state %c)", entry.Name(), state), nil
+			}
 		}
 	}
 	return "", nil
@@ -279,6 +297,30 @@ func startedAfter(statPath string, bootTime time.Time, bootErr error, lockTime t
 	started, err := readProcessStart(statPath, bootTime)
 	// Allow a second of slack: starttime has tick resolution, btime second resolution.
 	return err == nil && started.After(lockTime.Add(time.Second))
+}
+
+// processIdle reports whether the process is asleep (S) or idle (I), with its state for logs.
+// An unreadable state is not idle.
+func processIdle(statPath string) (state byte, idle bool) {
+	state, err := readProcessState(statPath)
+	return state, err == nil && (state == 'S' || state == 'I')
+}
+
+// readProcessState returns field 3 (state) of /proc/<pid>/stat.
+func readProcessState(path string) (byte, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return '?', err
+	}
+	end := bytes.LastIndexByte(data, ')')
+	if end < 0 {
+		return '?', os.ErrInvalid
+	}
+	fields := strings.Fields(string(data[end+1:]))
+	if len(fields) == 0 || len(fields[0]) != 1 {
+		return '?', os.ErrInvalid
+	}
+	return fields[0][0], nil
 }
 
 func readBootTime(path string) (time.Time, error) {

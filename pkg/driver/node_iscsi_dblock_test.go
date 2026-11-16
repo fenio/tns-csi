@@ -59,11 +59,17 @@ func (f *dbLockFixture) writeProc(t *testing.T, name, content string) {
 // addProcess adds a process that started offset seconds after boot.
 func (f *dbLockFixture) addProcess(t *testing.T, pid int, comm string, startAfterBoot time.Duration) {
 	t.Helper()
+	f.addProcessInState(t, pid, comm, "S", startAfterBoot)
+}
+
+// addProcessInState adds a process in the given /proc state (S sleeping, D uninterruptible, R running).
+func (f *dbLockFixture) addProcessInState(t *testing.T, pid int, comm, state string, startAfterBoot time.Duration) {
+	t.Helper()
 	ticks := int64(startAfterBoot/time.Second) * procClockTicks
 	dir := strconv.Itoa(pid)
 	f.writeProc(t, filepath.Join(dir, "comm"), comm+"\n")
 	// Field 2 contains spaces and a ')' on purpose: parsing must anchor on the last ')'.
-	stat := fmt.Sprintf("%d (%s) x) S 1 1 1 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 %d 0 0", pid, comm, ticks)
+	stat := fmt.Sprintf("%d (%s) x) %s 1 1 1 0 -1 4194560 100 0 0 0 0 0 0 0 20 0 1 0 %d 0 0", pid, comm, state, ticks)
 	f.writeProc(t, filepath.Join(dir, "stat"), stat)
 }
 
@@ -272,30 +278,56 @@ func TestISCSIDBLockJanitorNilIsNoop(t *testing.T) {
 }
 
 func TestHostProcessesVisible(t *testing.T) {
-	proc := t.TempDir()
-	mk := func(pid, target string) {
-		dir := filepath.Join(proc, pid, "ns")
+	procWithSelfNS := func(target string) string {
+		proc := t.TempDir()
+		dir := filepath.Join(proc, "self", "ns")
 		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(target, filepath.Join(dir, "mnt")); err != nil {
+		if err := os.Symlink(target, filepath.Join(dir, "pid")); err != nil {
 			t.Fatal(err)
 		}
+		return proc
 	}
-	mk("1", "mnt:[4026531841]")
-	mk("self", "mnt:[4026532999]")
-	if !hostProcessesVisible(proc) {
-		t.Fatal("different mount namespace for PID 1 means hostPID; want visible")
+	if !hostProcessesVisible(procWithSelfNS("pid:[4026531836]")) {
+		t.Fatal("the kernel's initial PID namespace (hostPID) must count as visible")
 	}
-
-	same := t.TempDir()
-	proc = same
-	mk("1", "mnt:[4026532999]")
-	mk("self", "mnt:[4026532999]")
-	if hostProcessesVisible(same) {
-		t.Fatal("PID 1 in our own mount namespace is our container (no hostPID); want not visible")
+	// shareProcessNamespace without hostPID: PID 1 is the pod's pause container, in its own
+	// mount namespace, but the PID namespace is the pod's, not the host's (review finding).
+	if hostProcessesVisible(procWithSelfNS("pid:[4026532410]")) {
+		t.Fatal("a pod PID namespace must not count as the host's")
 	}
-	if hostProcessesVisible(filepath.Join(same, "missing")) {
+	if hostProcessesVisible(filepath.Join(t.TempDir(), "missing")) {
 		t.Fatal("unreadable namespaces must count as not visible")
+	}
+}
+
+// iscsistart takes the same lock as iscsiadm and is treated the same way (review finding).
+func TestISCSIDBLockJanitorKeepsLockWithOlderLiveIscsistart(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.addProcess(t, 50, "iscsistart", 900*time.Second)
+	if f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() removed a lock a live iscsistart may own")
+	}
+}
+
+// iscsid also takes the lock when it reads or writes records. One blocked in a write (D) or
+// running (R) may own it; one asleep in its event loop (S) does not.
+func TestISCSIDBLockJanitorKeepsLockWhileIscsidIsBusy(t *testing.T) {
+	for _, state := range []string{"D", "R"} {
+		f := newDBLockFixture(t, true)
+		f.addProcessInState(t, 60, "iscsid", state, 5*time.Second)
+		if f.janitor(10 * time.Minute).clearStale() {
+			t.Fatalf("clearStale() removed a lock while iscsid was in state %s", state)
+		}
+	}
+}
+
+func TestISCSIDBLockJanitorKeepsLockWhenIscsidStateUnknown(t *testing.T) {
+	f := newDBLockFixture(t, true)
+	f.writeProc(t, "61/comm", "iscsid\n")
+	f.writeProc(t, "61/stat", "garbage")
+	if f.janitor(10 * time.Minute).clearStale() {
+		t.Fatal("clearStale() removed a lock while iscsid's state was unreadable")
 	}
 }

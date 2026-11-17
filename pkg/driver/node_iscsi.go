@@ -139,6 +139,10 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 		klog.V(4).Infof("iSCSI device connected at %s (IQN: %s, LUN: %d, dataset: %s) on attempt %d",
 			devicePath, params.iqn, params.lun, datasetName, attempt)
 
+		if timeoutErr := s.raiseISCSIDiskTimeout(devicePath); timeoutErr != nil {
+			return nil, status.Errorf(codes.Internal, "%v", timeoutErr)
+		}
+
 		// Try staging - if device becomes unavailable during staging, retry the whole connection
 		stageResp, stageErr := s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
 		if stageErr == nil {
@@ -322,6 +326,16 @@ func (s *NodeService) discoverISCSINodeRecord(ctx context.Context, params *iscsi
 }
 
 func (s *NodeService) runISCSILogin(ctx context.Context, params *iscsiConnectionParams, selectedPortal string) error {
+	if s.iscsiReplacementTimeout > 0 {
+		// The node record is what login copies into the new session, so this must precede
+		// every login, including the one after discovery has refreshed the record.
+		timeout := strconv.Itoa(s.iscsiReplacementTimeout)
+		if out, updateErr := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "node", "-T", params.iqn, "-p", selectedPortal,
+			"-o", "update", "-n", "node.session.timeo.replacement_timeout", "-v", timeout); updateErr != nil {
+			return fmt.Errorf("failed to set replacement_timeout=%s on iSCSI node %s: %w, output: %s", timeout, params.iqn, updateErr, string(out))
+		}
+	}
+
 	klog.Infof("Logging into iSCSI target %s through %s", params.iqn, selectedPortal)
 	output, err := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "node", "-T", params.iqn, "-p", selectedPortal, "--login")
 	if err != nil {
@@ -495,6 +509,32 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	devicePath := "/dev/" + deviceName
 	klog.Infof("Found iSCSI device: %s", devicePath)
 	return devicePath, nil
+}
+
+// raiseISCSIDiskTimeout raises the disk's SCSI command timeout so it outlasts the
+// replacement timeout. The kernel fails a command older than timeout × (retries+1), which
+// is 30 s × 6 = 180 s for sd by default, so without this an outage longer than ~180 s
+// still fails I/O after the session reconnects. It never lowers a higher host setting.
+func (s *NodeService) raiseISCSIDiskTimeout(devicePath string) error {
+	if s.iscsiReplacementTimeout <= 0 {
+		return nil
+	}
+	// Divide by 5, not 6: the in-flight command also ages through the reconnect itself.
+	want := (s.iscsiReplacementTimeout + 4) / 5
+	path := filepath.Join(sysBlockPath, filepath.Base(devicePath), "device", "timeout")
+	current, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("failed to read SCSI timeout of %s: %w", devicePath, err)
+	}
+	if cur, parseErr := strconv.Atoi(strings.TrimSpace(string(current))); parseErr == nil && cur >= want {
+		return nil
+	}
+	// The mode is unused: the sysfs attribute already exists.
+	if err := os.WriteFile(path, []byte(strconv.Itoa(want)), 0o600); err != nil {
+		return fmt.Errorf("failed to set SCSI timeout of %s to %ds: %w", devicePath, want, err)
+	}
+	klog.Infof("Set SCSI command timeout of %s to %ds (replacement_timeout %ds)", devicePath, want, s.iscsiReplacementTimeout)
+	return nil
 }
 
 // waitForISCSIDevice waits for the iSCSI device to appear after login.

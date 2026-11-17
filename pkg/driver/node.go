@@ -59,10 +59,14 @@ type NodeService struct {
 	volumeLifecycleLocks    keyedMutex
 	leftRunningOps          leftRunningOps
 	iscsiadmGate            iscsiadmGate
-	nvmeLifecycleMu         sync.Mutex
-	testMode                bool
-	enableDiscovery         bool
-	iscsiFencing            bool
+	// iscsiReplacementTimeout (seconds) is written to each iSCSI node record before login; 0 leaves the host default.
+	iscsiReplacementTimeout int
+	// nvmeCtrlLossTimeout is passed to nvme connect as --ctrl-loss-tmo (seconds, -1 = forever).
+	nvmeCtrlLossTimeout int
+	nvmeLifecycleMu     sync.Mutex
+	testMode            bool
+	enableDiscovery     bool
+	iscsiFencing        bool
 }
 
 // NewNodeService creates a new node service.
@@ -79,6 +83,8 @@ func NewNodeService(nodeID string, apiClient tnsapi.ClientInterface, testMode bo
 		nvmeConnectSem:  make(chan struct{}, maxConcurrentNVMeConnects),
 		// The janitor reads the host lock dir and /proc; nil (no hostPID) never removes anything.
 		clearStaleISCSIDBLockFn: newISCSIDBLockJanitor().clearStale,
+		// Matches the value the driver always passed before it was configurable.
+		nvmeCtrlLossTimeout: 60,
 	}
 }
 

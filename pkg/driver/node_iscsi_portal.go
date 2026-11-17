@@ -113,16 +113,23 @@ func parseISCSISessionDeviceForPortal(output, targetIQN, server, port string, ad
 		if !portalMatches || !strings.Contains(line, "Attached scsi disk") {
 			continue
 		}
-		fields := strings.Fields(line)
-		for i, field := range fields {
-			if field == "disk" && i+1 < len(fields) {
-				if selected != "" && selected != fields[i+1] {
-					return "", fmt.Errorf("%w for IQN %s on %s:%s", errISCSIAmbiguousDevice, targetIQN, server, port)
-				}
-				selected = fields[i+1]
-				break
+		if disk, ok := attachedSCSIDisk(line); ok {
+			if selected != "" && selected != disk {
+				return "", fmt.Errorf("%w for IQN %s on %s:%s", errISCSIAmbiguousDevice, targetIQN, server, port)
 			}
+			selected = disk
 		}
 	}
 	return selected, nil
+}
+
+// attachedSCSIDisk returns the device name from an iscsiadm -P 3 "Attached scsi disk sdX" line.
+func attachedSCSIDisk(line string) (string, bool) {
+	fields := strings.Fields(line)
+	for i, field := range fields {
+		if field == "disk" && i+1 < len(fields) {
+			return fields[i+1], true
+		}
+	}
+	return "", false
 }

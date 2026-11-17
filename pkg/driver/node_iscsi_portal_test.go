@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -143,10 +145,8 @@ func TestLoginISCSITargetSelectsOnePortal(t *testing.T) {
 		calls = append(calls, slices.Clone(args))
 		switch len(calls) {
 		case 1:
-			return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
-		case 2:
 			return []byte("100.64.0.5:3260,1 " + testISCSIIQN + "\n192.0.2.10:3260,1 " + testISCSIIQN), nil
-		case 3:
+		case 2:
 			return []byte("Login successful"), nil
 		default:
 			t.Fatalf("unexpected extra iscsiadm call: %v", args)
@@ -156,24 +156,130 @@ func TestLoginISCSITargetSelectsOnePortal(t *testing.T) {
 	if err := service.loginISCSITarget(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
-	discoveryMatches := len(calls) == 3 && slices.Equal(calls[0], []string{"-m", "discovery", "-t", "sendtargets", "-p", "truenas.local:3260"})
-	nodeListingMatches := len(calls) == 3 && slices.Equal(calls[1], []string{"-m", "node", "-P", "0"})
-	loginMatches := len(calls) == 3 && slices.Equal(calls[2], []string{"-m", "node", "-T", testISCSIIQN, "-p", "192.0.2.10:3260,1", "--login"})
-	if !discoveryMatches || !nodeListingMatches || !loginMatches {
+	nodeListingMatches := len(calls) == 2 && slices.Equal(calls[0], []string{"-m", "node", "-P", "0"})
+	loginMatches := len(calls) == 2 && slices.Equal(calls[1], []string{"-m", "node", "-T", testISCSIIQN, "-p", "192.0.2.10:3260,1", "--login"})
+	if !nodeListingMatches || !loginMatches {
 		t.Fatalf("iscsiadm calls = %v; login must specify only the LAN portal", calls)
 	}
 
 	calls = nil
 	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
 		calls = append(calls, slices.Clone(args))
-		if len(calls) == 1 {
+		if slices.Contains(args, "sendtargets") {
 			return nil, nil
 		}
 		return []byte("100.64.0.5:3260,1 " + testISCSIIQN), nil
 	}
-	if err := service.loginISCSITarget(context.Background(), params); !errors.Is(err, errISCSIPortalNotFound) || len(calls) != 2 {
+	if err := service.loginISCSITarget(context.Background(), params); !errors.Is(err, errISCSIPortalNotFound) || len(calls) != 3 {
 		t.Fatalf("missing configured portal = %v, calls %v; must fail without login", err, calls)
 	}
+}
+
+// A node that already has the target's record must not run a SendTargets discovery: with one
+// target per volume it rewrites hundreds of records under open-iscsi's DB lock (#336).
+func TestLoginISCSITargetSkipsDiscoveryWhenRecordExists(t *testing.T) {
+	service := &NodeService{}
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		switch {
+		case slices.Contains(args, "sendtargets"):
+			t.Fatalf("discovery ran although the node record exists: %v", args)
+		case slices.Contains(args, "--login"):
+			return []byte("Login successful"), nil
+		}
+		return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+	}
+	if err := service.loginISCSITarget(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoginISCSITargetDiscoversWhenNoRecordsExist(t *testing.T) {
+	service := &NodeService{}
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	var calls []string
+	discovered := false
+	noRecords := exitError(t, iscsiErrNoObjsFound)
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		switch {
+		case slices.Contains(args, "sendtargets"):
+			calls = append(calls, "discovery")
+			discovered = true
+			return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+		case slices.Contains(args, "--login"):
+			calls = append(calls, "login")
+			return []byte("Login successful"), nil
+		}
+		calls = append(calls, "list")
+		if !discovered {
+			// iscsiadm exits 21 (ISCSI_ERR_NO_OBJS_FOUND) on an empty node database.
+			return []byte("iscsiadm: No records found"), noRecords
+		}
+		return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+	}
+	if err := service.loginISCSITarget(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"list", "discovery", "list", "login"}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestLoginISCSITargetRefreshesStaleRecordOnce(t *testing.T) {
+	service := &NodeService{}
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	var calls []string
+	logins := 0
+	loginFailed := exitError(t, 24)
+	service.runISCSIAdmFn = func(_ context.Context, args ...string) ([]byte, error) {
+		switch {
+		case slices.Contains(args, "sendtargets"):
+			calls = append(calls, "discovery")
+			return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+		case slices.Contains(args, "--login"):
+			calls = append(calls, "login")
+			logins++
+			if logins == 1 {
+				return []byte("iscsiadm: Could not login to [iface: default, target: x]: target not found"), loginFailed
+			}
+			return []byte("Login successful"), nil
+		}
+		calls = append(calls, "list")
+		return []byte("192.0.2.10:3260,1 " + testISCSIIQN), nil
+	}
+	if err := service.loginISCSITarget(context.Background(), params); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"list", "login", "discovery", "list", "login"}; !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+// A held DB lock is a local problem; the error must say so and not send the user to TrueNAS.
+func TestLoginISCSITargetReportsLockedDatabase(t *testing.T) {
+	service := &NodeService{}
+	params := &iscsiConnectionParams{iqn: testISCSIIQN, server: "192.0.2.10", port: "3260"}
+	lockTimeout := exitError(t, 6)
+	service.runISCSIAdmFn = func(context.Context, ...string) ([]byte, error) {
+		return []byte("iscsiadm: Timeout on acquiring lock on DB: /run/lock/iscsi/lock, errno: 11"), lockTimeout
+	}
+	err := service.loginISCSITarget(context.Background(), params)
+	if !errors.Is(err, ErrISCSINodeDBLocked) {
+		t.Fatalf("loginISCSITarget() = %v, want ErrISCSINodeDBLocked", err)
+	}
+	if errors.Is(err, ErrISCSITargetNotInDB) || strings.Contains(err.Error(), "TrueNAS") {
+		t.Fatalf("loginISCSITarget() = %v; a local lock must not be reported as a TrueNAS problem", err)
+	}
+}
+
+// exitError returns a real *exec.ExitError with the given code.
+func exitError(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.CommandContext(t.Context(), "sh", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		t.Fatalf("sh exit %d returned no error", code)
+	}
+	return err
 }
 
 func TestLoginISCSITargetUsesCompactListingNotFilteredConfiguration(t *testing.T) {
@@ -286,20 +392,32 @@ func TestLoginISCSITargetSetsReplacementTimeout(t *testing.T) {
 	if err := service.loginISCSITarget(context.Background(), params); err != nil {
 		t.Fatal(err)
 	}
-	if len(calls) != 4 || !slices.Equal(calls[2], update) || !slices.Contains(calls[3], "--login") {
-		t.Fatalf("iscsiadm calls = %v; want the replacement_timeout update right before login", calls)
+	logins := 0
+	for i, call := range calls {
+		if slices.Contains(call, "--login") {
+			logins++
+			if i == 0 || !slices.Equal(calls[i-1], update) {
+				t.Fatalf("iscsiadm calls = %v; want the replacement_timeout update right before every login", calls)
+			}
+		}
+	}
+	if logins != 1 {
+		t.Fatalf("iscsiadm calls = %v; want exactly one login", calls)
 	}
 
 	calls = nil
 	updateErr = errors.New("exit status 21")
-	if err := service.loginISCSITarget(context.Background(), params); err == nil || len(calls) != 3 {
+	if err := service.loginISCSITarget(context.Background(), params); err == nil || slices.ContainsFunc(calls, hasLogin) {
 		t.Fatalf("err = %v, calls = %v; a failed update must stop before login", err, calls)
 	}
 
 	calls = nil
 	updateErr = nil
 	service.iscsiReplacementTimeout = 0
-	if err := service.loginISCSITarget(context.Background(), params); err != nil || len(calls) != 3 || slices.Contains(calls[2], "update") {
+	err := service.loginISCSITarget(context.Background(), params)
+	if err != nil || slices.ContainsFunc(calls, func(c []string) bool { return slices.Contains(c, "update") }) {
 		t.Fatalf("err = %v, calls = %v; timeout 0 must leave the node record alone", err, calls)
 	}
 }
+
+func hasLogin(args []string) bool { return slices.Contains(args, "--login") }

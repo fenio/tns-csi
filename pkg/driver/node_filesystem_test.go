@@ -402,20 +402,6 @@ func TestKeyedMutexRejectsCanceledContext(t *testing.T) {
 	}
 }
 
-func TestCappedCommandOutput(t *testing.T) {
-	var output cappedCommandOutput
-	input := []byte(strings.Repeat("x", 10000))
-	if written, err := output.Write(input); err != nil || written != len(input) {
-		t.Fatalf("Write() = %d, %v; want %d, nil", written, err, len(input))
-	}
-	if got := len(output.Bytes()); got != 4097 {
-		t.Fatalf("captured output length = %d, want 4097", got)
-	}
-	if written, err := output.Write([]byte("ignored")); err != nil || written != len("ignored") {
-		t.Fatalf("second Write() = %d, %v; want %d, nil", written, err, len("ignored"))
-	}
-}
-
 func TestTruncateCommandOutput(t *testing.T) {
 	longOutput := []byte(strings.Repeat("x", 5000))
 	got := truncateCommandOutput(longOutput)

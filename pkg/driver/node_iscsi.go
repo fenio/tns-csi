@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -34,6 +33,9 @@ var (
 	ErrISCSILogoutTimeout    = errors.New("timeout waiting for iSCSI session logout")
 	ErrISCSINonDevicePath    = errors.New("iSCSI staging path resolved to a non-device path")
 	ErrISCSIMalformedSession = errors.New("malformed iSCSI session output")
+	ErrISCSINodeDBLocked     = errors.New("open-iscsi node database lock is held (lock.write); an iscsiadm may have been killed while holding it")
+	ErrISCSIAdmStillRunning  = errors.New("iscsiadm still running")
+	errISCSISessionQuery     = errors.New("iSCSI session query failed")
 )
 
 // defaultISCSIMountOptions are sensible defaults for iSCSI filesystem mounts.
@@ -43,34 +45,6 @@ const (
 	iscsiStagingMetadataSuffix = ".tns-csi-iscsi"
 	iscsiTargetPrefix          = "Target:"
 )
-
-// iscsiadmCmd builds a command to run iscsiadm, using nsenter to execute
-// in the host's namespaces when running in a container. This allows the
-// container to use the host's iscsid daemon.
-func iscsiadmCmd(ctx context.Context, args ...string) *exec.Cmd {
-	// Check if we're in a container by looking for /proc/1/ns/mnt
-	// If accessible and we have hostPID, use nsenter to run in host namespace
-	if _, err := os.Stat("/proc/1/ns/mnt"); err == nil {
-		// Use nsenter to enter host's mount namespace (for /etc/iscsi, /run)
-		// and IPC namespace (for iscsid communication)
-		nsenterArgs := make([]string, 0, 4+len(args))
-		nsenterArgs = append(nsenterArgs, "--mount=/proc/1/ns/mnt", "--ipc=/proc/1/ns/ipc", "--", "iscsiadm")
-		nsenterArgs = append(nsenterArgs, args...)
-		klog.V(5).Infof("Running iscsiadm via nsenter: nsenter %v", nsenterArgs)
-		return cmdexec.CommandContext(ctx, "nsenter", nsenterArgs...)
-	}
-
-	// Not in container or no access to host namespaces - run directly
-	klog.V(5).Infof("Running iscsiadm directly: iscsiadm %v", args)
-	return cmdexec.CommandContext(ctx, "iscsiadm", args...)
-}
-
-func (s *NodeService) runISCSIAdm(ctx context.Context, args ...string) ([]byte, error) {
-	if s.runISCSIAdmFn != nil {
-		return s.runISCSIAdmFn(ctx, args...)
-	}
-	return iscsiadmCmd(ctx, args...).CombinedOutput()
-}
 
 // iscsiConnectionParams holds validated iSCSI connection parameters.
 type iscsiConnectionParams struct {
@@ -110,6 +84,10 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	if devicePath, findErr := s.findISCSIDevice(ctx, params); findErr == nil && devicePath != "" {
 		klog.V(4).Infof("iSCSI device already connected at %s - reusing existing connection", devicePath)
 		return s.stageISCSIDevice(ctx, volumeID, devicePath, stagingTargetPath, volumeCapability, isBlockVolume, volumeContext)
+	} else if errors.Is(findErr, errISCSISessionQuery) {
+		// As before this change: a failed session query does not block a fresh login, which
+		// reports "already present" if a session exists after all.
+		klog.Warningf("Cannot check for an existing iSCSI session for %s (%v); continuing with login", params.iqn, findErr)
 	} else if findErr != nil && !errors.Is(findErr, ErrISCSIDeviceNotFound) {
 		return nil, status.Errorf(codes.FailedPrecondition, "cannot safely select an iSCSI device for %s: %v", params.iqn, findErr)
 	}
@@ -128,7 +106,7 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 	)
 
 	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= maxRetries && ctx.Err() == nil; attempt++ {
 		if attempt > 1 {
 			klog.Infof("iSCSI staging attempt %d/%d for volume %s", attempt, maxRetries, volumeID)
 		}
@@ -138,7 +116,7 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 			lastErr = loginErr
 			klog.Warningf("iSCSI login attempt %d failed: %v", attempt, loginErr)
 			if attempt < maxRetries {
-				time.Sleep(retryDelay)
+				sleepContext(ctx, retryDelay)
 			}
 			continue
 		}
@@ -153,7 +131,7 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 				klog.Warningf("Failed to logout from iSCSI target after device wait failure: %v", logoutErr)
 			}
 			if attempt < maxRetries {
-				time.Sleep(retryDelay)
+				sleepContext(ctx, retryDelay)
 			}
 			continue
 		}
@@ -180,7 +158,7 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 				klog.Warningf("Failed to logout from iSCSI target after staging failure: %v", logoutErr)
 			}
 			if attempt < maxRetries {
-				time.Sleep(retryDelay)
+				sleepContext(ctx, retryDelay)
 			}
 			continue
 		}
@@ -189,8 +167,24 @@ func (s *NodeService) stageISCSIVolume(ctx context.Context, req *csi.NodeStageVo
 		return nil, stageErr
 	}
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// Report what actually went wrong, not only that time ran out.
+		return nil, status.Errorf(status.FromContextError(ctxErr).Code(), "iSCSI staging of volume %s stopped (%v); last error: %v", volumeID, ctxErr, lastErr)
+	}
 	// All retries exhausted
 	return nil, status.Errorf(codes.Internal, "Failed to stage iSCSI volume after %d attempts: %v", maxRetries, lastErr)
+}
+
+// sleepContext waits for d or until ctx ends, and reports whether the full wait elapsed.
+func sleepContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // validateISCSIParams validates and extracts iSCSI connection parameters from volume context.
@@ -221,16 +215,20 @@ func (s *NodeService) validateISCSIParams(volumeContext map[string]string) (*isc
 
 // checkISCSIAdm checks if iscsiadm is available (either directly or via nsenter).
 func (s *NodeService) checkISCSIAdm(ctx context.Context) error {
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	cmd := iscsiadmCmd(checkCtx, "--version")
-	if err := cmd.Run(); err != nil {
-		return ErrISCSIAdmNotFound
+	if _, err := s.runISCSIAdm(ctx, 5*time.Second, "--version"); err != nil {
+		if iscsiadmErrorIs(err) || ctx.Err() != nil {
+			return fmt.Errorf("checking iscsiadm: %w", err)
+		}
+		return fmt.Errorf("%w: %w", ErrISCSIAdmNotFound, err)
 	}
 	return nil
 }
 
-// loginISCSITarget discovers and logs into an iSCSI target.
+// iscsiErrNoObjsFound is iscsiadm's exit code for "No records found" (ISCSI_ERR_NO_OBJS_FOUND).
+const iscsiErrNoObjsFound = 21
+
+// loginISCSITarget logs into an iSCSI target, discovering it first only when this node has
+// no record for it yet.
 func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnectionParams) error {
 	portal := net.JoinHostPort(strings.Trim(params.server, "[]"), params.port)
 	if len(params.serverIPs) == 0 {
@@ -241,63 +239,105 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 		params.serverIPs = ips
 	}
 
-	// Step 1: Discovery
-	klog.Infof("iSCSI: Discovering targets at portal %s for IQN %s", portal, params.iqn)
-	discoverCtx, discoverCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer discoverCancel()
-
-	output, err := s.runISCSIAdm(discoverCtx, "-m", "discovery", "-t", "sendtargets", "-p", portal)
+	// A SendTargets discovery rewrites the record of every target the portal advertises
+	// (hundreds with one target per volume) under open-iscsi's DB lock. An existing record
+	// for this target is enough to log in, so skip discovery when there is one (#336).
+	selectedPortal, err := s.selectISCSINodeRecord(ctx, params)
+	discovered := false
 	if err != nil {
-		// Log the discovery error - this is critical for debugging
-		klog.Errorf("iSCSI discovery failed at %s: %v, output: %s", portal, err, string(output))
-		// Check if it's a connection error to iscsid
-		if strings.Contains(string(output), "connect") || strings.Contains(string(output), "Connection refused") {
-			return fmt.Errorf("%w: %s", ErrISCSIDiscoveryFailed, string(output))
+		if !errors.Is(err, errISCSIPortalNotFound) {
+			return err
 		}
-		// Continue anyway - target might already be known from previous discovery
+		selectedPortal, err = s.discoverISCSINodeRecord(ctx, params, portal)
+		if err != nil {
+			return err
+		}
+		discovered = true
+	} else {
+		klog.Infof("iSCSI: node record for %s already present at %s; skipping discovery", params.iqn, selectedPortal)
+	}
+
+	loginErr := s.runISCSILogin(ctx, params, selectedPortal)
+	if loginErr == nil || discovered || iscsiadmErrorIs(loginErr) || ctx.Err() != nil {
+		return loginErr
+	}
+	// The record may be stale (target re-created, portal changed): refresh it and retry once.
+	klog.Warningf("iSCSI login to %s using the existing node record failed (%v); refreshing it with discovery", params.iqn, loginErr)
+	selectedPortal, err = s.discoverISCSINodeRecord(ctx, params, portal)
+	if err != nil {
+		return errors.Join(loginErr, err)
+	}
+	if retryErr := s.runISCSILogin(ctx, params, selectedPortal); retryErr != nil {
+		return errors.Join(fmt.Errorf("login after refreshing the node record: %w", retryErr),
+			fmt.Errorf("login with the existing node record: %w", loginErr))
+	}
+	return nil
+}
+
+// selectISCSINodeRecord lists this node's records and selects the one for the target on the
+// configured server. It returns errISCSIPortalNotFound when there is none.
+// Do not pass -T here: open-iscsi prints configuration blocks for a filtered node query,
+// even with -P 0. List compact records and filter the IQN in Go.
+func (s *NodeService) selectISCSINodeRecord(ctx context.Context, params *iscsiConnectionParams) (string, error) {
+	output, err := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "node", "-P", "0")
+	if err != nil {
+		if code, ok := cmdexec.ExitCode(err); !ok || code != iscsiErrNoObjsFound {
+			klog.Errorf("iSCSI: listing node records failed: %v, output: %s", err, string(output))
+			return "", fmt.Errorf("failed to list iSCSI node records: %w, output: %s", err, strings.TrimSpace(string(output)))
+		}
+		output = nil
+	}
+	// TrueNAS may return multiple interfaces for one IQN. Select the record on the configured
+	// server (resolving hostnames to the advertised IP), not all records.
+	return selectISCSINodePortal(string(output), params.iqn, params.server, params.port, params.serverIPs)
+}
+
+// discoverISCSINodeRecord runs SendTargets discovery against portal, then selects the
+// target's record.
+func (s *NodeService) discoverISCSINodeRecord(ctx context.Context, params *iscsiConnectionParams, portal string) (string, error) {
+	klog.Infof("iSCSI: Discovering targets at portal %s for IQN %s", portal, params.iqn)
+	output, discoveryErr := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "discovery", "-t", "sendtargets", "-p", portal)
+	if discoveryErr != nil {
+		klog.Errorf("iSCSI discovery failed at %s: %v, output: %s", portal, discoveryErr, string(output))
+		if iscsiadmErrorIs(discoveryErr) || ctx.Err() != nil {
+			return "", fmt.Errorf("iSCSI discovery at %s: %w", portal, discoveryErr)
+		}
+		if strings.Contains(string(output), "connect") || strings.Contains(string(output), "Connection refused") {
+			return "", fmt.Errorf("%w: %s", ErrISCSIDiscoveryFailed, string(output))
+		}
+		// Continue: the target may already be known from a previous discovery.
 		klog.Warningf("Continuing despite discovery failure - target may already be known")
 	} else {
 		klog.Infof("iSCSI discovery successful at %s, discovered targets:\n%s", portal, string(output))
 	}
 
-	// Step 2: Check if target is in node database
-	// TrueNAS may return multiple interfaces for one IQN. Select the record on
-	// the configured server (resolving hostnames to the advertised IP), not all records.
-	// Do not pass -T here: open-iscsi prints configuration blocks for a filtered
-	// node query, even with -P 0. List compact records and filter the IQN in Go.
-	klog.Infof("iSCSI: Checking if target '%s' is in node database", params.iqn)
-	checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer checkCancel()
-	klog.Infof("iSCSI: Running node check command: iscsiadm -m node -P 0")
-	checkOutput, checkErr := s.runISCSIAdm(checkCtx, "-m", "node", "-P", "0")
-	if checkErr != nil {
-		klog.Errorf("iSCSI target '%s' not found in node database: %v, output: %s",
-			params.iqn, checkErr, string(checkOutput))
-		return fmt.Errorf("%w - check that TrueNAS iSCSI service is running and target is properly configured: %s", ErrISCSITargetNotInDB, string(checkOutput))
+	selected, err := s.selectISCSINodeRecord(ctx, params)
+	switch {
+	case err == nil:
+		return selected, nil
+	case discoveryErr != nil:
+		return "", fmt.Errorf("%w (discovery at %s failed: %w, output: %s)", err, portal, discoveryErr, strings.TrimSpace(string(output)))
+	case errors.Is(err, errISCSIPortalNotFound):
+		// Discovery succeeded and still did not return the target: now TrueNAS is the suspect.
+		return "", fmt.Errorf("%w - check that the TrueNAS iSCSI service is running and the target is configured: %w", ErrISCSITargetNotInDB, err)
+	default:
+		return "", err
 	}
-	klog.Infof("iSCSI target '%s' found in node database: %s", params.iqn, string(checkOutput))
-	selectedPortal, selectErr := selectISCSINodePortal(string(checkOutput), params.iqn, params.server, params.port, params.serverIPs)
-	if selectErr != nil {
-		return selectErr
-	}
+}
 
+func (s *NodeService) runISCSILogin(ctx context.Context, params *iscsiConnectionParams, selectedPortal string) error {
 	if s.iscsiReplacementTimeout > 0 {
-		// The node record is what login copies into the new session, so this must precede it.
-		updateCtx, updateCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer updateCancel()
+		// The node record is what login copies into the new session, so this must precede
+		// every login, including the one after discovery has refreshed the record.
 		timeout := strconv.Itoa(s.iscsiReplacementTimeout)
-		if out, updateErr := s.runISCSIAdm(updateCtx, "-m", "node", "-T", params.iqn, "-p", selectedPortal,
+		if out, updateErr := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "node", "-T", params.iqn, "-p", selectedPortal,
 			"-o", "update", "-n", "node.session.timeo.replacement_timeout", "-v", timeout); updateErr != nil {
 			return fmt.Errorf("failed to set replacement_timeout=%s on iSCSI node %s: %w, output: %s", timeout, params.iqn, updateErr, string(out))
 		}
 	}
 
-	// Step 3: Login
 	klog.Infof("Logging into iSCSI target %s through %s", params.iqn, selectedPortal)
-	loginCtx, loginCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer loginCancel()
-
-	output, err = s.runISCSIAdm(loginCtx, "-m", "node", "-T", params.iqn, "-p", selectedPortal, "--login")
+	output, err := s.runISCSIAdm(ctx, iscsiadmDBTimeout, "-m", "node", "-T", params.iqn, "-p", selectedPortal, "--login")
 	if err != nil {
 		// Check if already logged in
 		alreadyLoggedIn := strings.Contains(string(output), "already present") ||
@@ -307,7 +347,10 @@ func (s *NodeService) loginISCSITarget(ctx context.Context, params *iscsiConnect
 			return nil
 		}
 		klog.Errorf("iSCSI login failed for target %s: %v, output: %s", params.iqn, err, string(output))
-		return fmt.Errorf("%w: %s", ErrISCSILoginFailed, string(output))
+		if iscsiadmErrorIs(err) {
+			return fmt.Errorf("%w: %w", ErrISCSILoginFailed, err)
+		}
+		return fmt.Errorf("%w: %w, output: %s", ErrISCSILoginFailed, err, string(output))
 	}
 
 	klog.Infof("Successfully logged into iSCSI target: %s, output: %s", params.iqn, string(output))
@@ -359,9 +402,7 @@ func (s *NodeService) logoutISCSISessions(ctx context.Context, iqn string, sessi
 		waitGroup.Add(1)
 		go func() {
 			defer waitGroup.Done()
-			logoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			defer cancel()
-			output, err := s.runISCSIAdm(logoutCtx, "-m", "session", "-r", sessionID, "--logout")
+			output, err := s.runISCSIAdm(ctx, 15*time.Second, "-m", "session", "-r", sessionID, "--logout")
 			if err != nil {
 				klog.V(4).Infof("iSCSI logout command returned an error for %s session %s: %v, output: %s", iqn, sessionID, err, string(output))
 				errorsBySession <- fmt.Errorf("session %s: %w, output: %s", sessionID, err, string(output))
@@ -390,10 +431,7 @@ func iscsiLogoutContextError(iqn string, operationErr, logoutErr error) error {
 }
 
 func (s *NodeService) findISCSISessionIDs(ctx context.Context, iqn string) ([]string, error) {
-	sessionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	output, err := s.runISCSIAdm(sessionCtx, "-m", "session")
+	output, err := s.runISCSIAdm(ctx, 5*time.Second, "-m", "session")
 	if err != nil {
 		lowerOutput := strings.ToLower(string(output))
 		if strings.Contains(lowerOutput, "no active sessions") ||
@@ -440,16 +478,16 @@ func containsExactField(fields []string, value string) bool {
 // findISCSIDevice finds the device path for an iSCSI LUN.
 func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnectionParams) (string, error) {
 	// Query active sessions with detail level 3 to see attached devices
-	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	output, err := s.runISCSIAdm(sessionCtx, "-m", "session", "-P", "3")
+	output, err := s.runISCSIAdm(ctx, iscsiadmQueryTimeout, "-m", "session", "-P", "3")
 
 	// Always log the output for debugging
 	klog.Infof("iscsiadm -m session -P 3: err=%v, output:\n%s", err, string(output))
 
 	if err != nil {
-		return "", ErrISCSIDeviceNotFound
+		if code, ok := cmdexec.ExitCode(err); ok && code == iscsiErrNoObjsFound {
+			return "", ErrISCSIDeviceNotFound // no active sessions
+		}
+		return "", fmt.Errorf("%w: %w, output: %s", errISCSISessionQuery, err, strings.TrimSpace(string(output)))
 	}
 
 	addresses := params.serverIPs
@@ -504,9 +542,14 @@ func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConne
 	klog.Infof("Waiting for iSCSI device for IQN %s (timeout: %v)", params.iqn, timeout)
 
 	deadline := time.Now().Add(timeout)
+	var lastQueryErr error
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
 		devicePath, err := s.findISCSIDevice(ctx, params)
-		if err != nil && !errors.Is(err, ErrISCSIDeviceNotFound) {
+		if errors.Is(err, errISCSISessionQuery) {
+			// A failed or slow session query says nothing about the device; keep polling.
+			lastQueryErr = err
+			klog.Warningf("iSCSI session query failed while waiting for %s: %v", params.iqn, err)
+		} else if err != nil && !errors.Is(err, ErrISCSIDeviceNotFound) {
 			return "", err
 		}
 		if err == nil && devicePath != "" {
@@ -515,9 +558,14 @@ func (s *NodeService) waitForISCSIDevice(ctx context.Context, params *iscsiConne
 				return devicePath, nil
 			}
 		}
-		time.Sleep(2 * time.Second)
+		if !sleepContext(ctx, 2*time.Second) {
+			return "", ctx.Err()
+		}
 	}
 
+	if lastQueryErr != nil {
+		return "", fmt.Errorf("%w (last session query error: %w)", ErrISCSIDeviceTimeout, lastQueryErr)
+	}
 	return "", ErrISCSIDeviceTimeout
 }
 
@@ -739,9 +787,7 @@ func (s *NodeService) deriveISCSIIQNFromStagingPath(ctx context.Context, staging
 }
 
 func (s *NodeService) findISCSIIQNForDevice(ctx context.Context, devicePath string) (string, error) {
-	sessionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	output, err := s.runISCSIAdm(sessionCtx, "-m", "session", "-P", "3")
+	output, err := s.runISCSIAdm(ctx, iscsiadmQueryTimeout, "-m", "session", "-P", "3")
 	if err != nil {
 		return "", fmt.Errorf("failed to query iSCSI sessions: %w, output: %s", err, string(output))
 	}
@@ -793,11 +839,8 @@ func parseISCSISessionIQNForDevice(output, deviceName string) string {
 		if currentIQN == "" || !strings.Contains(line, "Attached scsi disk") {
 			continue
 		}
-		fields := strings.Fields(line)
-		for i, field := range fields {
-			if field == "disk" && i+1 < len(fields) && fields[i+1] == deviceName {
-				return currentIQN
-			}
+		if disk, ok := attachedSCSIDisk(line); ok && disk == deviceName {
+			return currentIQN
 		}
 	}
 

@@ -47,6 +47,16 @@ Protocol-specific volume operations (NFS, NVMe-oF, iSCSI, and SMB):
   - Number of NVMe-oF connect operations waiting for the semaphore
   - Non-zero values indicate the concurrency limit is actively throttling connections
 
+### iSCSI Node Database Metrics
+
+- **`tns_csi_iscsiadm_waiting`** (gauge)
+  - Number of `iscsiadm` node-database operations (discovery and node-record reads) waiting for this node's iscsiadm gate; logins do not wait on it
+  - The driver runs these one at a time per node because open-iscsi's database is single-writer; sustained non-zero values mean many volumes are staging at once
+
+- **`tns_csi_iscsi_stale_db_lock_recoveries_total`** (counter)
+  - Number of orphaned open-iscsi database locks (`/run/lock/iscsi/lock.write`) the driver removed
+  - Any increase means an `iscsiadm` was killed while holding the lock (by the driver's hard ceiling, an OOM kill, or something outside the driver); see the iSCSI troubleshooting guide
+
 ### WebSocket Connection Metrics
 
 Metrics for the TrueNAS API WebSocket connection:

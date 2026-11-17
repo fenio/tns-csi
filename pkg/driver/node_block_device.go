@@ -162,6 +162,9 @@ func (s *NodeService) handleDeviceFormatting(ctx context.Context, volumeID, devi
 		if formatErr == nil {
 			return true, nil
 		}
+		if abortErr := s.leftRunning(ctx, "format of "+devicePath, formatErr); abortErr != nil {
+			return false, abortErr
+		}
 		lastErr = formatErr
 		if !isDeviceBusyError(formatErr) {
 			return false, status.Errorf(codes.Internal, "Failed to format device: %v", formatErr)

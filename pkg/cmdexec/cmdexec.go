@@ -48,8 +48,10 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 }
 
 // IsTimeout reports whether err came from a command killed for exceeding its deadline.
+// A protected command left running past its deadline (IsStillRunning) was not killed and
+// is not a timeout in this sense.
 func IsTimeout(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded)
+	return errors.Is(err, context.DeadlineExceeded) && !IsStillRunning(err)
 }
 
 // ExitCode returns the exit code of a command that ran to completion and exited

@@ -516,40 +516,45 @@ func mkfsArgs(driverArgs, extraArgs []string, devicePath string) []string {
 // mkfsOptions parameter, already checked by mkfsOptionArgs, and go before the device.
 // This function performs the actual formatting operation. The caller is responsible
 // for determining whether formatting is appropriate (e.g., checking needsFormat first).
+// formatHardCeiling only stops a format that is truly hung; large thin volumes with discard
+// can take many minutes.
+const formatHardCeiling = 30 * time.Minute
+
 func formatDevice(ctx context.Context, volumeID, devicePath, fsType string, extraArgs []string) error {
 	klog.Infof("Formatting volume %s at %s with filesystem %s", volumeID, devicePath, fsType)
 
-	// Formatting can take time, allow up to 60 seconds
-	formatCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	var cmd *exec.Cmd
-
+	var (
+		name string
+		args []string
+	)
 	switch fsType {
 	case fsTypeExt4:
 		// -F force, don't ask for confirmation
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext4", mkfsArgs([]string{"-F"}, extraArgs, devicePath)...)
+		name, args = "mkfs.ext4", mkfsArgs([]string{"-F"}, extraArgs, devicePath)
 	case fsTypeExt3:
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.ext3", mkfsArgs([]string{"-F"}, extraArgs, devicePath)...)
+		name, args = "mkfs.ext3", mkfsArgs([]string{"-F"}, extraArgs, devicePath)
 	case fsTypeXFS:
 		// -f force overwrite
 		// Explicitly pass the logical sector size to avoid mismatches when the
 		// backing zvol's physical sector size differs from the transport's
 		// advertised logical sector size (common with NVMe-oF over TCP).
-		args := []string{"-f"}
+		xfsArgs := []string{"-f"}
 		if sectorSize, err := getLogicalSectorSize(devicePath); err == nil {
-			args = append(args, "-s", fmt.Sprintf("size=%d", sectorSize))
+			xfsArgs = append(xfsArgs, "-s", fmt.Sprintf("size=%d", sectorSize))
 			klog.V(4).Infof("Using logical sector size %d for XFS format of %s", sectorSize, devicePath)
 		} else {
 			klog.V(4).Infof("Could not detect logical sector size for %s, using mkfs.xfs default: %v", devicePath, err)
 		}
-		cmd = cmdexec.CommandContext(formatCtx, "mkfs.xfs", mkfsArgs(args, extraArgs, devicePath)...)
+		name, args = "mkfs.xfs", mkfsArgs(xfsArgs, extraArgs, devicePath)
 	default:
 		return fmt.Errorf("%w: %s", ErrUnsupportedFSType, fsType)
 	}
 
-	klog.V(4).Infof("Running format command: %v", cmd.Args)
-	output, err := cmd.CombinedOutput()
+	// mkfs is never killed at the request deadline: an interrupted format leaves a partly
+	// written filesystem behind. One still running when the request ends is returned as a
+	// cmdexec.StillRunningError (wrapped) and finishes in the background.
+	klog.V(4).Infof("Running format command: %s %v", name, args)
+	output, err := cmdexec.RunProtected(ctx, 0, formatHardCeiling, name, args...)
 	if err != nil {
 		return fmt.Errorf("format command failed: %w, output: %s", err, string(output))
 	}

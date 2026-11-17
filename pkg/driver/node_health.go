@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/fenio/tns-csi/pkg/cmdexec"
 	"github.com/fenio/tns-csi/pkg/mount"
 	"k8s.io/klog/v2"
 )
@@ -195,7 +194,7 @@ func (s *NodeService) checkISCSIHealth(ctx context.Context, volumePath string) V
 	}
 
 	// Check 4: Check iSCSI session state
-	sessionState, err := getISCSISessionState(ctx, devicePath)
+	sessionState, err := s.getISCSISessionState(ctx, devicePath)
 	if err != nil {
 		klog.V(4).Infof("Failed to get iSCSI session state: %v", err)
 		// Don't fail health check if we can't read session state
@@ -302,8 +301,8 @@ func getNVMeControllerState(devicePath string) (string, error) {
 	return state, nil
 }
 
-// getISCSISessionState gets the state of an iSCSI session for a device.
-func getISCSISessionState(ctx context.Context, devicePath string) (string, error) {
+// getISCSISessionState gets the state of the iSCSI session behind a device.
+func (s *NodeService) getISCSISessionState(ctx context.Context, devicePath string) (string, error) {
 	// Find the session for this device by looking at /sys/block/<dev>/device/
 	base := filepath.Base(devicePath)
 
@@ -319,23 +318,34 @@ func getISCSISessionState(ctx context.Context, devicePath string) (string, error
 		return state, nil
 	}
 
-	// Alternative: use iscsiadm to check session state
-	cmd := cmdexec.CommandContext(ctx, "iscsiadm", "-m", "session", "-P", "1")
-	output, cmdErr := cmd.CombinedOutput()
+	// Alternative: ask iscsiadm for the session the device is attached to.
+	output, cmdErr := s.runISCSIAdm(ctx, iscsiadmQueryTimeout, "-m", "session", "-P", "3")
 	if cmdErr != nil {
 		return "", fmt.Errorf("iscsiadm failed: %w", cmdErr)
 	}
+	if state := parseISCSISessionStateForDevice(string(output), devicePath); state != "" {
+		return state, nil
+	}
+	return "", errISCSIStateUnknown
+}
 
-	// Parse output for session state
-	// Look for "iSCSI Session State:" line
-	for _, line := range strings.Split(string(output), "\n") {
-		if strings.Contains(line, "iSCSI Session State:") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1]), nil
+// parseISCSISessionStateForDevice returns the "iSCSI Session State" of the session whose
+// attached disk is deviceName, from iscsiadm -m session -P 3 output.
+func parseISCSISessionStateForDevice(output, deviceName string) string {
+	deviceName = filepath.Base(deviceName)
+	sessionState := ""
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, iscsiTargetPrefix):
+			sessionState = ""
+		case strings.HasPrefix(line, "iSCSI Session State:"):
+			sessionState = strings.TrimSpace(strings.TrimPrefix(line, "iSCSI Session State:"))
+		case strings.Contains(line, "Attached scsi disk"):
+			if disk, ok := attachedSCSIDisk(line); ok && disk == deviceName {
+				return sessionState
 			}
 		}
 	}
-
-	return "", errISCSIStateUnknown
+	return ""
 }

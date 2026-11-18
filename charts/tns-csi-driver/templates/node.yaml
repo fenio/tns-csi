@@ -90,6 +90,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "tns-csi-driver.secretName" . }}
                   key: api-key
+            # Optional, so an existing secret without it keeps the legacy login.
+            - name: TNS_API_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tns-csi-driver.secretName" . }}
+                  key: username
+                  optional: true
             {{- if .Values.node.debug }}
             - name: DEBUG_CSI
               value: "true"

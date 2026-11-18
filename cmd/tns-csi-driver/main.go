@@ -29,6 +29,7 @@ var (
 	driverName                = flag.String("driver-name", "tns.csi.io", "Name of the driver")
 	apiURL                    = flag.String("api-url", "", "Storage system API URL (e.g., ws://10.10.20.100/api/v2.0/websocket)")
 	apiKey                    = flag.String("api-key", "", "Storage system API key (prefer the "+truenasKeyEnvName+" environment variable: flag values are visible in the process list)")
+	apiUsername               = flag.String("api-username", "", "TrueNAS user that owns the API key (or the "+truenasUsernameEnvName+" environment variable); when set the driver logs in with auth.login_ex")
 	metricsAddr               = flag.String("metrics-addr", "", "Address to expose Prometheus metrics")
 	skipTLSVerify             = flag.Bool("skip-tls-verify", false, "Skip TLS certificate verification (for self-signed certificates)")
 	showVersion               = flag.Bool("show-version", false, "Show version and exit")
@@ -49,13 +50,27 @@ var (
 // and /proc/<pid>/cmdline), which passing --api-key=$(TNS_API_KEY) does not.
 const truenasKeyEnvName = "TNS_API_KEY"
 
+// truenasUsernameEnvName holds the TrueNAS user that owns the API key. The chart sets it
+// from the secret's optional "username" key.
+const truenasUsernameEnvName = "TNS_API_USERNAME"
+
 // resolveAPIKey returns the API key from --api-key if set (backward compatibility),
 // otherwise from the environment, with surrounding whitespace from secrets trimmed.
 func resolveAPIKey(flagValue string, getenv func(string) string) string {
+	return flagOrEnv(flagValue, truenasKeyEnvName, getenv)
+}
+
+// resolveAPIUsername returns the API key's owner from --api-username or the environment.
+// Empty means the driver logs in with the legacy auth.login_with_api_key.
+func resolveAPIUsername(flagValue string, getenv func(string) string) string {
+	return flagOrEnv(flagValue, truenasUsernameEnvName, getenv)
+}
+
+func flagOrEnv(flagValue, envName string, getenv func(string) string) string {
 	if v := strings.TrimSpace(flagValue); v != "" {
 		return v
 	}
-	return strings.TrimSpace(getenv(truenasKeyEnvName))
+	return strings.TrimSpace(getenv(envName))
 }
 
 func main() {
@@ -90,6 +105,12 @@ func main() {
 	if resolvedAPIKey == "" {
 		klog.Fatalf("Storage API key must be provided via the %s environment variable or --api-key", truenasKeyEnvName)
 	}
+	resolvedAPIUsername := resolveAPIUsername(*apiUsername, os.Getenv)
+	if resolvedAPIUsername == "" {
+		klog.Warningf("No API username set, so the driver logs in with auth.login_with_api_key, which TrueNAS 27 "+
+			"deprecates and plans to remove. Set %s, --api-username or the chart's truenas.username to the user "+
+			"that owns the API key to log in with auth.login_ex.", truenasUsernameEnvName)
+	}
 
 	// Set version info for metrics endpoint
 	metrics.SetVersionInfo(version, gitCommit, buildDate)
@@ -109,6 +130,7 @@ func main() {
 		Endpoint:                  *endpoint,
 		APIURL:                    *apiURL,
 		APIKey:                    resolvedAPIKey,
+		APIUsername:               resolvedAPIUsername,
 		MetricsAddr:               *metricsAddr,
 		SkipTLSVerify:             *skipTLSVerify,
 		EnableNVMeDiscovery:       *enableNVMeDiscovery,

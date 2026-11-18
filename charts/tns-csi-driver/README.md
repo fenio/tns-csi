@@ -168,7 +168,8 @@ kubectl create namespace tns-csi
 |-----------|-------------|---------|
 | `truenas.url` | WebSocket URL (wss://host:port/api/current) | `""` (required) |
 | `truenas.apiKey` | TrueNAS API key | `""` (required) |
-| `truenas.existingSecret` | Name of existing Secret with `url` and `api-key` keys | `""` |
+| `truenas.username` | TrueNAS user that owns the API key. When set, the driver logs in with `auth.login_ex`; when empty it uses `auth.login_with_api_key`, which TrueNAS 27 deprecates | `""` |
+| `truenas.existingSecret` | Name of existing Secret with `url` and `api-key` keys, and optionally `username` | `""` |
 | `truenas.skipTLSVerify` | Skip TLS certificate verification | `false` |
 | `truenas.maxResponseSizeMB` | Maximum size (MiB) of a single TrueNAS API response; raise if calls fail with `websocket: message too big` | `10` |
 

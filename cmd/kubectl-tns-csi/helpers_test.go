@@ -105,11 +105,12 @@ func TestBuildNamespaceSearchOrder(t *testing.T) {
 
 func TestExtractConfigFromSecretData(t *testing.T) {
 	tests := []struct {
-		name       string
-		data       map[string][]byte
-		wantURL    string
-		wantAPIKey string
-		wantNil    bool
+		name         string
+		data         map[string][]byte
+		wantURL      string
+		wantAPIKey   string
+		wantUsername string
+		wantNil      bool
 	}{
 		{
 			name: "complete data with standard keys",
@@ -130,6 +131,17 @@ func TestExtractConfigFromSecretData(t *testing.T) {
 			wantNil:    false,
 			wantURL:    "wss://alt-host:443/api/current",
 			wantAPIKey: "alt-key",
+		},
+		{
+			name: "chart secret with the key owner's username",
+			data: map[string][]byte{
+				"url":      []byte("wss://truenas:443/api/current"),
+				"api-key":  []byte("my-secret-key"),
+				"username": []byte("csi-user\n"),
+			},
+			wantURL:      "wss://truenas:443/api/current",
+			wantAPIKey:   "my-secret-key",
+			wantUsername: "csi-user",
 		},
 		{
 			name:    "empty map returns nil",
@@ -184,6 +196,9 @@ func TestExtractConfigFromSecretData(t *testing.T) {
 			}
 			if got.APIKey != tt.wantAPIKey {
 				t.Errorf("APIKey = %q, want %q", got.APIKey, tt.wantAPIKey)
+			}
+			if got.APIUsername != tt.wantUsername {
+				t.Errorf("APIUsername = %q, want %q", got.APIUsername, tt.wantUsername)
 			}
 		})
 	}

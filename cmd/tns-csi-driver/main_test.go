@@ -31,3 +31,32 @@ func TestResolveAPIKey(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveAPIUsername(t *testing.T) {
+	env := func(v string) func(string) string {
+		return func(name string) string {
+			if name == truenasUsernameEnvName {
+				return v
+			}
+			return ""
+		}
+	}
+	tests := []struct {
+		name    string
+		flagVal string
+		envVal  string
+		want    string
+	}{
+		{name: "env from the chart secret", envVal: "csi-user", want: "csi-user"},
+		{name: "flag wins", flagVal: "from-flag", envVal: "from-env", want: "from-flag"},
+		{name: "unset keeps the legacy login", want: ""},
+		{name: "whitespace from a secret is trimmed", envVal: " csi-user\n", want: "csi-user"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveAPIUsername(tt.flagVal, env(tt.envVal)); got != tt.want {
+				t.Errorf("resolveAPIUsername(%q, env=%q) = %q, want %q", tt.flagVal, tt.envVal, got, tt.want)
+			}
+		})
+	}
+}

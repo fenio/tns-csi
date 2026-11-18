@@ -75,6 +75,9 @@ func (h *HelmDeployer) Deploy(protocol string) error {
 		flagSet, "image.pullPolicy=" + h.config.CSIImagePullPolicy,
 		flagSet, "truenas.skipTLSVerify=true",
 	}
+	if h.config.TrueNASAPIUsername != "" {
+		args = append(args, flagSet, "truenas.username="+h.config.TrueNASAPIUsername)
+	}
 
 	// Enable snapshots for all protocols (required for snapshot tests)
 	args = append(args,

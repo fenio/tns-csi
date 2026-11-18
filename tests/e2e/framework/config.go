@@ -20,7 +20,10 @@ type Config struct {
 	// TrueNAS connection settings
 	TrueNASHost   string
 	TrueNASAPIKey string
-	TrueNASPool   string
+	// TrueNASAPIUsername owns the API key (TRUENAS_API_USERNAME, optional). When set the
+	// driver and the verifier log in with auth.login_ex instead of auth.login_with_api_key.
+	TrueNASAPIUsername string
+	TrueNASPool        string
 
 	// CSI driver image settings
 	CSIImageRepo       string
@@ -47,6 +50,7 @@ func NewConfig() (*Config, error) {
 	cfg := &Config{
 		TrueNASHost:        os.Getenv("TRUENAS_HOST"),
 		TrueNASAPIKey:      os.Getenv("TRUENAS_API_KEY"),
+		TrueNASAPIUsername: os.Getenv("TRUENAS_API_USERNAME"),
 		TrueNASPool:        getEnvOrDefault("TRUENAS_POOL", "csi"),
 		CSIImageRepo:       getEnvOrDefault("CSI_IMAGE_REPO", "ghcr.io/fenio/tns-csi"),
 		CSIImageTag:        getEnvOrDefault("CSI_IMAGE_TAG", "latest"),

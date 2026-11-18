@@ -80,6 +80,7 @@ This guide explains how to deploy the TrueNAS Scale CSI driver on a Kubernetes c
 3. Click **Add**
 4. Give it a name (e.g., "kubernetes-csi")
 5. Copy the generated API key (you won't be able to see it again)
+6. Note which user the key belongs to and pass it as `truenas.username` (or a `username` key in your secret). With it the driver logs in with `auth.login_ex`; without it, it falls back to `auth.login_with_api_key`, which TrueNAS 27 deprecates
 
 ### 1.2 Create Storage Pool
 
@@ -430,6 +431,8 @@ stringData:
   url: "ws://YOUR-TRUENAS-IP/websocket"
   # API key from Step 1.1
   api-key: "1-abcdef123456789..."
+  # Optional: the user that owns the API key (Step 1.1)
+  username: "root"
 ```
 
 ### 3.2 Update Image References

@@ -247,6 +247,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
         run: |
           # QEMU SLIRP user-mode networking remaps source ports through NAT,
           # so NFS clients appear to use non-privileged ports (>1024).
@@ -268,6 +269,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
@@ -352,6 +354,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
@@ -433,6 +436,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
@@ -557,6 +561,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}
@@ -643,6 +648,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
         run: |
           # Shared tests exercise NFS alongside other protocols, so the SLIRP
           # workaround is needed here too. WebSocket only — REST is deprecated.
@@ -660,6 +666,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST_TAILSCALE || secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: ${{ inputs.pr != '' && needs.compute-tag.outputs.image_tag || 'e2e-test' }}

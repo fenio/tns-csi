@@ -55,18 +55,20 @@ const (
 // Static errors for client operations.
 var (
 	ErrAuthenticationRejected = errors.New("authentication failed: Storage system rejected API key - verify key is correct and not revoked in System Settings -> API Keys")
-	ErrResponseIDMismatch     = errors.New("authentication response ID mismatch")
-	ErrClientClosed           = errors.New("client is closed")
-	ErrConnectionClosed       = errors.New("connection closed while waiting for response")
-	ErrCloneFailed            = errors.New("clone operation returned false (unsuccessful)")
-	ErrClonedDatasetNotFound  = errors.New("cloned dataset not found after successful clone")
-	ErrSubsystemNotFound      = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
-	ErrMultipleSubsystems     = errors.New("multiple subsystems found with same NQN")
-	ErrListSubsystemsFailed   = errors.New("failed to list NVMe-oF subsystems with all methods")
-	ErrDatasetNotFound        = errors.New("dataset not found")
-	ErrJobNotFound            = errors.New("job not found")
-	ErrJobFailed              = errors.New("job failed")
-	ErrJobAborted             = errors.New("job was aborted")
+	// ErrLoginIncomplete means auth.login_ex answered with neither success nor a verdict on the key.
+	ErrLoginIncomplete       = errors.New("login did not complete")
+	ErrResponseIDMismatch    = errors.New("authentication response ID mismatch")
+	ErrClientClosed          = errors.New("client is closed")
+	ErrConnectionClosed      = errors.New("connection closed while waiting for response")
+	ErrCloneFailed           = errors.New("clone operation returned false (unsuccessful)")
+	ErrClonedDatasetNotFound = errors.New("cloned dataset not found after successful clone")
+	ErrSubsystemNotFound     = errors.New("subsystem not found - ensure subsystem is pre-configured in TrueNAS")
+	ErrMultipleSubsystems    = errors.New("multiple subsystems found with same NQN")
+	ErrListSubsystemsFailed  = errors.New("failed to list NVMe-oF subsystems with all methods")
+	ErrDatasetNotFound       = errors.New("dataset not found")
+	ErrJobNotFound           = errors.New("job not found")
+	ErrJobFailed             = errors.New("job failed")
+	ErrJobAborted            = errors.New("job was aborted")
 
 	// Deletion operation errors - TrueNAS API returned false (unsuccessful).
 	ErrDatasetDeletionFailed           = errors.New("dataset deletion returned false (unsuccessful)")
@@ -492,12 +494,18 @@ func (c *Client) checkLoginResult(method string, result json.RawMessage) error {
 				return fmt.Errorf("failed to unmarshal authentication result: %w", err)
 			}
 		}
-		if resp.ResponseType == loginResponseSuccess {
+		switch resp.ResponseType {
+		case loginResponseSuccess:
 			return nil
+		case "AUTH_ERR", "EXPIRED":
+			klog.Errorf("Storage system rejected API key for user %q: %s", c.username, resp.ResponseType)
+			return fmt.Errorf("%w (auth.login_ex returned %q for user %q, which must own the key)",
+				ErrAuthenticationRejected, resp.ResponseType, c.username)
+		default:
+			// Not a verdict on the key: e.g. REDIRECT from an HA standby controller, or OTP_REQUIRED.
+			return fmt.Errorf("%w: auth.login_ex returned %q for user %q; the key was not rejected",
+				ErrLoginIncomplete, resp.ResponseType, c.username)
 		}
-		klog.Errorf("Storage system rejected API key for user %q: %s", c.username, resp.ResponseType)
-		return fmt.Errorf("%w (auth.login_ex returned %q for user %q, which must own the key)",
-			ErrAuthenticationRejected, resp.ResponseType, c.username)
 	}
 
 	var ok bool

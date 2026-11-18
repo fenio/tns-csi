@@ -25,9 +25,15 @@ spec:
         {{- with .Values.customLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-      {{- with .Values.customAnnotations }}
+      {{- if or (not .Values.truenas.existingSecret) .Values.customAnnotations }}
       annotations:
+        {{- if not .Values.truenas.existingSecret }}
+        # Restart the pods when the chart-managed credentials change: they read them only as env vars.
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.customAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- end }}
     spec:
       serviceAccountName: {{ include "tns-csi-driver.node.serviceAccountName" . }}

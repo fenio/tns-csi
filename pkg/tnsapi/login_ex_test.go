@@ -125,6 +125,28 @@ func TestLoginExRejectionIsPermanent(t *testing.T) {
 	}
 }
 
+// REDIRECT (an HA standby) and OTP_REQUIRED say nothing about the key, so they must not be
+// reported as a rejected key.
+func TestLoginExNonVerdictIsNotRejection(t *testing.T) {
+	for _, responseType := range []string{"REDIRECT", "OTP_REQUIRED"} {
+		t.Run(responseType, func(t *testing.T) {
+			rec := &loginRecorder{responseType: responseType}
+			server := newLoginServer(t, rec)
+
+			client, err := NewClient(server.URL(), "test-api-key", false,
+				WithAPIUsername("someone-else"),
+				WithConnectRetryDelays(0, 10*time.Millisecond, 10*time.Millisecond))
+			if err == nil {
+				cleanupClient(client)
+				t.Fatal("NewClient() succeeded, want a failed login")
+			}
+			if errors.Is(err, ErrAuthenticationRejected) {
+				t.Errorf("NewClient() error = %v, must not be ErrAuthenticationRejected", err)
+			}
+		})
+	}
+}
+
 func TestAuthenticateDirectUsesLoginEx(t *testing.T) {
 	tests := []struct {
 		wantErr      error

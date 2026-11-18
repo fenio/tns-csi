@@ -243,6 +243,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
         run: |
           # QEMU SLIRP user-mode networking remaps source ports through NAT,
           # so NFS clients appear to use non-privileged ports (>1024).
@@ -294,6 +295,7 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           SMB_USERNAME: ${{ secrets.SMB_USERNAME }}
           SMB_PASSWORD: ${{ secrets.SMB_PASSWORD }}
@@ -315,6 +317,7 @@ jobs:
             --wait --timeout 8m
             --set "truenas.url=wss://${TRUENAS_HOST}/api/current"
             --set "truenas.apiKey=${TRUENAS_API_KEY}"
+            --set "truenas.username=${TRUENAS_API_USERNAME}"
             --set "truenas.pool=${TRUENAS_POOL}"
             --set "truenas.skipTLSVerify=true"
             --set "image.repository=ghcr.io/fenio/tns-csi"
@@ -366,6 +369,7 @@ jobs:
           KUBECONFIG: /tmp/kubeconfig
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
           TRUENAS_POOL: ${{ secrets.TRUENAS_POOL }}
           CSI_IMAGE_REPO: ghcr.io/fenio/tns-csi
           CSI_IMAGE_TAG: qemu-test
@@ -411,6 +415,7 @@ jobs:
         env:
           TRUENAS_HOST: ${{ secrets.TRUENAS_HOST }}
           TRUENAS_API_KEY: ${{ secrets.TRUENAS_API_KEY }}
+          TRUENAS_API_USERNAME: ${{ secrets.TRUENAS_API_USERNAME }}
         run: |
           if [ ! -x /tmp/websocat ]; then
             curl -fsSL -o /tmp/websocat https://github.com/vi/websocat/releases/download/v1.13.0/websocat.x86_64-unknown-linux-musl

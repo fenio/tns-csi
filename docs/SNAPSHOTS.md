@@ -682,7 +682,7 @@ kubectl get volumesnapshot my-detached-snapshot
 |--------|------------------|-------------------|
 | **Storage mechanism** | ZFS COW snapshot | Full dataset copy via zfs send/receive |
 | **Source dependency** | Depends on source volume | Completely independent |
-| **Source deletion** | Snapshot deleted with source | Snapshot survives source deletion |
+| **Source deletion** | Blocked while the snapshot exists: the PV stays `Released` and is deleted once its snapshots are removed | Snapshot survives source deletion |
 | **Creation speed** | Instant | Proportional to data size |
 | **Storage efficiency** | Space-efficient (COW) | Full copy (uses more space) |
 | **Use case** | Point-in-time recovery | Backup/DR, long-term archival |

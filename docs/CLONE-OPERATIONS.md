@@ -221,7 +221,7 @@ Controls how snapshots are created.
 | `"false"` (default) | Standard COW snapshot | `zfs snapshot` |
 | `"true"` | Independent dataset copy | `zfs send/receive` via replication |
 
-**Key difference:** Detached snapshots are stored as independent datasets (not ZFS snapshots) and survive the deletion of the source volume. Regular snapshots are deleted when the source volume is deleted.
+**Key difference:** Detached snapshots are stored as independent datasets (not ZFS snapshots) and survive the deletion of the source volume. A regular snapshot lives on its source dataset, so the driver does not delete a volume that still has CSI snapshots: `DeleteVolume` returns `FailedPrecondition`, the PV stays `Released` (with its data on TrueNAS) while csi-provisioner retries, and the volume is deleted once its VolumeSnapshots are removed.
 
 ## Operation Matrix
 

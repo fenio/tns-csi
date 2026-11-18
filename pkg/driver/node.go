@@ -728,8 +728,13 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return nil, status.Errorf(codes.InvalidArgument, "Volume is not mounted at path %s", volumePath)
 	}
 
-	// Determine protocol by detecting filesystem type at the mount path
-	protocol := s.detectProtocolFromStagingPath(ctx, volumePath)
+	// Detect the protocol from the staging path when the kubelet sends one: it carries the
+	// protocol's staging metadata, while a raw block volume's publish path is only a device bind mount.
+	stagingPath := req.GetStagingTargetPath()
+	if stagingPath == "" {
+		stagingPath = volumePath
+	}
+	protocol := s.detectProtocolFromStagingPath(ctx, stagingPath)
 
 	klog.V(4).Infof("Expanding volume %s (protocol: %s) at path %s", volumeID, protocol, volumePath)
 
@@ -739,6 +744,17 @@ func (s *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 		return &csi.NodeExpandVolumeResponse{
 			CapacityBytes: req.GetCapacityRange().GetRequiredBytes(),
 		}, nil
+	}
+
+	if protocol == ProtocolISCSI {
+		// Block volumes need this too: the device node keeps its old size until rescanned.
+		devicePath, devErr := getStagedISCSIDevicePath(ctx, stagingPath)
+		if devErr != nil {
+			return nil, status.Errorf(codes.Internal, "Failed to find the iSCSI device for %s: %v", stagingPath, devErr)
+		}
+		if rescanErr := rescanISCSIDevice(ctx, devicePath, req.GetCapacityRange().GetRequiredBytes()); rescanErr != nil {
+			return nil, rescanErr
+		}
 	}
 
 	// For block protocol volumes (NVMe-oF or iSCSI), check if this is a block or filesystem volume

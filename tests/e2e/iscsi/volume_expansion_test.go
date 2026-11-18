@@ -3,6 +3,8 @@ package iscsi
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -86,6 +88,18 @@ var _ = Describe("iSCSI Volume Expansion", func() {
 		expandedCapacity := pvc.Status.Capacity[corev1.ResourceStorage]
 		Expect(expandedCapacity.Cmp(initialCapacity)).To(BeNumerically(">", 0),
 			"Expanded capacity should be greater than initial capacity")
+
+		// PVC capacity only says the zvol grew. The pod must see a bigger filesystem too, which
+		// needs the node to rescan the disk while it stays mounted (#328).
+		By("Verifying the mounted filesystem grew inside the pod")
+		Eventually(func() (int64, error) {
+			out, execErr := f.K8s.ExecInPod(ctx, pod.Name, []string{"sh", "-c", "df -k /data | awk 'NR==2 {print $2}'"})
+			if execErr != nil {
+				return 0, execErr
+			}
+			return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
+		}, 2*time.Minute, 5*time.Second).Should(BeNumerically(">", 1536*1024),
+			"filesystem should be larger than 1.5 GiB after expanding to 2Gi")
 
 		By("Verifying data persisted after expansion")
 		output, err := f.K8s.ExecInPod(ctx, pod.Name, []string{"cat", "/data/test.txt"})

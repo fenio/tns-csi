@@ -24,12 +24,18 @@ func TestRunProtectedReturnsOutputOfFastCommand(t *testing.T) {
 }
 
 func TestRunProtectedKeepsExitCode(t *testing.T) {
-	_, err := RunProtected(context.Background(), time.Second, 0, "sh", "-c", "exit 21")
-	if code, ok := ExitCode(err); !ok || code != 21 {
-		t.Fatalf("ExitCode(%v) = %d, %v; want 21, true", err, code, ok)
-	}
-	if IsStillRunning(err) {
-		t.Error("IsStillRunning() = true for a command that exited")
+	// With a hard ceiling the process context is canceled as soon as the command exits; that
+	// must not turn a plain exit 21 (iscsiadm "No records found") into a reported kill.
+	for _, hardCeiling := range []time.Duration{0, time.Minute} {
+		for range 20 {
+			_, err := RunProtected(context.Background(), time.Second, hardCeiling, "sh", "-c", "exit 21")
+			if code, ok := ExitCode(err); !ok || code != 21 {
+				t.Fatalf("hardCeiling %v: ExitCode(%v) = %d, %v; want 21, true", hardCeiling, err, code, ok)
+			}
+			if IsStillRunning(err) {
+				t.Error("IsStillRunning() = true for a command that exited")
+			}
+		}
 	}
 }
 

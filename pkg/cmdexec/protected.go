@@ -101,18 +101,21 @@ func RunProtected(ctx context.Context, softTimeout, hardCeiling time.Duration, n
 	}
 
 	done := make(chan struct{})
-	var waitErr error
+	var waitErr, killErr error
 	go func() {
 		defer procCancel()
 		waitErr = cmd.Wait()
+		// Read before the deferred procCancel: afterwards procCtx is always done, and a normal
+		// non-zero exit would be reported as a kill that hides its exit code.
+		killErr = procCtx.Err()
 		close(done)
 	}()
 
-	// result is valid once done is closed: close(done) orders the writes to waitErr before it.
+	// result is valid once done is closed: close(done) orders the writes before it.
 	result := func() ([]byte, error) {
 		if waitErr != nil {
-			if ctxErr := procCtx.Err(); ctxErr != nil {
-				return output.Bytes(), fmt.Errorf("%s: killed at hard ceiling %v: %w (%w)", name, hardCeiling, ctxErr, waitErr)
+			if killErr != nil {
+				return output.Bytes(), fmt.Errorf("%s: killed at hard ceiling %v: %w (%w)", name, hardCeiling, killErr, waitErr)
 			}
 			return output.Bytes(), fmt.Errorf("%s: %w", name, waitErr)
 		}

@@ -511,6 +511,44 @@ func (s *NodeService) findISCSIDevice(ctx context.Context, params *iscsiConnecti
 	return devicePath, nil
 }
 
+// iscsiRescanWait bounds how long NodeExpandVolume waits for a rescanned disk to report its new size.
+var iscsiRescanWait = 10 * time.Second
+
+// rescanISCSIDevice makes the kernel re-read the size of an iSCSI disk after the zvol behind it
+// grew. The kernel does not pick up a LUN's new capacity by itself, so without this resize2fs
+// finds nothing to grow and the expansion is reported done at the old size (#328). It returns
+// Unavailable, so the kubelet retries, while the disk is still smaller than requiredBytes.
+func rescanISCSIDevice(ctx context.Context, devicePath string, requiredBytes int64) error {
+	dev := filepath.Join(sysBlockPath, filepath.Base(devicePath))
+	// The mode is unused: the sysfs attribute already exists.
+	if err := os.WriteFile(filepath.Join(dev, "device", "rescan"), []byte("1"), 0o600); err != nil {
+		return status.Errorf(codes.Internal, "failed to rescan %s for its new size: %v", devicePath, err)
+	}
+	if requiredBytes <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(iscsiRescanWait)
+	for {
+		sectors, err := os.ReadFile(filepath.Clean(filepath.Join(dev, "size")))
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed to read the size of %s: %v", devicePath, err)
+		}
+		// sysfs reports the size in 512-byte sectors regardless of the logical block size.
+		n, parseErr := strconv.ParseInt(strings.TrimSpace(string(sectors)), 10, 64)
+		if parseErr == nil && n*512 >= requiredBytes {
+			klog.Infof("iSCSI device %s now reports %d bytes", devicePath, n*512)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return status.Errorf(codes.Unavailable, "iSCSI device %s still reports %d bytes after a rescan, want %d", devicePath, n*512, requiredBytes)
+		}
+		sleepContext(ctx, 500*time.Millisecond)
+		if ctx.Err() != nil {
+			return status.FromContextError(ctx.Err()).Err()
+		}
+	}
+}
+
 // raiseISCSIDiskTimeout raises the disk's SCSI command timeout so it outlasts the
 // replacement timeout. The kernel fails a command older than timeout × (retries+1), which
 // is 30 s × 6 = 180 s for sd by default, so without this an outage longer than ~180 s

@@ -463,7 +463,7 @@ When enabled, a ConfigMap with the `grafana_dashboard: "1"` label is created. Gr
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `image.repository` | CSI driver image repository | `bfenski/tns-csi` |
+| `image.repository` | CSI driver image repository | `docker.io/bfenski/tns-csi` |
 | `image.tag` | Image tag (defaults to chart appVersion) | `""` |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 

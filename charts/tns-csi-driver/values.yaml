@@ -35,7 +35,7 @@ truenas:
 
 # Image configuration
 image:
-  repository: bfenski/tns-csi
+  repository: docker.io/bfenski/tns-csi
   pullPolicy: IfNotPresent
   # Image tag to use. If empty, defaults to the chart's appVersion.
   # For production, either:

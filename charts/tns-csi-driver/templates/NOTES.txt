@@ -64,7 +64,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: busybox
+    image: docker.io/library/busybox
     command: ["/bin/sh", "-c", "echo 'Hello from TrueNAS!' > /data/test.txt && cat /data/test.txt && sleep 3600"]
     volumeMounts:
     - name: data

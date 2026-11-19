@@ -62,8 +62,14 @@ permissions:
 
 # TrueNAS pool is shared across protocol jobs, so serialize across workflow runs.
 # Within a single run, the 5 protocol jobs run in parallel (each in its own VM).
+# Runs that compute-tag will skip (PR-branch or failed CI) get their own group: in the
+# shared one they would replace main's pending run, which then never tests anything.
 concurrency:
-  group: integration-tests
+  group: >-
+    ${{ (github.event_name != 'workflow_run' ||
+         (github.event.workflow_run.conclusion == 'success' &&
+          (github.event.workflow_run.name == 'Release' || github.event.workflow_run.head_branch == 'main')))
+        && 'integration-tests' || format('integration-tests-skip-{0}', github.run_id) }}
   cancel-in-progress: false
 
 env:

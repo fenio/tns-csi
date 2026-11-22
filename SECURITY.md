@@ -102,10 +102,54 @@ kubectl create role secret-reader \
 ### Supply Chain Security
 
 **Container Images:**
-- Images are built from this source code
-- Verify image signatures before deployment
-- Use specific version tags, not `latest`
+- Images are built from this source code by the [release workflow](.github/workflows/release.yml) on GitHub-hosted runners
+- Verify signatures before deployment (see [Verifying release artifacts](#verifying-release-artifacts))
+- Use specific version tags or digests, not `latest`
 - Scan images for vulnerabilities
+
+### Verifying release artifacts
+
+Releases after v0.23.0 are signed by the release workflow with [cosign](https://github.com/sigstore/cosign) keyless signing. There is no long-lived signing key: each signature's certificate names the workflow and the tag it ran for, and is logged in Sigstore's public transparency log. The workflow also publishes [SLSA build provenance](https://slsa.dev/spec/v1.0/provenance) as GitHub artifact attestations.
+
+| Artifact | Signature | Build provenance |
+| --- | --- | --- |
+| Driver image (Docker Hub, GHCR) | Yes | Yes, stored in both registries and on GitHub |
+| Helm chart (Docker Hub, GHCR) | Yes | Yes, for the chart tarball |
+| Release files (chart `.tgz`, plain manifest) | No | Yes |
+
+Every signature and attestation is issued to the same identity:
+
+- **Issuer:** `https://token.actions.githubusercontent.com`
+- **Identity:** `https://github.com/fenio/tns-csi/.github/workflows/release.yml@refs/tags/<version>`
+
+Verify a signature with cosign 3:
+
+```bash
+VERSION=v0.24.0  # the release you are installing
+cosign verify "docker.io/bfenski/tns-csi:${VERSION}" \
+  --certificate-identity "https://github.com/fenio/tns-csi/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The same flags verify `ghcr.io/fenio/tns-csi:${VERSION}` and the charts, `docker.io/bfenski/tns-csi-driver:${VERSION#v}` and `ghcr.io/fenio/charts/tns-csi-driver:${VERSION#v}`.
+
+Verify build provenance with the GitHub CLI:
+
+```bash
+# An image, from either registry
+gh attestation verify "oci://docker.io/bfenski/tns-csi:${VERSION}" \
+  --repo fenio/tns-csi \
+  --signer-workflow fenio/tns-csi/.github/workflows/release.yml \
+  --source-ref "refs/tags/${VERSION}"
+
+# The chart tarball, from the release page or `helm pull`
+gh attestation verify "tns-csi-driver-${VERSION#v}.tgz" \
+  --repo fenio/tns-csi \
+  --signer-workflow fenio/tns-csi/.github/workflows/release.yml \
+  --source-ref "refs/tags/${VERSION}"
+```
+
+To enforce this at admission, require a keyless signature from the issuer above with an identity matching `^https://github\.com/fenio/tns-csi/\.github/workflows/release\.yml@refs/tags/v`. Signatures and attestations are Sigstore bundles stored as OCI referrers (cosign 3's default), so the policy engine has to read that format; Kyverno's `ImageValidatingPolicy` does as of Kyverno 1.19.
 
 **Dependencies:**
 - Review `go.mod` for dependency versions

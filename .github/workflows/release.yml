@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
   packages: write
+  # Keyless signing: Sigstore issues the signing certificate for this job's OIDC token.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -81,6 +84,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -138,19 +142,74 @@ jobs:
             --set snapshots.enabled=true \
             > .helm-releases/tns-csi-driver-${{ steps.version.outputs.version }}.yaml
 
+      # Each push prints the chart's manifest digest, which the signing step needs.
       - name: Push Helm chart to Docker Hub (OCI)
+        id: chart-dockerhub
         run: |
           VERSION=${{ steps.version.outputs.version }}
           CHART_VERSION=${VERSION#v}
           echo ${{ secrets.DOCKERHUB_TOKEN }} | helm registry login registry-1.docker.io -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
-          helm push .helm-releases/tns-csi-driver-${CHART_VERSION}.tgz oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }}
+          out=$(helm push ".helm-releases/tns-csi-driver-${CHART_VERSION}.tgz" oci://registry-1.docker.io/${{ secrets.DOCKERHUB_USERNAME }})
+          echo "$out"
+          digest=$(sed -n 's/^Digest: //p' <<<"$out")
+          test -n "$digest" || { echo "::error::helm push printed no digest"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Push Helm chart to GHCR (OCI)
+        id: chart-ghcr
         run: |
           VERSION=${{ steps.version.outputs.version }}
           CHART_VERSION=${VERSION#v}
           echo ${{ secrets.GITHUB_TOKEN }} | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
-          helm push .helm-releases/tns-csi-driver-${CHART_VERSION}.tgz oci://ghcr.io/${{ github.repository_owner }}/charts
+          out=$(helm push ".helm-releases/tns-csi-driver-${CHART_VERSION}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts)
+          echo "$out"
+          digest=$(sed -n 's/^Digest: //p' <<<"$out")
+          test -n "$digest" || { echo "::error::helm push printed no digest"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      # Keyless: the certificate names this workflow and tag, which is what users verify
+      # against. Each registry stores its own copy of the signature.
+      - name: Sign images and Helm charts
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          DOCKERHUB_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi
+          GHCR_IMAGE: ghcr.io/${{ github.repository }}
+          DOCKERHUB_CHART: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi-driver@${{ steps.chart-dockerhub.outputs.digest }}
+          GHCR_CHART: ghcr.io/${{ github.repository_owner }}/charts/tns-csi-driver@${{ steps.chart-ghcr.outputs.digest }}
+        run: |
+          cosign sign --yes \
+            "${DOCKERHUB_IMAGE}@${IMAGE_DIGEST}" \
+            "${GHCR_IMAGE}@${IMAGE_DIGEST}" \
+            "${DOCKERHUB_CHART}" \
+            "${GHCR_CHART}"
+
+      # SLSA build provenance, stored in the registries so admission controllers can read it
+      # next to the image. Storage records exist only for organization-owned repositories.
+      - name: Attest image provenance (GHCR)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest image provenance (Docker Hub)
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tns-csi
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      # The chart tarball is the same file the OCI charts carry, so this also covers
+      # `helm pull` downloads.
+      - name: Attest release file provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: .helm-releases/*
 
       - name: Generate changelog with git-cliff
         id: changelog
@@ -199,6 +258,9 @@ jobs:
           Create the \`tns-csi\` namespace, then download the plain manifest from this release (\`tns-csi-driver-${VERSION}.yaml\`) and use it as a Kustomize base. Replace \`TRUENAS_IP\` and \`REPLACE_WITH_API_KEY\` placeholders with your values, and remove any storage classes you don't need.
 
           For detailed installation instructions, see the [README](https://github.com/${{ github.repository }}/blob/${VERSION}/README.md).
+
+          ### Verifying
+          The images and Helm charts are signed with cosign (keyless) and carry SLSA build provenance. See [Verifying release artifacts](https://github.com/${{ github.repository }}/blob/${VERSION}/SECURITY.md#verifying-release-artifacts).
           EOF
 
       - name: Create GitHub Release

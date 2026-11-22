@@ -69,6 +69,8 @@ updating the chart source version does not publish a release.
      - Push images to Docker Hub and GitHub Container Registry
      - Package Helm chart
      - Publish Helm chart to Docker Hub and GHCR as OCI artifacts
+     - Sign the images and charts in both registries with cosign (keyless)
+     - Attest SLSA build provenance for the images and the release files
      - Create GitHub release with changelog
      - Attach Helm chart tarball to release
 
@@ -76,6 +78,15 @@ updating the chart source version does not publish a release.
    - Docker Hub: https://hub.docker.com/r/bfenski/tns-csi
    - GitHub Releases: https://github.com/fenio/tns-csi/releases
    - GHCR: https://github.com/fenio?tab=packages
+   - Attestations: https://github.com/fenio/tns-csi/attestations
+   - Signatures: the `cosign verify` and `gh attestation verify` commands in
+     [SECURITY.md](../SECURITY.md#verifying-release-artifacts)
+
+Signing needs no secrets or keys. The job's `id-token: write` permission lets it
+request a short-lived certificate from Sigstore for the workflow's identity, and
+`attestations: write` lets it store attestations on GitHub. If a signing or
+attestation step fails, the images and charts are already pushed but the GitHub
+release is not created; re-run the job.
 
 ## What Gets Published
 
@@ -85,11 +96,13 @@ Each release creates the following artifacts:
 - **Docker Hub**: `bfenski/tns-csi:v1.0.0`, `bfenski/tns-csi:1.0`, `bfenski/tns-csi:1`, `bfenski/tns-csi:latest`
 - **GHCR**: `ghcr.io/fenio/tns-csi:v1.0.0`, etc.
 - **Architectures**: linux/amd64, linux/arm64
+- **Signatures and provenance**: a cosign signature and a SLSA provenance attestation in each registry, stored as OCI referrers of the image index
 
 ### Helm Charts
 - **Docker Hub OCI**: `oci://registry-1.docker.io/bfenski/tns-csi-driver`
 - **GHCR OCI**: `oci://ghcr.io/fenio/charts/tns-csi-driver`
 - **GitHub Release**: `tns-csi-driver-1.0.0.tgz` attached to release
+- **Signatures and provenance**: a cosign signature on each OCI chart; SLSA provenance on GitHub for the chart tarball and the plain manifest
 
 ### GitHub Release
 - Automatic changelog from git commits

@@ -394,6 +394,8 @@ Detached snapshots use `zfs send/receive` to create independent dataset copies t
 | `controller.resources.requests.cpu` | CPU request | `10m` |
 | `controller.resources.requests.memory` | Memory request | `20Mi` |
 | `controller.livenessProbe` | Liveness probe timing for the controller plugin container | `initialDelaySeconds: 10`, `timeoutSeconds: 3`, `periodSeconds: 10`, `failureThreshold: 5` |
+| `controller.podSecurityContext` | Controller pod securityContext. With `openshift.enabled`, `runAsUser`, `runAsGroup` and `fsGroup` are dropped so the SCC assigns them. `null` renders none | `runAsNonRoot: true`, `runAsUser`/`runAsGroup`/`fsGroup: 65532`, `seccompProfile.type: RuntimeDefault` |
+| `controller.securityContext` | securityContext for every container in the controller pod (plugin and sidecars). `null` renders none | `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop: [ALL]` |
 
 ### Node Settings
 

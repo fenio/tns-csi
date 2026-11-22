@@ -29,6 +29,21 @@ Create chart name and version as used by the chart label.
 {{- end }}
 
 {{/*
+Controller pod securityContext, as YAML (empty when unset). OpenShift's SCC
+assigns the UID, GID and fsGroup from the namespace's range and rejects fixed
+values outside it.
+*/}}
+{{- define "tns-csi-driver.controller.podSecurityContext" -}}
+{{- $ctx := .Values.controller.podSecurityContext | default dict -}}
+{{- if .Values.openshift.enabled -}}
+{{- $ctx = omit $ctx "runAsUser" "runAsGroup" "fsGroup" -}}
+{{- end -}}
+{{- with $ctx -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Common labels
 */}}
 {{- define "tns-csi-driver.labels" -}}

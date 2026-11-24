@@ -794,3 +794,17 @@ func (v *TrueNASVerifier) GetZFSProperty(ctx context.Context, datasetPath, prope
 
 	return "", nil
 }
+
+// LogPoolSpace logs the pool's size and free space, to tell a full pool apart from other
+// failures when a test that writes a lot of data fails.
+func (v *TrueNASVerifier) LogPoolSpace(ctx context.Context, label, poolPath string) {
+	name, _, _ := strings.Cut(poolPath, "/")
+	pool, err := v.client.QueryPool(ctx, name)
+	if err != nil {
+		klog.Warningf("Pool space (%s): %v", label, err)
+		return
+	}
+	p := pool.Properties
+	klog.Infof("Pool space (%s): %s has %.1f GiB free of %.1f GiB (%d%% used)",
+		label, name, float64(p.Free.Parsed)/(1<<30), float64(p.Size.Parsed)/(1<<30), p.Capacity.Parsed)
+}

@@ -56,7 +56,8 @@ func abortJob(ctx context.Context, c *tnsapi.Client, id int) error {
 // writeRandomData fills the pod's volume with sizeMiB of random data and returns its md5.
 func writeRandomData(ctx context.Context, f *framework.Framework, pod string, sizeMiB int) string {
 	_, err := f.K8s.ExecInPod(ctx, pod, []string{"sh", "-c",
-		fmt.Sprintf("dd if=/dev/urandom of=/data/blob bs=1M count=%d 2>/dev/null && sync", sizeMiB)})
+		// On failure, dd's error and the volume's df go to stderr, which ends up in err.
+		fmt.Sprintf("{ dd if=/dev/urandom of=/data/blob bs=1M count=%d && sync; } || { rc=$?; df -h /data >&2; exit $rc; }", sizeMiB)})
 	Expect(err).NotTo(HaveOccurred(), "Failed to write random data")
 	out, err := f.K8s.ExecInPod(ctx, pod, []string{"sh", "-c", "md5sum /data/blob | cut -d' ' -f1"})
 	Expect(err).NotTo(HaveOccurred(), "Failed to checksum random data")

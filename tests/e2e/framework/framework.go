@@ -213,6 +213,7 @@ func SetupSuite(protocol string) error {
 	if suite.truenas != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		snap := suite.truenas.SnapshotResources(ctx, config.TrueNASPool)
+		suite.truenas.LogPoolSpace(ctx, "before suite", config.TrueNASPool)
 		cancel()
 		suite.beforeSnapshot = snap
 		LogSnapshot("Before suite (pre-existing)", snap)
@@ -235,6 +236,7 @@ func TeardownSuite() {
 	if suite.truenas != nil && suite.beforeSnapshot != nil && suite.config != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		afterSnap := suite.truenas.SnapshotResources(ctx, suite.config.TrueNASPool)
+		suite.truenas.LogPoolSpace(ctx, "after suite", suite.config.TrueNASPool)
 		cancel()
 		LogSnapshot("After suite", afterSnap)
 		LogResourceDiff(suite.beforeSnapshot, afterSnap)

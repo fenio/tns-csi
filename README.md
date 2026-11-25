@@ -177,6 +177,8 @@ The TNS CSI Driver is published to both Docker Hub and GitHub Container Registry
 
 **Always use a specific version in production.** See [docs/VERSIONING.md](docs/VERSIONING.md) for details.
 
+Release images and charts are signed with cosign and carry SLSA build provenance; see [Verifying release artifacts](SECURITY.md#verifying-release-artifacts).
+
 #### Docker Hub (recommended)
 ```bash
 helm install tns-csi oci://registry-1.docker.io/bfenski/tns-csi-driver \

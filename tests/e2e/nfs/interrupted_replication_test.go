@@ -53,6 +53,25 @@ func abortJob(ctx context.Context, c *tnsapi.Client, id int) error {
 	return c.Call(ctx, "core.job_abort", []any{id}, nil)
 }
 
+// retryWhileBusy retries del while TrueNAS reports the dataset busy. Right after an aborted
+// replication the receive is still being torn down, and a single attempt left the
+// partially received target (GiBs each) on the pool after every run.
+func retryWhileBusy(del func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	for {
+		err := del(ctx)
+		if err == nil || !tnsapi.IsBusy(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
 // writeRandomData fills the pod's volume with sizeMiB of random data and returns its md5.
 func writeRandomData(ctx context.Context, f *framework.Framework, pod string, sizeMiB int) string {
 	_, err := f.K8s.ExecInPod(ctx, pod, []string{"sh", "-c",
@@ -112,7 +131,9 @@ var _ = Describe("Interrupted replication", func() {
 		snapName := "e2e-resume-token"
 		_, err = client.CreateSnapshot(ctx, tnsapi.SnapshotCreateParams{Dataset: source, Name: snapName})
 		Expect(err).NotTo(HaveOccurred())
-		f.Cleanup.Add(func() error { return client.DeleteSnapshot(context.Background(), source+"@"+snapName) })
+		f.Cleanup.Add(func() error {
+			return retryWhileBusy(func(ctx context.Context) error { return client.DeleteSnapshot(ctx, source+"@"+snapName) })
+		})
 
 		target := fmt.Sprintf("%s/e2e-resume-token-%d", f.Config.TrueNASPool, time.Now().Unix())
 		f.Cleanup.Add(func() error {
@@ -120,7 +141,7 @@ var _ = Describe("Interrupted replication", func() {
 			if existsErr != nil || !exists {
 				return existsErr
 			}
-			return client.DeleteDataset(context.Background(), target)
+			return retryWhileBusy(func(ctx context.Context) error { return client.DeleteDataset(ctx, target) })
 		})
 
 		By("Starting a replication with the same parameters the driver uses")

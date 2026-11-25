@@ -36,7 +36,7 @@ for arg in "$@"; do
             echo "  --dry-run   Show what would be deleted without actually deleting"
             echo "  --help      Show this help message"
             echo ""
-            echo "Default mode (safe): Only removes CSI test artifacts (pvc-*, test-csi*)"
+            echo "Default mode (safe): Only removes CSI test artifacts (pvc-*, test-csi*, e2e-*)"
             echo ""
             echo "Required environment variables:"
             echo "  TRUENAS_HOST      - TrueNAS hostname/IP"
@@ -163,7 +163,9 @@ func main() {
 			// - test-csi* datasets (test artifacts)
 			// - snapshot-* datasets (detached snapshots)
 			// - csi-detached-snapshots folder and its contents
+			// - e2e-* datasets the e2e specs create directly (e.g. e2e-resume-token-*)
 			if strings.Contains(name, "pvc-") ||
+			   strings.Contains(name, "/e2e-") ||
 			   strings.Contains(name, "test-csi") ||
 			   strings.Contains(name, "snapshot-") ||
 			   strings.Contains(name, "csi-detached-snapshots") {

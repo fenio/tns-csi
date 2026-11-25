@@ -983,41 +983,9 @@ func TestQueryPool(t *testing.T) {
 					_, message, _ = conn.Read(ctx)
 					_ = json.Unmarshal(message, &req)
 					if req.Method == "pool.query" {
-						poolData := []Pool{{
-							ID:   1,
-							Name: "tank",
-							Properties: struct {
-								Size struct {
-									Parsed int64 `json:"parsed"`
-								} `json:"size"`
-								Allocated struct {
-									Parsed int64 `json:"parsed"`
-								} `json:"allocated"`
-								Free struct {
-									Parsed int64 `json:"parsed"`
-								} `json:"free"`
-								Capacity struct {
-									Parsed int64 `json:"parsed"`
-								} `json:"capacity"`
-							}{
-								Size: struct {
-									Parsed int64 `json:"parsed"`
-								}{Parsed: 1000000000000}, // 1TB
-								Allocated: struct {
-									Parsed int64 `json:"parsed"`
-								}{Parsed: 400000000000}, // 400GB
-								Free: struct {
-									Parsed int64 `json:"parsed"`
-								}{Parsed: 600000000000}, // 600GB
-								Capacity: struct {
-									Parsed int64 `json:"parsed"`
-								}{Parsed: 40}, // 40%
-							},
-						}}
-						result, err := json.Marshal(poolData)
-						if err != nil {
-							return
-						}
+						// Shape of a real pool.query entry: capacity fields are top-level integers.
+						result := json.RawMessage(`[{"id": 1, "name": "tank", "status": "ONLINE", "size": 1000000000000,
+							"allocated": 400000000000, "free": 600000000000, "freeing": 0, "size_str": "1000000000000"}]`)
 						resp := Response{
 							ID:     req.ID,
 							Result: result,
@@ -1114,12 +1082,12 @@ func TestQueryPool(t *testing.T) {
 				t.Errorf("Pool name = %s, want %s", pool.Name, tt.wantPoolName)
 			}
 
-			if pool.Properties.Size.Parsed != tt.wantSize {
-				t.Errorf("Pool size = %d, want %d", pool.Properties.Size.Parsed, tt.wantSize)
+			if pool.Size != tt.wantSize {
+				t.Errorf("Pool size = %d, want %d", pool.Size, tt.wantSize)
 			}
 
-			if pool.Properties.Free.Parsed != tt.wantFree {
-				t.Errorf("Pool free = %d, want %d", pool.Properties.Free.Parsed, tt.wantFree)
+			if pool.Free != tt.wantFree {
+				t.Errorf("Pool free = %d, want %d", pool.Free, tt.wantFree)
 			}
 		})
 	}

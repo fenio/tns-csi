@@ -190,35 +190,11 @@ func (m *MockClient) QueryPool(ctx context.Context, poolName string) (*tnsapi.Po
 
 	// Return mock pool with realistic capacity values
 	return &tnsapi.Pool{
-		ID:   1,
-		Name: poolName,
-		Properties: struct {
-			Size struct {
-				Parsed int64 `json:"parsed"`
-			} `json:"size"`
-			Allocated struct {
-				Parsed int64 `json:"parsed"`
-			} `json:"allocated"`
-			Free struct {
-				Parsed int64 `json:"parsed"`
-			} `json:"free"`
-			Capacity struct {
-				Parsed int64 `json:"parsed"`
-			} `json:"capacity"`
-		}{
-			Size: struct {
-				Parsed int64 `json:"parsed"`
-			}{Parsed: 1099511627776}, // 1TB total
-			Allocated: struct {
-				Parsed int64 `json:"parsed"`
-			}{Parsed: 107374182400}, // 100GB used
-			Free: struct {
-				Parsed int64 `json:"parsed"`
-			}{Parsed: 992137445376}, // 924GB available
-			Capacity: struct {
-				Parsed int64 `json:"parsed"`
-			}{Parsed: 10}, // 10% used
-		},
+		ID:        1,
+		Name:      poolName,
+		Size:      1099511627776, // 1TB total
+		Allocated: 107374182400,  // 100GB used
+		Free:      992137445376,  // 924GB available
 	}, nil
 }
 

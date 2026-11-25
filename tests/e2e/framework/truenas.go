@@ -804,7 +804,6 @@ func (v *TrueNASVerifier) LogPoolSpace(ctx context.Context, label, poolPath stri
 		klog.Warningf("Pool space (%s): %v", label, err)
 		return
 	}
-	p := pool.Properties
-	klog.Infof("Pool space (%s): %s has %.1f GiB free of %.1f GiB (%d%% used)",
-		label, name, float64(p.Free.Parsed)/(1<<30), float64(p.Size.Parsed)/(1<<30), p.Capacity.Parsed)
+	klog.Infof("Pool space (%s): %s has %.1f GiB free of %.1f GiB",
+		label, name, float64(pool.Free)/(1<<30), float64(pool.Size)/(1<<30))
 }

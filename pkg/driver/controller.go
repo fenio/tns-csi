@@ -1418,12 +1418,12 @@ func (s *ControllerService) GetCapacity(ctx context.Context, req *csi.GetCapacit
 	}
 
 	// Return available capacity in bytes
-	availableCapacity := pool.Properties.Free.Parsed
+	availableCapacity := pool.Free
 	klog.V(4).Infof("Pool %s capacity: total=%d bytes, available=%d bytes, used=%d bytes",
 		poolName,
-		pool.Properties.Size.Parsed,
+		pool.Size,
 		availableCapacity,
-		pool.Properties.Allocated.Parsed)
+		pool.Allocated)
 
 	return &csi.GetCapacityResponse{
 		AvailableCapacity: availableCapacity,

@@ -1262,32 +1262,11 @@ func TestGetCapacity(t *testing.T) {
 			},
 			mockQueryPool: func(ctx context.Context, poolName string) (*tnsapi.Pool, error) {
 				return &tnsapi.Pool{
-					ID:   1,
-					Name: "tank",
-					Properties: struct {
-						Size struct {
-							Parsed int64 `json:"parsed"`
-						} `json:"size"`
-						Allocated struct {
-							Parsed int64 `json:"parsed"`
-						} `json:"allocated"`
-						Free struct {
-							Parsed int64 `json:"parsed"`
-						} `json:"free"`
-						Capacity struct {
-							Parsed int64 `json:"parsed"`
-						} `json:"capacity"`
-					}{
-						Size: struct {
-							Parsed int64 `json:"parsed"`
-						}{Parsed: 1000000000000}, // 1TB
-						Allocated: struct {
-							Parsed int64 `json:"parsed"`
-						}{Parsed: 400000000000}, // 400GB
-						Free: struct {
-							Parsed int64 `json:"parsed"`
-						}{Parsed: 600000000000}, // 600GB
-					},
+					ID:        1,
+					Name:      "tank",
+					Size:      1000000000000, // 1TB
+					Allocated: 400000000000,  // 400GB
+					Free:      600000000000,  // 600GB
 				}, nil
 			},
 			wantErr:      false,

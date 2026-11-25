@@ -1290,21 +1290,11 @@ type Pool struct {
 	} `json:"topology"`
 	Status string `json:"status"`
 	Path   string `json:"path"`
-	// Capacity fields from the TrueNAS pool.query API
-	Properties struct {
-		Size struct {
-			Parsed int64 `json:"parsed"` // Total pool size in bytes
-		} `json:"size"`
-		Allocated struct {
-			Parsed int64 `json:"parsed"` // Used space in bytes
-		} `json:"allocated"`
-		Free struct {
-			Parsed int64 `json:"parsed"` // Available space in bytes
-		} `json:"free"`
-		Capacity struct {
-			Parsed int64 `json:"parsed"` // Capacity percentage (0-100)
-		} `json:"capacity"`
-	} `json:"properties"`
+	// Capacity in bytes. pool.query returns these as top-level integers (null when
+	// unavailable, decoded as 0).
+	Size      int64 `json:"size"`
+	Allocated int64 `json:"allocated"`
+	Free      int64 `json:"free"`
 }
 
 // QueryPool retrieves information about a specific ZFS pool.
@@ -1327,9 +1317,9 @@ func (c *Client) QueryPool(ctx context.Context, poolName string) (*Pool, error) 
 
 	klog.V(4).Infof("Successfully queried pool %s: size=%d bytes, free=%d bytes, used=%d bytes",
 		result[0].Name,
-		result[0].Properties.Size.Parsed,
-		result[0].Properties.Free.Parsed,
-		result[0].Properties.Allocated.Parsed)
+		result[0].Size,
+		result[0].Free,
+		result[0].Allocated)
 
 	return &result[0], nil
 }

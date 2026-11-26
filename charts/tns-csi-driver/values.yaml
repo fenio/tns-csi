@@ -183,6 +183,26 @@ controller:
   # Affinity for controller pod
   affinity: {}
 
+  # Security context for the controller pod. The controller only calls the TrueNAS
+  # API and serves its CSI socket from an emptyDir, so it needs neither root nor
+  # host access. With openshift.enabled, runAsUser, runAsGroup and fsGroup are
+  # left out so the namespace's SCC assigns them.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Security context for every container in the controller pod (the plugin and
+  # its sidecars)
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
 # Node plugin configuration
 node:
   # Kubelet data directory path
@@ -706,12 +726,6 @@ snapshots:
     parentDataset: ""
     # Deletion policy for detached snapshots
     deletionPolicy: Delete
-
-# Security context for controller pod
-securityContext:
-  runAsNonRoot: false
-  runAsUser: 0
-  fsGroup: 0
 
 # Priority class names
 priorityClassName:

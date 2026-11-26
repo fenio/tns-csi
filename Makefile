@@ -121,6 +121,7 @@ test-scripts:
 	@echo "Running script tests..."
 	bash tests/sanity/sanity-script_test.sh
 	bash tests/chart/csidriver_attach_required_test.sh
+	bash tests/chart/controller_security_context_test.sh
 
 # Fail if go.mod/go.sum are not tidy. Read-only: prints the needed diff, never edits files.
 mod-tidy-check:

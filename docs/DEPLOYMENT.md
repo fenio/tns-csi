@@ -383,6 +383,8 @@ Setting `openshift.enabled=true` creates:
 
 Without this, the node DaemonSet pods will fail to start on OpenShift due to restricted security policies.
 
+The controller needs no SCC of its own: it runs non-root under the default `restricted-v2` SCC. With `openshift.enabled`, the chart leaves `runAsUser`, `runAsGroup` and `fsGroup` out of `controller.podSecurityContext` so the SCC can assign them from the namespace's range.
+
 This single command will:
 - Create the `tns-csi` namespace if needed
 - Deploy the CSI controller and node components

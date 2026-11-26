@@ -50,7 +50,9 @@ jobs:
         uses: azure/setup-helm@v5
 
       - name: Chart tests
-        run: bash tests/chart/csidriver_attach_required_test.sh
+        run: |
+          bash tests/chart/csidriver_attach_required_test.sh
+          bash tests/chart/controller_security_context_test.sh
 
       - name: Verify Helm rendering
         run: |

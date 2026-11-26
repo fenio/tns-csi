@@ -34,6 +34,10 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "tns-csi-driver.controller.serviceAccountName" . }}
+      {{- with include "tns-csi-driver.controller.podSecurityContext" . }}
+      securityContext:
+        {{- . | nindent 8 }}
+      {{- end }}
       {{- if .Values.priorityClassName.controller }}
       priorityClassName: {{ .Values.priorityClassName.controller }}
       {{- end }}
@@ -46,6 +50,10 @@ spec:
         - name: tns-csi-plugin
           image: "{{ .Values.image.repository }}:{{ include "tns-csi-driver.imageTag" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--endpoint=unix:///var/lib/csi/sockets/pluginproxy/csi.sock"
             - "--node-id=$(NODE_ID)"
@@ -128,6 +136,10 @@ spec:
         - name: csi-provisioner
           image: "{{ .Values.sidecars.provisioner.image.repository }}:{{ .Values.sidecars.provisioner.image.tag }}"
           imagePullPolicy: {{ .Values.sidecars.provisioner.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
@@ -166,6 +178,10 @@ spec:
         - name: csi-attacher
           image: "{{ .Values.sidecars.attacher.image.repository }}:{{ .Values.sidecars.attacher.image.tag }}"
           imagePullPolicy: {{ .Values.sidecars.attacher.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
@@ -192,6 +208,10 @@ spec:
         - name: csi-resizer
           image: "{{ .Values.sidecars.resizer.image.repository }}:{{ .Values.sidecars.resizer.image.tag }}"
           imagePullPolicy: {{ .Values.sidecars.resizer.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
@@ -220,6 +240,10 @@ spec:
         - name: csi-snapshotter
           image: "{{ .Values.sidecars.snapshotter.image.repository }}:{{ .Values.sidecars.snapshotter.image.tag }}"
           imagePullPolicy: {{ .Values.sidecars.snapshotter.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--v={{ .Values.controller.logLevel }}"
@@ -247,6 +271,10 @@ spec:
         - name: liveness-probe
           image: "{{ .Values.sidecars.livenessprobe.image.repository }}:{{ .Values.sidecars.livenessprobe.image.tag }}"
           imagePullPolicy: {{ .Values.sidecars.livenessprobe.image.pullPolicy }}
+          {{- with $.Values.controller.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           args:
             - "--csi-address=$(ADDRESS)"
             - "--health-port=9808"
